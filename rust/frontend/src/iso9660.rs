@@ -551,7 +551,7 @@ mod tests {
 
     fn synthetic_ps2_elf() -> Vec<u8> {
         let mut bytes = vec![0u8; 112];
-        bytes[0..4].copy_from_slice(b"\\x7FELF");
+        bytes[0..4].copy_from_slice(b"\x7FELF");
         bytes[4] = 1;
         bytes[5] = 1;
         bytes[6] = 1;
