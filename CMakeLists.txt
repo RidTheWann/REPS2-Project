@@ -85,6 +85,13 @@ if(BUILD_TESTING)
             0x000B8FC3
             0x26920001
             0x22B60001
+            0x0274B82D
+            0x0274C02F
+            0x6679FFF0
+            0x0014D138
+            0x0013D83E
+            0x0013E03F
+            0x66BD0001
         DEPENDS reps2
         COMMENT "AOT-compiling the synthetic EE block to C++"
         VERBATIM
