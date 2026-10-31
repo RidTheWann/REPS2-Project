@@ -4,7 +4,8 @@ This file identifies public technical materials and external projects that may g
 
 ## Primary technical references
 
-- PS2 hardware manuals and research documentation: https://github.com/4kbyter/ps2docs and https://github.com/ninjadynamics/PS2Docs. Verify each document's revision and provenance before using it as an implementation authority.
+- MIPS32 Architecture for Programmers, Volume II instruction definitions: https://pages.hmc.edu/harris/class/e155/11/MIPS32InstructionSet.pdf. Use it for general instruction behavior, including zero-extension of logical immediates. Cross-check PS2 EE/R5900-specific restrictions before treating base MIPS behavior as sufficient.
+- PS2 hardware manuals and research documentation: https://github.com/4kbyter/ps2docs and https://github.com/ninjadynamics/PS2Docs. Verify each document's revision, provenance and redistribution status. Do not commit or redistribute restricted manuals.
 - MIPS ELF ABI: https://refspecs.linuxfoundation.org/elf/mipsabi.pdf. Standard MIPS ELF conventions must be cross-checked with PS2-specific toolchain output.
 - Rust language and safety references: https://doc.rust-lang.org/book/ and https://doc.rust-lang.org/nomicon/ffi.html.
 
@@ -15,6 +16,10 @@ This file identifies public technical materials and external projects that may g
 - PCSX2: https://github.com/PCSX2/pcsx2. May be used as an external behavioral reference and differential-test oracle. Do not copy or adapt its implementation code.
 
 These projects have different goals and different completion levels. Their demos and feature lists do not establish equivalent REPS2 capability.
+
+## Semantic discrepancy log
+
+- **ORI immediate extension:** the public MIPS32 instruction reference defines ORI's 16-bit immediate as zero-extended. The currently consulted PCSX2 R5900 implementation also combines the source GPR with the zero-extended 16-bit immediate. One publicly accessible mirror of the Sony EE Core Instruction Set Manual contains prose describing ORI's immediate as sign-extended. REPS2 follows the MIPS instruction definition and observed PCSX2 behavior for this subset, records the discrepancy, and requires a future differential conformance case before expanding claims.
 
 ## Provenance rules
 

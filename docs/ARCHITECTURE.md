@@ -22,13 +22,13 @@ This is the correctness-critical input and transformation pipeline. Rust's check
 ### C++20 runtime
 
 C++20 owns the native runtime and platform-facing subsystem implementations:
-- Guest memory and EE runtime services.
+- EE state and memory interfaces.
 - VU0/VU1 execution interfaces.
 - GS submission and rendering integration.
 - IOP, DMA, SPU2/audio, controller, optical media, and memory-card services.
 - Generated-code helper ABI and host integration.
 
-The runtime remains modular. A target game needs only the runtime profile required to advance its current vertical slice, but every fallback is observable and logged.
+The current runtime code is only a small EE GPR state/helper ABI used by the first generated-code integration test. It is not a functional EE emulator or complete PS2 runtime.
 
 ### Boundary
 
@@ -36,7 +36,7 @@ The primary boundary is generated source plus a machine-readable manifest, not p
 
 A narrow C ABI or CXX bridge may be introduced later only when a measured use case requires in-process calls. Such a bridge must use coarse-grained operations and stable POD/opaque handles; it must not cross the boundary for every guest instruction.
 
-CMake orchestrates the build, Cargo builds/tests the Rust frontend, and the host C++ toolchain is added to the build as soon as runtime source is introduced. Corrosion is available for importing Rust executables or libraries into CMake; it is not required merely to invoke a standalone Rust frontend.
+CMake orchestrates the build, Cargo builds/tests the Rust frontend, and CMake's C++20 toolchain compiles generated code and runtime components. Corrosion is available for importing Rust executables or libraries into CMake; it is not required merely to invoke a standalone Rust frontend.
 
 ## Pipeline
 
@@ -78,11 +78,13 @@ Decoding is pure and deterministic. Every input word produces a classified instr
 
 ### IR
 
-IR nodes retain guest PC and side-effect information. Delay-slot behavior, guest register width, exception behavior, and architectural ordering must be represented explicitly. An IR verifier rejects operations with no defined semantics or backend lowering.
+The current IR represents a verified straight-line block with sequential guest PCs. Its operations are typed variants, not embedded C++ strings. The first subset models word arithmetic, 64-bit logical operations, immediate operations, LUI, and word shifts. Branches, delay slots, memory operations, and indirect control flow are not yet representable as completed executable semantics. These must be added as explicit IR types and verified control-flow edges rather than flattened into a linear sequence.
+
+IR nodes retain guest PC and side-effect information. Word arithmetic restrictions, overflow outcomes, GPR[0], low/high GPR lanes, and unsupported behavior are explicit. An IR verifier rejects invalid or non-sequential straight-line code before emission.
 
 ### AOT backend
 
-Generated code uses explicit-width types and helper functions for guest arithmetic, memory, and architectural behavior. It must not rely on host signed-overflow behavior, pointer punning, or undefined behavior. Code generation is deterministic for the same input and options.
+Generated code uses explicit-width types and helper functions for guest arithmetic and architectural state. It must not rely on host signed-overflow behavior, pointer punning, or undefined behavior. Code generation is deterministic for the same IR. Generated scalar operations update GPR[63:0] while preserving the upper 64-bit lane.
 
 ### Runtime
 
@@ -90,14 +92,15 @@ Runtime interfaces are versioned and narrow. Every unimplemented system service 
 
 ### Validation
 
-Synthetic tests, instruction semantics, generated-code tests, differential checks, and game-stage regression are separate layers. Parsing a real ELF or compiling a generated translation unit is not evidence that a game boots or is playable.
+Synthetic Rust tests, generated-code compilation/execution, instruction semantic tests, differential checks, and game-stage regression are separate layers. Parsing a real ELF or compiling a generated translation unit is not evidence that a game boots or is playable.
 
 ## Current implementation
 
 - Rust ELF32 little-endian parser with section names, symbol tables, and REL/RELA metadata.
 - Bounded PT_LOAD materialization with zero-filled tails and overlap detection.
 - Initial base-MIPS decoder subset with delay-slot metadata.
-- CLI diagnostics for ELF metadata and instruction words.
-- Synthetic tests and Windows/Linux CI.
+- Typed linear IR for a bounded scalar instruction subset.
+- Deterministic C++20 emitter with a small EE GPR state ABI.
+- CMake-generated C++ smoke test executed on Windows and Linux CI.
 
-No complete R5900 semantic engine, CFG, IR, C++ AOT emitter, or PS2 runtime is claimed yet.
+No complete R5900 semantic engine, CFG, game ELF AOT pipeline, or PS2 runtime is claimed yet.
