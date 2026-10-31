@@ -270,14 +270,14 @@ fn default_library_root() -> Result<std::path::PathBuf, String> {
     {
         let root = env::var_os("LOCALAPPDATA")
             .ok_or_else(|| "LOCALAPPDATA is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
-        return Ok(Path::new(&root).join("REPS2").join("Library"));
+        Ok(Path::new(&root).join("REPS2").join("Library"))
     }
 
     #[cfg(target_os = "macos")]
     {
         let home = env::var_os("HOME")
             .ok_or_else(|| "HOME is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
-        return Ok(Path::new(&home).join("Library").join("Application Support").join("REPS2").join("Library"));
+        Ok(Path::new(&home).join("Library").join("Application Support").join("REPS2").join("Library"))
     }
 
     #[cfg(all(not(windows), not(target_os = "macos")))]
