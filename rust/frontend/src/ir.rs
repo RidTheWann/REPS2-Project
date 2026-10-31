@@ -62,6 +62,8 @@ pub enum Operation {
     StoreByte { src: Gpr, base: Gpr, offset: u16 },
     StoreHalf { src: Gpr, base: Gpr, offset: u16 },
     StoreWord { src: Gpr, base: Gpr, offset: u16 },
+    LoadQuadword { dst: Gpr, base: Gpr, offset: u16 },
+    StoreQuadword { src: Gpr, base: Gpr, offset: u16 },
 }
 
 /// One IR operation with its original guest instruction address.
@@ -267,6 +269,12 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             Opcode::Sw => Operation::StoreWord {
                 src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
             },
+            Opcode::Lq => Operation::LoadQuadword {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Sq => Operation::StoreQuadword {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -325,6 +333,8 @@ mod tests {
             (0x28 << 26) | (4 << 21) | (5 << 16) | 1,
             (0x29 << 26) | (4 << 21) | (6 << 16) | 2,
             (0x2B << 26) | (4 << 21) | (7 << 16) | 4,
+            (0x1E << 26) | (4 << 21) | (11 << 16) | 8,
+            (0x1F << 26) | (4 << 21) | (12 << 16) | 12,
         ];
         let stream = words.iter().enumerate()
             .map(|(index, word)| decoded(*word, 0x2000 + (index as u32 * 4)))
@@ -349,6 +359,16 @@ mod tests {
             program.instructions()[8].operation,
             Operation::StoreWord { src, base, offset: 4 }
                 if src.index() == 7 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[9].operation,
+            Operation::LoadQuadword { dst, base, offset: 8 }
+                if dst.index() == 11 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[10].operation,
+            Operation::StoreQuadword { src, base, offset: 12 }
+                if src.index() == 12 && base.index() == 4
         ));
     }
 

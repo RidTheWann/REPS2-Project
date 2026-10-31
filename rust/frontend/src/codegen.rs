@@ -22,9 +22,11 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::load_u8;\n\
              using reps2::runtime::load_u16;\n\
              using reps2::runtime::load_u32;\n\
+             using reps2::runtime::load_u128;\n\
              using reps2::runtime::store_u8;\n\
              using reps2::runtime::store_u16;\n\
              using reps2::runtime::store_u32;\n\
+             using reps2::runtime::store_u128;\n\
              state.gpr[0] = {};\n"
     );
 
@@ -115,6 +117,12 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::StoreWord { src, base, offset } => {
             emit_memory_store(output, index, src, base, offset, 4);
         }
+        Operation::LoadQuadword { dst, base, offset } => {
+            emit_quadword_load(output, index, dst, base, offset);
+        }
+        Operation::StoreQuadword { src, base, offset } => {
+            emit_quadword_store(output, index, src, base, offset);
+        }
     }
 }
 
@@ -191,6 +199,26 @@ fn emit_memory_store(
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
         "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
+        src.index()
+    ));
+}
+
+fn emit_quadword_load(output: &mut String, index: usize, dst: Gpr, base: Gpr, offset: u16) {
+    let tag = format!("{index:04}");
+    emit_effective_address(output, &tag, base, offset);
+    output.push_str(&format!(
+        "    reps2::runtime::Gpr128 quadword_value_{tag}{{}};\n    const auto memory_status_{tag} = load_u128(state.memory, effective_address_{tag}, quadword_value_{tag});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n"
+    ));
+    if !dst.is_zero() {
+        output.push_str(&format!("    state.gpr[{}] = quadword_value_{tag};\n", dst.index()));
+    }
+}
+
+fn emit_quadword_store(output: &mut String, index: usize, src: Gpr, base: Gpr, offset: u16) {
+    let tag = format!("{index:04}");
+    emit_effective_address(output, &tag, base, offset);
+    output.push_str(&format!(
+        "    const auto memory_status_{tag} = store_u128(state.memory, effective_address_{tag}, state.gpr[{}]);\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
         src.index()
     ));
 }
@@ -340,6 +368,8 @@ mod tests {
             (0x21 << 26) | (8 << 21) | (11 << 16) | 4, // lh t3, 4(t0)
             (0x23 << 26) | (8 << 21) | (12 << 16) | 8, // lw t4, 8(t0)
             (0x2B << 26) | (8 << 21) | (13 << 16) | 12, // sw t5, 12(t0)
+            (0x1E << 26) | (8 << 21) | (14 << 16) | 4, // lq t6, 4(t0)
+            (0x1F << 26) | (8 << 21) | (15 << 16) | 8, // sq t7, 8(t0)
         ];
         let decoded = words.iter().enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x2000 + index as u32 * 4))
@@ -350,6 +380,9 @@ mod tests {
         assert!(cpp.contains("load_u16(state.memory"));
         assert!(cpp.contains("load_u32(state.memory"));
         assert!(cpp.contains("store_u32(state.memory"));
+        assert!(cpp.contains("load_u128(state.memory"));
+        assert!(cpp.contains("store_u128(state.memory"));
+        assert!(cpp.contains("state.gpr[14] = quadword_value_0005"));
         assert!(cpp.contains("0xFFFFFFFFFFFFFF00ULL"));
         assert!(cpp.contains("0xFFFFFFFFFFFF0000ULL"));
         assert!(cpp.contains("sign_extend_word(memory_value_0003)"));

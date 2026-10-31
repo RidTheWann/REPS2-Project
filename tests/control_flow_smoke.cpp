@@ -154,7 +154,9 @@ int main() {
     for (std::size_t index = 0; index < virtual_bases.size(); ++index) {
         const auto physical = physical_offsets[index];
         std::fill(main_ram.begin() + static_cast<std::ptrdiff_t>(physical),
-                  main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 12U), std::uint8_t{0});
+                  main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 16U), std::uint8_t{0});
+        std::fill(main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x20U),
+                  main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x30U), std::uint8_t{0});
 
         EeState memory_state{};
         memory_state.pc = 0x5000U;
@@ -188,6 +190,19 @@ int main() {
             || memory_state.gpr[12].high != 0xBBBBBBBBBBBBBBBBULL) {
             std::fprintf(stderr, "GPR high-lane preservation failure alias[%zu]\n", index);
             return fail(24);
+        }
+        if (memory_state.gpr[16].low != 0x8001000180FF8001ULL
+            || memory_state.gpr[16].high != 0x0000000080FF8001ULL) {
+            std::fprintf(stderr, "LQ lane mismatch alias[%zu]: low=0x%016llX high=0x%016llX\n",
+                index, static_cast<unsigned long long>(memory_state.gpr[16].low),
+                static_cast<unsigned long long>(memory_state.gpr[16].high));
+            return fail(35);
+        }
+        for (std::size_t byte = 0; byte < 16U; ++byte) {
+            if (main_ram[physical + 0x20U + byte] != main_ram[physical + byte]) {
+                std::fprintf(stderr, "SQ byte mismatch alias[%zu] byte[%zu]\n", index, byte);
+                return fail(36);
+            }
         }
         if (main_ram[physical] != 0x01U || main_ram[physical + 1U] != 0x80U
             || main_ram[physical + 2U] != 0xFFU || main_ram[physical + 3U] != 0x80U) {
@@ -255,6 +270,12 @@ int main() {
     if (short_backing_status != Status::unmapped_memory || short_backing.pc != 0x5000U) {
         std::fprintf(stderr, "short-backing status mismatch: status=%u pc=0x%08X\n", static_cast<unsigned>(short_backing_status), short_backing.pc);
         return fail(31);
+    }
+    reps2::runtime::Gpr128 short_quadword{};
+    const auto short_quadword_status = reps2::runtime::load_u128(short_backing.memory, 0x10U, short_quadword);
+    if (short_quadword_status != Status::unmapped_memory) {
+        std::fprintf(stderr, "short quadword backing status mismatch: %u\n", static_cast<unsigned>(short_quadword_status));
+        return fail(37);
     }
 
     // The generated module initializer accepts a complete 32 MiB image,
