@@ -879,7 +879,7 @@ mod tests {
         };
         let error = iso.read_entry(&oversized, u64::MAX)
             .expect_err("caller must not bypass the absolute allocation bound");
-        assert!(error.to_string().contains("exceeding 536870912-byte read limit"));
+        assert!(error.to_string().contains("exceeding the 536870912-byte read limit"));
     }
 
     #[test]
