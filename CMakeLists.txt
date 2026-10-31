@@ -265,6 +265,8 @@ if(BUILD_TESTING)
             "${REPS2_SA_GENERATED_CPP}"
             0x0000C000
             0x00200029  # mtsa   $1        SA <- GPR[1][63:0]
+            0x00000028  # mfsa   $0        non-zero SA makes a missing
+                         # mfsa $0 guard observable
             0x00001028  # mfsa   $2        GPR[2][63:0] <- SA
             0x0478000F  # mtsab  $3, 0x0F  SA <- (GPR[3][3:0] ^ 0xF) * 8
             0x70A736E8  # qfsrv  $6, $5, $7 funnel shift by SA = 88
@@ -273,7 +275,7 @@ if(BUILD_TESTING)
             0x70A756E8  # qfsrv  $10, $5, $7 funnel shift by SA = 64
             0x05780005  # mtsab  $11, 0x05 SA <- (0x5 ^ 0x5) * 8 = 0
             0x70A766E8  # qfsrv  $12, $5, $7 funnel shift by SA = 0
-            0x00000028  # mfsa   $0        hard-wired zero destination
+            0x04780003  # mtsab  $3, 0x03  SA <- (0x4 ^ 0x3) * 8 = 56
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 MMI SA and QFSRV block"
         VERBATIM

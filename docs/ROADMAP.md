@@ -96,7 +96,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] AOT-lower and execute MTHI/MTLO/MFHI/MFLO and signed/unsigned R5900 MULT/MULTU in a dedicated native smoke test on Windows/MSVC and Linux/GCC, including HI/LO and `rd` results.
 - [x] AOT-lower and execute NOR/SLT/SLTU/SLTI/SLTIU with signed 64-bit boundary, unsigned ordering, negative immediate, GPR[0], and upper-lane preservation tests on Windows/MSVC and Linux/GCC.
 - [x] AOT-lower and execute PADDUW across all four 128-bit lanes in a native smoke test, including lane-local unsigned saturation, a non-zero destination, and GPR[0] suppression.
-- [x] AOT-lower and execute MFSA/MTSA/MTSAB/MTSAH with QFSRV in one native smoke test, covering the 64-bit SA round-trip, the `*8`/`*16` bit-count scaling, funnel shifts at SA = 88/64/0, SA staying unread-consumed by QFSRV, full 128-bit destination writes, and GPR[0] suppression.
+- [x] AOT-lower and execute MFSA/MTSA/MTSAB/MTSAH with QFSRV in one native smoke test, covering the 64-bit SA round-trip, the `*8`/`*16` bit-count scaling, funnel shifts at SA = 88/64/0, SA staying unread-consumed by QFSRV, full 128-bit destination writes, and GPR[0] suppression observed while SA is non-zero.
 - [x] Execute DADD/DSUB/DADDI success and overflow paths in generated native C++ on Windows/MSVC and Linux/GCC, including no-write-on-trap and overflow when `rd = 0`.
 - [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
