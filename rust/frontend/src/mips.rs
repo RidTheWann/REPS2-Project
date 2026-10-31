@@ -9,7 +9,7 @@ pub enum Opcode {
     Jr, Jalr, Syscall, Break,
     Mfhi, Mthi, Mflo, Mtlo, Mult, Multu, Div, Divu,
     Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
-    Daddu, Dsubu, Daddiu, Dsll, Dsrl, Dsra, Dsll32, Dsrl32, Dsra32,
+    Dadd, Daddu, Dsub, Dsubu, Daddi, Daddiu, Dsll, Dsrl, Dsra, Dsll32, Dsrl32, Dsra32,
     Sllv, Srlv, Srav, Dsllv, Dsrlv, Dsrav,
     J, Jal, Beq, Bne, Blez, Bgtz, Bltz, Bgez, Bltzal, Bgezal,
     Addi, Addiu, Slti, Sltiu, Andi, Ori, Xori, Lui,
@@ -50,8 +50,11 @@ impl Opcode {
             Self::Nor => "nor",
             Self::Slt => "slt",
             Self::Sltu => "sltu",
+            Self::Dadd => "dadd",
             Self::Daddu => "daddu",
+            Self::Dsub => "dsub",
             Self::Dsubu => "dsubu",
+            Self::Daddi => "daddi",
             Self::Daddiu => "daddiu",
             Self::Dsll => "dsll",
             Self::Dsrl => "dsrl",
@@ -256,13 +259,14 @@ impl Instruction {
             Opcode::Sllv | Opcode::Srlv | Opcode::Srav |
             Opcode::Dsllv | Opcode::Dsrlv | Opcode::Dsrav |
             Opcode::Add | Opcode::Addu | Opcode::Sub | Opcode::Subu |
+            Opcode::Dadd | Opcode::Dsub |
             Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Nor |
             Opcode::Slt | Opcode::Sltu | Opcode::Daddu | Opcode::Dsubu => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
                 effects.may_raise_exception = matches!(
                     self.opcode,
-                    Opcode::Add | Opcode::Sub
+                    Opcode::Add | Opcode::Sub | Opcode::Dadd | Opcode::Dsub
                 );
             }
 
@@ -336,12 +340,12 @@ impl Instruction {
                 };
             }
 
-            Opcode::Addi | Opcode::Addiu | Opcode::Daddiu |
+            Opcode::Addi | Opcode::Addiu | Opcode::Daddi | Opcode::Daddiu |
             Opcode::Slti | Opcode::Sltiu | Opcode::Andi |
             Opcode::Ori | Opcode::Xori => {
                 effects.gpr_read_mask = rs;
                 effects.gpr_write_mask = rt;
-                effects.may_raise_exception = self.opcode == Opcode::Addi;
+                effects.may_raise_exception = matches!(self.opcode, Opcode::Addi | Opcode::Daddi);
             }
             Opcode::Lui => {
                 effects.gpr_write_mask = rt;
@@ -452,7 +456,9 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x27 if shift_amount == 0 => Opcode::Nor,
             0x2A if shift_amount == 0 => Opcode::Slt,
             0x2B if shift_amount == 0 => Opcode::Sltu,
+            0x2C if shift_amount == 0 => Opcode::Dadd,
             0x2D if shift_amount == 0 => Opcode::Daddu,
+            0x2E if shift_amount == 0 => Opcode::Dsub,
             0x2F if shift_amount == 0 => Opcode::Dsubu,
             0x38 if rs == 0 => Opcode::Dsll,
             0x3A if rs == 0 => Opcode::Dsrl,
@@ -509,6 +515,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             }
             0x08 => Opcode::Addi,
             0x09 => Opcode::Addiu,
+            0x18 => Opcode::Daddi,
             0x19 => Opcode::Daddiu,
             0x0A => Opcode::Slti,
             0x0B => Opcode::Sltiu,
@@ -876,6 +883,47 @@ mod tests {
         assert_eq!(sltiu.gpr_read_mask, 1 << 8);
         assert_eq!(sltiu.gpr_write_mask, 1 << 9);
         assert!(!sltiu.may_raise_exception);
+    }
+
+
+    #[test]
+    fn decodes_signed_doubleword_arithmetic_and_reserved_fields() {
+        let cases = [
+            (((8 << 21) | (9 << 16) | (10 << 11) | 0x2C), Opcode::Dadd),
+            (((12 << 21) | (13 << 16) | (11 << 11) | 0x2E), Opcode::Dsub),
+            (((0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE), Opcode::Daddi),
+        ];
+        for (word, expected) in cases {
+            let decoded = decode(word, 0xB000);
+            assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
+            assert!(!decoded.has_delay_slot);
+        }
+        let dadd = decode((8 << 21) | (9 << 16) | (10 << 11) | 0x2C, 0xB000);
+        assert_eq!((dadd.rs, dadd.rt, dadd.rd), (8, 9, 10));
+        let daddi = decode((0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE, 0xB004);
+        assert_eq!((daddi.rs, daddi.rt), (15, 14));
+        assert_eq!(daddi.signed_immediate(), -2);
+        let malformed = (8 << 21) | (9 << 16) | (10 << 11) | (1 << 6) | 0x2C;
+        assert_eq!(decode(malformed, 0xB008).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn signed_doubleword_arithmetic_effects_mark_overflow_and_zero_destination() {
+        let dadd = decode((8 << 21) | (9 << 16) | (10 << 11) | 0x2C, 0xB100).effects();
+        assert_eq!(dadd.gpr_read_mask, (1 << 8) | (1 << 9));
+        assert_eq!(dadd.gpr_write_mask, 1 << 10);
+        assert!(dadd.may_raise_exception);
+        let dsub = decode((12 << 21) | (13 << 16) | (11 << 11) | 0x2E, 0xB104).effects();
+        assert_eq!(dsub.gpr_read_mask, (1 << 12) | (1 << 13));
+        assert_eq!(dsub.gpr_write_mask, 1 << 11);
+        assert!(dsub.may_raise_exception);
+        let daddi = decode((0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE, 0xB108).effects();
+        assert_eq!(daddi.gpr_read_mask, 1 << 15);
+        assert_eq!(daddi.gpr_write_mask, 1 << 14);
+        assert!(daddi.may_raise_exception);
+        let dadd_to_zero = decode((8 << 21) | (9 << 16) | 0x2C, 0xB10C).effects();
+        assert_eq!(dadd_to_zero.gpr_write_mask, 0);
+        assert!(dadd_to_zero.may_raise_exception);
     }
 
 }

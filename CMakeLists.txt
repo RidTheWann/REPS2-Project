@@ -166,6 +166,40 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_compare_codegen_smoke COMMAND reps2_compare_codegen_smoke)
 
+    set(REPS2_SIGNED_DOUBLEWORD_GENERATED_CPP "${REPS2_GENERATED_DIR}/signed_doubleword_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_SIGNED_DOUBLEWORD_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_SIGNED_DOUBLEWORD_GENERATED_CPP}"
+            0x0000B000
+            0x0109502C
+            0x018D582E
+            0x61EEFFFE
+            0x0211002C
+            0x0253902C
+        DEPENDS reps2
+        COMMENT "AOT-compiling the synthetic R5900 trapping doubleword arithmetic block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_SIGNED_DOUBLEWORD_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_signed_doubleword_codegen_fixture DEPENDS "${REPS2_SIGNED_DOUBLEWORD_GENERATED_CPP}")
+    add_executable(reps2_signed_doubleword_codegen_smoke
+        "${REPS2_SIGNED_DOUBLEWORD_GENERATED_CPP}"
+        tests/signed_doubleword_smoke.cpp
+    )
+    add_dependencies(reps2_signed_doubleword_codegen_smoke reps2_signed_doubleword_codegen_fixture)
+    target_link_libraries(reps2_signed_doubleword_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_signed_doubleword_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_signed_doubleword_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_signed_doubleword_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_signed_doubleword_codegen_smoke COMMAND reps2_signed_doubleword_codegen_smoke)
+
     set(REPS2_HILO_GENERATED_CPP "${REPS2_GENERATED_DIR}/hilo_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_HILO_GENERATED_CPP}"

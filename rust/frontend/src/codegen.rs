@@ -94,6 +94,15 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::SubUnsignedWord { dst, lhs, rhs } => emit_word_sub(
             output, index, dst, lhs, rhs, false
         ),
+        Operation::AddDoublewordSigned { dst, lhs, rhs } => {
+            emit_doubleword_signed_add(output, index, dst, lhs, rhs);
+        }
+        Operation::SubDoublewordSigned { dst, lhs, rhs } => {
+            emit_doubleword_signed_sub(output, index, dst, lhs, rhs);
+        }
+        Operation::AddImmediateDoublewordSigned { dst, src, immediate } => {
+            emit_doubleword_signed_immediate_add(output, index, dst, src, immediate);
+        }
         Operation::AddDoublewordUnsigned { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "+"),
         Operation::SubDoublewordUnsigned { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "-"),
         Operation::AddImmediateDoublewordUnsigned { dst, src, immediate } => {
@@ -552,6 +561,66 @@ fn emit_set_less_than_immediate(
     ));
 }
 
+fn emit_doubleword_signed_add(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
+) {
+    let tag = format!("{index:04}");
+    let d = dst.index();
+    let a = lhs.index();
+    let b = rhs.index();
+    output.push_str(&format!(
+        "    const std::uint64_t signed_add_lhs_{tag} = state.gpr[{a}].low;\n\
+         \x20   const std::uint64_t signed_add_rhs_{tag} = state.gpr[{b}].low;\n\
+         \x20   const std::uint64_t signed_add_result_{tag} = signed_add_lhs_{tag} + signed_add_rhs_{tag};\n\
+         \x20   if (((~(signed_add_lhs_{tag} ^ signed_add_rhs_{tag}) & (signed_add_lhs_{tag} ^ signed_add_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return Status::integer_overflow;\n\
+         \x20   if ({d} != 0) state.gpr[{d}].low = signed_add_result_{tag};\n"
+    ));
+}
+
+fn emit_doubleword_signed_sub(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
+) {
+    let tag = format!("{index:04}");
+    let d = dst.index();
+    let a = lhs.index();
+    let b = rhs.index();
+    output.push_str(&format!(
+        "    const std::uint64_t signed_sub_lhs_{tag} = state.gpr[{a}].low;\n\
+         \x20   const std::uint64_t signed_sub_rhs_{tag} = state.gpr[{b}].low;\n\
+         \x20   const std::uint64_t signed_sub_result_{tag} = signed_sub_lhs_{tag} - signed_sub_rhs_{tag};\n\
+         \x20   if ((((signed_sub_lhs_{tag} ^ signed_sub_rhs_{tag}) & (signed_sub_lhs_{tag} ^ signed_sub_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return Status::integer_overflow;\n\
+         \x20   if ({d} != 0) state.gpr[{d}].low = signed_sub_result_{tag};\n"
+    ));
+}
+
+fn emit_doubleword_signed_immediate_add(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    src: Gpr,
+    immediate: u16,
+) {
+    let tag = format!("{index:04}");
+    let d = dst.index();
+    let s = src.index();
+    let signed_immediate = immediate as i16 as i64;
+    output.push_str(&format!(
+        "    const std::uint64_t signed_addi_lhs_{tag} = state.gpr[{s}].low;\n\
+         \x20   const std::uint64_t signed_addi_rhs_{tag} = static_cast<std::uint64_t>({signed_immediate}LL);\n\
+         \x20   const std::uint64_t signed_addi_result_{tag} = signed_addi_lhs_{tag} + signed_addi_rhs_{tag};\n\
+         \x20   if (((~(signed_addi_lhs_{tag} ^ signed_addi_rhs_{tag}) & (signed_addi_lhs_{tag} ^ signed_addi_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return Status::integer_overflow;\n\
+         \x20   if ({d} != 0) state.gpr[{d}].low = signed_addi_result_{tag};\n"
+    ));
+}
+
 fn emit_binary64(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr, operator: &str) {
     let d = dst.index();
     let a = lhs.index();
@@ -843,6 +912,32 @@ mod tests {
         assert!(cpp.contains("state.gpr[11].low < static_cast<std::uint64_t>(-1LL)"));
         assert!(cpp.contains("? 1ULL : 0ULL"));
         assert!(cpp.contains("#include <bit>"));
+    }
+
+
+    #[test]
+    fn emits_trapping_doubleword_arithmetic_with_portable_overflow_detection() {
+        let words = [
+            (8 << 21) | (9 << 16) | (10 << 11) | 0x2C,
+            (12 << 21) | (13 << 16) | (11 << 11) | 0x2E,
+            (0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE,
+        ];
+        let decoded_stream = words.iter().enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xB000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("signed doubleword IR");
+        let cpp = emit_cpp(&program).expect("signed doubleword C++");
+
+        assert!(cpp.contains("signed_add_result_0000 = signed_add_lhs_0000 + signed_add_rhs_0000"));
+        assert!(cpp.contains("~(signed_add_lhs_0000 ^ signed_add_rhs_0000)"));
+        assert!(cpp.contains("signed_sub_result_0001 = signed_sub_lhs_0001 - signed_sub_rhs_0001"));
+        assert!(cpp.contains("(signed_sub_lhs_0001 ^ signed_sub_rhs_0001)"));
+        assert!(cpp.contains("signed_addi_rhs_0002 = static_cast<std::uint64_t>(-2LL)"));
+        assert!(cpp.contains("signed_addi_result_0002 = signed_addi_lhs_0002 + signed_addi_rhs_0002"));
+        assert_eq!(cpp.matches("return Status::integer_overflow;").count(), 3);
+        assert!(cpp.contains("if (10 != 0) state.gpr[10].low = signed_add_result_0000"));
+        assert!(cpp.contains("if (11 != 0) state.gpr[11].low = signed_sub_result_0001"));
+        assert!(cpp.contains("if (14 != 0) state.gpr[14].low = signed_addi_result_0002"));
     }
 
 }

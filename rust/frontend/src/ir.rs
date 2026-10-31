@@ -54,6 +54,9 @@ pub enum Operation {
     AddImmediateUnsignedWord { dst: Gpr, src: Gpr, immediate: u16 },
     SubWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     SubUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    AddDoublewordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    SubDoublewordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    AddImmediateDoublewordSigned { dst: Gpr, src: Gpr, immediate: u16 },
     AddDoublewordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     SubDoublewordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     AddImmediateDoublewordUnsigned { dst: Gpr, src: Gpr, immediate: u16 },
@@ -266,6 +269,15 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             },
             Opcode::Subu => Operation::SubUnsignedWord {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Dadd => Operation::AddDoublewordSigned {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Dsub => Operation::SubDoublewordSigned {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Daddi => Operation::AddImmediateDoublewordSigned {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
             },
             Opcode::Daddu => Operation::AddDoublewordUnsigned {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
@@ -669,6 +681,39 @@ mod tests {
         assert!(matches!(program.instructions()[4].operation,
             Operation::SetLessThanImmediateUnsigned64 { dst, src, immediate: 0xFFFF }
                 if dst.index() == 12 && src.index() == 11));
+    }
+
+
+    #[test]
+    fn lifts_trapping_signed_doubleword_arithmetic_separately_from_unsigned_ops() {
+        let words = [
+            (8 << 21) | (9 << 16) | (10 << 11) | 0x2C,
+            (12 << 21) | (13 << 16) | (11 << 11) | 0x2E,
+            (0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE,
+            (8 << 21) | (9 << 16) | (16 << 11) | 0x2D,
+            (8 << 21) | (9 << 16) | (17 << 11) | 0x2F,
+            (0x19 << 26) | (15 << 21) | (18 << 16) | 0xFFFE,
+        ];
+        let decoded_stream = words.iter().enumerate()
+            .map(|(index, word)| decoded(*word, 0xB000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("signed and unsigned doubleword IR");
+
+        assert!(matches!(program.instructions()[0].operation,
+            Operation::AddDoublewordSigned { dst, lhs, rhs }
+                if dst.index() == 10 && lhs.index() == 8 && rhs.index() == 9));
+        assert!(matches!(program.instructions()[1].operation,
+            Operation::SubDoublewordSigned { dst, lhs, rhs }
+                if dst.index() == 11 && lhs.index() == 12 && rhs.index() == 13));
+        assert!(matches!(program.instructions()[2].operation,
+            Operation::AddImmediateDoublewordSigned { dst, src, immediate: 0xFFFE }
+                if dst.index() == 14 && src.index() == 15));
+        assert!(matches!(program.instructions()[3].operation,
+            Operation::AddDoublewordUnsigned { dst, .. } if dst.index() == 16));
+        assert!(matches!(program.instructions()[4].operation,
+            Operation::SubDoublewordUnsigned { dst, .. } if dst.index() == 17));
+        assert!(matches!(program.instructions()[5].operation,
+            Operation::AddImmediateDoublewordUnsigned { dst, .. } if dst.index() == 18));
     }
 
 }

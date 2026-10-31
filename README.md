@@ -19,6 +19,7 @@ The frontend is written in Rust: executable inspection, instruction decoding, an
 - Expose conservative per-instruction GPR/HI-LO dependencies, memory/control-flow effects, and possible synchronous exceptions; unsupported encodings remain explicitly opaque.
 - Decode, lift and AOT-lower base EE MTHI/MTLO/MFHI/MFLO plus R5900 three-operand MULT/MULTU; preserve HI/LO, the optional GPR destination, and both EE GPR lanes.
 - Decode, lift and AOT-lower 64-bit NOR, signed/unsigned SLT/SLTU, and SLTI/SLTIU with signed immediate extension and low-lane-only result writes.
+- Decode, lift and AOT-lower trapping 64-bit DADD, DSUB and DADDI with defined overflow checks; preserve destination atomicity, GPR[0] trap behavior and upper-lane state.
 - Discover entry points and STT_FUNC roots, then build a reachability-guided CFG for the currently supported control-transfer subset.
 - Preserve control instructions and delay slots as explicit terminators; record direct taken/fallthrough/call/return-continuation edges and unresolved indirect targets.
 - Read executable instructions only from file-backed PT_LOAD bytes; zero-filled BSS is never misinterpreted as code.
