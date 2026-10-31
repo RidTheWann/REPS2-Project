@@ -152,6 +152,8 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 - Typed DADDU/DSUBU/DADDIU and immediate DSLL/DSRL/DSRA plus DSLL32/DSRL32/DSRA32 lowering into the low 64-bit EE GPR lane; arithmetic right shift uses an explicit sign-fill helper.
 - Typed register-variable SLLV/SRLV/SRAV and DSLLV/DSRLV/DSRAV lowering with architectural 5-bit/6-bit count masks, sign-extended word writes, and preserved upper GPR lanes.
 - Typed MMI1 PADDUW lowering to four independent unsigned 32-bit lane additions with lane-local saturation and full 128-bit destination writes.
+- Typed MMI SA movers (MFSA/MTSA/MTSAB/MTSAH) and MMI1 QFSRV, with SA modeled as a 64-bit bit count consumed through a runtime funnel-shift helper that never forms a C++ shift count of 64 or more.
+- Typed COP1 data movement: MFC1/MTC1/CFC1/CTC1 over the single-precision 32-bit FPR file plus FIR/FCR31, and LWC1/SWC1 through the shared word accessors. MFC1/CFC1 sign-extend into `GPR[63:0]`, CTC1 cannot program the FCR31 rounding bits, and reserved control numbers are rejected while lifting rather than folded onto FCSR.
 - Deterministic decoder coverage census over executable PT_LOAD file bytes plus a bounded entry-point diagnostic scan.
 
 - Checked little-endian EE main-RAM accesses over a caller-owned 32 MiB backing span with documented aliases and explicit MMIO/unmapped failures.

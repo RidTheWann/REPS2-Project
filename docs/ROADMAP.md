@@ -70,12 +70,15 @@ The library must distinguish these states; no state implies a later one:
 ## M2 — R5900 decoder and analysis
 
 - [ ] Cover the documented R5900 integer, 64-bit, MMI0–MMI3, COP0, and FPU instruction families.
+- [ ] Decode, lift and AOT-lower the COP1 S-class and W-class arithmetic (ADD/SUB/MUL/DIV/SQRT/ABS/NEG/MOV, the `a`-form ACC operations, MADD/MSUB, RSQRT, MAX/MIN, CVT.W.S and CVT.S.W) with the EE's non-IEEE data semantics rather than host `float` behaviour, and model the ACC the arithmetic reads and writes.
+- [ ] Model FCR31 condition and cause flags, then decode BC1F/BC1T with their branch-likely forms and delay slots, verifying whether `SQRT.S` takes its operand from bits 20..16 (Sony and Ghidra) or bits 15..11 (binutils).
 - [x] Decode, lift, and AOT-lower the non-trapping 64-bit scalar subset (DADDU, DSUBU, DADDIU, DSLL/DSRL/DSRA and their 32-shift variants); test modulo arithmetic, sign-extended immediates, shift boundaries, and upper GPR-lane preservation.
 - [x] Decode, lift, and AOT-lower register-variable SLLV/SRLV/SRAV and DSLLV/DSRLV/DSRAV; test 5-bit/6-bit shift-count masking, word sign extension, arithmetic sign fill, and GPR upper-lane preservation through compiled native code.
 - [x] Expose conservative GPR/HI-LO, memory, control-flow, and possible-exception metadata for currently decoded opcodes; unknown encodings remain opaque.
 - [x] Decode R5900 three-operand MULT/MULTU with optional `rd`, plus base EE MTHI/MTLO/MFHI/MFLO; division, MMI pipeline-1, and full instruction-family coverage remain separate work.
 - [x] Decode, lift, and AOT-lower the MMI1-group PADDUW operation with independent unsigned 32-bit lane addition and lane-local saturation; other MMI operations and MMI pipeline-1 state remain separate work.
 - [x] Decode and lift the MMI shift-amount movers MFSA/MTSA/MTSAB/MTSAH with their documented reserved-field masks, and lower MMI1 QFSRV so SA is consumed as a 64-bit bit count; branch-likely and three-cycle SA hazards remain unmodeled.
+- [x] Decode, lift and AOT-lower the COP1 transfers MFC1/MTC1/CFC1/CTC1 plus LWC1/SWC1 using the verified bits 25..21 format selector and reserved bits 10..0, with FPR/FCR dependency metadata, sign-extended GPR writes, program-uncontrolled FCR31 rounding bits, and rejection of the double-width and reserved control encodings the EE does not implement. COP1 arithmetic, BC1 branches and the FPU ACC remain separate work.
 - [x] Decode and lift NOR, SLT, SLTU, SLTI and SLTIU into typed scalar IR; SLTIU's immediate is sign-extended before unsigned comparison.
 - [x] Decode, lift and AOT-lower trapping 64-bit DADD/DSUB/DADDI separately from DADDU/DSUBU/DADDIU; detect signed overflow without host-language signed-overflow UB and test GPR[0] exception behavior.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
@@ -97,6 +100,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] AOT-lower and execute NOR/SLT/SLTU/SLTI/SLTIU with signed 64-bit boundary, unsigned ordering, negative immediate, GPR[0], and upper-lane preservation tests on Windows/MSVC and Linux/GCC.
 - [x] AOT-lower and execute PADDUW across all four 128-bit lanes in a native smoke test, including lane-local unsigned saturation, a non-zero destination, and GPR[0] suppression.
 - [x] AOT-lower and execute MFSA/MTSA/MTSAB/MTSAH with QFSRV in one native smoke test, covering the 64-bit SA round-trip, the `*8`/`*16` bit-count scaling, funnel shifts at SA = 88/64/0, SA staying unread-consumed by QFSRV, full 128-bit destination writes, and GPR[0] suppression observed while SA is non-zero.
+- [x] AOT-lower and execute the COP1 transfers in one native smoke test, covering MTC1 32-bit truncation, MFC1/CFC1 sign extension with GPR upper-lane preservation, GPR[0] suppression while FPR[6] is non-zero, FPR[0] written by both MTC1 and LWC1, an SWC1/LWC1 round trip through main RAM at positive and negative offsets, FIR read-back, and CTC1 leaving FCR31 bits 1..0 hard-wired to `0b01`. Seven mutations of the emitters, the control-register mask and the lift mapping each make the fixture fail.
 - [x] Execute DADD/DSUB/DADDI success and overflow paths in generated native C++ on Windows/MSVC and Linux/GCC, including no-write-on-trap and overflow when `rd = 0`.
 - [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
