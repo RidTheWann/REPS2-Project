@@ -88,6 +88,24 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::ShiftRightArithmeticDoubleword { dst, src, amount } => {
             emit_doubleword_shift(output, dst, src, amount, "arithmetic", true);
         }
+        Operation::ShiftLeftWordVariable { dst, src, amount } => {
+            emit_variable_word_shift(output, index, dst, src, amount, "<<", false);
+        }
+        Operation::ShiftRightLogicalWordVariable { dst, src, amount } => {
+            emit_variable_word_shift(output, index, dst, src, amount, ">>", false);
+        }
+        Operation::ShiftRightArithmeticWordVariable { dst, src, amount } => {
+            emit_variable_word_shift(output, index, dst, src, amount, "arithmetic", true);
+        }
+        Operation::ShiftLeftDoublewordVariable { dst, src, amount } => {
+            emit_variable_doubleword_shift(output, index, dst, src, amount, "<<", false);
+        }
+        Operation::ShiftRightLogicalDoublewordVariable { dst, src, amount } => {
+            emit_variable_doubleword_shift(output, index, dst, src, amount, ">>", false);
+        }
+        Operation::ShiftRightArithmeticDoublewordVariable { dst, src, amount } => {
+            emit_variable_doubleword_shift(output, index, dst, src, amount, "arithmetic", true);
+        }
         Operation::And64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "&"),
         Operation::Or64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "|"),
         Operation::Xor64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "^"),
@@ -467,6 +485,60 @@ fn emit_doubleword_shift(
     }
 }
 
+fn emit_variable_word_shift(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    src: Gpr,
+    amount: Gpr,
+    operator: &str,
+    arithmetic: bool,
+) {
+    let tag = format!("{index:04}");
+    let d = dst.index();
+    let s = src.index();
+    let a = amount.index();
+    output.push_str(&format!(
+        "    if (!is_word_value(state.gpr[{s}].low)) return Status::undefined_word_operand;\n    const std::uint32_t shift_amount_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low) & 0x1FU;\n"
+    ));
+    if arithmetic {
+        output.push_str(&format!(
+            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(arithmetic_shift_right_word(static_cast<std::uint32_t>(state.gpr[{s}].low), static_cast<std::uint8_t>(shift_amount_{tag})));\n"
+        ));
+    } else {
+        output.push_str(&format!(
+            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[{s}].low) {operator} shift_amount_{tag});\n"
+        ));
+    }
+}
+
+fn emit_variable_doubleword_shift(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    src: Gpr,
+    amount: Gpr,
+    operator: &str,
+    arithmetic: bool,
+) {
+    let tag = format!("{index:04}");
+    let d = dst.index();
+    let s = src.index();
+    let a = amount.index();
+    output.push_str(&format!(
+        "    const std::uint32_t shift_amount_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low) & 0x3FU;\n"
+    ));
+    if arithmetic {
+        output.push_str(&format!(
+            "    if ({d} != 0) state.gpr[{d}].low = arithmetic_shift_right_doubleword(state.gpr[{s}].low, static_cast<std::uint8_t>(shift_amount_{tag}));\n"
+        ));
+    } else {
+        output.push_str(&format!(
+            "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low {operator} shift_amount_{tag};\n"
+        ));
+    }
+}
+
 fn emit_shift(output: &mut String, dst: Gpr, src: Gpr, amount: u8, operator: &str, arithmetic: bool) {
     let d = dst.index();
     let s = src.index();
@@ -561,6 +633,32 @@ mod tests {
         assert!(cpp.contains("state.gpr[14].low = state.gpr[9].low >> 39U"));
         assert!(cpp.contains("arithmetic_shift_right_doubleword(state.gpr[9].low, 39U)"));
         assert!(!cpp.contains("state.gpr[10] ="));
+    }
+
+    #[test]
+    fn emits_register_variable_word_and_doubleword_shifts_with_masked_counts() {
+        let words = [
+            (4 << 21) | (5 << 16) | (6 << 11) | 0x04,
+            (4 << 21) | (5 << 16) | (7 << 11) | 0x06,
+            (4 << 21) | (5 << 16) | (8 << 11) | 0x07,
+            (4 << 21) | (5 << 16) | (30 << 11) | 0x14,
+            (4 << 21) | (5 << 16) | (31 << 11) | 0x16,
+            (4 << 21) | (5 << 16) | (22 << 11) | 0x17,
+        ];
+        let decoded = words.iter().enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x8000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("variable shifts lift");
+        let cpp = emit_cpp(&program).expect("variable shift C++");
+        assert!(cpp.contains("shift_amount_0000 = static_cast<std::uint32_t>(state.gpr[4].low) & 0x1FU"));
+        assert!(cpp.contains("state.gpr[6].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[5].low) << shift_amount_0000)"));
+        assert!(cpp.contains("state.gpr[7].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[5].low) >> shift_amount_0001)"));
+        assert!(cpp.contains("arithmetic_shift_right_word(static_cast<std::uint32_t>(state.gpr[5].low), static_cast<std::uint8_t>(shift_amount_0002))"));
+        assert!(cpp.contains("shift_amount_0003 = static_cast<std::uint32_t>(state.gpr[4].low) & 0x3FU"));
+        assert!(cpp.contains("state.gpr[30].low = state.gpr[5].low << shift_amount_0003"));
+        assert!(cpp.contains("state.gpr[31].low = state.gpr[5].low >> shift_amount_0004"));
+        assert!(cpp.contains("arithmetic_shift_right_doubleword(state.gpr[5].low, static_cast<std::uint8_t>(shift_amount_0005))"));
+        assert!(cpp.contains("if (!is_word_value(state.gpr[5].low)) return Status::undefined_word_operand"));
     }
 
     #[test]

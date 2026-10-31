@@ -15,6 +15,14 @@ int main() {
     state.gpr[2].low = 0x0000000000000030ULL;
     state.gpr[2].high = 0x5555666677778888ULL;
     state.gpr[3].low = 0xFFFFFFFFFFFFFFFFULL;
+    state.gpr[4].low = 0xC5ULL; // Word and doubleword shifts must mask the architectural count bits.
+    state.gpr[5].low = 0xFFFFFFFF80000001ULL;
+    state.gpr[5].high = 0x13579BDF2468ACE0ULL;
+    state.gpr[6].high = 0xABCDEF0123456789ULL;
+    state.gpr[7].high = 0xABCDEF0123456789ULL;
+    state.gpr[22].high = 0xABCDEF0123456789ULL;
+    state.gpr[30].high = 0xABCDEF0123456789ULL;
+    state.gpr[31].high = 0xABCDEF0123456789ULL;
     state.gpr[23].high = 0xABCDEF0123456789ULL;
     state.gpr[24].high = 0xABCDEF0123456789ULL;
     state.gpr[25].high = 0xABCDEF0123456789ULL;
@@ -102,6 +110,19 @@ int main() {
         || state.gpr[29].high != 0xABCDEF0123456789ULL) return 24;
     if (state.gpr[1].high != 0x1111222233334444ULL
         || state.gpr[2].high != 0x5555666677778888ULL) return 25;
+
+    if (state.gpr[6].low != 0x20ULL) return 26; // SLLV, low-word wrap and sign extension.
+    if (state.gpr[7].low != 0x04000000ULL) return 27; // SRLV.
+    if (state.gpr[22].low != 0xFFFFFFFFFC000000ULL) return 28; // SRAV.
+    if (state.gpr[30].low != 0xFFFFFFF000000020ULL) return 29; // DSLLV.
+    if (state.gpr[31].low != 0x07FFFFFFFC000000ULL) return 30; // DSRLV.
+    if (state.gpr[19].low != 0xFFFFFFFFFC000000ULL) return 31; // DSRAV.
+    if (state.gpr[5].high != 0x13579BDF2468ACE0ULL) return 32;
+    if (state.gpr[6].high != 0xABCDEF0123456789ULL
+        || state.gpr[7].high != 0xABCDEF0123456789ULL
+        || state.gpr[22].high != 0xABCDEF0123456789ULL
+        || state.gpr[30].high != 0xABCDEF0123456789ULL
+        || state.gpr[31].high != 0xABCDEF0123456789ULL) return 33;
 
     return 0;
 }

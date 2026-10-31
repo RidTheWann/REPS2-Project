@@ -32,6 +32,8 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 
 - [ ] Cover the documented R5900 integer, 64-bit, MMI0–MMI3, COP0, and FPU instruction families.
 - [x] Decode, lift, and AOT-lower the non-trapping 64-bit scalar subset (DADDU, DSUBU, DADDIU, DSLL/DSRL/DSRA and their 32-shift variants); test modulo arithmetic, sign-extended immediates, shift boundaries, and upper GPR-lane preservation.
+- [x] Decode, lift, and AOT-lower register-variable SLLV/SRLV/SRAV and DSLLV/DSRLV/DSRAV; test 5-bit/6-bit shift-count masking, word sign extension, arithmetic sign fill, and GPR upper-lane preservation through compiled native code.
+
 
 - [ ] Encode instruction operand/side-effect/exception metadata.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
