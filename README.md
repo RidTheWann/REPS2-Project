@@ -59,7 +59,7 @@ The frontend executable is produced at:
 - Windows: build/cargo-target/release/reps2.exe
 - Linux: build/cargo-target/release/reps2
 
-The CMake build generates build/generated/synthetic_program.cpp and build/generated/control_flow.cpp, compiles both with the host C++20 compiler, and runs reps2_codegen_smoke plus reps2_cfg_codegen_smoke.
+The CMake build generates seven translation units under `build/generated/` (`synthetic_program.cpp`, `compare_nor_program.cpp`, `signed_doubleword_program.cpp`, `hilo_program.cpp`, `sa_program.cpp`, `cop1_program.cpp`, `control_flow.cpp`), compiles each with the host C++20 compiler into a native smoke executable, and runs them together with the Rust test target through CTest.
 
 For Rust-only work:
 
