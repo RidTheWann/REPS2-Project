@@ -571,14 +571,14 @@ impl Sha256 {
         }
 
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = self.state;
-        for index in 0..64 {
+        for (index, schedule_word) in schedule.iter().copied().enumerate() {
             let sum1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let choice = (e & f) ^ ((!e) & g);
             let temp1 = h
                 .wrapping_add(sum1)
                 .wrapping_add(choice)
                 .wrapping_add(Self::ROUND_CONSTANTS[index])
-                .wrapping_add(schedule[index]);
+                .wrapping_add(schedule_word);
             let sum0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let majority = (a & b) ^ (a & c) ^ (b & c);
             let temp2 = sum0.wrapping_add(majority);
