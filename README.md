@@ -4,14 +4,17 @@
 
 The frontend is written in Rust: executable inspection, instruction decoding, analysis, typed IR, verification, and AOT C++ source generation. Generated C++ is compiled by the host compiler and linked against the independently implemented C++20 runtime.
 
-> **Status: experimental foundation (v0.3.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed straight-line IR, and a deterministic C++20 emitter for a documented scalar subset. CMake builds a synthetic program through Rust-to-C++ lowering, compiles it with the host compiler, and executes it in CI on Windows and Linux. This does not yet recompile a PS2 ELF, build a complete game module, boot a title, or implement the PS2 hardware runtime.
+> **Status: experimental foundation (v0.4.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed straight-line IR, and a deterministic C++20 emitter for a documented scalar subset. CMake builds a synthetic program through Rust-to-C++ lowering, compiles it with the host compiler, and executes it in CI on Windows and Linux. This does not yet recompile a PS2 ELF, build a complete game module, boot a title, or implement the PS2 hardware runtime.
 
 ## Current capabilities
 
 - Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries.
 - Validate file-backed ranges, table bounds, cross-table references, entry sizes, address overflow, and parser resource limits.
 - Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges.
-- Decode an explicitly scoped base-MIPS integer subset with delay-slot metadata and direct branch/jump targets.
+- Decode an explicitly scoped base-MIPS integer subset, including BEQ/BNE/BLEZ/BGTZ and REGIMM BLTZ/BGEZ branch families.
+- Discover entry points and STT_FUNC roots, then build a reachability-guided CFG for the currently supported control-transfer subset.
+- Preserve control instructions and delay slots as explicit terminators; record direct taken/fallthrough/call/return-continuation edges and unresolved indirect targets.
+- Read executable instructions only from file-backed PT_LOAD bytes; zero-filled BSS is never misinterpreted as code.
 - Lift a supported straight-line instruction subset into typed Rust IR with guest-PC provenance and verification.
 - Emit deterministic C++20 for supported scalar operations: NOP, ADD/ADDI/ADDU/ADDIU, SUB/SUBU, AND/OR/XOR, immediate logical operations, LUI, and word shifts.
 - Keep a 128-bit EE GPR state shape in the runtime ABI; scalar instructions update only the low 64-bit lane and preserve the high lane.
@@ -50,6 +53,7 @@ For Rust-only work:
 
     reps2 version
     reps2 elf-info <elf-file>
+    reps2 analyze-elf <elf-file>
     reps2 decode <instruction-word-hex> [pc-hex]
     reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...
 
@@ -59,7 +63,9 @@ Example:
     reps2 decode 0x2485FFFC 0x00100000
     reps2 compile-words output.cpp 0x00100000 0x24080005 0x24090007 0x01095021
 
-compile-words is a narrow linear-block development command. It accepts raw instruction words, lifts only the supported scalar subset, and writes a C++ translation unit. It is not an ELF-to-game recompiler. Branches and delay-slot control flow, memory operations, function discovery, full R5900 semantics, and runtime service integration remain future work.
+analyze-elf is a read-only, reachability-guided analysis command. It starts from the ELF entry point and executable STT_FUNC symbols, reports basic blocks and static edges, and explicitly lists indirect targets that cannot be resolved. It does not yet emit or execute branch CFGs. The CFG supports a bounded set of direct and register-indirect control transfers; unsupported instructions terminate analysis blocks with diagnostics. It deliberately does not decode zero-filled BSS bytes.
+
+compile-words remains a narrow linear-block development command. It accepts raw instruction words, lifts only the supported scalar subset, and writes a C++ translation unit. REPS2 is not yet an ELF-to-game recompiler: branch/delay-slot AOT lowering, memory-operation IR, complete R5900 semantics, and runtime service integration remain future work.
 
 ## Architecture
 

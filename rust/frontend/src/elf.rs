@@ -149,6 +149,7 @@ impl Image {
 pub struct LoadedSegment {
     pub virtual_address: u32,
     pub flags: u32,
+    pub file_size: usize,
     pub bytes: Vec<u8>,
 }
 
@@ -527,6 +528,7 @@ pub fn load_segments(bytes: &[u8], image: &Image, maximum_total_memory: usize) -
         segments.push(LoadedSegment {
             virtual_address: header.virtual_address,
             flags: header.flags,
+            file_size,
             bytes: memory,
         });
     }
@@ -686,6 +688,7 @@ mod tests {
         let image = parse(&bytes, ParseLimits::default()).expect("valid fixture");
         let loaded = load_segments(&bytes, &image, 1024).expect("PT_LOAD materializes");
         assert_eq!(&loaded[0].bytes[..8], &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(loaded[0].file_size, 8);
         assert_eq!(&loaded[0].bytes[8..], &[0; 8]);
 
         let mut malformed_image = image.clone();

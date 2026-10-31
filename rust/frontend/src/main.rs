@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
+use reps2_frontend::analysis::{self, AnalysisLimits};
 use reps2_frontend::codegen;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
@@ -80,6 +81,52 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+fn analyze_elf(path: &Path) -> Result<(), String> {
+    let bytes = read_input(path)?;
+    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
+    if !image.is_mips() {
+        return Err("ELF machine is not EM_MIPS; refusing PS2 EE analysis".to_owned());
+    }
+
+    let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
+        .map_err(|error| error.to_string())?;
+    let edges = graph.edges();
+
+    println!("REPS2 reachable executable analysis");
+    println!("  Entry roots: {}", graph.entry_points.len());
+    println!("  Basic blocks: {}", graph.blocks.len());
+    println!("  Decoded instructions: {}", graph.decoded_instruction_count);
+    println!("  Static edges: {}", edges.len());
+    println!("  Unsupported blocks: {}", graph.unsupported_block_count());
+    println!("  Unresolved indirect jumps: {}", graph.unresolved_indirect_jumps.len());
+    println!("  External/unmapped targets: {}", graph.external_targets.len());
+
+    for entry in &graph.entry_points {
+        let role = if entry.is_elf_entry { "ELF entry" } else { "function" };
+        let labels = if entry.labels.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", entry.labels.join(", "))
+        };
+        println!("  {role}: 0x{:08X}{labels}", entry.address);
+    }
+
+    println!("  Block preview:");
+    for block in graph.blocks.values().take(64) {
+        println!(
+            "    0x{:08X}: {} instruction(s), {}",
+            block.start_pc,
+            block.instruction_count(),
+            block.terminator.label()
+        );
+    }
+    if graph.blocks.len() > 64 {
+        println!("    ... {} more block(s)", graph.blocks.len() - 64);
+    }
+
+    Ok(())
+}
+
 fn compile_words(output: &Path, base_pc_text: &str, word_texts: &[String]) -> Result<(), String> {
     if word_texts.is_empty() {
         return Err("compile-words requires at least one instruction word".to_owned());
@@ -118,6 +165,7 @@ fn usage() {
     println!("Usage:");
     println!("  reps2 version");
     println!("  reps2 elf-info <elf-file>");
+    println!("  reps2 analyze-elf <elf-file>");
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
@@ -133,6 +181,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
+        Some("analyze-elf") if arguments.len() == 3 => analyze_elf(Path::new(&arguments[2])),
         Some("decode") if (3..=4).contains(&arguments.len()) => {
             decode_word(&arguments[2], arguments.get(3).map(String::as_str))
         }

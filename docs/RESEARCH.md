@@ -21,6 +21,12 @@ These projects have different goals and different completion levels. Their demos
 
 - **ORI immediate extension:** the public MIPS32 instruction reference defines ORI's 16-bit immediate as zero-extended. The currently consulted PCSX2 R5900 implementation also combines the source GPR with the zero-extended 16-bit immediate. One publicly accessible mirror of the Sony EE Core Instruction Set Manual contains prose describing ORI's immediate as sign-extended. REPS2 follows the MIPS instruction definition and observed PCSX2 behavior for this subset, records the discrepancy, and requires a future differential conformance case before expanding claims.
 
+## Control-flow and delay-slot references
+
+- MIPS32 Volume II defines the standard delayed-control-transfer instruction forms and branch offset calculation. Use it as a baseline only; validate EE-specific behavior and the supported R5900 encoding subset with PS2 documentation and differential tests.
+- REPS2's initial CFG keeps the branch instruction and delay slot separate from block-body instructions. This is a representation decision that prevents a linear scalar IR from accidentally treating a delay slot as ordinary fallthrough.
+- Indirect jump targets are unresolved unless statically proven; no target is guessed from a register name or common ABI convention.
+
 ## Provenance rules
 
 1. REPS2 source is independently authored.
