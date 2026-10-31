@@ -21,7 +21,7 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] PT_LOAD-to-32 MiB initial RAM image construction with BSS zeroing and physical alias overlap checks.
 - [ ] Full address-space permissions and COP0/TLB mapping.
 - [x] Read-only ISO 9660 inspection and SYSTEM.CNF BOOT2/BOOT ELF extraction for raw 2048-byte-sector images; reject unsupported containers and directory features explicitly.
-- [ ] Real local ELF inventory manifest with no binaries committed.
+- [x] Content-addressed, per-game ISO import manifest with internally extracted boot ELF and bounded analysis/code-generation status; original ISO remains external and no game binaries are committed.
 - [x] Discover ELF entry points and executable STT_FUNC symbol roots.
 - [x] Reachability-guided CFG for the implemented branch/jump subset; keep indirect targets unresolved.
 - [x] Distinguish file-backed executable bytes from zero-filled PT_LOAD tails during instruction reads.
@@ -86,6 +86,16 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [ ] Audio, controller, optical media, and memory-card services.
 
 **Exit gate:** a target stage advances without unexplained fallbacks.
+
+## M7 — Multi-game desktop platform
+
+- [ ] Persistent game library service with add/remove/relink/rescan operations and schema migrations.
+- [ ] Big Picture-style controller-first library UI with metadata, cover-art policy, per-game settings, and launch state.
+- [ ] Per-game build cache keyed by ISO content hash, toolchain version, runtime ABI, and compiler configuration.
+- [ ] Session manager that launches a native title module with the correct PS2 runtime profile and saves/logs isolated per game.
+- [ ] User-facing compatibility states that distinguish imported, analyzed, translated, native-built, boot-tested, and playable.
+
+**Exit gate:** multiple independently imported titles appear in one library; at least one title launches through the native runtime with reproducible boot evidence. A library UI or generated executable alone is not a playable-game claim.
 
 ## M6 — Compatibility, performance, and release engineering
 
