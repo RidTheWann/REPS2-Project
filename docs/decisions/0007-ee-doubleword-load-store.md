@@ -8,7 +8,7 @@
 
 The existing scalar memory path handled byte, halfword and word transfers, while the EE state already represented each GPR as two 64-bit lanes. LQ/SQ handled both lanes as a 128-bit transfer, but the common 64-bit doubleword path was missing. This prevented a useful class of integer code from being translated without an explicit unsupported stop.
 
-The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 identifies LD and SD as CPU doubleword load/store instructions. Its pre-Release-6 alignment table includes these operations among naturally aligned accesses. The MIPS64 opcode table assigns LD and SD to primary opcodes 0x37 and 0x3F. REPS2 uses this public ISA material as a baseline and does not claim that it resolves the remaining EE virtual-memory or exception model.
+The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 identifies LD and SD as CPU doubleword load/store instructions and documents natural-alignment requirements before Release 6. Revision 5.04, Table A.2, assigns primary opcodes 0x37 and 0x3F to LD and SD respectively. PCSX2 1.6.0's R5900 interpreter independently corroborates the EE-specific execution shape used here: 8-byte alignment, access through the low 64-bit GPR lane, and a dummy destination for loads to GPR0. That interpreter is a non-normative implementation cross-check, not an official hardware specification. These references do not resolve the remaining EE virtual-memory, exception, cache, or device model.
 
 ## Decision
 
