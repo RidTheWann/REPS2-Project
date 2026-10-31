@@ -50,9 +50,11 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
 - [x] Typed LQ/SQ 128-bit transfers with explicit little-endian lane assembly and EE 16-byte address rounding.
 - [x] Decode, lift and lower LD/SD 64-bit doubleword memory transfers with 8-byte alignment and explicit low-lane semantics.
+- [x] Decode, lift and lower LWL/LWR/SWL/SWR and LDL/LDR/SDL/SDR with checked aligned reads/writes and byte-lane merge semantics.
 - [x] Main-RAM backing span, documented aliases, endian-safe accessors, natural-alignment checks and explicit MMIO/unmapped statuses.
 - [x] Generated memory code compiled/executed on Windows/MSVC and Linux/GCC for load extension, store width, aliasing, alignment and bounds.
 - [x] Generated LQ/SQ code compiled/executed on Windows/MSVC and Linux/GCC for both GPR lanes, 16-byte rounding, little-endian layout and backing-span bounds.
+- [x] Generated unaligned word and doubleword merge code exercised across every byte offset with GPR lane-preservation and short-backing failure tests.
 - [x] Generated ELF entry-point initializer which validates/copies a companion RAM image, resets GPRs and selects the ELF entry PC.
 - [x] Reject allocated REL/RELA relocations and ELF segments outside the implemented default main-RAM mapping.
 - [ ] Full EE virtual-memory/TLB mapping, exception delivery, cache semantics and memory-mapped device models.
