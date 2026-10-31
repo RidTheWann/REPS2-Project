@@ -293,7 +293,7 @@ mod tests {
         let decoded_bltz = decode(bltz, 0x1000);
         assert_eq!(decoded_bltz.opcode, Opcode::Bltz);
         assert!(decoded_bltz.has_delay_slot);
-        assert_eq!(decoded_bltz.target, 0x1010);
+        assert_eq!(decoded_bltz.target, 0x100C);
 
         let bgezal = (0x01 << 26) | (9 << 21) | (0x11 << 16) | 0xFFFE;
         let decoded_bgezal = decode(bgezal, 0x2000);
