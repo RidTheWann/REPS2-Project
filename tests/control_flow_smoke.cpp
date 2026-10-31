@@ -125,6 +125,77 @@ int main() {
         return fail(17);
     }
 
+    // A branch-likely executes its delay slot only on the taken path.
+    EeState likely_taken{};
+    likely_taken.pc = 0x3100U;
+    likely_taken.gpr[8].low = 0;
+    likely_taken.gpr[31].low = 0x9000U;
+    const auto likely_taken_status = reps2::generated::execute_cfg(likely_taken, 64U);
+    if (likely_taken_status != Status::external_control_flow || likely_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "taken branch-likely status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(likely_taken_status), likely_taken.pc);
+        return fail(56);
+    }
+    if (likely_taken.gpr[9].low != 7 || likely_taken.gpr[10].low != 0
+        || likely_taken.gpr[11].low != 11 || likely_taken.gpr[15].low != 0
+        || likely_taken.gpr[13].low != 13) {
+        std::fprintf(stderr, "taken branch-likely register mismatch\n");
+        return fail(57);
+    }
+
+    EeState likely_not_taken{};
+    likely_not_taken.pc = 0x3100U;
+    likely_not_taken.gpr[8].low = 1;
+    likely_not_taken.gpr[31].low = 0x9000U;
+    const auto likely_not_taken_status = reps2::generated::execute_cfg(likely_not_taken, 64U);
+    if (likely_not_taken_status != Status::external_control_flow || likely_not_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "not-taken branch-likely status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(likely_not_taken_status), likely_not_taken.pc);
+        return fail(58);
+    }
+    if (likely_not_taken.gpr[9].low != 0 || likely_not_taken.gpr[10].low != 5
+        || likely_not_taken.gpr[11].low != 0 || likely_not_taken.gpr[15].low != 9
+        || likely_not_taken.gpr[13].low != 13) {
+        std::fprintf(stderr, "not-taken branch-likely executed its annulled delay slot\n");
+        return fail(59);
+    }
+
+    // Link-likely writes PC+8 unconditionally, even when the branch is not
+    // taken and the delay slot is annulled.
+    EeState likely_link_taken{};
+    likely_link_taken.pc = 0x3200U;
+    likely_link_taken.gpr[8].low = 0xFFFFFFFFFFFFFFFFULL;
+    likely_link_taken.gpr[30].low = 0x9000U;
+    const auto likely_link_taken_status = reps2::generated::execute_cfg(likely_link_taken, 64U);
+    if (likely_link_taken_status != Status::external_control_flow || likely_link_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "taken link-likely status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(likely_link_taken_status), likely_link_taken.pc);
+        return fail(60);
+    }
+    if (likely_link_taken.gpr[31].low != 0x3208U || likely_link_taken.gpr[9].low != 7
+        || likely_link_taken.gpr[10].low != 0 || likely_link_taken.gpr[11].low != 11
+        || likely_link_taken.gpr[15].low != 0 || likely_link_taken.gpr[13].low != 13) {
+        std::fprintf(stderr, "taken link-likely register mismatch\n");
+        return fail(61);
+    }
+
+    EeState likely_link_not_taken{};
+    likely_link_not_taken.pc = 0x3200U;
+    likely_link_not_taken.gpr[8].low = 0;
+    likely_link_not_taken.gpr[30].low = 0x9000U;
+    const auto likely_link_not_taken_status = reps2::generated::execute_cfg(likely_link_not_taken, 64U);
+    if (likely_link_not_taken_status != Status::external_control_flow || likely_link_not_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "not-taken link-likely status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(likely_link_not_taken_status), likely_link_not_taken.pc);
+        return fail(62);
+    }
+    if (likely_link_not_taken.gpr[31].low != 0x3208U || likely_link_not_taken.gpr[9].low != 0
+        || likely_link_not_taken.gpr[10].low != 5 || likely_link_not_taken.gpr[11].low != 0
+        || likely_link_not_taken.gpr[15].low != 9 || likely_link_not_taken.gpr[13].low != 13) {
+        std::fprintf(stderr, "not-taken link-likely did not preserve unconditional link write\n");
+        return fail(63);
+    }
+
     // JALR with rd == rs must jump to the captured old source value even
     // though that GPR is overwritten with the link address.
     EeState jalr_alias{};
