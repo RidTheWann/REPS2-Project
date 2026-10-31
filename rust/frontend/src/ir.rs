@@ -37,15 +37,6 @@ impl Gpr {
 pub struct Fpr(u8);
 
 impl Fpr {
-    /// Constructs an FPR index, rejecting values outside the 32-register file.
-    pub fn new(index: u8) -> Result<Self, VerifyError> {
-        if index < 32 {
-            Ok(Self(index))
-        } else {
-            Err(VerifyError::InvalidRegister(index))
-        }
-    }
-
     /// Returns the architectural register number.
     #[must_use]
     pub const fn index(self) -> u8 {
