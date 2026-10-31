@@ -314,7 +314,8 @@ mod tests {
     fn rejects_invalid_reserved_fields_and_unknown_ops() {
         let bad_jr = (4 << 21) | (1 << 16) | 0x08;
         assert!(!decode(bad_jr, 0).is_supported());
-        assert!(!decode(0xFFFF_FFFF, 0).is_supported());
+        assert_eq!(decode(0xFFFF_FFFF, 0).opcode, Opcode::Sd);
+        assert!(!decode(0xEC00_0000, 0).is_supported());
     }
 
     #[test]
