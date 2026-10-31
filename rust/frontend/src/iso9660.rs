@@ -541,6 +541,40 @@ mod tests {
         bytes[offset + 4..offset + 8].copy_from_slice(&value.to_be_bytes());
     }
 
+    fn put_elf_u16(bytes: &mut [u8], offset: usize, value: u16) {
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_elf_u32(bytes: &mut [u8], offset: usize, value: u32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn synthetic_ps2_elf() -> Vec<u8> {
+        let mut bytes = vec![0u8; 112];
+        bytes[0..4].copy_from_slice(b"\\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_elf_u16(&mut bytes, 16, crate::elf::ET_EXEC);
+        put_elf_u16(&mut bytes, 18, crate::elf::EM_MIPS);
+        put_elf_u32(&mut bytes, 20, 1);
+        put_elf_u32(&mut bytes, 24, 0x0010_0000);
+        put_elf_u32(&mut bytes, 28, 52);
+        put_elf_u16(&mut bytes, 40, 52);
+        put_elf_u16(&mut bytes, 42, 32);
+        put_elf_u16(&mut bytes, 44, 1);
+        put_elf_u32(&mut bytes, 52, crate::elf::PT_LOAD);
+        put_elf_u32(&mut bytes, 56, 96);
+        put_elf_u32(&mut bytes, 60, 0x0010_0000);
+        put_elf_u32(&mut bytes, 64, 0x0010_0000);
+        put_elf_u32(&mut bytes, 68, 8);
+        put_elf_u32(&mut bytes, 72, 16);
+        put_elf_u32(&mut bytes, 76, 5);
+        put_elf_u32(&mut bytes, 80, 1);
+        bytes[96..104].copy_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
+        bytes
+    }
+
     fn directory_record(extent: u32, size: u32, flags: u8, identifier: &[u8]) -> Vec<u8> {
         let padding = if identifier.len() % 2 == 0 { 1 } else { 0 };
         let record_length = 33 + identifier.len() + padding;
@@ -579,7 +613,7 @@ mod tests {
         terminator[6] = 1;
 
         let system_cnf = b"BOOT2 = cdrom0:\\GAME.ELF;1\nVER = 1.00\nVMODE = NTSC\n";
-        let executable = b"synthetic ps2 executable bytes";
+        let executable = synthetic_ps2_elf();
         let root_offset = ROOT_LBA * LOGICAL_BLOCK_SIZE as usize;
         let mut cursor = root_offset;
         for record in [
@@ -595,7 +629,7 @@ mod tests {
         let system_offset = SYSTEM_LBA * LOGICAL_BLOCK_SIZE as usize;
         image[system_offset..system_offset + system_cnf.len()].copy_from_slice(system_cnf);
         let executable_offset = EXECUTABLE_LBA * LOGICAL_BLOCK_SIZE as usize;
-        image[executable_offset..executable_offset + executable.len()].copy_from_slice(executable);
+        image[executable_offset..executable_offset + executable.len()].copy_from_slice(&executable);
         image
     }
 
@@ -609,7 +643,14 @@ mod tests {
         assert_eq!(iso.boot_executable_path().expect("SYSTEM.CNF"), Some("GAME.ELF".to_owned()));
 
         let executable = iso.read_file("cdrom0:\\GAME.ELF;1", 1024).expect("boot file");
-        assert_eq!(executable, b"synthetic ps2 executable bytes");
+        let elf = crate::elf::parse(&executable, crate::elf::ParseLimits::default())
+            .expect("SYSTEM.CNF target is a valid synthetic PS2 ELF");
+        assert!(elf.is_mips());
+        assert!(elf.is_executable());
+        assert_eq!(elf.entry_point, 0x0010_0000);
+        let ram_image = crate::elf::build_main_ram_image(&executable, &elf)
+            .expect("boot target is consumable by the EE ELF loader");
+        assert_eq!(ram_image.entry_point, 0x0010_0000);
     }
 
     #[test]
