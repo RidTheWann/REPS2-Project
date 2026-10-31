@@ -258,6 +258,24 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             Opcode::Dsra32 => Operation::ShiftRightArithmeticDoubleword {
                 dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
             },
+            Opcode::Sllv => Operation::ShiftLeftWordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Srlv => Operation::ShiftRightLogicalWordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Srav => Operation::ShiftRightArithmeticWordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Dsllv => Operation::ShiftLeftDoublewordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Dsrlv => Operation::ShiftRightLogicalDoublewordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Dsrav => Operation::ShiftRightArithmeticDoublewordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
             Opcode::And => Operation::And64 {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
             },
