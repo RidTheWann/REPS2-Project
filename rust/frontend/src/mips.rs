@@ -20,6 +20,10 @@ pub enum Opcode {
     Mthi1,
     Mflo1,
     Mtlo1,
+    Mfsa,
+    Mtsa,
+    Mtsab,
+    Mtsah,
     Mult,
     Multu,
     Div,
@@ -100,6 +104,7 @@ pub enum Opcode {
     Lq,
     Sq,
     ParallelAddUnsignedWord,
+    FunnelShiftRightVec,
     Unknown,
 }
 
@@ -201,6 +206,10 @@ impl Opcode {
             Self::Mthi1 => "mthi1",
             Self::Mflo1 => "mflo1",
             Self::Mtlo1 => "mtlo1",
+            Self::Mfsa => "mfsa",
+            Self::Mtsa => "mtsa",
+            Self::Mtsab => "mtsab",
+            Self::Mtsah => "mtsah",
             Self::Mult => "mult",
             Self::Multu => "multu",
             Self::Div => "div",
@@ -281,6 +290,7 @@ impl Opcode {
             Self::Lq => "lq",
             Self::Sq => "sq",
             Self::ParallelAddUnsignedWord => "padduw",
+            Self::FunnelShiftRightVec => "qfsrv",
             Self::Unknown => "unknown",
         }
     }
@@ -329,6 +339,8 @@ pub struct InstructionEffects {
     pub reads_lo1: bool,
     pub writes_hi1: bool,
     pub writes_lo1: bool,
+    pub reads_sa: bool,
+    pub writes_sa: bool,
     pub memory: MemoryEffect,
     pub control_flow: ControlFlowEffect,
     /// True when instruction execution can synchronously raise an exception.
@@ -351,6 +363,8 @@ impl InstructionEffects {
             reads_lo1: false,
             writes_hi1: false,
             writes_lo1: false,
+            reads_sa: false,
+            writes_sa: false,
             memory: MemoryEffect::None,
             control_flow: ControlFlowEffect::None,
             may_raise_exception: false,
@@ -557,6 +571,22 @@ impl Instruction {
                 effects.gpr_read_mask = rs;
                 effects.writes_lo1 = true;
             }
+            Opcode::Mfsa => {
+                effects.reads_sa = true;
+                effects.gpr_write_mask = rd;
+            }
+            Opcode::Mtsa => {
+                effects.gpr_read_mask = rs;
+                effects.writes_sa = true;
+            }
+            Opcode::Mtsab => {
+                effects.gpr_read_mask = rs;
+                effects.writes_sa = true;
+            }
+            Opcode::Mtsah => {
+                effects.gpr_read_mask = rs;
+                effects.writes_sa = true;
+            }
             Opcode::Mult | Opcode::Multu => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
@@ -633,6 +663,11 @@ impl Instruction {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
+            Opcode::FunnelShiftRightVec => {
+                effects.reads_sa = true;
+                effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rd;
+            }
 
             Opcode::Lb
             | Opcode::Lh
@@ -687,6 +722,8 @@ impl Instruction {
                 effects.reads_lo1 = true;
                 effects.writes_hi1 = true;
                 effects.writes_lo1 = true;
+                effects.reads_sa = true;
+                effects.writes_sa = true;
                 effects.memory = MemoryEffect::Unknown;
                 effects.control_flow = ControlFlowEffect::Unknown;
                 effects.may_raise_exception = true;
@@ -756,6 +793,10 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x11 if rt == 0 && rd == 0 && shift_amount == 0 => Opcode::Mthi,
             0x12 if rs == 0 && rt == 0 && shift_amount == 0 => Opcode::Mflo,
             0x13 if rt == 0 && rd == 0 && shift_amount == 0 => Opcode::Mtlo,
+            // EE-specific SA moves reuse the R-type shift field: MFSA takes its
+            // destination from rd (bits 15..11) while MTSA reads rs.
+            0x28 if rs == 0 && rt == 0 && shift_amount == 0 => Opcode::Mfsa,
+            0x29 if rt == 0 && rd == 0 && shift_amount == 0 => Opcode::Mtsa,
             // R5900 MULT/MULTU use rd as an optional third destination.
             // MULT/MULTU share the MIPS32 rd field as an R5900 destination for
             // the low 64 bits of the product; DIV/DIVU keep rd reserved-zero
@@ -804,9 +845,21 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                     0x11 => Opcode::Bgezal,
                     0x12 => Opcode::Bltzall,
                     0x13 => Opcode::Bgezall,
+                    0x18 => Opcode::Mtsab,
+                    0x19 => Opcode::Mtsah,
                     _ => Opcode::Unknown,
                 };
-                if opcode != Opcode::Unknown {
+                if matches!(
+                    opcode,
+                    Opcode::Bltz
+                        | Opcode::Bgez
+                        | Opcode::Bltzl
+                        | Opcode::Bgezl
+                        | Opcode::Bltzal
+                        | Opcode::Bgezal
+                        | Opcode::Bltzall
+                        | Opcode::Bgezall
+                ) {
                     instruction.target = pc
                         .wrapping_add(4)
                         .wrapping_add(((immediate as i16 as i32).wrapping_mul(4)) as u32);
@@ -862,6 +915,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x1B => Opcode::Ldr,
             0x1C => match (word & 0x3F) as u8 {
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
+                0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
                 0x11 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mthi1,
                 0x12 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mflo1,
@@ -1459,5 +1513,95 @@ mod tests {
         let dadd_to_zero = decode((8 << 21) | (9 << 16) | 0x2C, 0xB10C).effects();
         assert_eq!(dadd_to_zero.gpr_write_mask, 0);
         assert!(dadd_to_zero.may_raise_exception);
+    }
+
+    #[test]
+    fn decodes_r5900_sa_instructions_and_reserved_fields() {
+        let mfsa = 0x0000_2828; // mfsa $5 (rd=5, funct=0x28)
+        let mtsa = 0x0080_0029; // mtsa $4 (rs=4, funct=0x29)
+        let mtsab = (0x01 << 26) | (4 << 21) | (0x18 << 16) | 0x0007; // mtsab $4, 7
+        let mtsah = (0x01 << 26) | (4 << 21) | (0x19 << 16) | 0x0003; // mtsah $4, 3
+
+        let dec_mfsa = decode(mfsa, 0x1000);
+        assert_eq!(dec_mfsa.opcode, Opcode::Mfsa);
+        assert_eq!(dec_mfsa.rd, 5);
+        assert!(!dec_mfsa.has_delay_slot);
+
+        let dec_mtsa = decode(mtsa, 0x1004);
+        assert_eq!(dec_mtsa.opcode, Opcode::Mtsa);
+        assert_eq!(dec_mtsa.rs, 4);
+        assert!(!dec_mtsa.has_delay_slot);
+
+        let dec_mtsab = decode(mtsab, 0x1008);
+        assert_eq!(dec_mtsab.opcode, Opcode::Mtsab);
+        assert_eq!(dec_mtsab.rs, 4);
+        assert_eq!(dec_mtsab.immediate, 7);
+        assert!(!dec_mtsab.has_delay_slot);
+
+        let dec_mtsah = decode(mtsah, 0x100C);
+        assert_eq!(dec_mtsah.opcode, Opcode::Mtsah);
+        assert_eq!(dec_mtsah.rs, 4);
+        assert_eq!(dec_mtsah.immediate, 3);
+        assert!(!dec_mtsah.has_delay_slot);
+
+        // Reserved fields for MFSA (rs, rt, shamt must be zero)
+        assert!(!decode(mfsa | (1 << 21), 0).is_supported());
+        assert!(!decode(mfsa | (1 << 16), 0).is_supported());
+        assert!(!decode(mfsa | (1 << 6), 0).is_supported());
+
+        // Reserved fields for MTSA (rt, rd, shamt must be zero)
+        assert!(!decode(mtsa | (1 << 16), 0).is_supported());
+        assert!(!decode(mtsa | (1 << 11), 0).is_supported());
+        assert!(!decode(mtsa | (1 << 6), 0).is_supported());
+    }
+
+    #[test]
+    fn effects_track_sa_register_dependencies() {
+        let mfsa = decode(0x0000_2828, 0).effects();
+        assert!(mfsa.reads_sa);
+        assert!(!mfsa.writes_sa);
+        assert_eq!(mfsa.gpr_write_mask, 1 << 5);
+        assert_eq!(mfsa.gpr_read_mask, 0);
+
+        let mtsa = decode(0x0080_0029, 0).effects();
+        assert!(!mtsa.reads_sa);
+        assert!(mtsa.writes_sa);
+        assert_eq!(mtsa.gpr_read_mask, 1 << 4);
+        assert_eq!(mtsa.gpr_write_mask, 0);
+
+        let mtsab = decode((0x01 << 26) | (4 << 21) | (0x18 << 16) | 7, 0).effects();
+        assert!(!mtsab.reads_sa);
+        assert!(mtsab.writes_sa);
+        assert_eq!(mtsab.gpr_read_mask, 1 << 4);
+
+        let mtsah = decode((0x01 << 26) | (4 << 21) | (0x19 << 16) | 3, 0).effects();
+        assert!(!mtsah.reads_sa);
+        assert!(mtsah.writes_sa);
+        assert_eq!(mtsah.gpr_read_mask, 1 << 4);
+    }
+
+    #[test]
+    fn decodes_mmi1_qfsrv_and_tracks_sa_dependency() {
+        // qfsrv rd=$6, rs=$4, rt=$5: MMI1 selector bits 10..6 = 0x1B, funct 0x28.
+        let word = 0x7085_36E8;
+        let decoded = decode(word, 0x2000);
+        assert_eq!(decoded.opcode, Opcode::FunnelShiftRightVec);
+        assert_eq!(decoded.rs, 4);
+        assert_eq!(decoded.rt, 5);
+        assert_eq!(decoded.rd, 6);
+        assert!(!decoded.has_delay_slot);
+
+        let effects = decoded.effects();
+        assert!(effects.reads_sa);
+        assert!(!effects.writes_sa);
+        assert_eq!(effects.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(effects.gpr_write_mask, 1 << 6);
+
+        // MMI group selectors keep the shared funct 0x28 space unambiguous:
+        // selector 0x10 is PADDUW, selector 0x1B is QFSRV.
+        assert_eq!(
+            decode(word & !(0x1F << 6) | (0x10 << 6), 0).opcode,
+            Opcode::ParallelAddUnsignedWord
+        );
     }
 }

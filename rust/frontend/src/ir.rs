@@ -46,6 +46,11 @@ pub enum Operation {
     MoveFromLo1 { dst: Gpr },
     MoveToHi1 { src: Gpr },
     MoveToLo1 { src: Gpr },
+    MoveFromSa { dst: Gpr },
+    MoveToSa { src: Gpr },
+    MoveToSaByte { src: Gpr, immediate: u16 },
+    MoveToSaHalfword { src: Gpr, immediate: u16 },
+    FunnelShiftRightVec { dst: Gpr, lhs: Gpr, rhs: Gpr },
     MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Nor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -264,6 +269,20 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             Opcode::Mtlo1 => Operation::MoveToLo1 {
                 src: gpr(instruction.rs),
             },
+            Opcode::Mfsa => Operation::MoveFromSa {
+                dst: gpr(instruction.rd),
+            },
+            Opcode::Mtsa => Operation::MoveToSa {
+                src: gpr(instruction.rs),
+            },
+            Opcode::Mtsab => Operation::MoveToSaByte {
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
+            },
+            Opcode::Mtsah => Operation::MoveToSaHalfword {
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
+            },
             Opcode::Mult => Operation::MultiplyWordSigned {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
@@ -320,6 +339,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::ParallelAddUnsignedWord => Operation::ParallelAddUnsignedWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::FunnelShiftRightVec => Operation::FunnelShiftRightVec {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -951,5 +975,54 @@ mod tests {
             Operation::SubDoublewordUnsigned { dst, .. } if dst.index() == 17));
         assert!(matches!(program.instructions()[5].operation,
             Operation::AddImmediateDoublewordUnsigned { dst, .. } if dst.index() == 18));
+    }
+
+    #[test]
+    fn lifts_r5900_sa_instructions() {
+        let stream = [
+            mips::decode(0x0080_0029, 0x1000), // mtsa $4
+            mips::decode((0x01 << 26) | (4 << 21) | (0x18 << 16) | 0x000F, 0x1004), // mtsab $4, 0xF
+            mips::decode((0x01 << 26) | (4 << 21) | (0x19 << 16) | 0x0007, 0x1008), // mtsah $4, 0x7
+            mips::decode(0x0000_2828, 0x100C), // mfsa $5
+        ];
+        let program = lift(&stream).expect("lift SA");
+        assert_eq!(program.instructions().len(), 4);
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::MoveToSa { src: Gpr(4) }
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::MoveToSaByte {
+                src: Gpr(4),
+                immediate: 0xF
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::MoveToSaHalfword {
+                src: Gpr(4),
+                immediate: 0x7
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::MoveFromSa { dst: Gpr(5) }
+        ));
+    }
+
+    #[test]
+    fn lifts_mmi1_qfsrv_into_funnel_shift() {
+        let stream = [mips::decode(0x7085_36E8, 0x1000)];
+        let program = lift(&stream).expect("lift QFSRV");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::FunnelShiftRightVec {
+                dst: Gpr(6),
+                lhs: Gpr(4),
+                rhs: Gpr(5)
+            }
+        ));
+        program.verify().expect("QFSRV verifies");
     }
 }
