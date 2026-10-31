@@ -337,8 +337,9 @@ mod tests {
         let words = [
             (0x20 << 26) | (8 << 21) | (9 << 16) | 0xFFFC, // lb t1, -4(t0)
             (0x25 << 26) | (8 << 21) | (10 << 16) | 2, // lhu t2, 2(t0)
-            (0x23 << 26) | (8 << 21) | (11 << 16) | 4, // lw t3, 4(t0)
-            (0x2B << 26) | (8 << 21) | (12 << 16) | 8, // sw t4, 8(t0)
+            (0x21 << 26) | (8 << 21) | (11 << 16) | 4, // lh t3, 4(t0)
+            (0x23 << 26) | (8 << 21) | (12 << 16) | 8, // lw t4, 8(t0)
+            (0x2B << 26) | (8 << 21) | (13 << 16) | 12, // sw t5, 12(t0)
         ];
         let decoded = words.iter().enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x2000 + index as u32 * 4))
@@ -351,7 +352,7 @@ mod tests {
         assert!(cpp.contains("store_u32(state.memory"));
         assert!(cpp.contains("0xFFFFFFFFFFFFFF00ULL"));
         assert!(cpp.contains("0xFFFFFFFFFFFF0000ULL"));
-        assert!(cpp.contains("sign_extend_word(memory_value_0002)"));
+        assert!(cpp.contains("sign_extend_word(memory_value_0003)"));
         assert!(!cpp.contains("Status::address_error"));
         assert!(cpp.contains("memory_status_0000 != Status::ok"));
     }
