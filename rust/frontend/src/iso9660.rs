@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_interleaved_and_multi_extent_records() {
+    fn rejects_interleaved_and_multi_extent_files_when_read() {
         for (field, value) in [(26usize, 1u8), (27usize, 1u8), (25usize, 0x80u8)] {
             let mut image = valid_image();
             let root_offset = ROOT_LBA * LOGICAL_BLOCK_SIZE as usize;
@@ -663,7 +663,10 @@ mod tests {
             }
             image[cursor + field] = value;
             let mut iso = Iso9660::open(Cursor::new(image)).expect("PVD valid");
-            assert!(iso.root_entries().is_err());
+            let entries = iso.root_entries().expect("unrelated file metadata remains listable");
+            let game = entries.iter().find(|entry| entry.name == "GAME.ELF;1")
+                .expect("boot executable entry");
+            assert!(iso.read_entry(game, 1024).is_err());
         }
     }
 
