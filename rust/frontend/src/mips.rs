@@ -363,8 +363,8 @@ impl Instruction {
             Opcode::Unknown => {
                 // Do not let an unrecognized EE, COP, FPU, MMI, or malformed
                 // encoding look like a side-effect-free instruction.
-                effects.gpr_read_mask = u32::MAX & !1_u32;
-                effects.gpr_write_mask = u32::MAX & !1_u32;
+                effects.gpr_read_mask = !1_u32;
+                effects.gpr_write_mask = !1_u32;
                 effects.reads_hi = true;
                 effects.reads_lo = true;
                 effects.writes_hi = true;
