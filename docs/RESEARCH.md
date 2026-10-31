@@ -8,6 +8,7 @@ This file identifies public technical materials and external projects that may g
 - PS2 hardware manuals and research documentation: https://github.com/4kbyter/ps2docs and https://github.com/ninjadynamics/PS2Docs. Verify each document's revision, provenance and redistribution status. Do not commit or redistribute restricted manuals.
 - MIPS ELF ABI: https://refspecs.linuxfoundation.org/elf/mipsabi.pdf. Standard MIPS ELF conventions must be cross-checked with PS2-specific toolchain output.
 - Rust language and safety references: https://doc.rust-lang.org/book/ and https://doc.rust-lang.org/nomicon/ffi.html.
+- PS2 EE virtual/physical memory map: https://www.psdevwiki.com/ps2/Memory_Map. Cross-check the listed uncached and accelerated main-RAM aliases and device ranges against the selected EE execution mode.
 
 ## External projects for architectural study and behavioral testing
 
@@ -33,6 +34,13 @@ These projects have different goals and different completion levels. Their demos
 - The PCSX2 R5900 dynamic-recompiler branch implementation is used only as an independent behavioural cross-check: BLTZAL/BGEZAL write the link before selecting the taken/fallthrough path, and the delay instruction is processed in either path for these non-likely variants. REPS2's code and tests are independently written.
 - The CFG AOT dispatcher captures JALR's source target before the link write, then executes its delay slot before committing the next PC. This ordering is covered by synthetic tests and must remain explicit in future optimizations.
 - Branch-likely/annul instructions are intentionally outside this first control-flow AOT subset; they must receive separate IR semantics and tests before decoding/lowering them as executable.
+
+## EE memory and load/store cross-checks
+
+- The public PS2 memory map identifies 32 MiB main RAM at virtual 0x00000000, an uncached alias at 0x20000000, and an accelerated alias at 0x30100000 for the upper 31 MiB. It separately identifies EE I/O registers, VU memories, privileged GS registers, IOP RAM, BIOS and scratchpad.
+- PCSX2's R5900 load/store implementation is used only as an independent behavioural reference for the current subset: LB/LH/LW sign-extend into the low 64-bit GPR lane; LBU/LHU/LWU zero-extend; SB/SH/SW transfer only their selected low bits; halfword and word accesses check natural alignment. REPS2's implementation and synthetic tests are independently authored.
+- PCSX2's virtual-memory documentation notes that EE mappings depend on COP0/TLB state and that the memory map is more complex than the direct aliases shown in simplified tables. REPS2's initial memory slice deliberately does not claim to implement TLB remapping or the complete physical bus map.
+- The generated backend performs effective-address arithmetic in 32-bit unsigned arithmetic after sign-extending the 16-bit offset. The CPU memory helper validates alignment and backing bounds before access. Device/reserved regions are surfaced as unsupported, never mapped to ordinary RAM.
 
 ## Provenance rules
 

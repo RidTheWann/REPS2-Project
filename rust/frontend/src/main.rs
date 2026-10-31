@@ -75,7 +75,7 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
         mips::Opcode::Addi | mips::Opcode::Addiu | mips::Opcode::Slti |
         mips::Opcode::Sltiu | mips::Opcode::Lb | mips::Opcode::Lh |
         mips::Opcode::Lw | mips::Opcode::Lbu | mips::Opcode::Lhu |
-        mips::Opcode::Sb | mips::Opcode::Sh | mips::Opcode::Sw) {
+        mips::Opcode::Lwu | mips::Opcode::Sb | mips::Opcode::Sh | mips::Opcode::Sw) {
         print!("  imm={}", instruction.signed_immediate());
     }
     println!();
@@ -213,19 +213,42 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         (8 << 21) | (8 << 11) | 0x09, // jalr t0, t0
         0x2409_001F, // delay slot: t1 = 31
     ];
+    let memory_ops = [
+        (0x2B << 26) | (8 << 21) | (9 << 16) | 0xFFFC, // sw t1, -4(t0)
+        (0x20 << 26) | (8 << 21) | (10 << 16) | 0xFFFD, // lb t2, -3(t0)
+        (0x24 << 26) | (8 << 21) | (11 << 16) | 0xFFFE, // lbu t3, -2(t0)
+        (0x21 << 26) | (8 << 21) | (12 << 16) | 0xFFFE, // lh t4, -2(t0)
+        (0x25 << 26) | (8 << 21) | (13 << 16) | 0xFFFE, // lhu t5, -2(t0)
+        (0x23 << 26) | (8 << 21) | (14 << 16) | 0xFFFC, // lw t6, -4(t0)
+        (0x27 << 26) | (8 << 21) | (15 << 16) | 0xFFFC, // lwu t7, -4(t0)
+        (0x28 << 26) | (8 << 21) | (9 << 16), // sb t1, 0(t0)
+        (0x29 << 26) | (8 << 21) | (9 << 16) | 2, // sh t1, 2(t0)
+        (0x2B << 26) | (8 << 21) | (9 << 16) | 4, // sw t1, 4(t0)
+        0x03E0_0008, // jr ra
+        0x0000_0000, // delay slot
+    ];
+    let unaligned_load = [
+        (0x23 << 26) | (8 << 21) | (14 << 16), // lw t6, 0(t0)
+        0x03E0_0008, // jr ra
+        0x0000_0000, // delay slot
+    ];
     let segments = [
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
         segment(0x3000, &branch_and_link),
         segment(0x4000, &jalr_alias),
+        segment(0x5000, &memory_ops),
+        segment(0x5100, &unaligned_load),
     ];
     let entries = vec![
         entry(0x1000, "branch-fixture"),
         entry(0x2000, "call-fixture"),
         entry(0x3000, "branch-link-fixture"),
         entry(0x4000, "jalr-alias-fixture"),
+        entry(0x5000, "ee-memory-fixture"),
+        entry(0x5100, "unaligned-load-fixture"),
     ];
-    let roots = [0x1000, 0x2000, 0x3000, 0x4000];
+    let roots = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph)

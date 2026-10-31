@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(REPS2
-    VERSION 0.5.0
+    VERSION 0.6.0
     DESCRIPTION "Independent PlayStation 2 static recompilation toolchain"
     LANGUAGES CXX
 )

@@ -26,6 +26,12 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
              using reps2::runtime::sign_extend_immediate;\n\
              using reps2::runtime::sign_extend_word;\n\
              using reps2::runtime::sign_extend_word_signed;\n\
+             using reps2::runtime::load_u8;\n\
+             using reps2::runtime::load_u16;\n\
+             using reps2::runtime::load_u32;\n\
+             using reps2::runtime::store_u8;\n\
+             using reps2::runtime::store_u16;\n\
+             using reps2::runtime::store_u32;\n\
              std::uint64_t remaining = instruction_budget;\n\
              state.gpr[0] = {};\n\
              for (;;) {\n\
