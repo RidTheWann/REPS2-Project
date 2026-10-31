@@ -171,6 +171,27 @@ enum class Status : std::uint8_t {
     return Status::ok;
 }
 
+[[nodiscard]] inline Status load_u128(
+    const EeMemory& memory,
+    std::uint32_t address,
+    Gpr128& value
+) noexcept {
+    std::uint32_t physical{};
+    const auto aligned_address = address & ~0x0FU;
+    const auto status = resolve_ee_memory_access(memory, aligned_address, 16U, 1U, physical);
+    if (status != Status::ok) return status;
+    const auto offset = static_cast<std::size_t>(physical);
+    std::uint64_t low{};
+    std::uint64_t high{};
+    for (std::size_t index = 0; index < 8U; ++index) {
+        low |= static_cast<std::uint64_t>(memory.main_ram[offset + index]) << (index * 8U);
+        high |= static_cast<std::uint64_t>(memory.main_ram[offset + 8U + index]) << (index * 8U);
+    }
+    value.low = low;
+    value.high = high;
+    return Status::ok;
+}
+
 [[nodiscard]] inline Status store_u8(
     EeMemory& memory,
     std::uint32_t address,
@@ -210,6 +231,23 @@ enum class Status : std::uint8_t {
     memory.main_ram[offset + 1U] = static_cast<std::uint8_t>(value >> 8U);
     memory.main_ram[offset + 2U] = static_cast<std::uint8_t>(value >> 16U);
     memory.main_ram[offset + 3U] = static_cast<std::uint8_t>(value >> 24U);
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status store_u128(
+    EeMemory& memory,
+    std::uint32_t address,
+    const Gpr128& value
+) noexcept {
+    std::uint32_t physical{};
+    const auto aligned_address = address & ~0x0FU;
+    const auto status = resolve_ee_memory_access(memory, aligned_address, 16U, 1U, physical);
+    if (status != Status::ok) return status;
+    const auto offset = static_cast<std::size_t>(physical);
+    for (std::size_t index = 0; index < 8U; ++index) {
+        memory.main_ram[offset + index] = static_cast<std::uint8_t>(value.low >> (index * 8U));
+        memory.main_ram[offset + 8U + index] = static_cast<std::uint8_t>(value.high >> (index * 8U));
+    }
     return Status::ok;
 }
 
