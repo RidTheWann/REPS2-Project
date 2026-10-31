@@ -107,6 +107,78 @@ impl Opcode {
     }
 }
 
+/// Guest-visible memory effects summarized for static analysis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryEffect {
+    None,
+    Read,
+    Write,
+    /// The instruction encoding is not understood; memory effects are unknown.
+    Unknown,
+}
+
+/// Control-flow behavior relevant to CFG and data-flow consumers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlFlowEffect {
+    None,
+    ConditionalDirect,
+    DirectJump,
+    DirectCall,
+    IndirectJump,
+    IndirectCall,
+    /// A synchronous trap instruction (for example SYSCALL or BREAK).
+    Trap,
+    /// The instruction encoding is not understood.
+    Unknown,
+}
+
+/// Conservative architectural effects for one decoded instruction.
+///
+/// Register masks use bit N for GPR N. For known instructions, GPR[0] is
+/// omitted because it is hard-wired to zero. Unknown instructions conservatively
+/// report every writable GPR as potentially read or written.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InstructionEffects {
+    pub gpr_read_mask: u32,
+    pub gpr_write_mask: u32,
+    pub reads_hi: bool,
+    pub reads_lo: bool,
+    pub writes_hi: bool,
+    pub writes_lo: bool,
+    pub memory: MemoryEffect,
+    pub control_flow: ControlFlowEffect,
+    /// True when instruction execution can synchronously raise an exception.
+    /// Instruction-fetch faults and asynchronous interrupts are not included.
+    pub may_raise_exception: bool,
+    /// True when this is an unsupported/unknown instruction encoding.
+    pub unknown: bool,
+}
+
+impl InstructionEffects {
+    fn none() -> Self {
+        Self {
+            gpr_read_mask: 0,
+            gpr_write_mask: 0,
+            reads_hi: false,
+            reads_lo: false,
+            writes_hi: false,
+            writes_lo: false,
+            memory: MemoryEffect::None,
+            control_flow: ControlFlowEffect::None,
+            may_raise_exception: false,
+            unknown: false,
+        }
+    }
+}
+
+fn gpr_bit(index: u8) -> u32 {
+    if index == 0 || index >= 32 {
+        0
+    } else {
+        1_u32 << index
+    }
+}
+
 /// One decoded guest instruction. This is decode metadata, not executed
 /// architectural semantics.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -155,6 +227,151 @@ impl Instruction {
             Opcode::Beq | Opcode::Bne | Opcode::Blez | Opcode::Bgtz |
             Opcode::Bltz | Opcode::Bgez | Opcode::Bltzal | Opcode::Bgezal
         )
+    }
+
+    /// Summarizes the architectural data, memory, control-flow, and exception
+    /// effects of this instruction for static analysis.
+    ///
+    /// The summary covers only opcodes recognized by this decoder. Unknown
+    /// encodings are intentionally conservative and must not be optimized as
+    /// though they had no side effects.
+    #[must_use]
+    pub fn effects(self) -> InstructionEffects {
+        let mut effects = InstructionEffects::none();
+        let rs = gpr_bit(self.rs);
+        let rt = gpr_bit(self.rt);
+        let rd = gpr_bit(self.rd);
+
+        match self.opcode {
+            Opcode::Nop => {}
+
+            Opcode::Sll | Opcode::Srl | Opcode::Sra => {
+                effects.gpr_read_mask = rt;
+                effects.gpr_write_mask = rd;
+            }
+
+            Opcode::Sllv | Opcode::Srlv | Opcode::Srav |
+            Opcode::Dsllv | Opcode::Dsrlv | Opcode::Dsrav |
+            Opcode::Add | Opcode::Addu | Opcode::Sub | Opcode::Subu |
+            Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Nor |
+            Opcode::Slt | Opcode::Sltu | Opcode::Daddu | Opcode::Dsubu => {
+                effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rd;
+                effects.may_raise_exception = matches!(
+                    self.opcode,
+                    Opcode::Add | Opcode::Sub
+                );
+            }
+
+            Opcode::Dsll | Opcode::Dsrl | Opcode::Dsra |
+            Opcode::Dsll32 | Opcode::Dsrl32 | Opcode::Dsra32 => {
+                effects.gpr_read_mask = rt;
+                effects.gpr_write_mask = rd;
+            }
+
+            Opcode::Mfhi => {
+                effects.reads_hi = true;
+                effects.gpr_write_mask = rd;
+            }
+            Opcode::Mflo => {
+                effects.reads_lo = true;
+                effects.gpr_write_mask = rd;
+            }
+            Opcode::Mult | Opcode::Multu | Opcode::Div | Opcode::Divu => {
+                effects.gpr_read_mask = rs | rt;
+                effects.writes_hi = true;
+                effects.writes_lo = true;
+            }
+
+            Opcode::J => {
+                effects.control_flow = ControlFlowEffect::DirectJump;
+            }
+            Opcode::Jal => {
+                effects.gpr_write_mask = gpr_bit(31);
+                effects.control_flow = ControlFlowEffect::DirectCall;
+            }
+            Opcode::Beq | Opcode::Bne => {
+                effects.gpr_read_mask = rs | rt;
+                effects.control_flow = ControlFlowEffect::ConditionalDirect;
+            }
+            Opcode::Blez | Opcode::Bgtz | Opcode::Bltz | Opcode::Bgez => {
+                effects.gpr_read_mask = rs;
+                effects.control_flow = ControlFlowEffect::ConditionalDirect;
+            }
+            Opcode::Bltzal | Opcode::Bgezal => {
+                effects.gpr_read_mask = rs;
+                // The EE link register is written before the branch outcome
+                // is committed for these non-likely link variants.
+                effects.gpr_write_mask = gpr_bit(31);
+                effects.control_flow = ControlFlowEffect::ConditionalDirect;
+            }
+            Opcode::Jr => {
+                effects.gpr_read_mask = rs;
+                effects.control_flow = ControlFlowEffect::IndirectJump;
+            }
+            Opcode::Jalr => {
+                effects.gpr_read_mask = rs;
+                effects.gpr_write_mask = rd;
+                effects.control_flow = ControlFlowEffect::IndirectCall;
+            }
+
+            Opcode::Addi | Opcode::Addiu | Opcode::Daddiu |
+            Opcode::Slti | Opcode::Sltiu | Opcode::Andi |
+            Opcode::Ori | Opcode::Xori => {
+                effects.gpr_read_mask = rs;
+                effects.gpr_write_mask = rt;
+                effects.may_raise_exception = self.opcode == Opcode::Addi;
+            }
+            Opcode::Lui => {
+                effects.gpr_write_mask = rt;
+            }
+
+            Opcode::Lb | Opcode::Lh | Opcode::Lw |
+            Opcode::Lbu | Opcode::Lhu | Opcode::Lwu |
+            Opcode::Ld | Opcode::Lq => {
+                effects.gpr_read_mask = rs;
+                effects.gpr_write_mask = rt;
+                effects.memory = MemoryEffect::Read;
+                effects.may_raise_exception = true;
+            }
+            Opcode::Lwl | Opcode::Lwr | Opcode::Ldl | Opcode::Ldr => {
+                // Merge loads consume the old destination value as well as
+                // the base address and then replace the selected byte lanes.
+                effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rt;
+                effects.memory = MemoryEffect::Read;
+                effects.may_raise_exception = true;
+            }
+            Opcode::Sb | Opcode::Sh | Opcode::Sw |
+            Opcode::Sd | Opcode::Sq |
+            Opcode::Swl | Opcode::Swr | Opcode::Sdl | Opcode::Sdr => {
+                effects.gpr_read_mask = rs | rt;
+                effects.memory = MemoryEffect::Write;
+                effects.may_raise_exception = true;
+            }
+
+            Opcode::Syscall | Opcode::Break => {
+                effects.control_flow = ControlFlowEffect::Trap;
+                effects.may_raise_exception = true;
+            }
+
+            Opcode::Unknown => {
+                // Do not let an unrecognized EE, COP, FPU, MMI, or malformed
+                // encoding look like a side-effect-free instruction.
+                effects.gpr_read_mask = u32::MAX & !1_u32;
+                effects.gpr_write_mask = u32::MAX & !1_u32;
+                effects.reads_hi = true;
+                effects.reads_lo = true;
+                effects.writes_hi = true;
+                effects.writes_lo = true;
+                effects.memory = MemoryEffect::Unknown;
+                effects.control_flow = ControlFlowEffect::Unknown;
+                effects.may_raise_exception = true;
+                effects.unknown = true;
+            }
+        }
+
+        effects
     }
 }
 
@@ -450,4 +667,89 @@ mod tests {
         assert_eq!(decoded_bgezal.target, 0x1FFC);
         assert!(decoded_bgezal.is_control_transfer());
     }
+
+    #[test]
+    fn effects_report_scalar_register_dependencies_and_hardwired_zero() {
+        let addu = decode((4 << 21) | (5 << 16) | (6 << 11) | 0x21, 0x1000);
+        let effects = addu.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(effects.gpr_write_mask, 1 << 6);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        assert_eq!(effects.control_flow, ControlFlowEffect::None);
+        assert!(!effects.may_raise_exception);
+
+        let addiu_from_zero = decode((0x09 << 26) | (7 << 16) | 12, 0x1004);
+        let effects = addiu_from_zero.effects();
+        assert_eq!(effects.gpr_read_mask, 0);
+        assert_eq!(effects.gpr_write_mask, 1 << 7);
+    }
+
+    #[test]
+    fn effects_track_hilo_producers_and_consumers() {
+        let mult = decode((4 << 21) | (5 << 16) | 0x18, 0x2000).effects();
+        assert_eq!(mult.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert!(mult.writes_hi);
+        assert!(mult.writes_lo);
+        assert!(!mult.reads_hi);
+        assert!(!mult.reads_lo);
+
+        let mfhi = decode((6 << 11) | 0x10, 0x2004).effects();
+        assert!(mfhi.reads_hi);
+        assert!(!mfhi.reads_lo);
+        assert_eq!(mfhi.gpr_write_mask, 1 << 6);
+    }
+
+    #[test]
+    fn effects_distinguish_partial_load_merge_and_store_dependencies() {
+        let lwl = decode((0x22 << 26) | (4 << 21) | (5 << 16) | 1, 0x3000).effects();
+        assert_eq!(lwl.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(lwl.gpr_write_mask, 1 << 5);
+        assert_eq!(lwl.memory, MemoryEffect::Read);
+        assert!(lwl.may_raise_exception);
+
+        let swl = decode((0x2A << 26) | (4 << 21) | (5 << 16) | 1, 0x3004).effects();
+        assert_eq!(swl.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(swl.gpr_write_mask, 0);
+        assert_eq!(swl.memory, MemoryEffect::Write);
+        assert!(swl.may_raise_exception);
+    }
+
+    #[test]
+    fn effects_include_link_register_and_control_flow_classification() {
+        let bgezal = decode((0x01 << 26) | (4 << 21) | (0x11 << 16) | 1, 0x4000);
+        let effects = bgezal.effects();
+        assert_eq!(effects.gpr_read_mask, 1 << 4);
+        assert_eq!(effects.gpr_write_mask, 1 << 31);
+        assert_eq!(effects.control_flow, ControlFlowEffect::ConditionalDirect);
+
+        let jal = decode((0x03 << 26) | 0x20, 0x4004).effects();
+        assert_eq!(jal.gpr_write_mask, 1 << 31);
+        assert_eq!(jal.control_flow, ControlFlowEffect::DirectCall);
+
+        let jalr = decode((4 << 21) | (7 << 11) | 0x09, 0x4008).effects();
+        assert_eq!(jalr.gpr_read_mask, 1 << 4);
+        assert_eq!(jalr.gpr_write_mask, 1 << 7);
+        assert_eq!(jalr.control_flow, ControlFlowEffect::IndirectCall);
+    }
+
+    #[test]
+    fn effects_mark_traps_overflow_and_unknown_encodings_conservatively() {
+        let add = decode((4 << 21) | (5 << 16) | (6 << 11) | 0x20, 0x5000).effects();
+        assert!(add.may_raise_exception);
+
+        let syscall = decode(0x0000_000C, 0x5004).effects();
+        assert_eq!(syscall.control_flow, ControlFlowEffect::Trap);
+        assert!(syscall.may_raise_exception);
+
+        let unknown = decode(0xEC00_0000, 0x5008).effects();
+        assert!(unknown.unknown);
+        assert_eq!(unknown.gpr_read_mask, 0xFFFF_FFFE);
+        assert_eq!(unknown.gpr_write_mask, 0xFFFF_FFFE);
+        assert_eq!(unknown.memory, MemoryEffect::Unknown);
+        assert_eq!(unknown.control_flow, ControlFlowEffect::Unknown);
+        assert!(unknown.reads_hi && unknown.reads_lo);
+        assert!(unknown.writes_hi && unknown.writes_lo);
+        assert!(unknown.may_raise_exception);
+    }
+
 }
