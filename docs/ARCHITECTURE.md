@@ -151,6 +151,8 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 - Typed LWL/LWR/SWL/SWR and LDL/LDR/SDL/SDR IR with checked aligned-unit merge helpers and preserved unaffected GPR lanes.
 - Typed DADDU/DSUBU/DADDIU and immediate DSLL/DSRL/DSRA plus DSLL32/DSRL32/DSRA32 lowering into the low 64-bit EE GPR lane; arithmetic right shift uses an explicit sign-fill helper.
 - Typed register-variable SLLV/SRLV/SRAV and DSLLV/DSRLV/DSRAV lowering with architectural 5-bit/6-bit count masks, sign-extended word writes, and preserved upper GPR lanes.
+- Typed MMI1 PADDUW lowering to four independent unsigned 32-bit lane additions with lane-local saturation and full 128-bit destination writes.
+- Deterministic decoder coverage census over executable PT_LOAD file bytes plus a bounded entry-point diagnostic scan.
 
 - Checked little-endian EE main-RAM accesses over a caller-owned 32 MiB backing span with documented aliases and explicit MMIO/unmapped failures.
 - Default-map ET_EXEC PT_LOAD image construction with BSS zeroing, physical alias overlap rejection, and allocated-relocation refusal.

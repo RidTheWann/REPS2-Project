@@ -63,6 +63,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Discover ELF entry points and executable STT_FUNC symbol roots.
 - [x] Reachability-guided CFG for the implemented branch/jump subset; keep indirect targets unresolved.
 - [x] Distinguish file-backed executable bytes from zero-filled PT_LOAD tails during instruction reads.
+- [x] Report decoder coverage as an executable-byte census by supported opcode, trap, unsupported encoding family, and exact unsupported word, with a separate bounded entry-point scan; no reachability claim is made.
 
 **Exit gate:** inspect a lawfully owned PS2 ELF and produce a stable JSON manifest plus a map of loadable code/data ranges.
 
@@ -73,6 +74,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Decode, lift, and AOT-lower register-variable SLLV/SRLV/SRAV and DSLLV/DSRLV/DSRAV; test 5-bit/6-bit shift-count masking, word sign extension, arithmetic sign fill, and GPR upper-lane preservation through compiled native code.
 - [x] Expose conservative GPR/HI-LO, memory, control-flow, and possible-exception metadata for currently decoded opcodes; unknown encodings remain opaque.
 - [x] Decode R5900 three-operand MULT/MULTU with optional `rd`, plus base EE MTHI/MTLO/MFHI/MFLO; division, MMI pipeline-1, and full instruction-family coverage remain separate work.
+- [x] Decode, lift, and AOT-lower the MMI1-group PADDUW operation with independent unsigned 32-bit lane addition and lane-local saturation; other MMI operations and MMI pipeline-1 state remain separate work.
 - [x] Decode and lift NOR, SLT, SLTU, SLTI and SLTIU into typed scalar IR; SLTIU's immediate is sign-extended before unsigned comparison.
 - [x] Decode, lift and AOT-lower trapping 64-bit DADD/DSUB/DADDI separately from DADDU/DSUBU/DADDIU; detect signed overflow without host-language signed-overflow UB and test GPR[0] exception behavior.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
@@ -92,6 +94,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Synthetic generated C++ compiled and executed against the minimal EE state ABI on Windows and Linux CI.
 - [x] AOT-lower and execute MTHI/MTLO/MFHI/MFLO and signed/unsigned R5900 MULT/MULTU in a dedicated native smoke test on Windows/MSVC and Linux/GCC, including HI/LO and `rd` results.
 - [x] AOT-lower and execute NOR/SLT/SLTU/SLTI/SLTIU with signed 64-bit boundary, unsigned ordering, negative immediate, GPR[0], and upper-lane preservation tests on Windows/MSVC and Linux/GCC.
+- [x] AOT-lower and execute PADDUW across all four 128-bit lanes in a native smoke test, including lane-local unsigned saturation, a non-zero destination, and GPR[0] suppression.
 - [x] Execute DADD/DSUB/DADDI success and overflow paths in generated native C++ on Windows/MSVC and Linux/GCC, including no-write-on-trap and overflow when `rd = 0`.
 - [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
