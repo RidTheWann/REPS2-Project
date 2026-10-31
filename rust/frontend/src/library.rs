@@ -127,8 +127,10 @@ pub fn import_disc(iso_path: &Path, library_root: &Path) -> Result<ImportSummary
             hex_digest(&sha256_reader(&mut file)
                 .map_err(|error| format!("cannot hash existing boot ELF: {error}"))?)
         };
-        if !manifest.contains(&format!("\"iso_sha256\": \"{iso_sha256}\""))
-            || !manifest.contains(&format!("\"boot_elf_sha256\": \"{boot_sha256}\""))
+        let iso_hash_recorded = manifest.contains(&format!("\"sha256\": \"{iso_sha256}\""));
+        let boot_hash_recorded = manifest.contains(&format!("\"sha256\": \"{boot_sha256}\""));
+        if !iso_hash_recorded
+            || !boot_hash_recorded
             || existing_boot_digest != boot_sha256
         {
             return Err(format!(
