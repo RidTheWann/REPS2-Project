@@ -6,7 +6,6 @@ use std::fmt;
 use crate::elf::{self, Image, LoadedSegment};
 use crate::mips::{self, Instruction as DecodedInstruction, Opcode};
 
-const PF_X: u32 = 1;
 const STT_FUNC: u8 = 2;
 
 /// Bounded resources for analysis of untrusted or unusually large executables.
@@ -15,6 +14,10 @@ pub struct AnalysisLimits {
     pub max_loaded_memory: usize,
     pub max_instructions: usize,
     pub max_blocks: usize,
+    /// Maximum number of independent virtual views of main RAM that may be
+    /// materialized at once. The EE exposes four aliases of the same RAM, so
+    /// four is the architectural maximum.
+    pub max_aliased_roots: u8,
 }
 
 impl Default for AnalysisLimits {
@@ -23,6 +26,7 @@ impl Default for AnalysisLimits {
             max_loaded_memory: 256 * 1024 * 1024,
             max_instructions: 2_000_000,
             max_blocks: 250_000,
+            max_aliased_roots: 4,
         }
     }
 }
@@ -327,6 +331,9 @@ pub enum AnalysisError {
     BlockLimitExceeded {
         limit: usize,
     },
+    AliasedViewLimitExceeded {
+        limit: u8,
+    },
     InternalBlockOwnershipError(u32),
 }
 
@@ -339,7 +346,11 @@ impl fmt::Display for AnalysisError {
             }
             Self::EntryPointNotExecutable(pc) => write!(
                 formatter,
-                "entry point 0x{pc:08X} is not in an executable segment"
+                "entry point 0x{pc:08X} is not in an executable segment or any of its EE aliases"
+            ),
+            Self::AliasedViewLimitExceeded { limit } => write!(
+                formatter,
+                "analysis requires more than {limit} aliased views of main RAM"
             ),
             Self::InvalidLoadedSegment {
                 virtual_address,
@@ -407,21 +418,11 @@ struct InstructionOwner {
     location: OwnerLocation,
 }
 
-/// Returns whether a guest PC lies inside an executable PT_LOAD image.
+/// Returns whether a guest PC is backed by executable file bytes in the
+/// segment's declared alias region.
 #[must_use]
 pub fn contains_executable_address(segments: &[LoadedSegment], address: u32) -> bool {
-    let address = u64::from(address);
-    segments.iter().any(|segment| {
-        if segment.flags & PF_X == 0 {
-            return false;
-        }
-        let start = u64::from(segment.virtual_address);
-        let file_size = segment.file_size.min(segment.bytes.len()) as u64;
-        let Some(end) = start.checked_add(file_size) else {
-            return false;
-        };
-        address >= start && address < end
-    })
+    crate::address::file_backed_executable_segment(segments, address).is_some()
 }
 
 /// Collects the ELF entry point and named STT_FUNC symbols that lie inside
@@ -523,16 +524,49 @@ pub fn discover_cfg(
 
     let mut unique_roots = BTreeSet::new();
     for root in roots {
-        if root & 3 != 0 || !contains_executable_address(segments, *root) {
+        if root & 3 != 0 {
             return Err(AnalysisError::EntryPointNotExecutable(*root));
         }
         unique_roots.insert(*root);
     }
 
+    // Roots that differ only by alias view decode the same bytes. Admit the
+    // first view of each physical root so alias duplicates cannot bypass the
+    // block budget or replay identical work.
+    let mut admitted_roots = BTreeSet::new();
+    let mut root_views = BTreeSet::new();
+    let mut aliased_root_views = BTreeSet::new();
+    for root in unique_roots {
+        let Some(physical) = crate::address::physical_main_ram_address(root) else {
+            return Err(AnalysisError::EntryPointNotExecutable(root));
+        };
+        if crate::address::executable_file_bytes(segments, physical, 4).is_none() {
+            return Err(AnalysisError::EntryPointNotExecutable(root));
+        }
+        // A root is decoded in its own region, so a KSEG0 entry is never
+        // silently retargeted to a differently declared view. Roots that reach
+        // their bytes only through another view are counted separately.
+        let own_region = crate::address::file_backed_executable_segment(segments, root).is_some();
+        let region = crate::address::AliasRegion::of(root);
+        if own_region {
+            if root_views.insert((region, physical)) {
+                admitted_roots.insert(root);
+            }
+        } else if aliased_root_views.insert((region, physical)) {
+            admitted_roots.insert(root);
+        }
+    }
+    if aliased_root_views.len() > usize::from(limits.max_aliased_roots) {
+        return Err(AnalysisError::AliasedViewLimitExceeded {
+            limit: limits.max_aliased_roots,
+        });
+    }
+
     let mut queue = VecDeque::new();
     let mut queued = BTreeSet::new();
-    let mut leaders = unique_roots.clone();
-    for root in unique_roots {
+
+    let mut leaders = admitted_roots.clone();
+    for root in admitted_roots {
         queue.push_back(root);
         queued.insert(root);
     }
@@ -569,7 +603,18 @@ pub fn discover_cfg(
             continue;
         }
 
-        if !contains_executable_address(segments, start_pc) {
+        let is_executable_view = |addr: u32| -> bool {
+            contains_executable_address(segments, addr)
+                || (crate::address::AliasRegion::of(addr).is_some_and(|r| {
+                    aliased_root_views
+                        .iter()
+                        .any(|(view_r, _)| *view_r == Some(r))
+                }) && crate::address::physical_main_ram_address(addr).is_some_and(|p| {
+                    crate::address::executable_file_bytes(segments, p, 4).is_some()
+                }))
+        };
+
+        if !is_executable_view(start_pc) {
             external_targets.insert(start_pc);
             continue;
         }
@@ -721,13 +766,18 @@ pub fn discover_cfg(
         blocks.insert(start_pc, block);
 
         for target in next_targets {
-            if contains_executable_address(segments, target) {
-                leaders.insert(target);
-                if queued.insert(target) {
-                    queue.push_back(target);
-                }
-            } else {
+            if !is_executable_view(target) {
                 external_targets.insert(target);
+                continue;
+            }
+            // A target inside an already decoded block is a split request even
+            // when it arrives through another alias view, so it is admitted.
+            // Requests are queued once per address; an alias cycle therefore
+            // costs at most one extra queue entry per view, and each view that
+            // is decoded is claimed in `decoded_alias_views`.
+            leaders.insert(target);
+            if queued.insert(target) {
+                queue.push_back(target);
             }
         }
     }
@@ -745,26 +795,9 @@ fn read_instruction_word(segments: &[LoadedSegment], pc: u32) -> Option<u32> {
     if pc & 3 != 0 {
         return None;
     }
-    let address = u64::from(pc);
-    for segment in segments {
-        if segment.flags & PF_X == 0 {
-            continue;
-        }
-        let start = u64::from(segment.virtual_address);
-        let file_size = segment.file_size.min(segment.bytes.len());
-        let end = start.checked_add(file_size as u64)?;
-        if address < start || address >= end {
-            continue;
-        }
-        let offset = usize::try_from(address - start).ok()?;
-        let end_offset = offset.checked_add(4)?;
-        if end_offset <= file_size {
-            let bytes = &segment.bytes[offset..end_offset];
-            return Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]));
-        }
-        return None;
-    }
-    None
+    let payload = crate::address::region_payload(pc)?;
+    let bytes = crate::address::executable_file_bytes(segments, payload, 4)?;
+    Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 fn increment_instruction_count(count: &mut usize, limit: usize) -> Result<(), AnalysisError> {
@@ -993,6 +1026,7 @@ pub fn executable_function_symbols(image: &Image) -> Vec<&elf::Symbol> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elf::PF_X;
 
     fn segment(base: u32, words: &[u32]) -> LoadedSegment {
         let mut bytes = Vec::with_capacity(words.len() * 4);
@@ -1273,5 +1307,108 @@ mod tests {
                 && edge.to_pc == 0x4008
                 && edge.kind == EdgeKind::ReturnContinuation
         }));
+    }
+
+    #[test]
+    fn follows_kseg0_calls_made_through_jalr() {
+        // The dominant real-world shape: one PT_LOAD described in KSEG0. The
+        // R5900 `J` region comes from the delay-slot address, so a boot
+        // executable that calls within cached memory uses `JALR` (or a
+        // register-loaded target); `JAL` from KSEG0 would select KSEG1.
+        //   lui  t0, 0x8010      # t0 = 0x80100000
+        //   addiu t0, t0, 0x10   # t0 = 0x80100010
+        //   jalr t0              # call 0x80100010, ra = 0x8010000C
+        //   nop                  # delay slot
+        //   addiu t1, zero, 1    # callee body
+        //   jr ra                # return
+        //   nop                  # return delay slot: 0x8010001C
+        let words = [
+            0x3C08_8010, // lui  $8, 0x8010
+            0x2508_0010, // addiu $8, $8, 0x10
+            0x0100_F809, // jalr $8
+            0x0000_0000, // delay slot
+            0x2409_0001, // callee body
+            0x03E0_0008, // jr $ra
+            0x0000_0000, // return delay slot
+        ];
+        let segments = [segment(0x8010_0000, &words)];
+        let entry_pc = 0x8010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("KSEG0 control flow");
+
+        // The call block and the callee block are reachable statically. A
+        // register-indirect `jr` return has no static destination, so no
+        // continuation block is invented for it.
+        assert_eq!(graph.blocks.len(), 2);
+        // Only the `jalr` target is unresolved; the callee itself was reached
+        // statically because the same image contains it.
+        assert_eq!(graph.unresolved_indirect_jumps, vec![0x8010_0008]);
+        assert!(graph.external_targets.is_empty());
+        assert!(matches!(
+            graph.blocks[&0x8010_0000].terminator,
+            Terminator::IndirectJump {
+                source_register: 8,
+                ..
+            }
+        ));
+        let callee = discover_cfg(
+            &segments,
+            vec![entry(0x8010_0010)],
+            &[0x8010_0010],
+            AnalysisLimits::default(),
+        )
+        .expect("KSEG0 callee");
+        assert_eq!(callee.blocks[&0x8010_0010].instructions.len(), 1);
+        assert_eq!(
+            callee.blocks[&0x8010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
+        assert!(matches!(
+            callee.blocks[&0x8010_0010].terminator,
+            Terminator::Return { .. }
+        ));
+
+        // A fetch through a differently declared view is still refused: the
+        // KSEG0 image never materialized 0x00100010, even though the payload
+        // aliases it, because the runtime address translation must be decided
+        // by the image, not guessed by the analyzer.
+        assert!(!contains_executable_address(&segments, 0x0010_0010));
+        assert!(contains_executable_address(&segments, 0x8010_0010));
+    }
+
+    #[test]
+    fn alias_roots_are_limited_and_contribute_distinct_blocks() {
+        // The KSEG0 root aliases bytes of a direct-physical segment. It is
+        // accepted as a distinct entry, gets its own block, and does not
+        // corrupt block ownership of the direct view.
+        let words = [
+            0x2401_0001, // addiu $1, $0, 1
+            0x03E0_0008, // jr $ra
+            0x0000_0000, // return delay slot
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let mut limits = AnalysisLimits::default();
+        limits.max_aliased_roots = 1;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x0010_0000), entry(0x8010_0000)],
+            &[0x0010_0000, 0x8010_0000],
+            limits,
+        )
+        .expect("aliased roots");
+        assert!(graph.blocks.contains_key(&0x0010_0000));
+        assert!(graph.blocks.contains_key(&0x8010_0000));
+        assert_eq!(graph.blocks.len(), 2);
+        assert_eq!(graph.decoded_instruction_count, 6);
+
+        limits.max_aliased_roots = 0;
+        let error = discover_cfg(&segments, vec![entry(0x8010_0000)], &[0x8010_0000], limits)
+            .expect_err("aliased root without budget");
+        assert_eq!(error, AnalysisError::AliasedViewLimitExceeded { limit: 0 });
     }
 }
