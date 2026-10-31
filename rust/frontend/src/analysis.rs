@@ -197,10 +197,22 @@ impl Terminator {
         match self {
             Self::Fallthrough { .. } => "fallthrough",
             Self::ConditionalBranch { .. } => "conditional branch + delay slot",
-            Self::DirectJump { link_register: Some(_), .. } => "direct call + delay slot",
-            Self::DirectJump { link_register: None, .. } => "direct jump + delay slot",
-            Self::IndirectJump { link_register: Some(_), .. } => "indirect call + delay slot",
-            Self::IndirectJump { link_register: None, .. } => "indirect jump + delay slot",
+            Self::DirectJump {
+                link_register: Some(_),
+                ..
+            } => "direct call + delay slot",
+            Self::DirectJump {
+                link_register: None,
+                ..
+            } => "direct jump + delay slot",
+            Self::IndirectJump {
+                link_register: Some(_),
+                ..
+            } => "indirect call + delay slot",
+            Self::IndirectJump {
+                link_register: None,
+                ..
+            } => "indirect jump + delay slot",
             Self::Return { .. } => "return + delay slot",
             Self::Unsupported { .. } => "unsupported instruction",
             Self::SegmentEnd { .. } => "executable segment end",
@@ -223,8 +235,16 @@ impl BasicBlock {
     #[must_use]
     pub fn instruction_count(&self) -> usize {
         self.instructions.len()
-            + if self.terminator.control_instruction().is_some() { 1 } else { 0 }
-            + if self.terminator.delay_slot().is_some() { 1 } else { 0 }
+            + if self.terminator.control_instruction().is_some() {
+                1
+            } else {
+                0
+            }
+            + if self.terminator.delay_slot().is_some() {
+                1
+            } else {
+                0
+            }
     }
 }
 
@@ -267,14 +287,34 @@ pub enum AnalysisError {
     Elf(String),
     NoExecutableEntryPoints,
     EntryPointNotExecutable(u32),
-    InvalidLoadedSegment { virtual_address: u32, file_size: usize, memory_size: usize },
-    MissingDelaySlot { control_pc: u32, delay_pc: u32 },
-    UnsupportedDelaySlot { control_pc: u32, delay_pc: u32 },
-    ControlTransferInDelaySlot { control_pc: u32, delay_pc: u32 },
-    TargetEntersDelaySlot { target_pc: u32, owning_control_pc: u32 },
+    InvalidLoadedSegment {
+        virtual_address: u32,
+        file_size: usize,
+        memory_size: usize,
+    },
+    MissingDelaySlot {
+        control_pc: u32,
+        delay_pc: u32,
+    },
+    UnsupportedDelaySlot {
+        control_pc: u32,
+        delay_pc: u32,
+    },
+    ControlTransferInDelaySlot {
+        control_pc: u32,
+        delay_pc: u32,
+    },
+    TargetEntersDelaySlot {
+        target_pc: u32,
+        owning_control_pc: u32,
+    },
     GuestPcOverflow(u32),
-    InstructionLimitExceeded { limit: usize },
-    BlockLimitExceeded { limit: usize },
+    InstructionLimitExceeded {
+        limit: usize,
+    },
+    BlockLimitExceeded {
+        limit: usize,
+    },
     InternalBlockOwnershipError(u32),
 }
 
@@ -282,32 +322,60 @@ impl fmt::Display for AnalysisError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Elf(message) => write!(formatter, "ELF loading failed: {message}"),
-            Self::NoExecutableEntryPoints => formatter.write_str("no executable entry point or function symbol was found"),
-            Self::EntryPointNotExecutable(pc) => write!(formatter, "entry point 0x{pc:08X} is not in an executable segment"),
-            Self::InvalidLoadedSegment { virtual_address, file_size, memory_size } => write!(
+            Self::NoExecutableEntryPoints => {
+                formatter.write_str("no executable entry point or function symbol was found")
+            }
+            Self::EntryPointNotExecutable(pc) => write!(
+                formatter,
+                "entry point 0x{pc:08X} is not in an executable segment"
+            ),
+            Self::InvalidLoadedSegment {
+                virtual_address,
+                file_size,
+                memory_size,
+            } => write!(
                 formatter,
                 "loaded segment at 0x{virtual_address:08X} has file size {file_size} larger than its backing memory buffer {memory_size}"
             ),
-            Self::MissingDelaySlot { control_pc, delay_pc } => write!(
+            Self::MissingDelaySlot {
+                control_pc,
+                delay_pc,
+            } => write!(
                 formatter,
                 "control instruction at 0x{control_pc:08X} has no executable delay slot at 0x{delay_pc:08X}"
             ),
-            Self::UnsupportedDelaySlot { control_pc, delay_pc } => write!(
+            Self::UnsupportedDelaySlot {
+                control_pc,
+                delay_pc,
+            } => write!(
                 formatter,
                 "control instruction at 0x{control_pc:08X} has an unsupported delay-slot instruction at 0x{delay_pc:08X}"
             ),
-            Self::ControlTransferInDelaySlot { control_pc, delay_pc } => write!(
+            Self::ControlTransferInDelaySlot {
+                control_pc,
+                delay_pc,
+            } => write!(
                 formatter,
                 "control transfer at 0x{delay_pc:08X} appears in the delay slot of 0x{control_pc:08X}"
             ),
-            Self::TargetEntersDelaySlot { target_pc, owning_control_pc } => write!(
+            Self::TargetEntersDelaySlot {
+                target_pc,
+                owning_control_pc,
+            } => write!(
                 formatter,
                 "control-flow target 0x{target_pc:08X} enters the delay slot of 0x{owning_control_pc:08X}"
             ),
             Self::GuestPcOverflow(pc) => write!(formatter, "guest PC overflows after 0x{pc:08X}"),
-            Self::InstructionLimitExceeded { limit } => write!(formatter, "analysis exceeded the {limit} instruction limit"),
-            Self::BlockLimitExceeded { limit } => write!(formatter, "analysis exceeded the {limit} basic-block limit"),
-            Self::InternalBlockOwnershipError(pc) => write!(formatter, "cannot split or resolve instruction ownership at 0x{pc:08X}"),
+            Self::InstructionLimitExceeded { limit } => {
+                write!(formatter, "analysis exceeded the {limit} instruction limit")
+            }
+            Self::BlockLimitExceeded { limit } => {
+                write!(formatter, "analysis exceeded the {limit} basic-block limit")
+            }
+            Self::InternalBlockOwnershipError(pc) => write!(
+                formatter,
+                "cannot split or resolve instruction ownership at 0x{pc:08X}"
+            ),
         }
     }
 }
@@ -397,7 +465,10 @@ pub fn discover_elf(
     let segments = elf::load_segments(file_bytes, image, limits.max_loaded_memory)
         .map_err(|error| AnalysisError::Elf(error.to_string()))?;
     let entry_points = collect_entry_points(image, &segments);
-    let roots = entry_points.iter().map(|entry| entry.address).collect::<Vec<_>>();
+    let roots = entry_points
+        .iter()
+        .map(|entry| entry.address)
+        .collect::<Vec<_>>();
     discover_cfg(&segments, entry_points, &roots, limits)
 }
 
@@ -420,8 +491,9 @@ pub fn discover_cfg(
                 memory_size: segment.bytes.len(),
             });
         }
-        let Some(memory_end) = u64::from(segment.virtual_address)
-            .checked_add(segment.bytes.len() as u64) else {
+        let Some(memory_end) =
+            u64::from(segment.virtual_address).checked_add(segment.bytes.len() as u64)
+        else {
             return Err(AnalysisError::InvalidLoadedSegment {
                 virtual_address: segment.virtual_address,
                 file_size: segment.file_size,
@@ -519,10 +591,15 @@ pub fn discover_cfg(
 
             if instruction.is_conditional_branch() {
                 let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                increment_instruction_count(&mut decoded_instruction_count, limits.max_instructions)?;
+                increment_instruction_count(
+                    &mut decoded_instruction_count,
+                    limits.max_instructions,
+                )?;
                 let condition = branch_condition(instruction)
                     .ok_or(AnalysisError::InternalBlockOwnershipError(instruction.pc))?;
-                let fallthrough_pc = instruction.pc.checked_add(8)
+                let fallthrough_pc = instruction
+                    .pc
+                    .checked_add(8)
                     .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?;
                 break Terminator::ConditionalBranch {
                     instruction,
@@ -538,10 +615,17 @@ pub fn discover_cfg(
             match instruction.opcode {
                 Opcode::J | Opcode::Jal => {
                     let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                    increment_instruction_count(&mut decoded_instruction_count, limits.max_instructions)?;
+                    increment_instruction_count(
+                        &mut decoded_instruction_count,
+                        limits.max_instructions,
+                    )?;
                     let return_pc = if instruction.opcode == Opcode::Jal {
-                        Some(instruction.pc.checked_add(8)
-                            .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?)
+                        Some(
+                            instruction
+                                .pc
+                                .checked_add(8)
+                                .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?,
+                        )
                     } else {
                         None
                     };
@@ -555,7 +639,10 @@ pub fn discover_cfg(
                 }
                 Opcode::Jr if instruction.rs == 31 => {
                     let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                    increment_instruction_count(&mut decoded_instruction_count, limits.max_instructions)?;
+                    increment_instruction_count(
+                        &mut decoded_instruction_count,
+                        limits.max_instructions,
+                    )?;
                     break Terminator::Return {
                         instruction,
                         source_register: instruction.rs,
@@ -564,15 +651,23 @@ pub fn discover_cfg(
                 }
                 Opcode::Jr | Opcode::Jalr => {
                     let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                    increment_instruction_count(&mut decoded_instruction_count, limits.max_instructions)?;
-                    let link_register = if instruction.opcode == Opcode::Jalr && instruction.rd != 0 {
+                    increment_instruction_count(
+                        &mut decoded_instruction_count,
+                        limits.max_instructions,
+                    )?;
+                    let link_register = if instruction.opcode == Opcode::Jalr && instruction.rd != 0
+                    {
                         Some(instruction.rd)
                     } else {
                         None
                     };
                     let return_pc = if link_register.is_some() {
-                        Some(instruction.pc.checked_add(8)
-                            .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?)
+                        Some(
+                            instruction
+                                .pc
+                                .checked_add(8)
+                                .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?,
+                        )
                     } else {
                         None
                     };
@@ -588,7 +683,9 @@ pub fn discover_cfg(
             }
 
             instructions.push(instruction);
-            pc = pc.checked_add(4).ok_or(AnalysisError::GuestPcOverflow(pc))?;
+            pc = pc
+                .checked_add(4)
+                .ok_or(AnalysisError::GuestPcOverflow(pc))?;
         };
 
         let block = BasicBlock {
@@ -651,7 +748,8 @@ fn read_instruction_word(segments: &[LoadedSegment], pc: u32) -> Option<u32> {
 }
 
 fn increment_instruction_count(count: &mut usize, limit: usize) -> Result<(), AnalysisError> {
-    *count = count.checked_add(1)
+    *count = count
+        .checked_add(1)
         .ok_or(AnalysisError::InstructionLimitExceeded { limit })?;
     if *count > limit {
         return Err(AnalysisError::InstructionLimitExceeded { limit });
@@ -665,7 +763,9 @@ fn fetch_delay_slot(
     leaders: &BTreeSet<u32>,
     owners: &BTreeMap<u32, InstructionOwner>,
 ) -> Result<DecodedInstruction, AnalysisError> {
-    let delay_pc = control.pc.checked_add(4)
+    let delay_pc = control
+        .pc
+        .checked_add(4)
         .ok_or(AnalysisError::GuestPcOverflow(control.pc))?;
     if leaders.contains(&delay_pc) || owners.contains_key(&delay_pc) {
         return Err(AnalysisError::TargetEntersDelaySlot {
@@ -722,7 +822,9 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
 }
 
 fn block_targets(block: &BasicBlock) -> Vec<u32> {
-    block.terminator.outgoing_edges(block.start_pc)
+    block
+        .terminator
+        .outgoing_edges(block.start_pc)
         .into_iter()
         .map(|edge| edge.to_pc)
         .collect()
@@ -733,28 +835,44 @@ fn register_block_owners(
     owners: &mut BTreeMap<u32, InstructionOwner>,
 ) -> Result<(), AnalysisError> {
     for (index, instruction) in block.instructions.iter().enumerate() {
-        if owners.insert(instruction.pc, InstructionOwner {
-            block_start: block.start_pc,
-            location: OwnerLocation::Body(index),
-        }).is_some() {
+        if owners
+            .insert(
+                instruction.pc,
+                InstructionOwner {
+                    block_start: block.start_pc,
+                    location: OwnerLocation::Body(index),
+                },
+            )
+            .is_some()
+        {
             return Err(AnalysisError::InternalBlockOwnershipError(instruction.pc));
         }
     }
 
     if let Some(instruction) = block.terminator.control_instruction()
-        && owners.insert(instruction.pc, InstructionOwner {
-            block_start: block.start_pc,
-            location: OwnerLocation::Control,
-        }).is_some()
+        && owners
+            .insert(
+                instruction.pc,
+                InstructionOwner {
+                    block_start: block.start_pc,
+                    location: OwnerLocation::Control,
+                },
+            )
+            .is_some()
     {
         return Err(AnalysisError::InternalBlockOwnershipError(instruction.pc));
     }
 
     if let Some(delay_slot) = block.terminator.delay_slot()
-        && owners.insert(delay_slot.pc, InstructionOwner {
-            block_start: block.start_pc,
-            location: OwnerLocation::DelaySlot,
-        }).is_some()
+        && owners
+            .insert(
+                delay_slot.pc,
+                InstructionOwner {
+                    block_start: block.start_pc,
+                    location: OwnerLocation::DelaySlot,
+                },
+            )
+            .is_some()
     {
         return Err(AnalysisError::InternalBlockOwnershipError(delay_slot.pc));
     }
@@ -782,7 +900,8 @@ fn split_block_at(
         return Ok(());
     }
 
-    let mut prefix = blocks.remove(&owner.block_start)
+    let mut prefix = blocks
+        .remove(&owner.block_start)
         .ok_or(AnalysisError::InternalBlockOwnershipError(target_pc))?;
     let old_start = prefix.start_pc;
     let old_terminator = std::mem::replace(
@@ -816,13 +935,18 @@ fn split_block_at(
         .collect::<Vec<_>>();
     for (pc, location) in moved_owners {
         let location = match (location, body_split_index) {
-            (OwnerLocation::Body(index), Some(split_index)) => OwnerLocation::Body(index - split_index),
+            (OwnerLocation::Body(index), Some(split_index)) => {
+                OwnerLocation::Body(index - split_index)
+            }
             (other, _) => other,
         };
-        owners.insert(pc, InstructionOwner {
-            block_start: target_pc,
-            location,
-        });
+        owners.insert(
+            pc,
+            InstructionOwner {
+                block_start: target_pc,
+                location,
+            },
+        );
     }
 
     blocks.insert(old_start, prefix);
@@ -835,7 +959,9 @@ fn split_block_at(
 /// Returns function symbols without deciding whether their values map to code.
 #[must_use]
 pub fn executable_function_symbols(image: &Image) -> Vec<&elf::Symbol> {
-    image.symbols.iter()
+    image
+        .symbols
+        .iter()
         .filter(|symbol| symbol.kind == STT_FUNC && symbol.section_index != 0 && symbol.value != 0)
         .collect()
 }
@@ -878,8 +1004,13 @@ mod tests {
         ];
         let segments = [segment(0x1000, &words)];
         let roots = [0x1000];
-        let graph = discover_cfg(&segments, vec![entry(0x1000)], &roots, AnalysisLimits::default())
-            .expect("valid synthetic control flow");
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("valid synthetic control flow");
 
         assert_eq!(graph.blocks.len(), 3);
         let entry_block = &graph.blocks[&0x1000];
@@ -899,9 +1030,16 @@ mod tests {
             other => panic!("expected conditional branch, got {other:?}"),
         }
         let edges = graph.edges();
-        assert!(edges.iter().any(|edge| edge.from_block == 0x1000 && edge.to_pc == 0x1010 && edge.kind == EdgeKind::Taken));
-        assert!(edges.iter().any(|edge| edge.from_block == 0x1000 && edge.to_pc == 0x100C && edge.kind == EdgeKind::Fallthrough));
-        assert!(matches!(&graph.blocks[&0x1010].terminator, Terminator::Return { .. }));
+        assert!(edges.iter().any(|edge| edge.from_block == 0x1000
+            && edge.to_pc == 0x1010
+            && edge.kind == EdgeKind::Taken));
+        assert!(edges.iter().any(|edge| edge.from_block == 0x1000
+            && edge.to_pc == 0x100C
+            && edge.kind == EdgeKind::Fallthrough));
+        assert!(matches!(
+            &graph.blocks[&0x1010].terminator,
+            Terminator::Return { .. }
+        ));
     }
 
     #[test]
@@ -916,28 +1054,48 @@ mod tests {
         ];
         let segments = [segment(0x2000, &words)];
         let roots = [0x2000];
-        let graph = discover_cfg(&segments, vec![entry(0x2000)], &roots, AnalysisLimits::default())
-            .expect("backward branch graph");
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x2000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("backward branch graph");
         assert_eq!(graph.blocks.len(), 3);
         assert_eq!(graph.blocks[&0x2000].instructions.len(), 1);
-        assert!(matches!(&graph.blocks[&0x2000].terminator, Terminator::Fallthrough { next_pc: 0x2004 }));
+        assert!(matches!(
+            &graph.blocks[&0x2000].terminator,
+            Terminator::Fallthrough { next_pc: 0x2004 }
+        ));
         assert_eq!(graph.blocks[&0x2004].instructions.len(), 1);
-        assert!(matches!(&graph.blocks[&0x2004].terminator, Terminator::ConditionalBranch { target_pc: 0x2004, .. }));
+        assert!(matches!(
+            &graph.blocks[&0x2004].terminator,
+            Terminator::ConditionalBranch {
+                target_pc: 0x2004,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn rejects_a_branch_target_that_enters_a_delay_slot() {
-        let words = [
-            0x1100_0000,
-            0x0000_0000,
-            0x03E0_0008,
-            0x0000_0000,
-        ];
+        let words = [0x1100_0000, 0x0000_0000, 0x03E0_0008, 0x0000_0000];
         let segments = [segment(0x3000, &words)];
         let roots = [0x3000];
-        let error = discover_cfg(&segments, vec![entry(0x3000)], &roots, AnalysisLimits::default())
-            .expect_err("branch into delay slot is not a valid block boundary");
-        assert!(matches!(error, AnalysisError::TargetEntersDelaySlot { target_pc: 0x3004, .. }));
+        let error = discover_cfg(
+            &segments,
+            vec![entry(0x3000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect_err("branch into delay slot is not a valid block boundary");
+        assert!(matches!(
+            error,
+            AnalysisError::TargetEntersDelaySlot {
+                target_pc: 0x3004,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -946,8 +1104,13 @@ mod tests {
         segment.file_size = segment.bytes.len() + 1;
         let segments = [segment];
         let roots = [0x3900];
-        let error = discover_cfg(&segments, vec![entry(0x3900)], &roots, AnalysisLimits::default())
-            .expect_err("file-backed size cannot exceed the owned buffer");
+        let error = discover_cfg(
+            &segments,
+            vec![entry(0x3900)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect_err("file-backed size cannot exceed the owned buffer");
         assert!(matches!(error, AnalysisError::InvalidLoadedSegment { .. }));
     }
 
@@ -957,8 +1120,13 @@ mod tests {
         segment.file_size = 4;
         let segments = [segment];
         let roots = [0x3800];
-        let graph = discover_cfg(&segments, vec![entry(0x3800)], &roots, AnalysisLimits::default())
-            .expect("file-backed executable prefix");
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x3800)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("file-backed executable prefix");
         assert_eq!(graph.decoded_instruction_count, 1);
         assert_eq!(graph.blocks.len(), 1);
         assert_eq!(graph.blocks[&0x3800].instructions.len(), 1);
@@ -970,17 +1138,20 @@ mod tests {
 
     #[test]
     fn rejects_control_transfer_inside_another_delay_slot() {
-        let words = [
-            0x0800_0802,
-            0x0800_0803,
-            0x03E0_0008,
-            0x0000_0000,
-        ];
+        let words = [0x0800_0802, 0x0800_0803, 0x03E0_0008, 0x0000_0000];
         let segments = [segment(0x2000, &words)];
         let roots = [0x2000];
-        let error = discover_cfg(&segments, vec![entry(0x2000)], &roots, AnalysisLimits::default())
-            .expect_err("control transfer in a delay slot is unsupported");
-        assert!(matches!(error, AnalysisError::ControlTransferInDelaySlot { .. }));
+        let error = discover_cfg(
+            &segments,
+            vec![entry(0x2000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect_err("control transfer in a delay slot is unsupported");
+        assert!(matches!(
+            error,
+            AnalysisError::ControlTransferInDelaySlot { .. }
+        ));
     }
 
     #[test]
@@ -994,8 +1165,13 @@ mod tests {
         ];
         let segments = [segment(0x4000, &words)];
         let roots = [0x4000];
-        let graph = discover_cfg(&segments, vec![entry(0x4000)], &roots, AnalysisLimits::default())
-            .expect("indirect call graph");
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x4000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("indirect call graph");
         assert_eq!(graph.unresolved_indirect_jumps, vec![0x4000]);
         assert!(graph.edges().iter().any(|edge| {
             edge.from_block == 0x4000

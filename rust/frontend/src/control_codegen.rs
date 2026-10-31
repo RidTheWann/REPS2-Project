@@ -4,7 +4,7 @@
 //! translated graph continue natively; unresolved/dynamic targets are written
 //! to EeState::pc and returned to the caller as external control flow.
 
-use crate::control_ir::{ControlProgram, ControlTerminator, ControlError};
+use crate::control_ir::{ControlError, ControlProgram, ControlTerminator};
 
 /// Emits a deterministic C++20 translation unit with execute_cfg().
 pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
@@ -47,7 +47,7 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
              std::uint64_t remaining = instruction_budget;\n\
              state.gpr[0] = {};\n\
              for (;;) {\n\
-                 switch (state.pc) {\n"
+                 switch (state.pc) {\n",
     );
 
     for block in program.blocks.values() {
@@ -60,7 +60,10 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
         ));
 
         for (instruction_index, instruction) in block.instructions.iter().enumerate() {
-            output.push_str(&format!("                     state.pc = 0x{:08X}U;\n", instruction.guest_pc));
+            output.push_str(&format!(
+                "                     state.pc = 0x{:08X}U;\n",
+                instruction.guest_pc
+            ));
             crate::codegen::emit_instruction(&mut output, instruction_index, *instruction);
         }
 
@@ -74,7 +77,7 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
              \x20    }\n\
              }\n\
          }\n\
-         } // namespace reps2::generated\n"
+         } // namespace reps2::generated\n",
     );
     Ok(output)
 }
@@ -140,8 +143,14 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             return_pc,
             delay_slot,
         } => {
-            output.push_str(&format!("                     state.pc = 0x{guest_pc:08X}U;\n"));
-            emit_link_write(output, *link_register, return_pc.unwrap_or(guest_pc.wrapping_add(8)));
+            output.push_str(&format!(
+                "                     state.pc = 0x{guest_pc:08X}U;\n"
+            ));
+            emit_link_write(
+                output,
+                *link_register,
+                return_pc.unwrap_or(guest_pc.wrapping_add(8)),
+            );
             emit_delay_slot(output, index, delay_slot);
             output.push_str(&format!(
                 "                     state.pc = 0x{target_pc:08X}U;\n\
@@ -160,7 +169,11 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 "                     state.pc = 0x{guest_pc:08X}U;\n\
                  \x20                    const std::uint32_t dynamic_target_{guest_pc:08X} = static_cast<std::uint32_t>(state.gpr[{source_register}].low);\n"
             ));
-            emit_link_write(output, *link_register, return_pc.unwrap_or(guest_pc.wrapping_add(8)));
+            emit_link_write(
+                output,
+                *link_register,
+                return_pc.unwrap_or(guest_pc.wrapping_add(8)),
+            );
             emit_delay_slot(output, index, delay_slot);
             output.push_str(&format!(
                 "                     state.pc = dynamic_target_{guest_pc:08X};\n\
@@ -207,11 +220,7 @@ fn emit_link_write(output: &mut String, register: Option<u8>, return_pc: u32) {
     }
 }
 
-fn emit_delay_slot(
-    output: &mut String,
-    index: usize,
-    delay_slot: &crate::ir::Instruction,
-) {
+fn emit_delay_slot(output: &mut String, index: usize, delay_slot: &crate::ir::Instruction) {
     output.push_str(&format!(
         "                     state.pc = 0x{:08X}U;\n",
         delay_slot.guest_pc
@@ -256,18 +265,27 @@ mod tests {
             bytes.extend_from_slice(&word.to_le_bytes());
         }
         let file_size = bytes.len();
-        LoadedSegment { virtual_address: base, flags: 1, file_size, bytes }
+        LoadedSegment {
+            virtual_address: base,
+            flags: 1,
+            file_size,
+            bytes,
+        }
     }
 
     fn entry(address: u32) -> EntryPoint {
-        EntryPoint { address, labels: vec!["codegen-test".to_owned()], is_elf_entry: true }
+        EntryPoint {
+            address,
+            labels: vec!["codegen-test".to_owned()],
+            is_elf_entry: true,
+        }
     }
 
     #[test]
     fn emits_branch_test_before_link_and_delay_slot_before_dispatch() {
         let words = [
             (0x01 << 26) | (8 << 21) | (0x10 << 16) | 3, // bltzal t0, 0x1010
-            0x2409_0007, // delay slot
+            0x2409_0007,                                 // delay slot
             0x03E0_0008,
             0x0000_0000, // delay slot
             0x240A_0001,
@@ -276,15 +294,24 @@ mod tests {
         ];
         let segments = [segment(0x1000, &words)];
         let roots = [0x1000];
-        let graph = analysis::discover_cfg(&segments, vec![entry(0x1000)], &roots, AnalysisLimits::default())
-            .expect("synthetic branch CFG");
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic branch CFG");
         let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
         let cpp = emit_cpp(&program).expect("C++ output");
 
-        let condition = cpp.find("const bool branch_taken_00001000").expect("branch condition");
+        let condition = cpp
+            .find("const bool branch_taken_00001000")
+            .expect("branch condition");
         let link = cpp.find("state.gpr[31].low").expect("link write");
         let delay = cpp.find("state.pc = 0x00001004U").expect("delay slot");
-        let dispatch = cpp.find("state.pc = branch_taken_00001000").expect("branch dispatch");
+        let dispatch = cpp
+            .find("state.pc = branch_taken_00001000")
+            .expect("branch dispatch");
         assert!(condition < link && link < delay && delay < dispatch);
         assert!(cpp.contains("0x00001008U"));
         assert!(cpp.contains("0x0000100CU"));
@@ -304,7 +331,8 @@ mod tests {
             vec![entry(0x1000)],
             &roots,
             AnalysisLimits::default(),
-        ).expect("synthetic CFG");
+        )
+        .expect("synthetic CFG");
         let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
         let cpp = emit_cpp_with_entry(&program, 0x1000).expect("initialized C++ module");
 
@@ -322,13 +350,22 @@ mod tests {
         ];
         let segments = [segment(0x2000, &words)];
         let roots = [0x2000];
-        let graph = analysis::discover_cfg(&segments, vec![entry(0x2000)], &roots, AnalysisLimits::default())
-            .expect("synthetic jalr CFG");
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x2000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic jalr CFG");
         let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
         let cpp = emit_cpp(&program).expect("C++ output");
 
-        let capture = cpp.find("dynamic_target_00002000").expect("dynamic target capture");
-        let link = cpp.find("state.gpr[8].low = static_cast").expect("aliased link write");
+        let capture = cpp
+            .find("dynamic_target_00002000")
+            .expect("dynamic target capture");
+        let link = cpp
+            .find("state.gpr[8].low = static_cast")
+            .expect("aliased link write");
         let delay = cpp.find("state.pc = 0x00002004U").expect("delay slot");
         assert!(capture < link && link < delay);
     }
