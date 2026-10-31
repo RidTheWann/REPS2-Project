@@ -102,6 +102,8 @@ The first EE memory slice uses a caller-owned `std::span<std::uint8_t>` for 32 M
 
 This is not a full virtual-memory implementation. COP0/TLB mappings, cache behavior, exceptions/EXL state, bus error delivery, scratchpad storage, BIOS reads, IOP RAM, VU memories, GS/IPU/timers/DMA/SIF registers and all other MMIO are not implemented. Known device/reserved regions are blocked explicitly rather than aliased to main RAM. The host must attach a valid main-RAM span before executing generated code that uses these instructions.
 
+The ELF image stage converts an eligible static MIPS ET_EXEC into a 32 MiB physical main-RAM snapshot. Each PT_LOAD segment is translated through the supported direct/uncached/accelerated/KSEG aliases; zero-filled BSS tails are preserved. Segment ranges that overlap after alias translation, cross an alias boundary, or touch unsupported regions are rejected. Generated C++ contains an entry-specific initializer which validates the supplied snapshot and backing span, copies the bytes, resets GPR state and assigns the ELF entry PC. The command writes the snapshot beside the C++ file as a .ram.bin file. It rejects ET_DYN/relocatable images and allocated REL/RELA relocations: no relocation is silently skipped or guessed. This image loader is still not a full PS2 ELF loader; it does not model TLB/COP0, exception state, cache, expansion RAM, or device initialization.
+
 ### Validation
 
 Synthetic Rust tests, generated-code compilation/execution, instruction semantic tests, differential checks, and game-stage regression are separate layers. Parsing a real ELF or compiling a generated translation unit is not evidence that a game boots or is playable.
@@ -118,6 +120,8 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 - Synthetic generated control-flow code compiled and executed against the C++20 runtime on Windows/MSVC and Linux/GCC.
 - Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed-offset effective-address generation.
 - Checked little-endian EE main-RAM accesses over a caller-owned 32 MiB backing span with documented aliases and explicit MMIO/unmapped failures.
+- Default-map ET_EXEC PT_LOAD image construction with BSS zeroing, physical alias overlap rejection, and allocated-relocation refusal.
+- Generated ELF-entry RAM initializer, validated against synthetic 32 MiB image snapshots on Windows/MSVC and Linux/GCC.
 - Generated memory code executed in CI for signed/unsigned extension, write widths, all implemented RAM aliases, address alignment, unsupported devices and backing-span bounds.
 - CMake-generated C++ smoke test executed on Windows and Linux CI.
 

@@ -42,6 +42,14 @@ These projects have different goals and different completion levels. Their demos
 - PCSX2's virtual-memory documentation notes that EE mappings depend on COP0/TLB state and that the memory map is more complex than the direct aliases shown in simplified tables. REPS2's initial memory slice deliberately does not claim to implement TLB remapping or the complete physical bus map.
 - The generated backend performs effective-address arithmetic in 32-bit unsigned arithmetic after sign-extending the 16-bit offset. The CPU memory helper validates alignment and backing bounds before access. Device/reserved regions are surfaced as unsupported, never mapped to ordinary RAM.
 
+## ELF load-image policy
+
+- REPS2 currently constructs an initial memory image only for little-endian MIPS ET_EXEC files whose PT_LOAD virtual addresses can be translated using the documented default 32 MiB EE main-RAM aliases.
+- Segment placement is performed in physical RAM coordinates. A pair of virtual aliases that overlap physically is rejected rather than relying on program-header order.
+- PT_LOAD file bytes are copied and BSS tails remain zero. The generated source gets a fixed ELF entry point; the companion raw image is a full 32 MiB snapshot.
+- REL/RELA entries targeting SHF_ALLOC sections are rejected until their specific R_MIPS relocation semantics are implemented and differential-tested. Debug/non-allocated relocations do not change the executable image.
+- ET_DYN, relocatable objects, expansion RAM, custom TOOL mappings, COP0/TLB mappings, and segments outside default main RAM are not silently accepted.
+
 ## Provenance rules
 
 1. REPS2 source is independently authored.

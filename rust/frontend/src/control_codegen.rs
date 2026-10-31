@@ -67,6 +67,32 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
     Ok(output)
 }
 
+/// Emits the CFG dispatcher plus the ELF entry-point/RAM-image initializer.
+/// The adjacent .ram.bin file is supplied by the host as a 32 MiB byte span.
+pub fn emit_cpp_with_entry(
+    program: &ControlProgram,
+    guest_entry_pc: u32,
+) -> Result<String, ControlError> {
+    if !program.blocks.contains_key(&guest_entry_pc)
+        || !program.entry_points.contains(&guest_entry_pc)
+    {
+        return Err(ControlError::InvalidEntryPoint(guest_entry_pc));
+    }
+
+    let mut output = emit_cpp(program)?;
+    output.push_str(&format!(
+        "\nnamespace reps2::generated {{\n\\
+         [[nodiscard]] reps2::runtime::Status initialize_ee_state(\n\\
+             reps2::runtime::EeState& state,\n\\
+             std::span<const std::uint8_t> main_ram_image\n\\
+         ) noexcept {{\n\\
+             return reps2::runtime::initialize_ee_state(state, main_ram_image, 0x{guest_entry_pc:08X}U);\n\\
+         }}\n\\
+         }} // namespace reps2::generated\n"
+    ));
+    Ok(output)
+}
+
 fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: usize) {
     match terminator {
         ControlTerminator::Fallthrough { next_pc } => {
@@ -250,6 +276,30 @@ mod tests {
         assert!(condition < link && link < delay && delay < dispatch);
         assert!(cpp.contains("0x00001008U"));
         assert!(cpp.contains("0x0000100CU"));
+    }
+
+    #[test]
+    fn adds_runtime_initializer_for_the_selected_elf_entry() {
+        let words = [
+            0x2408_0005, // addiu t0, zero, 5
+            0x03E0_0008, // jr ra
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x1000, &words)];
+        let roots = [0x1000];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &roots,
+            AnalysisLimits::default(),
+        ).expect("synthetic CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp_with_entry(&program, 0x1000).expect("initialized C++ module");
+
+        assert!(cpp.contains("initialize_ee_state"));
+        assert!(cpp.contains("main_ram_image"));
+        assert!(cpp.contains("0x00001000U"));
+        assert!(emit_cpp_with_entry(&program, 0x2000).is_err());
     }
 
     #[test]
