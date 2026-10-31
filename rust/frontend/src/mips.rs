@@ -11,7 +11,7 @@ pub enum Opcode {
     Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
     J, Jal, Beq, Bne, Blez, Bgtz, Bltz, Bgez, Bltzal, Bgezal,
     Addi, Addiu, Slti, Sltiu, Andi, Ori, Xori, Lui,
-    Lb, Lh, Lw, Lbu, Lhu, Lwu, Sb, Sh, Sw,
+    Lb, Lh, Lw, Lbu, Lhu, Lwu, Sb, Sh, Sw, Lq, Sq,
     Unknown,
 }
 
@@ -71,6 +71,8 @@ impl Opcode {
             Self::Sb => "sb",
             Self::Sh => "sh",
             Self::Sw => "sw",
+            Self::Lq => "lq",
+            Self::Sq => "sq",
             Self::Unknown => "unknown",
         }
     }
@@ -238,6 +240,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x28 => Opcode::Sb,
             0x29 => Opcode::Sh,
             0x2B => Opcode::Sw,
+            0x1E => Opcode::Lq,
+            0x1F => Opcode::Sq,
             _ => Opcode::Unknown,
         };
     }
@@ -287,6 +291,8 @@ mod tests {
             ((0x28 << 26) | (4 << 21) | (5 << 16) | 1, Opcode::Sb),
             ((0x29 << 26) | (4 << 21) | (5 << 16) | 2, Opcode::Sh),
             ((0x2B << 26) | (4 << 21) | (5 << 16) | 4, Opcode::Sw),
+            ((0x1E << 26) | (4 << 21) | (5 << 16) | 8, Opcode::Lq),
+            ((0x1F << 26) | (4 << 21) | (5 << 16) | 12, Opcode::Sq),
         ];
         for (word, expected) in cases {
             let decoded = decode(word, 0x1000);

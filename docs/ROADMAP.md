@@ -48,8 +48,10 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] Synthetic generated C++ compiled and executed against the minimal EE state ABI on Windows and Linux CI.
 - [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
+- [x] Typed LQ/SQ 128-bit transfers with explicit little-endian lane assembly and EE 16-byte address rounding.
 - [x] Main-RAM backing span, documented aliases, endian-safe accessors, natural-alignment checks and explicit MMIO/unmapped statuses.
 - [x] Generated memory code compiled/executed on Windows/MSVC and Linux/GCC for load extension, store width, aliasing, alignment and bounds.
+- [x] Generated LQ/SQ code compiled/executed on Windows/MSVC and Linux/GCC for both GPR lanes, 16-byte rounding, little-endian layout and backing-span bounds.
 - [x] Generated ELF entry-point initializer which validates/copies a companion RAM image, resets GPRs and selects the ELF entry PC.
 - [x] Reject allocated REL/RELA relocations and ELF segments outside the implemented default main-RAM mapping.
 - [ ] Full EE virtual-memory/TLB mapping, exception delivery, cache semantics and memory-mapped device models.
