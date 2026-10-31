@@ -86,10 +86,16 @@ impl<R: Read + Seek> Iso9660<R> {
         }
 
         let mut primary_descriptor: Option<[u8; LOGICAL_BLOCK_SIZE as usize]> = None;
+        let mut declared_volume_blocks: Option<u32> = None;
         let mut found_terminator = false;
 
         for descriptor_index in 0..MAX_VOLUME_DESCRIPTORS {
             let lba = VOLUME_DESCRIPTOR_START_LBA + descriptor_index;
+            if declared_volume_blocks.is_some_and(|blocks| lba >= u64::from(blocks)) {
+                return Err(Error::new(
+                    "ISO volume descriptor sequence extends beyond the declared volume space",
+                ));
+            }
             let offset = lba.checked_mul(LOGICAL_BLOCK_SIZE)
                 .ok_or_else(|| Error::new("volume descriptor offset overflow"))?;
             let mut sector = [0u8; LOGICAL_BLOCK_SIZE as usize];
@@ -112,6 +118,13 @@ impl<R: Read + Seek> Iso9660<R> {
                     if primary_descriptor.is_some() {
                         return Err(Error::new("ISO contains more than one Primary Volume Descriptor"));
                     }
+                    let volume_blocks = read_both_u32(&sector, 80, "volume space size")?;
+                    if u64::from(volume_blocks) <= lba {
+                        return Err(Error::new(
+                            "Primary Volume Descriptor lies outside its declared volume space",
+                        ));
+                    }
+                    declared_volume_blocks = Some(volume_blocks);
                     primary_descriptor = Some(sector);
                 }
                 255 => {
@@ -766,6 +779,19 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|entry| entry.name == "SYSTEM.CNF;1"));
         assert!(entries.iter().any(|entry| normalize_identifier(&entry.name) == "GAME.ELF"));
+    }
+
+    #[test]
+    fn rejects_descriptor_sequence_beyond_declared_volume_space() {
+        let mut image = valid_image();
+        let pvd_offset = 16 * LOGICAL_BLOCK_SIZE as usize;
+        put_both_u32(
+            &mut image[pvd_offset..pvd_offset + LOGICAL_BLOCK_SIZE as usize],
+            80,
+            17,
+        );
+        let error = Iso9660::open(Cursor::new(image)).expect_err("descriptor sequence out of volume");
+        assert!(error.to_string().contains("descriptor sequence extends beyond"));
     }
 
     #[test]
