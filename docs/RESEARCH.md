@@ -41,6 +41,7 @@ These projects have different goals and different completion levels. Their demos
 - PCSX2's R5900 load/store implementation is used only as an independent behavioural reference for the current subset: LB/LH/LW sign-extend into the low 64-bit GPR lane; LBU/LHU/LWU zero-extend; SB/SH/SW transfer only their selected low bits; halfword and word accesses check natural alignment. REPS2's implementation and synthetic tests are independently authored.
 - PCSX2's virtual-memory documentation notes that EE mappings depend on COP0/TLB state and that the memory map is more complex than the direct aliases shown in simplified tables. REPS2's initial memory slice deliberately does not claim to implement TLB remapping or the complete physical bus map.
 - The generated backend performs effective-address arithmetic in 32-bit unsigned arithmetic after sign-extending the 16-bit offset. The CPU memory helper validates alignment and backing bounds before access. Device/reserved regions are surfaced as unsupported, never mapped to ordinary RAM.
+- The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 (2014), §§5.1.2–5.1.3 identifies LD/SD as CPU doubleword load/store operations and documents natural-alignment requirements for these instructions before Release 6 (§5.1.3). It is used as the general ISA baseline; EE-specific address translation, 128-bit GPR lane effects, and exceptions remain bounded by REPS2's explicit runtime model and require target-specific conformance tests.
 
 ## ELF load-image policy
 

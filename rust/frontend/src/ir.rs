@@ -62,6 +62,8 @@ pub enum Operation {
     StoreByte { src: Gpr, base: Gpr, offset: u16 },
     StoreHalf { src: Gpr, base: Gpr, offset: u16 },
     StoreWord { src: Gpr, base: Gpr, offset: u16 },
+    LoadDoubleword { dst: Gpr, base: Gpr, offset: u16 },
+    StoreDoubleword { src: Gpr, base: Gpr, offset: u16 },
     LoadQuadword { dst: Gpr, base: Gpr, offset: u16 },
     StoreQuadword { src: Gpr, base: Gpr, offset: u16 },
 }
@@ -267,6 +269,12 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
             },
             Opcode::Sw => Operation::StoreWord {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Ld => Operation::LoadDoubleword {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Sd => Operation::StoreDoubleword {
                 src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
             },
             Opcode::Lq => Operation::LoadQuadword {

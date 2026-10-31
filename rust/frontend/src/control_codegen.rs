@@ -29,10 +29,12 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
              using reps2::runtime::load_u8;\n\
              using reps2::runtime::load_u16;\n\
              using reps2::runtime::load_u32;\n\
+             using reps2::runtime::load_u64;\n\
              using reps2::runtime::load_u128;\n\
              using reps2::runtime::store_u8;\n\
              using reps2::runtime::store_u16;\n\
              using reps2::runtime::store_u32;\n\
+             using reps2::runtime::store_u64;\n\
              using reps2::runtime::store_u128;\n\
              std::uint64_t remaining = instruction_budget;\n\
              state.gpr[0] = {};\n\
