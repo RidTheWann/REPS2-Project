@@ -73,6 +73,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Decode, lift, and AOT-lower register-variable SLLV/SRLV/SRAV and DSLLV/DSRLV/DSRAV; test 5-bit/6-bit shift-count masking, word sign extension, arithmetic sign fill, and GPR upper-lane preservation through compiled native code.
 - [x] Expose conservative GPR/HI-LO, memory, control-flow, and possible-exception metadata for currently decoded opcodes; unknown encodings remain opaque.
 - [x] Decode R5900 three-operand MULT/MULTU with optional `rd`, plus base EE MTHI/MTLO/MFHI/MFLO; division, MMI pipeline-1, and full instruction-family coverage remain separate work.
+- [x] Decode and lift NOR, SLT, SLTU, SLTI and SLTIU into typed scalar IR; SLTIU's immediate is sign-extended before unsigned comparison.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
 - [x] Direct branch/call recovery and unresolved indirect-edge tracking.
 - [x] Entry/function root discovery from ELF entry and STT_FUNC symbols (indirect function discovery remains unresolved).
@@ -88,6 +89,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Deterministic C++20 source generation for the implemented IR operations.
 - [x] Synthetic generated C++ compiled and executed against the minimal EE state ABI on Windows and Linux CI.
 - [x] AOT-lower and execute MTHI/MTLO/MFHI/MFLO and signed/unsigned R5900 MULT/MULTU in a dedicated native smoke test on Windows/MSVC and Linux/GCC, including HI/LO and `rd` results.
+- [x] AOT-lower and execute NOR/SLT/SLTU/SLTI/SLTIU with signed 64-bit boundary, unsigned ordering, negative immediate, GPR[0], and upper-lane preservation tests on Windows/MSVC and Linux/GCC.
 - [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
 - [x] Typed LQ/SQ 128-bit transfers with explicit little-endian lane assembly and EE 16-byte address rounding.

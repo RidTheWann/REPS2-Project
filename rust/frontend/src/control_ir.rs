@@ -530,6 +530,8 @@ mod tests {
             0x0020_0011, // mthi r1
             0x0000_1010, // mfhi r2
             0x0022_1818, // mult r3, r1, r2
+            0x0022_302A, // slt r6, r1, r2
+            0x0022_3827, // nor r7, r1, r2
             0x03E0_0008, // jr ra
             0x0000_0000, // delay slot
         ];
@@ -540,12 +542,18 @@ mod tests {
         let program = ControlProgram::lift(&graph).expect("HI/LO scalar operations lift in CFG");
 
         let block = &program.blocks[&0x3000];
-        assert_eq!(block.instructions.len(), 3);
+        assert_eq!(block.instructions.len(), 5);
         assert!(matches!(block.instructions[0].operation, ir::Operation::MoveToHi { src } if src.index() == 1));
         assert!(matches!(block.instructions[1].operation, ir::Operation::MoveFromHi { dst } if dst.index() == 2));
         assert!(matches!(block.instructions[2].operation,
             ir::Operation::MultiplyWordSigned { dst, lhs, rhs }
                 if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2));
+        assert!(matches!(block.instructions[3].operation,
+            ir::Operation::SetLessThanSigned64 { dst, lhs, rhs }
+                if dst.index() == 6 && lhs.index() == 1 && rhs.index() == 2));
+        assert!(matches!(block.instructions[4].operation,
+            ir::Operation::Nor64 { dst, lhs, rhs }
+                if dst.index() == 7 && lhs.index() == 1 && rhs.index() == 2));
         assert!(matches!(&block.terminator, ControlTerminator::Return { .. }));
         assert_eq!(program.unsupported_count(), 0);
     }

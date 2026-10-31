@@ -832,4 +832,50 @@ mod tests {
         assert!(div.writes_hi && div.writes_lo);
     }
 
+
+    #[test]
+    fn decodes_r5900_compare_and_nor_operations() {
+        let register_cases = [
+            (((4 << 21) | (5 << 16) | (6 << 11) | 0x27), Opcode::Nor),
+            (((4 << 21) | (5 << 16) | (7 << 11) | 0x2A), Opcode::Slt),
+            (((4 << 21) | (5 << 16) | (8 << 11) | 0x2B), Opcode::Sltu),
+        ];
+        for (word, expected) in register_cases {
+            let decoded = decode(word, 0x7000);
+            assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
+            assert_eq!((decoded.rs, decoded.rt), (4, 5));
+            assert_eq!(decoded.shift_amount, 0);
+            assert!(!decoded.has_delay_slot);
+        }
+
+        let immediate_cases = [
+            (((0x0A << 26) | (9 << 21) | (10 << 16) | 0x8001), Opcode::Slti),
+            (((0x0B << 26) | (11 << 21) | (12 << 16) | 0xFFFF), Opcode::Sltiu),
+        ];
+        for (word, expected) in immediate_cases {
+            let decoded = decode(word, 0x7100);
+            assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
+            assert_eq!(decoded.signed_immediate(), if expected == Opcode::Slti { -32767 } else { -1 });
+        }
+    }
+
+    #[test]
+    fn effects_track_compare_and_nor_dependencies_without_exceptions() {
+        let nor = decode((4 << 21) | (5 << 16) | (6 << 11) | 0x27, 0x7200).effects();
+        assert_eq!(nor.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(nor.gpr_write_mask, 1 << 6);
+        assert_eq!(nor.memory, MemoryEffect::None);
+        assert!(!nor.may_raise_exception);
+
+        let slt = decode((4 << 21) | (5 << 16) | (7 << 11) | 0x2A, 0x7204).effects();
+        assert_eq!(slt.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(slt.gpr_write_mask, 1 << 7);
+        assert!(!slt.may_raise_exception);
+
+        let sltiu = decode((0x0B << 26) | (8 << 21) | (9 << 16) | 0xFFFF, 0x7208).effects();
+        assert_eq!(sltiu.gpr_read_mask, 1 << 8);
+        assert_eq!(sltiu.gpr_write_mask, 1 << 9);
+        assert!(!sltiu.may_raise_exception);
+    }
+
 }

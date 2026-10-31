@@ -43,6 +43,11 @@ pub enum Operation {
     MoveToLo { src: Gpr },
     MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    Nor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    SetLessThanSigned64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    SetLessThanUnsigned64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    SetLessThanImmediateSigned64 { dst: Gpr, src: Gpr, immediate: u16 },
+    SetLessThanImmediateUnsigned64 { dst: Gpr, src: Gpr, immediate: u16 },
     AddWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     AddImmediateWord { dst: Gpr, src: Gpr, immediate: u16 },
     AddUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -234,6 +239,21 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             },
             Opcode::Multu => Operation::MultiplyWordUnsigned {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Nor => Operation::Nor64 {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Slt => Operation::SetLessThanSigned64 {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Sltu => Operation::SetLessThanUnsigned64 {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Slti => Operation::SetLessThanImmediateSigned64 {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+            },
+            Opcode::Sltiu => Operation::SetLessThanImmediateUnsigned64 {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
             },
             Opcode::Add => Operation::AddWord {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
@@ -617,6 +637,38 @@ mod tests {
             Operation::MultiplyWordSigned { dst, lhs, rhs } if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5));
         assert!(matches!(program.instructions()[5].operation,
             Operation::MultiplyWordUnsigned { dst, lhs, rhs } if dst.index() == 7 && lhs.index() == 4 && rhs.index() == 5));
+    }
+
+
+    #[test]
+    fn lifts_r5900_signed_unsigned_comparisons_and_nor() {
+        let words = [
+            (4 << 21) | (5 << 16) | (6 << 11) | 0x27, // nor r6, r4, r5
+            (4 << 21) | (5 << 16) | (7 << 11) | 0x2A, // slt r7, r4, r5
+            (4 << 21) | (5 << 16) | (8 << 11) | 0x2B, // sltu r8, r4, r5
+            (0x0A << 26) | (9 << 21) | (10 << 16) | 0x8001, // slti r10, r9, -32767
+            (0x0B << 26) | (11 << 21) | (12 << 16) | 0xFFFF, // sltiu r12, r11, -1
+        ];
+        let decoded_stream = words.iter().enumerate()
+            .map(|(index, word)| decoded(*word, 0xA000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("R5900 comparisons and NOR lift");
+
+        assert!(matches!(program.instructions()[0].operation,
+            Operation::Nor64 { dst, lhs, rhs }
+                if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5));
+        assert!(matches!(program.instructions()[1].operation,
+            Operation::SetLessThanSigned64 { dst, lhs, rhs }
+                if dst.index() == 7 && lhs.index() == 4 && rhs.index() == 5));
+        assert!(matches!(program.instructions()[2].operation,
+            Operation::SetLessThanUnsigned64 { dst, lhs, rhs }
+                if dst.index() == 8 && lhs.index() == 4 && rhs.index() == 5));
+        assert!(matches!(program.instructions()[3].operation,
+            Operation::SetLessThanImmediateSigned64 { dst, src, immediate: 0x8001 }
+                if dst.index() == 10 && src.index() == 9));
+        assert!(matches!(program.instructions()[4].operation,
+            Operation::SetLessThanImmediateUnsigned64 { dst, src, immediate: 0xFFFF }
+                if dst.index() == 12 && src.index() == 11));
     }
 
 }
