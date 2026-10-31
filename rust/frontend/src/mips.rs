@@ -10,6 +10,7 @@ pub enum Opcode {
     Mfhi, Mflo, Mult, Multu, Div, Divu,
     Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
     Daddu, Dsubu, Daddiu, Dsll, Dsrl, Dsra, Dsll32, Dsrl32, Dsra32,
+    Sllv, Srlv, Srav, Dsllv, Dsrlv, Dsrav,
     J, Jal, Beq, Bne, Blez, Bgtz, Bltz, Bgez, Bltzal, Bgezal,
     Addi, Addiu, Slti, Sltiu, Andi, Ori, Xori, Lui,
     Lb, Lh, Lw, Lbu, Lhu, Lwu, Sb, Sh, Sw,
@@ -56,6 +57,12 @@ impl Opcode {
             Self::Dsll32 => "dsll32",
             Self::Dsrl32 => "dsrl32",
             Self::Dsra32 => "dsra32",
+            Self::Sllv => "sllv",
+            Self::Srlv => "srlv",
+            Self::Srav => "srav",
+            Self::Dsllv => "dsllv",
+            Self::Dsrlv => "dsrlv",
+            Self::Dsrav => "dsrav",
             Self::J => "j",
             Self::Jal => "jal",
             Self::Beq => "beq",
@@ -212,6 +219,12 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x3C if rs == 0 => Opcode::Dsll32,
             0x3E if rs == 0 => Opcode::Dsrl32,
             0x3F if rs == 0 => Opcode::Dsra32,
+            0x04 if shift_amount == 0 => Opcode::Sllv,
+            0x06 if shift_amount == 0 => Opcode::Srlv,
+            0x07 if shift_amount == 0 => Opcode::Srav,
+            0x14 if shift_amount == 0 => Opcode::Dsllv,
+            0x16 if shift_amount == 0 => Opcode::Dsrlv,
+            0x17 if shift_amount == 0 => Opcode::Dsrav,
             _ => Opcode::Unknown,
         };
     } else {
@@ -389,6 +402,29 @@ mod tests {
             assert!(!decoded.has_delay_slot);
         }
         assert_eq!(decode((0x19 << 26) | (8 << 21) | (9 << 16) | 0xFFF0, 0).signed_immediate(), -16);
+    }
+
+    #[test]
+    fn decodes_register_variable_word_and_doubleword_shifts() {
+        let cases = [
+            ((4 << 21) | (5 << 16) | (6 << 11) | 0x04, Opcode::Sllv),
+            ((4 << 21) | (5 << 16) | (7 << 11) | 0x06, Opcode::Srlv),
+            ((4 << 21) | (5 << 16) | (8 << 11) | 0x07, Opcode::Srav),
+            ((4 << 21) | (5 << 16) | (30 << 11) | 0x14, Opcode::Dsllv),
+            ((4 << 21) | (5 << 16) | (31 << 11) | 0x16, Opcode::Dsrlv),
+            ((4 << 21) | (5 << 16) | (22 << 11) | 0x17, Opcode::Dsrav),
+        ];
+        for (word, expected) in cases {
+            assert_eq!(decode(word, 0x6000).opcode, expected, "word 0x{word:08X}");
+        }
+    }
+
+    #[test]
+    fn rejects_nonzero_reserved_shift_amount_for_variable_shifts() {
+        for function in [0x04, 0x06, 0x07, 0x14, 0x16, 0x17] {
+            let invalid = (4 << 21) | (5 << 16) | (6 << 11) | (1 << 6) | function;
+            assert!(!decode(invalid, 0).is_supported(), "function 0x{function:02X}");
+        }
     }
 
     #[test]
