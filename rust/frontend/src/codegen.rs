@@ -557,8 +557,8 @@ mod tests {
         assert!(cpp.contains("state.gpr[10].low = state.gpr[8].low + state.gpr[9].low"));
         assert!(cpp.contains("state.gpr[11].low = state.gpr[8].low - state.gpr[9].low"));
         assert!(cpp.contains("static_cast<std::uint64_t>(-16LL)"));
-        assert!(cpp.contains("state.gpr[13].low << 7U"));
-        assert!(cpp.contains("state.gpr[14].low >> 39U"));
+        assert!(cpp.contains("state.gpr[13].low = state.gpr[9].low << 7U"));
+        assert!(cpp.contains("state.gpr[14].low = state.gpr[9].low >> 39U"));
         assert!(cpp.contains("arithmetic_shift_right_doubleword(state.gpr[9].low, 39U)"));
         assert!(!cpp.contains("state.gpr[10] ="));
     }
