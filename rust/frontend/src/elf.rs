@@ -500,6 +500,12 @@ pub fn load_segments(bytes: &[u8], image: &Image, maximum_total_memory: usize) -
     let mut segments = Vec::new();
 
     for header in image.program_headers.iter().filter(|header| header.kind == PT_LOAD) {
+        if header.file_size > header.memory_size {
+            return Err(Error::new("ELF PT_LOAD file size exceeds memory size"));
+        }
+        if u64::from(header.virtual_address) + u64::from(header.memory_size) > (u64::from(u32::MAX) + 1) {
+            return Err(Error::new("ELF PT_LOAD virtual range overflows 32-bit address space"));
+        }
         let memory_size = usize::try_from(header.memory_size)
             .map_err(|_| Error::new("ELF segment memory size does not fit host size"))?;
         total = total.checked_add(memory_size).ok_or_else(|| Error::new("ELF loaded memory size overflow"))?;
@@ -681,6 +687,10 @@ mod tests {
         let loaded = load_segments(&bytes, &image, 1024).expect("PT_LOAD materializes");
         assert_eq!(&loaded[0].bytes[..8], &[1, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!(&loaded[0].bytes[8..], &[0; 8]);
+
+        let mut malformed_image = image.clone();
+        malformed_image.program_headers[0].file_size = 17;
+        assert!(load_segments(&bytes, &malformed_image, 1024).is_err());
     }
 
     #[test]
