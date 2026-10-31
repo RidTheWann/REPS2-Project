@@ -48,6 +48,12 @@ int main() {
     state.gpr[25].high = 0xF1F2F3F4F5F6F7F8ULL;
     state.gpr[26].high = 0x2626262626262626ULL;
     state.gpr[27].high = 0x2727272727272727ULL;
+    state.gpr[28].low = 0x0123456789ABCDEFULL;
+    state.gpr[28].high = 0x2828282828282828ULL;
+    state.gpr[29].low = 0xFEDCBA9876543210ULL;
+    state.gpr[29].high = 0x2929292929292929ULL;
+    state.gpr[30].high = 0x3030303030303030ULL;
+    state.gpr[31].high = 0x3131313131313131ULL;
 
     if (reps2::generated::execute(state) != Status::ok) return 1;
 
@@ -107,6 +113,14 @@ int main() {
         || state.gpr[16].high != 0x1616161616161616ULL
         || state.gpr[18].high != 0x1818181818181818ULL
         || state.gpr[19].high != 0x1919191919191919ULL) return 30;
+
+    // MMI pipeline-1 HI1/LO1 moves are independent of base HI/LO.
+    if (state.hi1 != 0x0123456789ABCDEFULL) return 31;
+    if (state.lo1 != 0xFEDCBA9876543210ULL) return 32;
+    if (state.gpr[30].low != 0x0123456789ABCDEFULL) return 33;
+    if (state.gpr[31].low != 0xFEDCBA9876543210ULL) return 34;
+    if (state.gpr[30].high != 0x3030303030303030ULL
+        || state.gpr[31].high != 0x3131313131313131ULL) return 35;
 
     return 0;
 }

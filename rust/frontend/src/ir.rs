@@ -42,6 +42,10 @@ pub enum Operation {
     MoveFromLo { dst: Gpr },
     MoveToHi { src: Gpr },
     MoveToLo { src: Gpr },
+    MoveFromHi1 { dst: Gpr },
+    MoveFromLo1 { dst: Gpr },
+    MoveToHi1 { src: Gpr },
+    MoveToLo1 { src: Gpr },
     MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Nor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -246,6 +250,18 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: gpr(instruction.rs),
             },
             Opcode::Mtlo => Operation::MoveToLo {
+                src: gpr(instruction.rs),
+            },
+            Opcode::Mfhi1 => Operation::MoveFromHi1 {
+                dst: gpr(instruction.rd),
+            },
+            Opcode::Mflo1 => Operation::MoveFromLo1 {
+                dst: gpr(instruction.rd),
+            },
+            Opcode::Mthi1 => Operation::MoveToHi1 {
+                src: gpr(instruction.rs),
+            },
+            Opcode::Mtlo1 => Operation::MoveToLo1 {
                 src: gpr(instruction.rs),
             },
             Opcode::Mult => Operation::MultiplyWordSigned {
@@ -820,6 +836,34 @@ mod tests {
             Operation::MultiplyWordSigned { dst, lhs, rhs } if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5));
         assert!(matches!(program.instructions()[5].operation,
             Operation::MultiplyWordUnsigned { dst, lhs, rhs } if dst.index() == 7 && lhs.index() == 4 && rhs.index() == 5));
+    }
+
+    #[test]
+    fn lifts_r5900_mmi_pipeline_one_hilo_moves() {
+        let words = [
+            (0x1C << 26) | (4 << 21) | 0x11,
+            (0x1C << 26) | (5 << 21) | 0x13,
+            (0x1C << 26) | (6 << 11) | 0x10,
+            (0x1C << 26) | (7 << 11) | 0x12,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xD000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("MMI pipeline-1 HI/LO moves lift");
+        assert!(
+            matches!(program.instructions()[0].operation, Operation::MoveToHi1 { src } if src.index() == 4)
+        );
+        assert!(
+            matches!(program.instructions()[1].operation, Operation::MoveToLo1 { src } if src.index() == 5)
+        );
+        assert!(
+            matches!(program.instructions()[2].operation, Operation::MoveFromHi1 { dst } if dst.index() == 6)
+        );
+        assert!(
+            matches!(program.instructions()[3].operation, Operation::MoveFromLo1 { dst } if dst.index() == 7)
+        );
     }
 
     #[test]
