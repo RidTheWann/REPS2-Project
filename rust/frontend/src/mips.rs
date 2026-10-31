@@ -11,7 +11,7 @@ pub enum Opcode {
     Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
     J, Jal, Beq, Bne, Blez, Bgtz, Bltz, Bgez, Bltzal, Bgezal,
     Addi, Addiu, Slti, Sltiu, Andi, Ori, Xori, Lui,
-    Lb, Lh, Lw, Lbu, Lhu, Sb, Sh, Sw,
+    Lb, Lh, Lw, Lbu, Lhu, Lwu, Sb, Sh, Sw,
     Unknown,
 }
 
@@ -67,6 +67,7 @@ impl Opcode {
             Self::Lw => "lw",
             Self::Lbu => "lbu",
             Self::Lhu => "lhu",
+            Self::Lwu => "lwu",
             Self::Sb => "sb",
             Self::Sh => "sh",
             Self::Sw => "sw",
@@ -233,6 +234,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x23 => Opcode::Lw,
             0x24 => Opcode::Lbu,
             0x25 => Opcode::Lhu,
+            0x27 => Opcode::Lwu,
             0x28 => Opcode::Sb,
             0x29 => Opcode::Sh,
             0x2B => Opcode::Sw,
@@ -271,6 +273,28 @@ mod tests {
         assert_eq!(decoded.opcode, Opcode::Beq);
         assert!(decoded.has_delay_slot);
         assert_eq!(decoded.target, 0x1014);
+    }
+
+    #[test]
+    fn decodes_load_store_width_and_signedness_variants() {
+        let cases = [
+            ((0x20 << 26) | (4 << 21) | (5 << 16) | 0xFFFC, Opcode::Lb),
+            ((0x21 << 26) | (4 << 21) | (5 << 16) | 2, Opcode::Lh),
+            ((0x23 << 26) | (4 << 21) | (5 << 16) | 4, Opcode::Lw),
+            ((0x24 << 26) | (4 << 21) | (5 << 16) | 6, Opcode::Lbu),
+            ((0x25 << 26) | (4 << 21) | (5 << 16) | 8, Opcode::Lhu),
+            ((0x27 << 26) | (4 << 21) | (5 << 16) | 12, Opcode::Lwu),
+            ((0x28 << 26) | (4 << 21) | (5 << 16) | 1, Opcode::Sb),
+            ((0x29 << 26) | (4 << 21) | (5 << 16) | 2, Opcode::Sh),
+            ((0x2B << 26) | (4 << 21) | (5 << 16) | 4, Opcode::Sw),
+        ];
+        for (word, expected) in cases {
+            let decoded = decode(word, 0x1000);
+            assert_eq!(decoded.opcode, expected);
+            assert_eq!(decoded.rs, 4);
+            assert_eq!(decoded.rt, 5);
+        }
+        assert_eq!(decode((0x20 << 26) | (4 << 21) | (5 << 16) | 0xFFFC, 0).signed_immediate(), -4);
     }
 
     #[test]

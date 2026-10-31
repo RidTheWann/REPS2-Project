@@ -19,6 +19,12 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::sign_extend_immediate;\n\
              using reps2::runtime::sign_extend_word;\n\
              using reps2::runtime::sign_extend_word_signed;\n\
+             using reps2::runtime::load_u8;\n\
+             using reps2::runtime::load_u16;\n\
+             using reps2::runtime::load_u32;\n\
+             using reps2::runtime::store_u8;\n\
+             using reps2::runtime::store_u16;\n\
+             using reps2::runtime::store_u32;\n\
              state.gpr[0] = {};\n"
     );
 
@@ -82,7 +88,111 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::ShiftRightArithmeticWord { dst, src, amount } => {
             emit_shift(output, dst, src, amount, "arithmetic", true);
         }
+        Operation::LoadByteSigned { dst, base, offset } => {
+            emit_memory_load(output, index, dst, base, offset, 1, true);
+        }
+        Operation::LoadByteUnsigned { dst, base, offset } => {
+            emit_memory_load(output, index, dst, base, offset, 1, false);
+        }
+        Operation::LoadHalfSigned { dst, base, offset } => {
+            emit_memory_load(output, index, dst, base, offset, 2, true);
+        }
+        Operation::LoadHalfUnsigned { dst, base, offset } => {
+            emit_memory_load(output, index, dst, base, offset, 2, false);
+        }
+        Operation::LoadWordSigned { dst, base, offset } => {
+            emit_memory_load(output, index, dst, base, offset, 4, true);
+        }
+        Operation::LoadWordUnsigned { dst, base, offset } => {
+            emit_memory_load(output, index, dst, base, offset, 4, false);
+        }
+        Operation::StoreByte { src, base, offset } => {
+            emit_memory_store(output, index, src, base, offset, 1);
+        }
+        Operation::StoreHalf { src, base, offset } => {
+            emit_memory_store(output, index, src, base, offset, 2);
+        }
+        Operation::StoreWord { src, base, offset } => {
+            emit_memory_store(output, index, src, base, offset, 4);
+        }
     }
+}
+
+fn emit_effective_address(output: &mut String, tag: &str, base: Gpr, offset: u16) {
+    output.push_str(&format!(
+        "    const std::uint32_t effective_address_{tag} = static_cast<std::uint32_t>(state.gpr[{}].low) + static_cast<std::uint32_t>(sign_extend_immediate(0x{offset:04X}U));\n",
+        base.index()
+    ));
+}
+
+fn emit_memory_load(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    base: Gpr,
+    offset: u16,
+    width: u8,
+    signed: bool,
+) {
+    let tag = format!("{index:04}");
+    let value_type = match width {
+        1 => "std::uint8_t",
+        2 => "std::uint16_t",
+        4 => "std::uint32_t",
+        _ => unreachable!("memory IR only permits byte, halfword and word"),
+    };
+    let helper = match width {
+        1 => "load_u8",
+        2 => "load_u16",
+        4 => "load_u32",
+        _ => unreachable!("memory IR only permits byte, halfword and word"),
+    };
+    emit_effective_address(output, &tag, base, offset);
+    output.push_str(&format!(
+        "    {value_type} memory_value_{tag}{{}};\n    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, memory_value_{tag});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n"
+    ));
+
+    let value_expression = match (width, signed) {
+        (1, true) => format!(
+            "static_cast<std::uint64_t>(memory_value_{tag}) | ((memory_value_{tag} & 0x80U) != 0 ? 0xFFFFFFFFFFFFFF00ULL : 0ULL)"
+        ),
+        (1, false) | (2, false) | (4, false) => {
+            format!("static_cast<std::uint64_t>(memory_value_{tag})")
+        }
+        (2, true) => format!(
+            "static_cast<std::uint64_t>(memory_value_{tag}) | ((memory_value_{tag} & 0x8000U) != 0 ? 0xFFFFFFFFFFFF0000ULL : 0ULL)"
+        ),
+        (4, true) => format!("sign_extend_word(memory_value_{tag})"),
+        _ => unreachable!("memory IR only permits supported load variants"),
+    };
+    if !dst.is_zero() {
+        output.push_str(&format!(
+            "    state.gpr[{}].low = {value_expression};\n",
+            dst.index()
+        ));
+    }
+}
+
+fn emit_memory_store(
+    output: &mut String,
+    index: usize,
+    src: Gpr,
+    base: Gpr,
+    offset: u16,
+    width: u8,
+) {
+    let tag = format!("{index:04}");
+    let (helper, value_type) = match width {
+        1 => ("store_u8", "std::uint8_t"),
+        2 => ("store_u16", "std::uint16_t"),
+        4 => ("store_u32", "std::uint32_t"),
+        _ => unreachable!("memory IR only permits byte, halfword and word"),
+    };
+    emit_effective_address(output, &tag, base, offset);
+    output.push_str(&format!(
+        "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
+        src.index()
+    ));
 }
 
 fn emit_word_add(
@@ -221,6 +331,31 @@ fn emit_shift(output: &mut String, dst: Gpr, src: Gpr, amount: u8, operator: &st
 mod tests {
     use super::*;
     use crate::ir;
+
+    #[test]
+    fn emits_checked_little_endian_memory_accesses_and_sign_extension() {
+        let words = [
+            (0x20 << 26) | (8 << 21) | (9 << 16) | 0xFFFC, // lb t1, -4(t0)
+            (0x25 << 26) | (8 << 21) | (10 << 16) | 2, // lhu t2, 2(t0)
+            (0x21 << 26) | (8 << 21) | (11 << 16) | 4, // lh t3, 4(t0)
+            (0x23 << 26) | (8 << 21) | (12 << 16) | 8, // lw t4, 8(t0)
+            (0x2B << 26) | (8 << 21) | (13 << 16) | 12, // sw t5, 12(t0)
+        ];
+        let decoded = words.iter().enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x2000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("memory IR");
+        let cpp = emit_cpp(&program).expect("memory C++");
+        assert!(cpp.contains("load_u8(state.memory"));
+        assert!(cpp.contains("load_u16(state.memory"));
+        assert!(cpp.contains("load_u32(state.memory"));
+        assert!(cpp.contains("store_u32(state.memory"));
+        assert!(cpp.contains("0xFFFFFFFFFFFFFF00ULL"));
+        assert!(cpp.contains("0xFFFFFFFFFFFF0000ULL"));
+        assert!(cpp.contains("sign_extend_word(memory_value_0003)"));
+        assert!(!cpp.contains("Status::address_error"));
+        assert!(cpp.contains("memory_status_0000 != Status::ok"));
+    }
 
     #[test]
     fn emits_deterministic_source_and_preserves_gpr_high_halves() {
