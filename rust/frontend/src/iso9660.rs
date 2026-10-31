@@ -62,6 +62,7 @@ impl DirectoryEntry {
     }
 }
 
+#[derive(Debug)]
 pub struct Iso9660<R> {
     reader: R,
     info: VolumeInfo,
