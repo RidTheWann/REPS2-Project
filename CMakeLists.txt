@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(REPS2
-    VERSION 0.4.0
+    VERSION 0.5.0
     DESCRIPTION "Independent PlayStation 2 static recompilation toolchain"
     LANGUAGES CXX
 )
@@ -108,6 +108,36 @@ if(BUILD_TESTING)
     endif()
 
     add_test(NAME reps2_codegen_smoke COMMAND reps2_codegen_smoke)
+
+    set(REPS2_CFG_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_CFG_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-cfg-fixture
+            "${REPS2_CFG_GENERATED_CPP}"
+        DEPENDS reps2
+        COMMENT "Generating and lowering the synthetic EE control-flow graph"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_CFG_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+
+    add_custom_target(reps2_cfg_codegen_fixture DEPENDS "${REPS2_CFG_GENERATED_CPP}")
+    add_executable(reps2_cfg_codegen_smoke
+        "${REPS2_CFG_GENERATED_CPP}"
+        tests/control_flow_smoke.cpp
+    )
+    add_dependencies(reps2_cfg_codegen_smoke reps2_cfg_codegen_fixture)
+    target_link_libraries(reps2_cfg_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cfg_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cfg_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cfg_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+
+    add_test(NAME reps2_cfg_codegen_smoke COMMAND reps2_cfg_codegen_smoke)
 endif()
 
 install(PROGRAMS "${REPS2_FRONTEND_EXECUTABLE}" DESTINATION bin)
