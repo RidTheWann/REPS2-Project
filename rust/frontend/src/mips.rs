@@ -698,9 +698,12 @@ impl Instruction {
             }
 
             // COP1 transfers use rt as the GPR and rd as the FPU register or
-            // control-register number. The register moves cannot raise a
-            // synchronous exception on the EE; the load/store forms still can
-            // on an address error, matching the other memory operations.
+            // control-register number. They cannot raise a floating-point
+            // exception because the EE FPU has none (section 8.8: processing
+            // continues by setting a flag); a CpU-Unusable exception still
+            // exists but needs the unmodeled COP0 Status.CU1 gate. The
+            // load/store forms can raise the same address error as the other
+            // memory operations.
             Opcode::MoveFromFpuRegister => {
                 effects.fpr_read_mask = fpr_bit(self.rd);
                 effects.gpr_write_mask = rt;
@@ -1730,8 +1733,9 @@ mod tests {
             decode((0x11 << 26) | (3 << 21) | (2 << 16), 0).opcode,
             Opcode::Unknown
         );
-        // Setting bit 25 turns mfc1 into format 2 with an undefined control
-        // number, which proves the bit is a selector rather than a COP flag.
+        // Setting bit 25 moves mfc1's format selector from 0 to 16, which is
+        // S-class arithmetic, so the bit is part of the selector and not a
+        // COP1/COP2 flag.
         assert_eq!(decode(0x4402_2800 | (1 << 25), 0).opcode, Opcode::Unknown);
         // COP2 (VU0) is a separate primary opcode and stays unsupported here.
         assert_eq!(
@@ -1742,8 +1746,8 @@ mod tests {
 
     #[test]
     fn decodes_lwc1_and_swc1_word_memory_forms() {
-        // LWC1 is primary 0x31 and SWC1 is primary 0x39; 0x35 is SWC2, which
-        // stays unsupported.
+        // LWC1 is primary 0x31 and SWC1 is primary 0x39. 0x35 is LDC1, which
+        // the single-precision-only EE does not implement; SWC2 is 0x3A.
         let load = decode(0xC506_0010, 0x1000);
         assert_eq!(load.opcode, Opcode::LoadFpuWord);
         assert_eq!((load.rs, load.rt, load.rd), (8, 6, 0));

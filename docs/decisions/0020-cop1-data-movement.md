@@ -24,7 +24,7 @@ Verified against GNU binutils 2.45 `opcodes/mips-opc.c`, the Sony EE Core Instru
 ### Runtime state (`runtime/include/reps2/runtime/ee_state.hpp`)
 
 - `EeState` gains `std::array<std::uint32_t, 32> fpr` and one `std::uint32_t fcsr`. There is no double-width destination anywhere in the EE FPU, so a wider lane would be invented state.
-- `kFpuImplementationRegister` is the read-only FIR value `0x2E00`; `kFpuControlResetValue` is `0x0100'0001`, kept as a named constant because the manual's reset figure and emulator behaviour disagree about bit 24.
+- `kFpuImplementationRegister` is the read-only FIR value `0x2E00` (implementation `0x2E` in bits 15..8, revision 0 in bits 7..0); `kFpuControlResetValue` is `0x0100'0001`, kept as a named constant because emulator behaviour disagrees with the manual about bit 24, which §8.3.2 documents as a one-bit field reading 1.
 - FCR31 bits 1..0 read as `0b01` and are not programmable, so control writes go through `store_fpu_control(control, value)`, which forces `(value & ~0x3) | 0x1`. A named helper is used instead of an inline mask so the recompiler cannot forget it.
 
 ### Decoder (`rust/frontend/src/mips.rs`)
@@ -41,9 +41,9 @@ Verified against GNU binutils 2.45 `opcodes/mips-opc.c`, the Sony EE Core Instru
 
 ### Backend (`rust/frontend/src/codegen.rs`)
 
-- MFC1 and CFC1 lower through `sign_extend_word`, writing `GPR[rd].low` and leaving `GPR[127:64]` intact, with the `Gpr::is_zero()` guard.
+- MFC1 and CFC1 lower through `sign_extend_word`, writing `GPR[rt].low` (rt is bits 20..16; `rd` names the FPU register or control number) and leaving `GPR[127:64]` intact. The emitted guard is the literal `if (<rt> != 0)`, which is what suppresses `GPR[0]`.
 - MTC1 truncates with `static_cast<std::uint32_t>(GPR[rs].low)` and is deliberately **not** guarded on the destination index, because FPR[0] is writable.
-- CTC1 calls `store_fpu_control`; `debug_assert!` pins that FIR never reaches the write path.
+- CTC1 calls `store_fpu_control`. Only FCSR is writable, and that is enforced by lifting (the emitter itself is infallible, so its `debug_assert!` is a tripwire that a Release build does not evaluate) plus the lift unit test.
 - LWC1/SWC1 reuse the existing effective-address and `load_u32`/`store_u32` helpers, so alignment, address translation and unmapped-memory behaviour are the same as every other load and store.
 
 ### Fixture (`tests/cop1_codegen_smoke.cpp`)
@@ -73,8 +73,10 @@ Fifteen words: `MTC1`/`MFC1` round-trips through FPR[6], `MFC1 $0` executed whil
   | fold CFC1 of FIR onto FCSR | exit 15 (fails) |
   | make LWC1 write the GPR file | exit 6 (fails) |
   | make SWC1 store the GPR value | exit 5 (fails) |
+  | change FIR's documented value (`kFpuImplementationRegister` to `0x2E01`) | passed with exit 0 at first, now fails at exit 15 |
+- The last row is a review finding, and it was a real defect in the evidence rather than in the code. The fixture compared `GPR[5].low` against `reps2::runtime::kFpuImplementationRegister` - the same constant the emitter writes - so it proved only that a constant equals itself, and the claim "FIR reads `0x2E00`" was pinned by nothing. The assertion now states the literal `0x0000'0000'0000'2E00ULL`, and mutating the constant fails. Review also corrected two comments that contradicted this ADR (a test comment calling `0x35` "SWC2" when it is `LDC1`, and one describing a bit-25-set `mfc1` as format 2 when bit 25 makes it format 16), a duplicated comment block in `ee_state.hpp`, a stale CMake comment presenting `0x44800000` as still-unsupported, an over-broad "cannot raise a synchronous exception" claim that belongs only to floating-point exceptions, and the dead `Fpr::new` constructor.
 - The fourth row is the reason the fixture grew. The first version of the block never issued `MTC1` into FPR[0], so treating FPR[0] as hard-wired zero passed with exit 0; the assertion set was not falsifiable for the claim being made. `0x44820000`/`0x440A0000`/`0x44800000`/`0x440B0000` were added and the mutation now fails.
-- `profile-elf` re-run over all eight images into `out/census-v3`, with the per-title and aggregate numbers recorded in `docs/RESEARCH.md`.
+- `profile-elf` re-run over all eight images into `out/census-v3`, with the per-title and aggregate numbers recorded in `docs/RESEARCH.md`. Two of those images turn out to be the same boot executable (a localized release whose extracted ELF is byte-identical to the US release), so the eight-image aggregate weights one core twice; `docs/RESEARCH.md` records both the eight-image and seven-distinct-core numbers, and no conclusion in this decision depends on the difference.
 
 ## References
 

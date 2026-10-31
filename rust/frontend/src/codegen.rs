@@ -127,8 +127,11 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         }
         Operation::MoveToFpuControl { src, register } => {
             let s = src.index();
-            // Only FCSR is writable; the emitter is never reached for FIR
-            // because lifting rejects CTC1 of a read-only control register.
+            // Only FCSR is writable. This emitter is infallible, so the
+            // guarantee lives in lifting: ir.rs maps CTC1 solely to
+            // FpuControl::Fcsr and rejects every other control number, which
+            // its unit test pins. The assertion guards against a later lift
+            // widening the mapping.
             debug_assert!(matches!(register, FpuControl::Fcsr));
             output.push_str(&format!(
                 "    store_fpu_control(state.fcsr, static_cast<std::uint32_t>(state.gpr[{s}].low));\n"

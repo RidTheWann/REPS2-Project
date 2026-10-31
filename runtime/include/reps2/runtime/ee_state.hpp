@@ -21,16 +21,19 @@ struct EeMemory {
     std::span<std::uint8_t> main_ram{};
 };
 
-// FCR31 bits 1..0 read as 0b01: the EE rounding mode is fixed to round toward
-// zero and is not programmable. Bit 24 is the single FPU condition bit. The EE
-// manual's reset figure shows bit 24 set, which emulators do not agree with, so
-// FCR31 bits 1..0 read as 0b01: the EE rounding mode is fixed to round toward
-// zero and is not programmable. Bit 24 is the single FPU condition bit. The EE
-// manual's reset figure shows bit 24 set, which emulators do not agree with, so
-// the value is named rather than inlined and stays an open differential case.
+// FCR31 as documented by the EE Core User's Manual Table 8-2: the condition
+// bit is 23, the cause flags I/D/O/U are 17..14, the sticky flags SI/SD/SO/SU
+// are 6..3, and bit 24 is a one-bit field that reads as 1. Bits 1..0 read as
+// 0b01 because the rounding mode is fixed to round toward zero (section 8.7).
+// Secondary emulator sources do not agree about bit 24, so the reset value is
+// named here rather than inlined and stays an open differential case. Only the
+// hard-wired low bits are enforced by this slice; the flag fields arrive with
+// the arithmetic operations that set them.
 inline constexpr std::uint32_t kFpuControlResetValue{0x0100'0001U};
 inline constexpr std::uint32_t kFpuControlReadOnlyMask{0x0000'0003U};
-// FIR (FCR0) identifies the implementation and is read-only.
+// FIR (FCR0) is read-only: implementation 0x2E in bits 15..8, revision 0 in
+// bits 7..0, and zero above. Tests assert the literal, not this constant, so a
+// wrong value cannot pass by agreeing with the code that emits it.
 inline constexpr std::uint32_t kFpuImplementationRegister{0x0000'2E00U};
 
 struct EeState {

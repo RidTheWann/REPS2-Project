@@ -97,8 +97,10 @@ int main() {
     if (state.gpr[7].low != kSignExtendedFpr) return 13;
     if (state.gpr[7].high != 0x7777'8888'9999'AAAAULL) return 14;
 
-    // FIR is a read-only constant, unaffected by the CTC1 that follows it.
-    if (state.gpr[5].low != reps2::runtime::kFpuImplementationRegister) return 15;
+    // FIR is read-only and its documented value is asserted literally: the
+    // emitter reads kFpuImplementationRegister, so comparing against that
+    // constant would only prove the constant equals itself.
+    if (state.gpr[5].low != 0x0000'0000'0000'2E00ULL) return 15;
     if (state.gpr[5].high != 0x5555'6666'7777'8888ULL) return 16;
 
     // CTC1 truncates to 32 bits and cannot program the rounding field.

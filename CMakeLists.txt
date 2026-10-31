@@ -314,8 +314,8 @@ if(BUILD_TESTING)
             0x44040000  # mfc1   $4, $f0   read FPR[0] back
             0x44820000  # mtc1   $2, $f0   MTC1 must write FPR[0], not skip it
             0x440A0000  # mfc1   $10, $f0
-            0x44800000  # mtc1   $zero, $f0 the first unsupported word found
-                         # in every retail entry scan so far
+            0x44800000  # mtc1   $zero, $f0 the word that halted every retail
+                         # entry scan at 34 decoded words before this slice
             0x440B0000  # mfc1   $11, $f0
             0xC527FFFC  # lwc1   $f7, -4($9)  signed offset to the same word
             0x44073800  # mfc1   $7, $f7
