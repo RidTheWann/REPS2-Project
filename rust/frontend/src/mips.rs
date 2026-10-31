@@ -105,6 +105,12 @@ pub enum Opcode {
     Sq,
     ParallelAddUnsignedWord,
     FunnelShiftRightVec,
+    MoveFromFpuRegister,
+    MoveToFpuRegister,
+    MoveFromFpuControl,
+    MoveToFpuControl,
+    LoadFpuWord,
+    StoreFpuWord,
     Unknown,
 }
 
@@ -291,6 +297,12 @@ impl Opcode {
             Self::Sq => "sq",
             Self::ParallelAddUnsignedWord => "padduw",
             Self::FunnelShiftRightVec => "qfsrv",
+            Self::MoveFromFpuRegister => "mfc1",
+            Self::MoveToFpuRegister => "mtc1",
+            Self::MoveFromFpuControl => "cfc1",
+            Self::MoveToFpuControl => "ctc1",
+            Self::LoadFpuWord => "lwc1",
+            Self::StoreFpuWord => "swc1",
             Self::Unknown => "unknown",
         }
     }
@@ -331,6 +343,10 @@ pub enum ControlFlowEffect {
 pub struct InstructionEffects {
     pub gpr_read_mask: u32,
     pub gpr_write_mask: u32,
+    /// FPU register dependencies. Unlike GPR[0], FPR[0] is a real register, so
+    /// these masks include bit 0.
+    pub fpr_read_mask: u32,
+    pub fpr_write_mask: u32,
     pub reads_hi: bool,
     pub reads_lo: bool,
     pub writes_hi: bool,
@@ -341,6 +357,9 @@ pub struct InstructionEffects {
     pub writes_lo1: bool,
     pub reads_sa: bool,
     pub writes_sa: bool,
+    /// CFC1 reads and CTC1 writes the single implemented FPU control register.
+    pub reads_fcr: bool,
+    pub writes_fcr: bool,
     pub memory: MemoryEffect,
     pub control_flow: ControlFlowEffect,
     /// True when instruction execution can synchronously raise an exception.
@@ -355,6 +374,8 @@ impl InstructionEffects {
         Self {
             gpr_read_mask: 0,
             gpr_write_mask: 0,
+            fpr_read_mask: 0,
+            fpr_write_mask: 0,
             reads_hi: false,
             reads_lo: false,
             writes_hi: false,
@@ -365,6 +386,8 @@ impl InstructionEffects {
             writes_lo1: false,
             reads_sa: false,
             writes_sa: false,
+            reads_fcr: false,
+            writes_fcr: false,
             memory: MemoryEffect::None,
             control_flow: ControlFlowEffect::None,
             may_raise_exception: false,
@@ -379,6 +402,11 @@ fn gpr_bit(index: u8) -> u32 {
     } else {
         1_u32 << index
     }
+}
+
+/// FPR[0] holds a value, so bit 0 of the mask is meaningful here.
+fn fpr_bit(index: u8) -> u32 {
+    if index < 32 { 1_u32 << index } else { 0 }
 }
 
 /// One decoded guest instruction. This is decode metadata, not executed
@@ -669,6 +697,40 @@ impl Instruction {
                 effects.gpr_write_mask = rd;
             }
 
+            // COP1 transfers use rt as the GPR and rd as the FPU register or
+            // control-register number. The register moves cannot raise a
+            // synchronous exception on the EE; the load/store forms still can
+            // on an address error, matching the other memory operations.
+            Opcode::MoveFromFpuRegister => {
+                effects.fpr_read_mask = fpr_bit(self.rd);
+                effects.gpr_write_mask = rt;
+            }
+            Opcode::MoveToFpuRegister => {
+                effects.gpr_read_mask = rt;
+                effects.fpr_write_mask = fpr_bit(self.rd);
+            }
+            Opcode::MoveFromFpuControl => {
+                // FIR (FCR0) is a read-only constant and touches no state.
+                effects.reads_fcr = self.rd == 31;
+                effects.gpr_write_mask = rt;
+            }
+            Opcode::MoveToFpuControl => {
+                effects.writes_fcr = true;
+                effects.gpr_read_mask = rt;
+            }
+            Opcode::LoadFpuWord => {
+                effects.gpr_read_mask = rs;
+                effects.fpr_write_mask = fpr_bit(self.rt);
+                effects.memory = MemoryEffect::Read;
+                effects.may_raise_exception = true;
+            }
+            Opcode::StoreFpuWord => {
+                effects.gpr_read_mask = rs;
+                effects.fpr_read_mask = fpr_bit(self.rt);
+                effects.memory = MemoryEffect::Write;
+                effects.may_raise_exception = true;
+            }
+
             Opcode::Lb
             | Opcode::Lh
             | Opcode::Lw
@@ -922,6 +984,17 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x13 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mtlo1,
                 _ => Opcode::Unknown,
             },
+            // COP1 register transfers select on bits 25..21, which is the rs
+            // field position; bits 10..0 are reserved zero for all four formats.
+            // Bit 25 is not a COP1/COP2 flag: COP2 (VU0) has its own primary
+            // opcode 0x12, so 0x11 is unambiguously the FPU.
+            0x11 if (word & 0x7FF) == 0 => match rs {
+                0 => Opcode::MoveFromFpuRegister,
+                2 if rd == 0 || rd == 31 => Opcode::MoveFromFpuControl,
+                4 => Opcode::MoveToFpuRegister,
+                6 if rd == 31 => Opcode::MoveToFpuControl,
+                _ => Opcode::Unknown,
+            },
             0x20 => Opcode::Lb,
             0x21 => Opcode::Lh,
             0x22 => Opcode::Lwl,
@@ -929,6 +1002,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x24 => Opcode::Lbu,
             0x25 => Opcode::Lhu,
             0x27 => Opcode::Lwu,
+            0x31 => Opcode::LoadFpuWord,
+            0x39 => Opcode::StoreFpuWord,
             0x28 => Opcode::Sb,
             0x29 => Opcode::Sh,
             0x2A => Opcode::Swl,
@@ -1603,5 +1678,123 @@ mod tests {
             decode(word & !(0x1F << 6) | (0x10 << 6), 0).opcode,
             Opcode::ParallelAddUnsignedWord
         );
+    }
+
+    #[test]
+    fn decodes_cop1_register_and_control_transfers() {
+        // GNU binutils masks: mfc1 0x44000000/0xffe007ff, mtc1 0x44800000/
+        // 0xffe007ff, cfc1 0x44400000, ctc1 0x44c00000. The selector lives in
+        // bits 25..21, so bit 25 is part of the format field, not a COP1/COP2
+        // flag; COP2 (VU0) has its own primary opcode 0x12.
+        let cases = [
+            (
+                0x4402_2800_u32,
+                Opcode::MoveFromFpuRegister,
+                0u8,
+                2u8,
+                5u8,
+                "mfc1",
+            ),
+            (0x4480_0000, Opcode::MoveToFpuRegister, 4, 0, 0, "mtc1"),
+            (0x4443_F800, Opcode::MoveFromFpuControl, 2, 3, 31, "cfc1"),
+            (0x44C4_F800, Opcode::MoveToFpuControl, 6, 4, 31, "ctc1"),
+        ];
+        for (word, expected, fmt, gpr, fpu, mnemonic) in cases {
+            let decoded = decode(word, 0x1000);
+            assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
+            assert_eq!(decoded.rs, fmt, "word 0x{word:08X} format field");
+            assert_eq!(decoded.rt, gpr, "word 0x{word:08X} GPR field");
+            assert_eq!(decoded.rd, fpu, "word 0x{word:08X} FPR/FCR field");
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert!(!decoded.has_delay_slot);
+            assert!(!decoded.is_control_transfer());
+        }
+
+        // The EE FPU is single precision only: control numbers other than FIR
+        // (FCR0) and FCSR (FCR31) are not implemented encodings.
+        assert_eq!(decode(0x4443_2800, 0).opcode, Opcode::Unknown);
+        // CTC1 of FIR would silently discard the write, so it stays unsupported.
+        assert_eq!(decode(0x44C4_0000, 0).opcode, Opcode::Unknown);
+        // Bits 10..0 are reserved zero for all four transfer formats.
+        for reserved in [1_u32, 1 << 6, 1 << 10] {
+            assert_eq!(decode(0x4402_2800 | reserved, 0).opcode, Opcode::Unknown);
+            assert_eq!(decode(0x4480_0000 | reserved, 0).opcode, Opcode::Unknown);
+        }
+        // Formats the EE does not define: CFC1/CTC1 of an undefined control
+        // number and the untouched COP1 register-transfer slots.
+        assert_eq!(
+            decode((0x11 << 26) | (1 << 21) | (2 << 16), 0).opcode,
+            Opcode::Unknown
+        );
+        assert_eq!(
+            decode((0x11 << 26) | (3 << 21) | (2 << 16), 0).opcode,
+            Opcode::Unknown
+        );
+        // Setting bit 25 turns mfc1 into format 2 with an undefined control
+        // number, which proves the bit is a selector rather than a COP flag.
+        assert_eq!(decode(0x4402_2800 | (1 << 25), 0).opcode, Opcode::Unknown);
+        // COP2 (VU0) is a separate primary opcode and stays unsupported here.
+        assert_eq!(
+            decode((0x12 << 26) | (2 << 16) | (5 << 11), 0).opcode,
+            Opcode::Unknown
+        );
+    }
+
+    #[test]
+    fn decodes_lwc1_and_swc1_word_memory_forms() {
+        // LWC1 is primary 0x31 and SWC1 is primary 0x39; 0x35 is SWC2, which
+        // stays unsupported.
+        let load = decode(0xC506_0010, 0x1000);
+        assert_eq!(load.opcode, Opcode::LoadFpuWord);
+        assert_eq!((load.rs, load.rt, load.rd), (8, 6, 0));
+        assert_eq!(load.signed_immediate(), 16);
+        let store = decode(0xE506_FFFC, 0x1000);
+        assert_eq!(store.opcode, Opcode::StoreFpuWord);
+        assert_eq!((store.rs, store.rt), (8, 6));
+        assert_eq!(store.signed_immediate(), -4);
+        assert_eq!(decode(0xD506_0010, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn effects_track_cop1_fpr_and_fcr_dependencies() {
+        // FPR[0] is a real register, unlike GPR[0], so bit 0 must be set.
+        let mfc1 = decode(0x4402_2800, 0).effects();
+        assert_eq!(mfc1.fpr_read_mask, 1 << 5);
+        assert_eq!(mfc1.fpr_write_mask, 0);
+        assert_eq!(mfc1.gpr_write_mask, 1 << 2);
+        assert_eq!(mfc1.gpr_read_mask, 0);
+        assert_eq!(mfc1.memory, MemoryEffect::None);
+        assert!(!mfc1.may_raise_exception);
+
+        let mtc1 = decode(0x4480_0000, 0).effects();
+        assert_eq!(mtc1.fpr_write_mask, 1);
+        assert_eq!(mtc1.gpr_read_mask, 0);
+        assert!(!mtc1.may_raise_exception);
+
+        let cfc1_fir = decode(0x4443_0000, 0).effects();
+        assert!(!cfc1_fir.reads_fcr);
+        assert!(!cfc1_fir.writes_fcr);
+        assert_eq!(cfc1_fir.gpr_write_mask, 1 << 3);
+        let cfc1_fcsr = decode(0x4443_F800, 0).effects();
+        assert!(cfc1_fcsr.reads_fcr);
+        assert!(!cfc1_fcsr.writes_fcr);
+
+        let ctc1 = decode(0x44C4_F800, 0).effects();
+        assert!(ctc1.writes_fcr);
+        assert!(!ctc1.reads_fcr);
+        assert_eq!(ctc1.gpr_read_mask, 1 << 4);
+
+        let load = decode(0xC506_0010, 0).effects();
+        assert_eq!(load.gpr_read_mask, 1 << 8);
+        assert_eq!(load.fpr_write_mask, 1 << 6);
+        assert_eq!(load.memory, MemoryEffect::Read);
+        assert!(load.may_raise_exception);
+
+        let store = decode(0xE506_FFFC, 0).effects();
+        assert_eq!(store.gpr_read_mask, 1 << 8);
+        assert_eq!(store.fpr_read_mask, 1 << 6);
+        assert_eq!(store.fpr_write_mask, 0);
+        assert_eq!(store.memory, MemoryEffect::Write);
+        assert!(store.may_raise_exception);
     }
 }

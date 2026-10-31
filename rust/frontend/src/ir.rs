@@ -31,6 +31,38 @@ impl Gpr {
     }
 }
 
+/// A validated FPU register index. FPR[0] holds a value, so unlike `Gpr` this
+/// type has no zero-register special case.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Fpr(u8);
+
+impl Fpr {
+    /// Constructs an FPR index, rejecting values outside the 32-register file.
+    pub fn new(index: u8) -> Result<Self, VerifyError> {
+        if index < 32 {
+            Ok(Self(index))
+        } else {
+            Err(VerifyError::InvalidRegister(index))
+        }
+    }
+
+    /// Returns the architectural register number.
+    #[must_use]
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
+
+/// The only FPU control registers the EE defines. FCR1..FCR30 are reserved and
+/// accessing them is not representable in this IR.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FpuControl {
+    /// Read-only implementation register.
+    Fir,
+    /// The single condition, flag and rounding-field register.
+    Fcsr,
+}
+
 /// Operations whose guest-visible behavior is explicitly represented by this
 /// initial IR. Scalar word operations write a sign-extended 32-bit result into
 /// the low 64 bits of a 128-bit EE GPR. Parallel word operations update all
@@ -51,6 +83,12 @@ pub enum Operation {
     MoveToSaByte { src: Gpr, immediate: u16 },
     MoveToSaHalfword { src: Gpr, immediate: u16 },
     FunnelShiftRightVec { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    MoveFromFpuRegister { dst: Gpr, src: Fpr },
+    MoveToFpuRegister { dst: Fpr, src: Gpr },
+    MoveFromFpuControl { dst: Gpr, register: FpuControl },
+    MoveToFpuControl { src: Gpr, register: FpuControl },
+    LoadFpuWord { dst: Fpr, base: Gpr, offset: u16 },
+    StoreFpuWord { src: Fpr, base: Gpr, offset: u16 },
     MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Nor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -237,6 +275,11 @@ fn gpr(index: u8) -> Gpr {
     Gpr(index & 0x1F)
 }
 
+fn fpr(index: u8) -> Fpr {
+    // Decoder register fields are five bits wide by construction.
+    Fpr(index & 0x1F)
+}
+
 /// Lifts a sequential decoded instruction stream into the supported IR.
 /// Branches, memory operations, exceptions and other unsupported semantics
 /// are returned as an explicit error.
@@ -347,6 +390,55 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
+            },
+            Opcode::MoveFromFpuRegister => Operation::MoveFromFpuRegister {
+                dst: gpr(instruction.rt),
+                src: fpr(instruction.rd),
+            },
+            Opcode::MoveToFpuRegister => Operation::MoveToFpuRegister {
+                dst: fpr(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            // Only FIR (FCR0) and FCSR (FCR31) are representable; the decoder
+            // already rejects other control numbers, and a reserved number must
+            // not be silently folded onto FCSR.
+            Opcode::MoveFromFpuControl => match instruction.rd {
+                0 => Operation::MoveFromFpuControl {
+                    dst: gpr(instruction.rt),
+                    register: FpuControl::Fir,
+                },
+                31 => Operation::MoveFromFpuControl {
+                    dst: gpr(instruction.rt),
+                    register: FpuControl::Fcsr,
+                },
+                _ => {
+                    return Err(LiftError::UnsupportedOpcode {
+                        pc: instruction.pc,
+                        mnemonic: instruction.opcode.mnemonic(),
+                    });
+                }
+            },
+            Opcode::MoveToFpuControl => match instruction.rd {
+                31 => Operation::MoveToFpuControl {
+                    src: gpr(instruction.rt),
+                    register: FpuControl::Fcsr,
+                },
+                _ => {
+                    return Err(LiftError::UnsupportedOpcode {
+                        pc: instruction.pc,
+                        mnemonic: instruction.opcode.mnemonic(),
+                    });
+                }
+            },
+            Opcode::LoadFpuWord => Operation::LoadFpuWord {
+                dst: fpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
+            },
+            Opcode::StoreFpuWord => Operation::StoreFpuWord {
+                src: fpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Dadd => Operation::AddDoublewordSigned {
                 dst: gpr(instruction.rd),
@@ -1024,5 +1116,111 @@ mod tests {
             }
         ));
         program.verify().expect("QFSRV verifies");
+    }
+
+    #[test]
+    fn lifts_cop1_transfers_onto_fpr_and_fcsr() {
+        let stream = [
+            mips::decode(0x4402_2800, 0x1000), // mfc1 $2, $f5
+            mips::decode(0x4487_6000, 0x1004), // mtc1 $7, $f12
+            mips::decode(0x4443_0000, 0x1008), // cfc1 $3, FIR
+            mips::decode(0x4443_F800, 0x100C), // cfc1 $3, FCSR
+            mips::decode(0x44C4_F800, 0x1010), // ctc1 $4, FCSR
+            mips::decode(0xC506_0010, 0x1014), // lwc1 $f6, 0x10($8)
+            mips::decode(0xE506_FFFC, 0x1018), // swc1 $f6, -4($8)
+        ];
+        let program = lift(&stream).expect("lift COP1 transfers");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::MoveFromFpuRegister {
+                dst: Gpr(2),
+                src: Fpr(5)
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::MoveToFpuRegister {
+                dst: Fpr(12),
+                src: Gpr(7)
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::MoveFromFpuControl {
+                dst: Gpr(3),
+                register: FpuControl::Fir
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::MoveFromFpuControl {
+                dst: Gpr(3),
+                register: FpuControl::Fcsr
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[4].operation,
+            Operation::MoveToFpuControl {
+                src: Gpr(4),
+                register: FpuControl::Fcsr
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[5].operation,
+            Operation::LoadFpuWord {
+                dst: Fpr(6),
+                base: Gpr(8),
+                offset: 0x0010
+            }
+        ));
+        assert!(matches!(
+            program.instructions()[6].operation,
+            Operation::StoreFpuWord {
+                src: Fpr(6),
+                base: Gpr(8),
+                offset: 0xFFFC
+            }
+        ));
+        program.verify().expect("COP1 transfers verify");
+
+        // FPR[0] is a real register, so it must survive lifting rather than
+        // being folded away the way GPR[0] is.
+        let fpr_zero = mips::decode(0x4480_0000, 0x101C); // mtc1 $zero, $f0
+        let program = lift(&[fpr_zero]).expect("lift FPR[0] write");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::MoveToFpuRegister {
+                dst: Fpr(0),
+                src: Gpr(0)
+            }
+        ));
+    }
+
+    #[test]
+    fn refuses_cop1_control_numbers_the_ee_does_not_define() {
+        // The decoder already rejects these, so the only way an undefined
+        // control number reaches lifting is a future decoder widening. Folding
+        // it onto FCSR would silently execute a different instruction.
+        let mut undefined_read = mips::decode(0x4443_0000, 0x1100);
+        undefined_read.rd = 5;
+        let error = lift(&[undefined_read]).expect_err("CFC1 of FCR5 is not FCSR");
+        assert_eq!(
+            error,
+            LiftError::UnsupportedOpcode {
+                pc: 0x1100,
+                mnemonic: "cfc1"
+            }
+        );
+
+        let mut undefined_write = mips::decode(0x44C4_F800, 0x1104);
+        undefined_write.rd = 0;
+        let error = lift(&[undefined_write]).expect_err("CTC1 of FIR is not FCSR");
+        assert_eq!(
+            error,
+            LiftError::UnsupportedOpcode {
+                pc: 0x1104,
+                mnemonic: "ctc1"
+            }
+        );
     }
 }
