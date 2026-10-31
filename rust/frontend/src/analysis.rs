@@ -1392,8 +1392,10 @@ mod tests {
             0x0000_0000, // return delay slot
         ];
         let segments = [segment(0x0010_0000, &words)];
-        let mut limits = AnalysisLimits::default();
-        limits.max_aliased_roots = 1;
+        let limits = AnalysisLimits {
+            max_aliased_roots: 1,
+            ..Default::default()
+        };
         let graph = discover_cfg(
             &segments,
             vec![entry(0x0010_0000), entry(0x8010_0000)],
@@ -1406,9 +1408,17 @@ mod tests {
         assert_eq!(graph.blocks.len(), 2);
         assert_eq!(graph.decoded_instruction_count, 6);
 
-        limits.max_aliased_roots = 0;
-        let error = discover_cfg(&segments, vec![entry(0x8010_0000)], &[0x8010_0000], limits)
-            .expect_err("aliased root without budget");
+        let zero_budget = AnalysisLimits {
+            max_aliased_roots: 0,
+            ..Default::default()
+        };
+        let error = discover_cfg(
+            &segments,
+            vec![entry(0x8010_0000)],
+            &[0x8010_0000],
+            zero_budget,
+        )
+        .expect_err("aliased root without budget");
         assert_eq!(error, AnalysisError::AliasedViewLimitExceeded { limit: 0 });
     }
 }
