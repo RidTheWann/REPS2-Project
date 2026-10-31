@@ -698,6 +698,23 @@ impl Instruction {
     }
 }
 
+/// Computes a region-relative `J`/`JAL` target.
+///
+/// The host program counter is 32 bits on the R5900, but the region carried
+/// into the target is the **high 4 bits** of the delay-slot address
+/// (`PC + 4`), not the high 3 bits of classic MIPS32. In particular a KSEG0 PC
+/// such as `0x90000000` produces a KSEG1 target instead of a sign-extended
+/// `0x80000000`-region one. The carry out of the low 28 bits is kept, so the
+/// last words of the address space select region `0xF` rather than wrapping to
+/// region `0x0`.
+#[must_use]
+fn jump_target(pc: u32, word: u32) -> u32 {
+    let delay_pc = u64::from(pc) + 4;
+    // Bits 31..28, including the carry out of bit 31 as bit 32.
+    let region = (delay_pc >> 28) as u32;
+    (region << 28) | ((word & 0x03FF_FFFF) << 2)
+}
+
 /// Decodes one word from the explicitly supported base-MIPS integer subset.
 #[must_use]
 pub fn decode(word: u32, pc: u32) -> Instruction {
@@ -740,6 +757,9 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x12 if rs == 0 && rt == 0 && shift_amount == 0 => Opcode::Mflo,
             0x13 if rt == 0 && rd == 0 && shift_amount == 0 => Opcode::Mtlo,
             // R5900 MULT/MULTU use rd as an optional third destination.
+            // MULT/MULTU share the MIPS32 rd field as an R5900 destination for
+            // the low 64 bits of the product; DIV/DIVU keep rd reserved-zero
+            // exactly as MIPS32 requires (there is no R5900 division alias).
             0x18 if shift_amount == 0 => Opcode::Mult,
             0x19 if shift_amount == 0 => Opcode::Multu,
             0x1A if rd == 0 && shift_amount == 0 => Opcode::Div,
@@ -795,14 +815,12 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 opcode
             }
             0x02 => {
-                instruction.target =
-                    (pc.wrapping_add(4) & 0xF000_0000) | ((word & 0x03FF_FFFF) << 2);
+                instruction.target = jump_target(pc, word);
                 instruction.has_delay_slot = true;
                 Opcode::J
             }
             0x03 => {
-                instruction.target =
-                    (pc.wrapping_add(4) & 0xF000_0000) | ((word & 0x03FF_FFFF) << 2);
+                instruction.target = jump_target(pc, word);
                 instruction.has_delay_slot = true;
                 Opcode::Jal
             }
@@ -873,29 +891,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
         };
     }
 
-    if !matches!(
-        instruction.opcode,
-        Opcode::J
-            | Opcode::Jal
-            | Opcode::Beq
-            | Opcode::Bne
-            | Opcode::Blez
-            | Opcode::Bgtz
-            | Opcode::Bltz
-            | Opcode::Bgez
-            | Opcode::Bltzal
-            | Opcode::Bgezal
-            | Opcode::Beql
-            | Opcode::Bnel
-            | Opcode::Blezl
-            | Opcode::Bgtzl
-            | Opcode::Bltzl
-            | Opcode::Bgezl
-            | Opcode::Bltzall
-            | Opcode::Bgezall
-            | Opcode::Jr
-            | Opcode::Jalr
-    ) {
+    if !instruction.is_control_transfer() {
         instruction.has_delay_slot = false;
     }
     instruction
@@ -975,10 +971,28 @@ mod tests {
     }
 
     #[test]
-    fn jump_region_uses_pc_plus_four() {
+    fn jump_region_uses_the_high_four_bits_of_pc_plus_four() {
+        // PC 0x80000000 + 4 = 0x80000004 selects region 0x8.
         let decoded = decode((0x03 << 26) | 1, 0x8000_0000);
         assert_eq!(decoded.opcode, Opcode::Jal);
         assert_eq!(decoded.target, 0x8000_0004);
+
+        // The last word of region 0x7: PC + 4 crosses into region 0x8, which a
+        // signed-arithmetic implementation of PC+4 would get wrong.
+        assert_eq!(decode(0x0800_0003, 0x7FFF_FFFC).target, 0x8000_000C);
+        assert_eq!(decode(0x0C00_0002, 0x7FFF_FFFC).target, 0x8000_0008);
+
+        // KSEG0 and KSEG1 regions are selected by the same four-bit rule; the
+        // region is never copied from the sign extension of the target field.
+        assert_eq!(decode(0x0C00_0002, 0x8000_0000).target, 0x8000_0008);
+        assert_eq!(decode(0x0800_0002, 0xA000_0000).target, 0xA000_0008);
+        assert_eq!(decode(0x0800_0002, 0x9000_0000).target, 0x9000_0008);
+
+        // A PC + 4 whose bit 31 carries out keeps that carry inside the host
+        // value instead of panicking; the resulting 33-bit region is then
+        // truncated to the architectural 32-bit PC (region 0x0 here), which is
+        // the address the R5900 itself would form.
+        assert_eq!(decode(0x0800_0002, 0xFFFF_FFFC).target, 0x0000_0008);
     }
 
     #[test]
