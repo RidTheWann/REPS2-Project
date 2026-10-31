@@ -1,6 +1,6 @@
 //! Deterministic C++20 source generation for the verified scalar IR subset.
 
-use crate::ir::{Gpr, Instruction, Operation, Program, VerifyError};
+use crate::ir::{FpuControl, Gpr, Instruction, Operation, Program, VerifyError};
 
 /// Generates one C++ translation unit exporting
 /// reps2::generated::execute(EeState&).
@@ -23,6 +23,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::sign_extend_word_signed;\n\
              using reps2::runtime::parallel_add_u32;\n\
              using reps2::runtime::funnel_shift_right_vec;\n\
+             using reps2::runtime::store_fpu_control;\n\
              using reps2::runtime::load_u8;\n\
              using reps2::runtime::load_u16;\n\
              using reps2::runtime::load_u32;\n\
@@ -97,6 +98,56 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
             let b = rhs.index();
             output.push_str(&format!(
                 "    if ({d} != 0) state.gpr[{d}] = funnel_shift_right_vec(state.gpr[{a}], state.gpr[{b}], state.sa);\n"
+            ));
+        }
+        Operation::MoveFromFpuRegister { dst, src } => {
+            let d = dst.index();
+            // MFC1 sign-extends the 32-bit FPU result into GPR[63:0] and leaves
+            // the upper 64-bit lane untouched.
+            output.push_str(&format!(
+                "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(state.fpr[{}]);\n",
+                src.index()
+            ));
+        }
+        Operation::MoveToFpuRegister { dst, src } => {
+            let (d, s) = (dst.index(), src.index());
+            output.push_str(&format!(
+                "    state.fpr[{d}] = static_cast<std::uint32_t>(state.gpr[{s}].low);\n"
+            ));
+        }
+        Operation::MoveFromFpuControl { dst, register } => {
+            let d = dst.index();
+            let source = match register {
+                FpuControl::Fir => "reps2::runtime::kFpuImplementationRegister".to_owned(),
+                FpuControl::Fcsr => "state.fcsr".to_owned(),
+            };
+            output.push_str(&format!(
+                "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word({source});\n"
+            ));
+        }
+        Operation::MoveToFpuControl { src, register } => {
+            let s = src.index();
+            // Only FCSR is writable; the emitter is never reached for FIR
+            // because lifting rejects CTC1 of a read-only control register.
+            debug_assert!(matches!(register, FpuControl::Fcsr));
+            output.push_str(&format!(
+                "    store_fpu_control(state.fcsr, static_cast<std::uint32_t>(state.gpr[{s}].low));\n"
+            ));
+        }
+        Operation::LoadFpuWord { dst, base, offset } => {
+            let tag = format!("{index:04}");
+            emit_effective_address(output, &tag, base, offset);
+            output.push_str(&format!(
+                "    std::uint32_t memory_value_{tag}{{}};\n    const auto memory_status_{tag} = load_u32(state.memory, effective_address_{tag}, memory_value_{tag});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n    state.fpr[{}] = memory_value_{tag};\n",
+                dst.index()
+            ));
+        }
+        Operation::StoreFpuWord { src, base, offset } => {
+            let tag = format!("{index:04}");
+            emit_effective_address(output, &tag, base, offset);
+            output.push_str(&format!(
+                "    const auto memory_status_{tag} = store_u32(state.memory, effective_address_{tag}, state.fpr[{}]);\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
+                src.index()
             ));
         }
         Operation::MultiplyWordSigned { dst, lhs, rhs } => {
@@ -1192,5 +1243,57 @@ mod tests {
         let program = ir::lift(&zero_destination).expect("QFSRV $0 IR");
         let cpp = emit_cpp(&program).expect("QFSRV $0 C++");
         assert!(cpp.contains("if (0 != 0) state.gpr[0] = funnel_shift_right_vec("));
+    }
+
+    #[test]
+    fn emits_cop1_moves_with_fpr_sign_extension_and_zero_guard() {
+        let words = [
+            0x4402_2800, // mfc1 $2, $f5
+            0x4400_2800, // mfc1 $0, $f5
+            0x4487_6000, // mtc1 $7, $f12
+            0x4480_0000, // mtc1 $zero, $f0
+            0x4443_0000, // cfc1 $3, FIR
+            0x4443_F800, // cfc1 $3, FCSR
+            0x44C4_F800, // ctc1 $4, FCSR
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x1000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("COP1 IR");
+        let cpp = emit_cpp(&program).expect("COP1 C++");
+
+        // MFC1 sign-extends into the low lane and keeps GPR[127:64]; GPR[0]
+        // stays hard-wired zero, FPR[0] does not.
+        assert!(cpp.contains("if (2 != 0) state.gpr[2].low = sign_extend_word(state.fpr[5]);"));
+        assert!(cpp.contains("if (0 != 0) state.gpr[0].low = sign_extend_word(state.fpr[5]);"));
+        assert!(cpp.contains("state.fpr[12] = static_cast<std::uint32_t>(state.gpr[7].low);"));
+        assert!(cpp.contains("state.fpr[0] = static_cast<std::uint32_t>(state.gpr[0].low);"));
+        assert!(!cpp.contains("if (0 != 0) state.fpr[0]"));
+        assert!(cpp.contains(
+            "if (3 != 0) state.gpr[3].low = sign_extend_word(reps2::runtime::kFpuImplementationRegister);"
+        ));
+        assert!(cpp.contains("if (3 != 0) state.gpr[3].low = sign_extend_word(state.fcsr);"));
+        assert!(cpp.contains(
+            "store_fpu_control(state.fcsr, static_cast<std::uint32_t>(state.gpr[4].low));"
+        ));
+        assert!(cpp.contains("using reps2::runtime::store_fpu_control;"));
+        // FIR is read-only, so no generated statement may write it.
+        assert!(!cpp.contains("kFpuImplementationRegister ="));
+    }
+
+    #[test]
+    fn emits_cop1_word_memory_through_the_shared_helpers() {
+        let load = [crate::mips::decode(0xC506_0010, 0x1000)]; // lwc1 $f6, 0x10($8)
+        let cpp = emit_cpp(&ir::lift(&load).expect("lwc1 IR")).expect("lwc1 C++");
+        assert!(cpp.contains("load_u32(state.memory, effective_address_0000, memory_value_0000)"));
+        assert!(cpp.contains("state.fpr[6] = memory_value_0000;"));
+        assert!(!cpp.contains("state.gpr[6] = memory_value_0000"));
+
+        let store = [crate::mips::decode(0xE506_FFFC, 0x1000)]; // swc1 $f6, -4($8)
+        let cpp = emit_cpp(&ir::lift(&store).expect("swc1 IR")).expect("swc1 C++");
+        assert!(cpp.contains("store_u32(state.memory, effective_address_0000, state.fpr[6])"));
+        assert!(cpp.contains("sign_extend_immediate(0xFFFCU)"));
     }
 }
