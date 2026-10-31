@@ -9,7 +9,7 @@ pub enum Opcode {
     Jr, Jalr, Syscall, Break,
     Mfhi, Mflo, Mult, Multu, Div, Divu,
     Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
-    J, Jal, Beq, Bne, Blez, Bgtz,
+    J, Jal, Beq, Bne, Blez, Bgtz, Bltz, Bgez, Bltzal, Bgezal,
     Addi, Addiu, Slti, Sltiu, Andi, Ori, Xori, Lui,
     Lb, Lh, Lw, Lbu, Lhu, Sb, Sh, Sw,
     Unknown,
@@ -50,6 +50,10 @@ impl Opcode {
             Self::Bne => "bne",
             Self::Blez => "blez",
             Self::Bgtz => "bgtz",
+            Self::Bltz => "bltz",
+            Self::Bgez => "bgez",
+            Self::Bltzal => "bltzal",
+            Self::Bgezal => "bgezal",
             Self::Addi => "addi",
             Self::Addiu => "addiu",
             Self::Slti => "slti",
@@ -98,6 +102,27 @@ impl Instruction {
     #[must_use]
     pub const fn is_supported(self) -> bool {
         !matches!(self.opcode, Opcode::Unknown)
+    }
+
+    /// Returns whether the opcode transfers control and owns a delay slot.
+    #[must_use]
+    pub const fn is_control_transfer(self) -> bool {
+        matches!(
+            self.opcode,
+            Opcode::J | Opcode::Jal | Opcode::Beq | Opcode::Bne |
+            Opcode::Blez | Opcode::Bgtz | Opcode::Bltz | Opcode::Bgez |
+            Opcode::Bltzal | Opcode::Bgezal | Opcode::Jr | Opcode::Jalr
+        )
+    }
+
+    /// Returns whether the opcode is a conditional direct branch.
+    #[must_use]
+    pub const fn is_conditional_branch(self) -> bool {
+        matches!(
+            self.opcode,
+            Opcode::Beq | Opcode::Bne | Opcode::Blez | Opcode::Bgtz |
+            Opcode::Bltz | Opcode::Bgez | Opcode::Bltzal | Opcode::Bgezal
+        )
     }
 }
 
@@ -158,6 +183,21 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
         };
     } else {
         instruction.opcode = match primary {
+            0x01 => {
+                let opcode = match rt {
+                    0x00 => Opcode::Bltz,
+                    0x01 => Opcode::Bgez,
+                    0x10 => Opcode::Bltzal,
+                    0x11 => Opcode::Bgezal,
+                    _ => Opcode::Unknown,
+                };
+                if opcode != Opcode::Unknown {
+                    instruction.target = pc.wrapping_add(4)
+                        .wrapping_add(((immediate as i16 as i32).wrapping_mul(4)) as u32);
+                    instruction.has_delay_slot = true;
+                }
+                opcode
+            }
             0x02 => {
                 instruction.target = (pc.wrapping_add(4) & 0xF000_0000) | ((word & 0x03FF_FFFF) << 2);
                 instruction.has_delay_slot = true;
@@ -202,7 +242,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
 
     if !matches!(instruction.opcode,
         Opcode::J | Opcode::Jal | Opcode::Beq | Opcode::Bne |
-        Opcode::Blez | Opcode::Bgtz | Opcode::Jr | Opcode::Jalr) {
+        Opcode::Blez | Opcode::Bgtz | Opcode::Bltz | Opcode::Bgez |
+        Opcode::Bltzal | Opcode::Bgezal | Opcode::Jr | Opcode::Jalr) {
         instruction.has_delay_slot = false;
     }
     instruction
@@ -244,5 +285,21 @@ mod tests {
         let decoded = decode((0x03 << 26) | 1, 0x8000_0000);
         assert_eq!(decoded.opcode, Opcode::Jal);
         assert_eq!(decoded.target, 0x8000_0004);
+    }
+
+    #[test]
+    fn decodes_regimm_signed_branches_and_link_variant() {
+        let bltz = (0x01 << 26) | (8 << 21) | 2;
+        let decoded_bltz = decode(bltz, 0x1000);
+        assert_eq!(decoded_bltz.opcode, Opcode::Bltz);
+        assert!(decoded_bltz.has_delay_slot);
+        assert_eq!(decoded_bltz.target, 0x100C);
+
+        let bgezal = (0x01 << 26) | (9 << 21) | (0x11 << 16) | 0xFFFE;
+        let decoded_bgezal = decode(bgezal, 0x2000);
+        assert_eq!(decoded_bgezal.opcode, Opcode::Bgezal);
+        assert!(decoded_bgezal.has_delay_slot);
+        assert_eq!(decoded_bgezal.target, 0x1FFC);
+        assert!(decoded_bgezal.is_control_transfer());
     }
 }

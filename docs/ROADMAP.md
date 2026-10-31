@@ -20,7 +20,9 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [ ] PT_LOAD address-space model, permissions, and unmapped-range behavior.
 - [ ] PS2 optical filesystem inspection and executable extraction, read-only.
 - [ ] Real local ELF inventory manifest with no binaries committed.
-- [ ] Entry point, function symbol, and executable-region discovery.
+- [x] Discover ELF entry points and executable STT_FUNC symbol roots.
+- [x] Reachability-guided CFG for the implemented branch/jump subset; keep indirect targets unresolved.
+- [x] Distinguish file-backed executable bytes from zero-filled PT_LOAD tails during instruction reads.
 
 **Exit gate:** inspect a lawfully owned PS2 ELF and produce a stable JSON manifest plus a map of loadable code/data ranges.
 
@@ -28,12 +30,13 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 
 - [ ] Cover the documented R5900 integer, 64-bit, MMI0–MMI3, COP0, and FPU instruction families.
 - [ ] Encode instruction operand/side-effect/exception metadata.
-- [ ] Delay-slot-aware basic block and CFG construction.
-- [ ] Direct call/branch recovery and unresolved indirect-edge tracking.
-- [ ] Function discovery from symbols, entry points, and call graph.
+- [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
+- [x] Direct branch/call recovery and unresolved indirect-edge tracking.
+- [x] Entry/function root discovery from ELF entry and STT_FUNC symbols (indirect function discovery remains unresolved).
+- [ ] Full documented R5900 branch, branch-likely, and control-transfer coverage.
 - [ ] Differential instruction corpus against documented behavior and an external oracle.
 
-**Exit gate:** instruction coverage report, semantic test suite, and CFG output for real ELF code regions.
+**Exit gate:** full instruction coverage report, semantic test suite, and CFG output for real ELF code regions. The current bounded CFG implementation is an intermediate milestone, not completion of M2.
 
 ## M3 — IR and generated-code vertical slice
 
