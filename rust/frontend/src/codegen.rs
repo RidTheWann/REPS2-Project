@@ -455,6 +455,14 @@ mod tests {
             (0x1F << 26) | (8 << 21) | (15 << 16) | 8, // sq t7, 8(t0)
             (0x37 << 26) | (8 << 21) | (16 << 16) | 4, // ld s0, 4(t0)
             (0x3F << 26) | (8 << 21) | (16 << 16) | 0x34, // sd s0, 0x34(t0)
+            (0x22 << 26) | (8 << 21) | (17 << 16) | 1, // lwl s1, 1(t0)
+            (0x26 << 26) | (8 << 21) | (18 << 16) | 2, // lwr s2, 2(t0)
+            (0x2A << 26) | (8 << 21) | (19 << 16) | 3, // swl s3, 3(t0)
+            (0x2E << 26) | (8 << 21) | (20 << 16) | 1, // swr s4, 1(t0)
+            (0x1A << 26) | (8 << 21) | (21 << 16) | 3, // ldl s5, 3(t0)
+            (0x1B << 26) | (8 << 21) | (22 << 16) | 5, // ldr s6, 5(t0)
+            (0x2C << 26) | (8 << 21) | (23 << 16) | 6, // sdl s7, 6(t0)
+            (0x2D << 26) | (8 << 21) | (24 << 16) | 7, // sdr t8, 7(t0)
         ];
         let decoded = words.iter().enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x2000 + index as u32 * 4))
@@ -469,6 +477,14 @@ mod tests {
         assert!(cpp.contains("store_u128(state.memory"));
         assert!(cpp.contains("load_u64(state.memory"));
         assert!(cpp.contains("store_u64(state.memory"));
+        assert!(cpp.contains("load_u32_left(state.memory"));
+        assert!(cpp.contains("load_u32_right(state.memory"));
+        assert!(cpp.contains("store_u32_left(state.memory"));
+        assert!(cpp.contains("store_u32_right(state.memory"));
+        assert!(cpp.contains("load_u64_left(state.memory"));
+        assert!(cpp.contains("load_u64_right(state.memory"));
+        assert!(cpp.contains("store_u64_left(state.memory"));
+        assert!(cpp.contains("store_u64_right(state.memory"));
         assert!(cpp.contains("state.gpr[14] = quadword_value_0005"));
         assert!(cpp.contains("state.gpr[16].low = memory_value_0007"));
         assert!(cpp.contains("0xFFFFFFFFFFFFFF00ULL"));
