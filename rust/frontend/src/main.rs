@@ -4,7 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
+use reps2_frontend::codegen;
 use reps2_frontend::elf::{self, ParseLimits};
+use reps2_frontend::ir;
 use reps2_frontend::mips;
 
 const MAX_INPUT_SIZE: u64 = 512 * 1024 * 1024;
@@ -78,6 +80,38 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+fn compile_words(output: &Path, base_pc_text: &str, word_texts: &[String]) -> Result<(), String> {
+    if word_texts.is_empty() {
+        return Err("compile-words requires at least one instruction word".to_owned());
+    }
+
+    let base_pc = parse_hex(base_pc_text)?;
+    if base_pc & 3 != 0 {
+        return Err("base guest PC must be 4-byte aligned".to_owned());
+    }
+
+    let mut decoded = Vec::with_capacity(word_texts.len());
+    for (index, word_text) in word_texts.iter().enumerate() {
+        let offset = u32::try_from(index)
+            .ok()
+            .and_then(|value| value.checked_mul(4))
+            .ok_or_else(|| "instruction stream is too large".to_owned())?;
+        let pc = base_pc.checked_add(offset)
+            .ok_or_else(|| "instruction stream guest PC overflows".to_owned())?;
+        decoded.push(mips::decode(parse_hex(word_text)?, pc));
+    }
+
+    let program = ir::lift(&decoded).map_err(|error| error.to_string())?;
+    let cpp = codegen::emit_cpp(&program).map_err(|error| error.to_string())?;
+    fs::write(output, cpp).map_err(|error| format!("cannot write generated C++: {error}"))?;
+    println!(
+        "Generated {} supported instruction(s) to {}",
+        program.instructions().len(),
+        output.display()
+    );
+    Ok(())
+}
+
 fn usage() {
     println!("REPS2 - PlayStation 2 static recompilation frontend");
     println!();
@@ -85,8 +119,10 @@ fn usage() {
     println!("  reps2 version");
     println!("  reps2 elf-info <elf-file>");
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
+    println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
-    println!("This is an experimental frontend; complete ELF recompilation and PS2 runtime are not implemented yet.");
+    println!("compile-words lifts a straight-line, supported instruction subset to C++20.");
+    println!("Branches, delay-slot control flow, memory operations and PS2 runtime services are not yet emitted.");
 }
 
 fn run() -> Result<(), String> {
@@ -99,6 +135,9 @@ fn run() -> Result<(), String> {
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
         Some("decode") if (3..=4).contains(&arguments.len()) => {
             decode_word(&arguments[2], arguments.get(3).map(String::as_str))
+        }
+        Some("compile-words") if arguments.len() >= 5 => {
+            compile_words(Path::new(&arguments[2]), &arguments[3], &arguments[4..])
         }
         None => {
             usage();
