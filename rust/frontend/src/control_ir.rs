@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::analysis::{BranchCondition, ControlFlowGraph, Terminator};
-use crate::ir::{self, Instruction as ScalarInstruction, LiftError, VerifyError as ScalarVerifyError};
+use crate::ir::{
+    self, Instruction as ScalarInstruction, LiftError, VerifyError as ScalarVerifyError,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ControlBlock {
@@ -18,7 +20,9 @@ pub struct ControlBlock {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ControlTerminator {
-    Fallthrough { next_pc: u32 },
+    Fallthrough {
+        next_pc: u32,
+    },
     ConditionalBranch {
         guest_pc: u32,
         condition: BranchCondition,
@@ -46,8 +50,13 @@ pub enum ControlTerminator {
         source_register: u8,
         delay_slot: ScalarInstruction,
     },
-    Unsupported { guest_pc: u32, mnemonic: String },
-    SegmentEnd { next_pc: u32 },
+    Unsupported {
+        guest_pc: u32,
+        mnemonic: String,
+    },
+    SegmentEnd {
+        next_pc: u32,
+    },
 }
 
 impl ControlTerminator {
@@ -112,7 +121,9 @@ impl fmt::Display for ControlError {
         match self {
             Self::EmptyProgram => formatter.write_str("control-flow program has no blocks"),
             Self::NoEntryPoints => formatter.write_str("control-flow program has no entry points"),
-            Self::InvalidEntryPoint(pc) => write!(formatter, "entry point 0x{pc:08X} has no translated block"),
+            Self::InvalidEntryPoint(pc) => {
+                write!(formatter, "entry point 0x{pc:08X} has no translated block")
+            }
             Self::BlockKeyMismatch { key, start_pc } => write!(
                 formatter,
                 "control-flow block key 0x{key:08X} does not match its start PC 0x{start_pc:08X}"
@@ -131,9 +142,13 @@ impl fmt::Display for ControlError {
                 formatter,
                 "delay slot expected at 0x{expected:08X}, found 0x{actual:08X}"
             ),
-            Self::InvalidRegister(register) => write!(formatter, "invalid control-flow GPR index {register}"),
+            Self::InvalidRegister(register) => {
+                write!(formatter, "invalid control-flow GPR index {register}")
+            }
             Self::ScalarLift(error) => write!(formatter, "scalar IR lift failed: {error}"),
-            Self::ScalarVerify(error) => write!(formatter, "scalar IR verification failed: {error}"),
+            Self::ScalarVerify(error) => {
+                write!(formatter, "scalar IR verification failed: {error}")
+            }
         }
     }
 }
@@ -171,15 +186,22 @@ impl ControlProgram {
                 lift_terminator(&block.terminator)?
             };
 
-            blocks.insert(*start_pc, ControlBlock {
-                start_pc: *start_pc,
-                instructions,
-                terminator,
-            });
+            blocks.insert(
+                *start_pc,
+                ControlBlock {
+                    start_pc: *start_pc,
+                    instructions,
+                    terminator,
+                },
+            );
         }
 
         let program = Self {
-            entry_points: graph.entry_points.iter().map(|entry| entry.address).collect(),
+            entry_points: graph
+                .entry_points
+                .iter()
+                .map(|entry| entry.address)
+                .collect(),
             blocks,
         };
         program.verify()?;
@@ -211,8 +233,7 @@ impl ControlProgram {
                 return Err(ControlError::MisalignedPc(block.start_pc));
             }
 
-            ir::Program::new(block.instructions.clone())
-                .map_err(ControlError::ScalarVerify)?;
+            ir::Program::new(block.instructions.clone()).map_err(ControlError::ScalarVerify)?;
 
             let mut expected_pc = block.start_pc;
             for instruction in &block.instructions {
@@ -222,7 +243,8 @@ impl ControlProgram {
                         actual: instruction.guest_pc,
                     });
                 }
-                expected_pc = expected_pc.checked_add(4)
+                expected_pc = expected_pc
+                    .checked_add(4)
                     .ok_or(ControlError::GuestPcOverflow(expected_pc))?;
             }
 
@@ -248,14 +270,17 @@ impl ControlProgram {
             }
 
             if let Some(delay_slot) = block.terminator.delay_slot() {
-                ir::Program::new(vec![*delay_slot])
-                    .map_err(ControlError::ScalarVerify)?;
-                let control_pc = block.terminator.guest_pc()
-                    .ok_or(ControlError::TerminatorPcMismatch {
-                        expected: expected_pc,
-                        actual: delay_slot.guest_pc,
-                    })?;
-                let expected_delay_pc = control_pc.checked_add(4)
+                ir::Program::new(vec![*delay_slot]).map_err(ControlError::ScalarVerify)?;
+                let control_pc =
+                    block
+                        .terminator
+                        .guest_pc()
+                        .ok_or(ControlError::TerminatorPcMismatch {
+                            expected: expected_pc,
+                            actual: delay_slot.guest_pc,
+                        })?;
+                let expected_delay_pc = control_pc
+                    .checked_add(4)
                     .ok_or(ControlError::GuestPcOverflow(control_pc))?;
                 if delay_slot.guest_pc != expected_delay_pc {
                     return Err(ControlError::DelaySlotPcMismatch {
@@ -274,34 +299,47 @@ impl ControlProgram {
 
     #[must_use]
     pub fn instruction_count(&self) -> usize {
-        self.blocks.values()
+        self.blocks
+            .values()
             .map(|block| block.instructions.len() + block.terminator.instruction_count())
             .sum()
     }
 
     #[must_use]
     pub fn unsupported_count(&self) -> usize {
-        self.blocks.values()
+        self.blocks
+            .values()
             .filter(|block| matches!(&block.terminator, ControlTerminator::Unsupported { .. }))
             .count()
     }
 }
 
 fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, ControlError> {
-    let lift_delay_slot = |decoded: &crate::mips::Instruction| -> Result<ScalarInstruction, ControlError> {
-        let program = ir::lift(std::slice::from_ref(decoded))
-            .map_err(ControlError::ScalarLift)?;
-        program.instructions().first().copied()
-            .ok_or(ControlError::TerminatorPcMismatch {
-                expected: decoded.pc,
-                actual: decoded.pc.wrapping_add(4),
-            })
-    };
+    let lift_delay_slot =
+        |decoded: &crate::mips::Instruction| -> Result<ScalarInstruction, ControlError> {
+            let program =
+                ir::lift(std::slice::from_ref(decoded)).map_err(ControlError::ScalarLift)?;
+            program
+                .instructions()
+                .first()
+                .copied()
+                .ok_or(ControlError::TerminatorPcMismatch {
+                    expected: decoded.pc,
+                    actual: decoded.pc.wrapping_add(4),
+                })
+        };
 
     match terminator {
-        Terminator::Fallthrough { next_pc } => Ok(ControlTerminator::Fallthrough { next_pc: *next_pc }),
+        Terminator::Fallthrough { next_pc } => {
+            Ok(ControlTerminator::Fallthrough { next_pc: *next_pc })
+        }
         Terminator::ConditionalBranch {
-            instruction, condition, target_pc, fallthrough_pc, delay_slot, link_register,
+            instruction,
+            condition,
+            target_pc,
+            fallthrough_pc,
+            delay_slot,
+            link_register,
         } => Ok(ControlTerminator::ConditionalBranch {
             guest_pc: instruction.pc,
             condition: *condition,
@@ -311,7 +349,11 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             delay_slot: lift_delay_slot(delay_slot)?,
         }),
         Terminator::DirectJump {
-            instruction, target_pc, delay_slot, link_register, return_pc,
+            instruction,
+            target_pc,
+            delay_slot,
+            link_register,
+            return_pc,
         } => Ok(ControlTerminator::DirectJump {
             guest_pc: instruction.pc,
             target_pc: *target_pc,
@@ -320,7 +362,11 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             delay_slot: lift_delay_slot(delay_slot)?,
         }),
         Terminator::IndirectJump {
-            instruction, source_register, delay_slot, link_register, return_pc,
+            instruction,
+            source_register,
+            delay_slot,
+            link_register,
+            return_pc,
         } => Ok(ControlTerminator::IndirectJump {
             guest_pc: instruction.pc,
             source_register: *source_register,
@@ -328,18 +374,22 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             return_pc: *return_pc,
             delay_slot: lift_delay_slot(delay_slot)?,
         }),
-        Terminator::Return { instruction, source_register, delay_slot } => {
-            Ok(ControlTerminator::Return {
-                guest_pc: instruction.pc,
-                source_register: *source_register,
-                delay_slot: lift_delay_slot(delay_slot)?,
-            })
-        }
+        Terminator::Return {
+            instruction,
+            source_register,
+            delay_slot,
+        } => Ok(ControlTerminator::Return {
+            guest_pc: instruction.pc,
+            source_register: *source_register,
+            delay_slot: lift_delay_slot(delay_slot)?,
+        }),
         Terminator::Unsupported { instruction } => Ok(ControlTerminator::Unsupported {
             guest_pc: instruction.pc,
             mnemonic: instruction.opcode.mnemonic().to_owned(),
         }),
-        Terminator::SegmentEnd { next_pc } => Ok(ControlTerminator::SegmentEnd { next_pc: *next_pc }),
+        Terminator::SegmentEnd { next_pc } => {
+            Ok(ControlTerminator::SegmentEnd { next_pc: *next_pc })
+        }
     }
 }
 
@@ -353,14 +403,19 @@ fn verify_terminator_targets(terminator: &ControlTerminator) -> Result<(), Contr
     };
 
     match terminator {
-        ControlTerminator::Fallthrough { next_pc }
-        | ControlTerminator::SegmentEnd { next_pc } => validate(*next_pc)?,
+        ControlTerminator::Fallthrough { next_pc } | ControlTerminator::SegmentEnd { next_pc } => {
+            validate(*next_pc)?
+        }
         ControlTerminator::ConditionalBranch {
-            guest_pc, target_pc, fallthrough_pc, ..
+            guest_pc,
+            target_pc,
+            fallthrough_pc,
+            ..
         } => {
             validate(*target_pc)?;
             validate(*fallthrough_pc)?;
-            let expected_fallthrough = guest_pc.checked_add(8)
+            let expected_fallthrough = guest_pc
+                .checked_add(8)
                 .ok_or(ControlError::GuestPcOverflow(*guest_pc))?;
             if *fallthrough_pc != expected_fallthrough {
                 return Err(ControlError::TerminatorPcMismatch {
@@ -370,16 +425,27 @@ fn verify_terminator_targets(terminator: &ControlTerminator) -> Result<(), Contr
             }
         }
         ControlTerminator::DirectJump {
-            guest_pc, target_pc, link_register, return_pc, ..
+            guest_pc,
+            target_pc,
+            link_register,
+            return_pc,
+            ..
         } => {
             validate(*target_pc)?;
-            if let Some(return_pc) = return_pc { validate(*return_pc)?; }
+            if let Some(return_pc) = return_pc {
+                validate(*return_pc)?;
+            }
             verify_link_continuation(*guest_pc, *link_register, *return_pc)?;
         }
         ControlTerminator::IndirectJump {
-            guest_pc, link_register, return_pc, ..
+            guest_pc,
+            link_register,
+            return_pc,
+            ..
         } => {
-            if let Some(return_pc) = return_pc { validate(*return_pc)?; }
+            if let Some(return_pc) = return_pc {
+                validate(*return_pc)?;
+            }
             verify_link_continuation(*guest_pc, *link_register, *return_pc)?;
         }
         ControlTerminator::Return { .. } | ControlTerminator::Unsupported { .. } => {}
@@ -394,7 +460,8 @@ fn verify_link_continuation(
 ) -> Result<(), ControlError> {
     match (link_register, return_pc) {
         (Some(_), Some(return_pc)) => {
-            let expected = guest_pc.checked_add(8)
+            let expected = guest_pc
+                .checked_add(8)
                 .ok_or(ControlError::GuestPcOverflow(guest_pc))?;
             if return_pc != expected {
                 return Err(ControlError::TerminatorPcMismatch {
@@ -406,7 +473,8 @@ fn verify_link_continuation(
         (None, None) => {}
         _ => {
             return Err(ControlError::TerminatorPcMismatch {
-                expected: guest_pc.checked_add(8)
+                expected: guest_pc
+                    .checked_add(8)
                     .ok_or(ControlError::GuestPcOverflow(guest_pc))?,
                 actual: return_pc.unwrap_or(guest_pc),
             });
@@ -417,11 +485,19 @@ fn verify_link_continuation(
 
 fn verify_terminator_registers(terminator: &ControlTerminator) -> Result<(), ControlError> {
     let validate = |register: u8| {
-        if register < 32 { Ok(()) } else { Err(ControlError::InvalidRegister(register)) }
+        if register < 32 {
+            Ok(())
+        } else {
+            Err(ControlError::InvalidRegister(register))
+        }
     };
 
     match terminator {
-        ControlTerminator::ConditionalBranch { condition, link_register, .. } => {
+        ControlTerminator::ConditionalBranch {
+            condition,
+            link_register,
+            ..
+        } => {
             match condition {
                 BranchCondition::Equal { lhs, rhs } | BranchCondition::NotEqual { lhs, rhs } => {
                     validate(*lhs)?;
@@ -432,16 +508,28 @@ fn verify_terminator_registers(terminator: &ControlTerminator) -> Result<(), Con
                 | BranchCondition::LessThanZero { register }
                 | BranchCondition::GreaterThanOrEqualZero { register } => validate(*register)?,
             }
-            if let Some(register) = link_register { validate(*register)?; }
+            if let Some(register) = link_register {
+                validate(*register)?;
+            }
         }
         ControlTerminator::DirectJump { link_register, .. } => {
-            if let Some(register) = link_register { validate(*register)?; }
+            if let Some(register) = link_register {
+                validate(*register)?;
+            }
         }
-        ControlTerminator::IndirectJump { source_register, link_register, .. } => {
+        ControlTerminator::IndirectJump {
+            source_register,
+            link_register,
+            ..
+        } => {
             validate(*source_register)?;
-            if let Some(register) = link_register { validate(*register)?; }
+            if let Some(register) = link_register {
+                validate(*register)?;
+            }
         }
-        ControlTerminator::Return { source_register, .. } => validate(*source_register)?,
+        ControlTerminator::Return {
+            source_register, ..
+        } => validate(*source_register)?,
         ControlTerminator::Fallthrough { .. }
         | ControlTerminator::Unsupported { .. }
         | ControlTerminator::SegmentEnd { .. } => {}
@@ -463,13 +551,24 @@ mod tests {
 
     fn segment(base: u32, words: &[u32]) -> LoadedSegment {
         let mut bytes = Vec::with_capacity(words.len() * 4);
-        for word in words { bytes.extend_from_slice(&word.to_le_bytes()); }
+        for word in words {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
         let file_size = bytes.len();
-        LoadedSegment { virtual_address: base, flags: PF_X, file_size, bytes }
+        LoadedSegment {
+            virtual_address: base,
+            flags: PF_X,
+            file_size,
+            bytes,
+        }
     }
 
     fn entry(address: u32) -> EntryPoint {
-        EntryPoint { address, labels: vec!["control-ir-test".to_owned()], is_elf_entry: true }
+        EntryPoint {
+            address,
+            labels: vec!["control-ir-test".to_owned()],
+            is_elf_entry: true,
+        }
     }
 
     #[test]
@@ -483,23 +582,35 @@ mod tests {
         ];
         let segments = [segment(0x1000, &words)];
         let roots = [0x1000];
-        let graph = analysis::discover_cfg(&segments, vec![entry(0x1000)], &roots, AnalysisLimits::default())
-            .expect("synthetic CFG");
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic CFG");
         let program = ControlProgram::lift(&graph).expect("typed CFG IR");
 
         match &program.blocks[&0x1000].terminator {
             ControlTerminator::ConditionalBranch {
-                guest_pc, target_pc, fallthrough_pc, delay_slot, ..
+                guest_pc,
+                target_pc,
+                fallthrough_pc,
+                delay_slot,
+                ..
             } => {
                 assert_eq!(*guest_pc, 0x1000);
                 assert_eq!(*target_pc, 0x100C);
                 assert_eq!(*fallthrough_pc, 0x1008);
                 assert_eq!(delay_slot.guest_pc, 0x1004);
-                assert_eq!(delay_slot.operation, ir::Operation::AddImmediateUnsignedWord {
-                    dst: ir::Gpr::new(9).unwrap(),
-                    src: ir::Gpr::new(0).unwrap(),
-                    immediate: 7,
-                });
+                assert_eq!(
+                    delay_slot.operation,
+                    ir::Operation::AddImmediateUnsignedWord {
+                        dst: ir::Gpr::new(9).unwrap(),
+                        src: ir::Gpr::new(0).unwrap(),
+                        immediate: 7,
+                    }
+                );
             }
             other => panic!("expected conditional branch terminator, got {other:?}"),
         }
@@ -514,8 +625,13 @@ mod tests {
         ];
         let segments = [segment(0x2000, &words)];
         let roots = [0x2000];
-        let graph = analysis::discover_cfg(&segments, vec![entry(0x2000)], &roots, AnalysisLimits::default())
-            .expect("synthetic CFG");
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x2000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic CFG");
         let program = ControlProgram::lift(&graph).expect("unsupported remains explicit");
         assert!(matches!(
             &program.blocks[&0x2000].terminator,
@@ -540,14 +656,23 @@ mod tests {
         ];
         let segments = [segment(0x3000, &words)];
         let roots = [0x3000];
-        let graph = analysis::discover_cfg(&segments, vec![entry(0x3000)], &roots, AnalysisLimits::default())
-            .expect("synthetic HI/LO CFG");
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x3000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic HI/LO CFG");
         let program = ControlProgram::lift(&graph).expect("HI/LO scalar operations lift in CFG");
 
         let block = &program.blocks[&0x3000];
         assert_eq!(block.instructions.len(), 8);
-        assert!(matches!(block.instructions[0].operation, ir::Operation::MoveToHi { src } if src.index() == 1));
-        assert!(matches!(block.instructions[1].operation, ir::Operation::MoveFromHi { dst } if dst.index() == 2));
+        assert!(
+            matches!(block.instructions[0].operation, ir::Operation::MoveToHi { src } if src.index() == 1)
+        );
+        assert!(
+            matches!(block.instructions[1].operation, ir::Operation::MoveFromHi { dst } if dst.index() == 2)
+        );
         assert!(matches!(block.instructions[2].operation,
             ir::Operation::MultiplyWordSigned { dst, lhs, rhs }
                 if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2));
@@ -566,7 +691,10 @@ mod tests {
         assert!(matches!(block.instructions[7].operation,
             ir::Operation::AddImmediateDoublewordSigned { dst, src, immediate: 0xFFFE }
                 if dst.index() == 14 && src.index() == 1));
-        assert!(matches!(&block.terminator, ControlTerminator::Return { .. }));
+        assert!(matches!(
+            &block.terminator,
+            ControlTerminator::Return { .. }
+        ));
         assert_eq!(program.unsupported_count(), 0);
     }
 }

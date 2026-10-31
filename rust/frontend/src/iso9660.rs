@@ -24,7 +24,9 @@ pub struct Error {
 
 impl Error {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self {
+            message: message.into(),
+        }
     }
 }
 
@@ -73,11 +75,14 @@ impl<R: Read + Seek> Iso9660<R> {
     /// Opens a raw 2048-byte-sector ISO image and validates its primary volume
     /// descriptor, volume bounds, logical block size, and root directory.
     pub fn open(mut reader: R) -> Result<Self, Error> {
-        let image_bytes = reader.seek(SeekFrom::End(0))
+        let image_bytes = reader
+            .seek(SeekFrom::End(0))
             .map_err(|error| Error::new(format!("cannot determine ISO image size: {error}")))?;
 
         if image_bytes < (VOLUME_DESCRIPTOR_START_LBA + 1) * LOGICAL_BLOCK_SIZE {
-            return Err(Error::new("image is too small to contain an ISO 9660 volume descriptor"));
+            return Err(Error::new(
+                "image is too small to contain an ISO 9660 volume descriptor",
+            ));
         }
         if image_bytes % LOGICAL_BLOCK_SIZE != 0 {
             return Err(Error::new(
@@ -96,7 +101,8 @@ impl<R: Read + Seek> Iso9660<R> {
                     "ISO volume descriptor sequence extends beyond the declared volume space",
                 ));
             }
-            let offset = lba.checked_mul(LOGICAL_BLOCK_SIZE)
+            let offset = lba
+                .checked_mul(LOGICAL_BLOCK_SIZE)
                 .ok_or_else(|| Error::new("volume descriptor offset overflow"))?;
             let mut sector = [0u8; LOGICAL_BLOCK_SIZE as usize];
             read_image_at(&mut reader, image_bytes, offset, &mut sector)?;
@@ -116,7 +122,9 @@ impl<R: Read + Seek> Iso9660<R> {
             match sector[0] {
                 1 => {
                     if primary_descriptor.is_some() {
-                        return Err(Error::new("ISO contains more than one Primary Volume Descriptor"));
+                        return Err(Error::new(
+                            "ISO contains more than one Primary Volume Descriptor",
+                        ));
                     }
                     let volume_blocks = read_both_u32(&sector, 80, "volume space size")?;
                     if u64::from(volume_blocks) <= lba {
@@ -144,15 +152,19 @@ impl<R: Read + Seek> Iso9660<R> {
         }
 
         if !found_terminator {
-            return Err(Error::new("ISO volume descriptor sequence has no terminator within the safety limit"));
+            return Err(Error::new(
+                "ISO volume descriptor sequence has no terminator within the safety limit",
+            ));
         }
 
-        let descriptor = primary_descriptor
-            .ok_or_else(|| Error::new("ISO has no Primary Volume Descriptor"))?;
+        let descriptor =
+            primary_descriptor.ok_or_else(|| Error::new("ISO has no Primary Volume Descriptor"))?;
         let volume_set_size = read_both_u16(&descriptor, 120, "volume set size")?;
         let volume_sequence_number = read_both_u16(&descriptor, 124, "volume sequence number")?;
         if volume_set_size != 1 || volume_sequence_number != 1 {
-            return Err(Error::new("multi-volume ISO sets are not supported; expected a single volume"));
+            return Err(Error::new(
+                "multi-volume ISO sets are not supported; expected a single volume",
+            ));
         }
         let volume_space_blocks = read_both_u32(&descriptor, 80, "volume space size")?;
         if volume_space_blocks <= VOLUME_DESCRIPTOR_START_LBA as u32 {
@@ -185,17 +197,21 @@ impl<R: Read + Seek> Iso9660<R> {
 
         let root_record_length = usize::from(descriptor[156]);
         if root_record_length < 34 || root_record_length > descriptor.len() - 156 {
-            return Err(Error::new("Primary Volume Descriptor root directory record is malformed"));
+            return Err(Error::new(
+                "Primary Volume Descriptor root directory record is malformed",
+            ));
         }
-        let root = parse_directory_record(
-            &descriptor[156..156 + root_record_length],
-            volume_bytes,
-        )?;
+        let root =
+            parse_directory_record(&descriptor[156..156 + root_record_length], volume_bytes)?;
         if !root.is_directory() {
-            return Err(Error::new("Primary Volume Descriptor root record is not a directory"));
+            return Err(Error::new(
+                "Primary Volume Descriptor root record is not a directory",
+            ));
         }
         if root.name != "." {
-            return Err(Error::new("Primary Volume Descriptor root record is not the current-directory entry"));
+            return Err(Error::new(
+                "Primary Volume Descriptor root record is not the current-directory entry",
+            ));
         }
 
         Ok(Self { reader, info, root })
@@ -209,12 +225,21 @@ impl<R: Read + Seek> Iso9660<R> {
     /// Reads one directory, enforcing the record, extent, and entry-count
     /// limits. ISO directory records are never allowed to cross a logical
     /// block boundary; zero-length bytes pad to the next block.
-    pub fn read_directory(&mut self, directory: &DirectoryEntry) -> Result<Vec<DirectoryEntry>, Error> {
+    pub fn read_directory(
+        &mut self,
+        directory: &DirectoryEntry,
+    ) -> Result<Vec<DirectoryEntry>, Error> {
         if !directory.is_directory() {
             return Err(Error::new(format!("{} is not a directory", directory.name)));
         }
-        if directory.flags & 0x80 != 0 || directory.file_unit_size != 0 || directory.interleave_gap_size != 0 {
-            return Err(Error::new(format!("directory {} uses unsupported multi-extent/interleaved storage", directory.name)));
+        if directory.flags & 0x80 != 0
+            || directory.file_unit_size != 0
+            || directory.interleave_gap_size != 0
+        {
+            return Err(Error::new(format!(
+                "directory {} uses unsupported multi-extent/interleaved storage",
+                directory.name
+            )));
         }
         let directory_size = u64::from(directory.size_bytes);
         if directory_size > MAX_DIRECTORY_BYTES {
@@ -225,8 +250,12 @@ impl<R: Read + Seek> Iso9660<R> {
             )));
         }
 
-        let mut bytes = vec![0u8; usize::try_from(directory_size)
-            .map_err(|_| Error::new("directory size does not fit host memory"))?];
+        let mut bytes = vec![
+            0u8;
+            usize::try_from(directory_size).map_err(|_| Error::new(
+                "directory size does not fit host memory"
+            ))?
+        ];
         let offset = u64::from(directory.extent_lba)
             .checked_mul(LOGICAL_BLOCK_SIZE)
             .ok_or_else(|| Error::new("directory extent offset overflow"))?;
@@ -259,7 +288,8 @@ impl<R: Read + Seek> Iso9660<R> {
                     "directory record at byte {cursor} crosses a logical block boundary"
                 )));
             }
-            let record_end = cursor.checked_add(record_length)
+            let record_end = cursor
+                .checked_add(record_length)
                 .ok_or_else(|| Error::new("directory record end overflows"))?;
             if record_end > bytes.len() {
                 return Err(Error::new(format!(
@@ -267,11 +297,14 @@ impl<R: Read + Seek> Iso9660<R> {
                 )));
             }
 
-            let record = parse_directory_record(&bytes[cursor..record_end], self.info.volume_bytes)?;
+            let record =
+                parse_directory_record(&bytes[cursor..record_end], self.info.volume_bytes)?;
             if record.name != "." && record.name != ".." {
                 entries.push(record);
                 if entries.len() > MAX_DIRECTORY_ENTRIES {
-                    return Err(Error::new("directory exceeds the 100000-entry safety limit"));
+                    return Err(Error::new(
+                        "directory exceeds the 100000-entry safety limit",
+                    ));
                 }
             }
             cursor = record_end;
@@ -299,9 +332,10 @@ impl<R: Read + Seek> Iso9660<R> {
                 return Ok(None);
             }
             let children = self.read_directory(&current)?;
-            let Some(found) = children.into_iter().find(|entry| {
-                normalize_identifier(&entry.name) == *component
-            }) else {
+            let Some(found) = children
+                .into_iter()
+                .find(|entry| normalize_identifier(&entry.name) == *component)
+            else {
                 return Ok(None);
             };
 
@@ -316,17 +350,24 @@ impl<R: Read + Seek> Iso9660<R> {
     /// Reads one ordinary file into bounded memory. Multi-extent and
     /// interleaved files are rejected by the directory-record parser.
     pub fn read_file(&mut self, path: &str, max_bytes: u64) -> Result<Vec<u8>, Error> {
-        let entry = self.find_entry(path)?
+        let entry = self
+            .find_entry(path)?
             .ok_or_else(|| Error::new(format!("ISO path was not found: {path}")))?;
         self.read_entry(&entry, max_bytes)
     }
 
     pub fn read_entry(&mut self, entry: &DirectoryEntry, max_bytes: u64) -> Result<Vec<u8>, Error> {
         if entry.is_directory() {
-            return Err(Error::new(format!("{} is a directory, not a file", entry.name)));
+            return Err(Error::new(format!(
+                "{} is a directory, not a file",
+                entry.name
+            )));
         }
         if entry.flags & 0x80 != 0 || entry.file_unit_size != 0 || entry.interleave_gap_size != 0 {
-            return Err(Error::new(format!("{} uses unsupported multi-extent/interleaved storage", entry.name)));
+            return Err(Error::new(format!(
+                "{} uses unsupported multi-extent/interleaved storage",
+                entry.name
+            )));
         }
         let size = u64::from(entry.size_bytes);
         let effective_limit = max_bytes.min(MAX_BOOT_EXECUTABLE_BYTES);
@@ -336,8 +377,12 @@ impl<R: Read + Seek> Iso9660<R> {
                 entry.name
             )));
         }
-        let mut bytes = vec![0u8; usize::try_from(size)
-            .map_err(|_| Error::new("ISO file size does not fit host memory"))?];
+        let mut bytes = vec![
+            0u8;
+            usize::try_from(size).map_err(|_| Error::new(
+                "ISO file size does not fit host memory"
+            ))?
+        ];
         let offset = u64::from(entry.extent_lba)
             .checked_mul(LOGICAL_BLOCK_SIZE)
             .ok_or_else(|| Error::new("file extent offset overflow"))?;
@@ -360,10 +405,13 @@ impl<R: Read + Seek> Iso9660<R> {
     }
 
     fn read_at(&mut self, offset: u64, destination: &mut [u8]) -> Result<(), Error> {
-        let end = offset.checked_add(destination.len() as u64)
+        let end = offset
+            .checked_add(destination.len() as u64)
             .ok_or_else(|| Error::new("ISO read range overflows"))?;
         if end > self.info.volume_bytes || end > self.info.image_bytes {
-            return Err(Error::new("ISO read extends beyond the validated volume or image"));
+            return Err(Error::new(
+                "ISO read extends beyond the validated volume or image",
+            ));
         }
         read_image_at(&mut self.reader, self.info.image_bytes, offset, destination)
     }
@@ -375,45 +423,57 @@ fn read_image_at<R: Read + Seek>(
     offset: u64,
     destination: &mut [u8],
 ) -> Result<(), Error> {
-    let end = offset.checked_add(destination.len() as u64)
+    let end = offset
+        .checked_add(destination.len() as u64)
         .ok_or_else(|| Error::new("ISO image read range overflows"))?;
     if end > image_bytes {
         return Err(Error::new("ISO image read extends beyond end of file"));
     }
-    reader.seek(SeekFrom::Start(offset))
+    reader
+        .seek(SeekFrom::Start(offset))
         .map_err(|error| Error::new(format!("cannot seek within ISO image: {error}")))?;
-    reader.read_exact(destination)
+    reader
+        .read_exact(destination)
         .map_err(|error| Error::new(format!("cannot read ISO image data: {error}")))
 }
 
 fn read_both_u16(bytes: &[u8], offset: usize, label: &str) -> Result<u16, Error> {
-    let little_end = bytes.get(offset..offset + 2)
+    let little_end = bytes
+        .get(offset..offset + 2)
         .ok_or_else(|| Error::new(format!("ISO {label} little-endian field is truncated")))?;
-    let big_end = bytes.get(offset + 2..offset + 4)
+    let big_end = bytes
+        .get(offset + 2..offset + 4)
         .ok_or_else(|| Error::new(format!("ISO {label} big-endian field is truncated")))?;
     let little = u16::from_le_bytes([little_end[0], little_end[1]]);
     let big = u16::from_be_bytes([big_end[0], big_end[1]]);
     if little != big {
-        return Err(Error::new(format!("ISO {label} both-endian values disagree")));
+        return Err(Error::new(format!(
+            "ISO {label} both-endian values disagree"
+        )));
     }
     Ok(little)
 }
 
 fn read_both_u32(bytes: &[u8], offset: usize, label: &str) -> Result<u32, Error> {
-    let little_end = bytes.get(offset..offset + 4)
+    let little_end = bytes
+        .get(offset..offset + 4)
         .ok_or_else(|| Error::new(format!("ISO {label} little-endian field is truncated")))?;
-    let big_end = bytes.get(offset + 4..offset + 8)
+    let big_end = bytes
+        .get(offset + 4..offset + 8)
         .ok_or_else(|| Error::new(format!("ISO {label} big-endian field is truncated")))?;
     let little = u32::from_le_bytes([little_end[0], little_end[1], little_end[2], little_end[3]]);
     let big = u32::from_be_bytes([big_end[0], big_end[1], big_end[2], big_end[3]]);
     if little != big {
-        return Err(Error::new(format!("ISO {label} both-endian values disagree")));
+        return Err(Error::new(format!(
+            "ISO {label} both-endian values disagree"
+        )));
     }
     Ok(little)
 }
 
 fn decode_volume_identifier(bytes: &[u8]) -> Result<String, Error> {
-    let trimmed = bytes.iter()
+    let trimmed = bytes
+        .iter()
         .copied()
         .take_while(|byte| *byte != 0)
         .collect::<Vec<_>>();
@@ -439,10 +499,13 @@ fn parse_directory_record(bytes: &[u8], volume_bytes: u64) -> Result<DirectoryEn
     let interleave_gap_size = bytes[27];
     let volume_sequence = read_both_u16(bytes, 28, "volume sequence number")?;
     if volume_sequence != 1 {
-        return Err(Error::new("directory entry references an unsupported secondary ISO volume"));
+        return Err(Error::new(
+            "directory entry references an unsupported secondary ISO volume",
+        ));
     }
     let identifier_length = usize::from(bytes[32]);
-    let identifier_end = 33usize.checked_add(identifier_length)
+    let identifier_end = 33usize
+        .checked_add(identifier_length)
         .ok_or_else(|| Error::new("ISO file identifier length overflows"))?;
     if identifier_length == 0 || identifier_end > record_length {
         return Err(Error::new("ISO file identifier is missing or truncated"));
@@ -454,14 +517,19 @@ fn parse_directory_record(bytes: &[u8], volume_bytes: u64) -> Result<DirectoryEn
         _ => decode_identifier(identifier)?,
     };
 
-    let data_lba = extent.checked_add(extended_attribute_blocks)
+    let data_lba = extent
+        .checked_add(extended_attribute_blocks)
         .ok_or_else(|| Error::new("ISO extent plus extended-attribute length overflows"))?;
-    let data_offset = u64::from(data_lba).checked_mul(LOGICAL_BLOCK_SIZE)
+    let data_offset = u64::from(data_lba)
+        .checked_mul(LOGICAL_BLOCK_SIZE)
         .ok_or_else(|| Error::new("ISO data extent byte offset overflows"))?;
-    let data_end = data_offset.checked_add(u64::from(size_bytes))
+    let data_end = data_offset
+        .checked_add(u64::from(size_bytes))
         .ok_or_else(|| Error::new("ISO data extent end overflows"))?;
     if data_offset > volume_bytes || data_end > volume_bytes {
-        return Err(Error::new(format!("ISO entry {name} extends beyond the declared volume")));
+        return Err(Error::new(format!(
+            "ISO entry {name} extends beyond the declared volume"
+        )));
     }
 
     Ok(DirectoryEntry {
@@ -478,9 +546,13 @@ fn decode_identifier(bytes: &[u8]) -> Result<String, Error> {
     let value = std::str::from_utf8(bytes)
         .map_err(|_| Error::new("ISO primary-volume filename is not ASCII/UTF-8"))?;
     if value.bytes().any(|byte| !(0x20..=0x7E).contains(&byte))
-        || value.contains('/') || value.contains('\\') || value.contains(':')
+        || value.contains('/')
+        || value.contains('\\')
+        || value.contains(':')
     {
-        return Err(Error::new("ISO primary-volume filename contains unsupported characters"));
+        return Err(Error::new(
+            "ISO primary-volume filename contains unsupported characters",
+        ));
     }
     Ok(value.to_owned())
 }
@@ -494,7 +566,9 @@ fn normalize_path(path: &str) -> Result<Vec<String>, Error> {
     let mut value = path.trim().trim_matches('"').to_owned();
     if let Some((device, remainder)) = value.split_once(':') {
         if !device.eq_ignore_ascii_case("cdrom0") && !device.eq_ignore_ascii_case("cdrom") {
-            return Err(Error::new(format!("unsupported SYSTEM.CNF boot device: {device}")));
+            return Err(Error::new(format!(
+                "unsupported SYSTEM.CNF boot device: {device}"
+            )));
         }
         value = remainder.to_owned();
     }
@@ -506,7 +580,9 @@ fn normalize_path(path: &str) -> Result<Vec<String>, Error> {
             continue;
         }
         if component == ".." {
-            return Err(Error::new("ISO paths may not contain parent-directory traversal"));
+            return Err(Error::new(
+                "ISO paths may not contain parent-directory traversal",
+            ));
         }
         let normalized = normalize_identifier(component);
         if normalized.is_empty() {
@@ -537,9 +613,14 @@ fn parse_boot_path(system_cnf: &str) -> Result<String, Error> {
         }
     }
 
-    let value = boot2.or(boot)
+    let value = boot2
+        .or(boot)
         .ok_or_else(|| Error::new("SYSTEM.CNF contains neither BOOT2 nor BOOT"))?;
-    let value = value.split_whitespace().next().unwrap_or_default().trim_matches('"');
+    let value = value
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches('"');
     let components = normalize_path(value)?;
     if components.is_empty() {
         return Err(Error::new("SYSTEM.CNF boot path is empty"));
@@ -569,8 +650,7 @@ mod tests {
             if self.position >= self.image_bytes || destination.is_empty() {
                 return Ok(0);
             }
-            let remaining = usize::try_from(self.image_bytes - self.position)
-                .unwrap_or(usize::MAX);
+            let remaining = usize::try_from(self.image_bytes - self.position).unwrap_or(usize::MAX);
             let count = destination.len().min(remaining);
             destination[..count].fill(0);
 
@@ -582,12 +662,23 @@ mod tests {
                 let overlap_start = read_start.max(sector_start);
                 let overlap_end = read_end.min(sector_end);
                 if overlap_start < overlap_end {
-                    let source_start = usize::try_from(overlap_start - sector_start)
-                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "sparse sector offset overflow"))?;
-                    let destination_start = usize::try_from(overlap_start - read_start)
-                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "sparse read offset overflow"))?;
-                    let length = usize::try_from(overlap_end - overlap_start)
-                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "sparse read length overflow"))?;
+                    let source_start =
+                        usize::try_from(overlap_start - sector_start).map_err(|_| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "sparse sector offset overflow",
+                            )
+                        })?;
+                    let destination_start =
+                        usize::try_from(overlap_start - read_start).map_err(|_| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "sparse read offset overflow",
+                            )
+                        })?;
+                    let length = usize::try_from(overlap_end - overlap_start).map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidData, "sparse read length overflow")
+                    })?;
                     destination[destination_start..destination_start + length]
                         .copy_from_slice(&sector[source_start..source_start + length]);
                 }
@@ -607,7 +698,10 @@ mod tests {
                 SeekFrom::End(offset) => i128::from(self.image_bytes) + i128::from(offset),
             };
             if !(0..=i128::from(u64::MAX)).contains(&target) {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "sparse image seek is out of range"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "sparse image seek is out of range",
+                ));
             }
             self.position = target as u64;
             Ok(self.position)
@@ -690,7 +784,8 @@ mod tests {
         pvd[156..156 + root.len()].copy_from_slice(&root);
 
         let terminator_offset = 17 * LOGICAL_BLOCK_SIZE as usize;
-        let terminator = &mut image[terminator_offset..terminator_offset + LOGICAL_BLOCK_SIZE as usize];
+        let terminator =
+            &mut image[terminator_offset..terminator_offset + LOGICAL_BLOCK_SIZE as usize];
         terminator[0] = 255;
         terminator[1..6].copy_from_slice(b"CD001");
         terminator[6] = 1;
@@ -702,8 +797,18 @@ mod tests {
         for record in [
             directory_record(ROOT_LBA as u32, LOGICAL_BLOCK_SIZE as u32, 0x02, &[0]),
             directory_record(ROOT_LBA as u32, LOGICAL_BLOCK_SIZE as u32, 0x02, &[1]),
-            directory_record(SYSTEM_LBA as u32, system_cnf.len() as u32, 0, b"SYSTEM.CNF;1"),
-            directory_record(EXECUTABLE_LBA as u32, executable.len() as u32, 0, b"GAME.ELF;1"),
+            directory_record(
+                SYSTEM_LBA as u32,
+                system_cnf.len() as u32,
+                0,
+                b"SYSTEM.CNF;1",
+            ),
+            directory_record(
+                EXECUTABLE_LBA as u32,
+                executable.len() as u32,
+                0,
+                b"GAME.ELF;1",
+            ),
         ] {
             image[cursor..cursor + record.len()].copy_from_slice(&record);
             cursor += record.len();
@@ -759,9 +864,14 @@ mod tests {
 
         assert_eq!(iso.volume_info().volume_identifier, "REPS2 TEST");
         assert_eq!(iso.volume_info().logical_block_size, 2048);
-        assert_eq!(iso.boot_executable_path().expect("SYSTEM.CNF"), Some("GAME.ELF".to_owned()));
+        assert_eq!(
+            iso.boot_executable_path().expect("SYSTEM.CNF"),
+            Some("GAME.ELF".to_owned())
+        );
 
-        let executable = iso.read_file("cdrom0:\\GAME.ELF;1", 1024).expect("boot file");
+        let executable = iso
+            .read_file("cdrom0:\\GAME.ELF;1", 1024)
+            .expect("boot file");
         let elf = crate::elf::parse(&executable, crate::elf::ParseLimits::default())
             .expect("SYSTEM.CNF target is a valid synthetic PS2 ELF");
         assert!(elf.is_mips());
@@ -779,7 +889,11 @@ mod tests {
         let entries = iso.root_entries().expect("root listing");
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|entry| entry.name == "SYSTEM.CNF;1"));
-        assert!(entries.iter().any(|entry| normalize_identifier(&entry.name) == "GAME.ELF"));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| normalize_identifier(&entry.name) == "GAME.ELF")
+        );
     }
 
     #[test]
@@ -791,8 +905,13 @@ mod tests {
             80,
             17,
         );
-        let error = Iso9660::open(Cursor::new(image)).expect_err("descriptor sequence out of volume");
-        assert!(error.to_string().contains("descriptor sequence extends beyond"));
+        let error =
+            Iso9660::open(Cursor::new(image)).expect_err("descriptor sequence out of volume");
+        assert!(
+            error
+                .to_string()
+                .contains("descriptor sequence extends beyond")
+        );
     }
 
     #[test]
@@ -809,7 +928,11 @@ mod tests {
         image[terminator_offset + 6] = 1;
 
         let error = Iso9660::open(Cursor::new(image)).expect_err("reserved descriptor type");
-        assert!(error.to_string().contains("unsupported ISO 9660 descriptor type 4"));
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported ISO 9660 descriptor type 4")
+        );
     }
 
     #[test]
@@ -822,8 +945,7 @@ mod tests {
         }
         let identifier_length = usize::from(image[cursor + 32]);
         assert_eq!(identifier_length, b"README.TXT;1".len());
-        image[cursor + 33..cursor + 33 + identifier_length]
-            .copy_from_slice(b"README.TXT;1");
+        image[cursor + 33..cursor + 33 + identifier_length].copy_from_slice(b"README.TXT;1");
         let mut iso = Iso9660::open(Cursor::new(image)).expect("ISO without SYSTEM.CNF");
         assert_eq!(iso.boot_executable_path().expect("missing config"), None);
     }
@@ -839,7 +961,11 @@ mod tests {
     fn rejects_multi_volume_sets_and_secondary_volume_entries() {
         let mut image = valid_image();
         let pvd_offset = 16 * LOGICAL_BLOCK_SIZE as usize;
-        put_both_u16(&mut image[pvd_offset..pvd_offset + LOGICAL_BLOCK_SIZE as usize], 120, 2);
+        put_both_u16(
+            &mut image[pvd_offset..pvd_offset + LOGICAL_BLOCK_SIZE as usize],
+            120,
+            2,
+        );
         let error = Iso9660::open(Cursor::new(image)).expect_err("multi-volume set");
         assert!(error.to_string().contains("multi-volume ISO sets"));
 
@@ -852,8 +978,12 @@ mod tests {
         let record_length = usize::from(image[cursor]);
         put_both_u16(&mut image[cursor..cursor + record_length], 28, 2);
         let mut iso = Iso9660::open(Cursor::new(image)).expect("single-volume PVD");
-        assert!(iso.root_entries().expect_err("secondary volume entry").to_string()
-            .contains("secondary ISO volume"));
+        assert!(
+            iso.root_entries()
+                .expect_err("secondary volume entry")
+                .to_string()
+                .contains("secondary ISO volume")
+        );
     }
 
     #[test]
@@ -877,9 +1007,14 @@ mod tests {
             file_unit_size: 0,
             interleave_gap_size: 0,
         };
-        let error = iso.read_entry(&oversized, u64::MAX)
+        let error = iso
+            .read_entry(&oversized, u64::MAX)
             .expect_err("caller must not bypass the absolute allocation bound");
-        assert!(error.to_string().contains("exceeding the 536870912-byte read limit"));
+        assert!(
+            error
+                .to_string()
+                .contains("exceeding the 536870912-byte read limit")
+        );
     }
 
     #[test]
@@ -894,7 +1029,11 @@ mod tests {
         image[cursor + 6..cursor + 10].copy_from_slice(&u32::MAX.to_be_bytes());
         let mut iso = Iso9660::open(Cursor::new(image)).expect("PVD valid");
         let error = iso.root_entries().expect_err("file outside volume");
-        assert!(error.to_string().contains("extends beyond the declared volume"));
+        assert!(
+            error
+                .to_string()
+                .contains("extends beyond the declared volume")
+        );
     }
 
     #[test]
@@ -908,8 +1047,12 @@ mod tests {
             }
             image[cursor + field] = value;
             let mut iso = Iso9660::open(Cursor::new(image)).expect("PVD valid");
-            let entries = iso.root_entries().expect("unrelated file metadata remains listable");
-            let game = entries.iter().find(|entry| entry.name == "GAME.ELF;1")
+            let entries = iso
+                .root_entries()
+                .expect("unrelated file metadata remains listable");
+            let game = entries
+                .iter()
+                .find(|entry| entry.name == "GAME.ELF;1")
                 .expect("boot executable entry");
             assert!(iso.read_entry(game, 1024).is_err());
         }
@@ -927,9 +1070,8 @@ mod tests {
 
     #[test]
     fn prefers_boot2_over_boot() {
-        let value = parse_boot_path(
-            "BOOT = cdrom:\\OLD.ELF;1\nBOOT2 = cdrom0:\\NEW.ELF;1\n",
-        ).expect("boot path");
+        let value = parse_boot_path("BOOT = cdrom:\\OLD.ELF;1\nBOOT2 = cdrom0:\\NEW.ELF;1\n")
+            .expect("boot path");
         assert_eq!(value, "NEW.ELF");
     }
 }

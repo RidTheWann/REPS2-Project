@@ -5,17 +5,88 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Opcode {
     Nop,
-    Sll, Srl, Sra,
-    Jr, Jalr, Syscall, Break,
-    Mfhi, Mthi, Mflo, Mtlo, Mult, Multu, Div, Divu,
-    Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
-    Dadd, Daddu, Dsub, Dsubu, Daddi, Daddiu, Dsll, Dsrl, Dsra, Dsll32, Dsrl32, Dsra32,
-    Sllv, Srlv, Srav, Dsllv, Dsrlv, Dsrav,
-    J, Jal, Beq, Bne, Blez, Bgtz, Bltz, Bgez, Bltzal, Bgezal,
-    Addi, Addiu, Slti, Sltiu, Andi, Ori, Xori, Lui,
-    Lb, Lh, Lw, Lbu, Lhu, Lwu, Sb, Sh, Sw,
-    Lwl, Lwr, Swl, Swr, Ldl, Ldr, Sdl, Sdr,
-    Ld, Sd, Lq, Sq,
+    Sll,
+    Srl,
+    Sra,
+    Jr,
+    Jalr,
+    Syscall,
+    Break,
+    Mfhi,
+    Mthi,
+    Mflo,
+    Mtlo,
+    Mult,
+    Multu,
+    Div,
+    Divu,
+    Add,
+    Addu,
+    Sub,
+    Subu,
+    And,
+    Or,
+    Xor,
+    Nor,
+    Slt,
+    Sltu,
+    Dadd,
+    Daddu,
+    Dsub,
+    Dsubu,
+    Daddi,
+    Daddiu,
+    Dsll,
+    Dsrl,
+    Dsra,
+    Dsll32,
+    Dsrl32,
+    Dsra32,
+    Sllv,
+    Srlv,
+    Srav,
+    Dsllv,
+    Dsrlv,
+    Dsrav,
+    J,
+    Jal,
+    Beq,
+    Bne,
+    Blez,
+    Bgtz,
+    Bltz,
+    Bgez,
+    Bltzal,
+    Bgezal,
+    Addi,
+    Addiu,
+    Slti,
+    Sltiu,
+    Andi,
+    Ori,
+    Xori,
+    Lui,
+    Lb,
+    Lh,
+    Lw,
+    Lbu,
+    Lhu,
+    Lwu,
+    Sb,
+    Sh,
+    Sw,
+    Lwl,
+    Lwr,
+    Swl,
+    Swr,
+    Ldl,
+    Ldr,
+    Sdl,
+    Sdr,
+    Ld,
+    Sd,
+    Lq,
+    Sq,
     Unknown,
 }
 
@@ -219,9 +290,18 @@ impl Instruction {
     pub const fn is_control_transfer(self) -> bool {
         matches!(
             self.opcode,
-            Opcode::J | Opcode::Jal | Opcode::Beq | Opcode::Bne |
-            Opcode::Blez | Opcode::Bgtz | Opcode::Bltz | Opcode::Bgez |
-            Opcode::Bltzal | Opcode::Bgezal | Opcode::Jr | Opcode::Jalr
+            Opcode::J
+                | Opcode::Jal
+                | Opcode::Beq
+                | Opcode::Bne
+                | Opcode::Blez
+                | Opcode::Bgtz
+                | Opcode::Bltz
+                | Opcode::Bgez
+                | Opcode::Bltzal
+                | Opcode::Bgezal
+                | Opcode::Jr
+                | Opcode::Jalr
         )
     }
 
@@ -230,8 +310,14 @@ impl Instruction {
     pub const fn is_conditional_branch(self) -> bool {
         matches!(
             self.opcode,
-            Opcode::Beq | Opcode::Bne | Opcode::Blez | Opcode::Bgtz |
-            Opcode::Bltz | Opcode::Bgez | Opcode::Bltzal | Opcode::Bgezal
+            Opcode::Beq
+                | Opcode::Bne
+                | Opcode::Blez
+                | Opcode::Bgtz
+                | Opcode::Bltz
+                | Opcode::Bgez
+                | Opcode::Bltzal
+                | Opcode::Bgezal
         )
     }
 
@@ -256,12 +342,26 @@ impl Instruction {
                 effects.gpr_write_mask = rd;
             }
 
-            Opcode::Sllv | Opcode::Srlv | Opcode::Srav |
-            Opcode::Dsllv | Opcode::Dsrlv | Opcode::Dsrav |
-            Opcode::Add | Opcode::Addu | Opcode::Sub | Opcode::Subu |
-            Opcode::Dadd | Opcode::Dsub |
-            Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Nor |
-            Opcode::Slt | Opcode::Sltu | Opcode::Daddu | Opcode::Dsubu => {
+            Opcode::Sllv
+            | Opcode::Srlv
+            | Opcode::Srav
+            | Opcode::Dsllv
+            | Opcode::Dsrlv
+            | Opcode::Dsrav
+            | Opcode::Add
+            | Opcode::Addu
+            | Opcode::Sub
+            | Opcode::Subu
+            | Opcode::Dadd
+            | Opcode::Dsub
+            | Opcode::And
+            | Opcode::Or
+            | Opcode::Xor
+            | Opcode::Nor
+            | Opcode::Slt
+            | Opcode::Sltu
+            | Opcode::Daddu
+            | Opcode::Dsubu => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
                 effects.may_raise_exception = matches!(
@@ -270,8 +370,12 @@ impl Instruction {
                 );
             }
 
-            Opcode::Dsll | Opcode::Dsrl | Opcode::Dsra |
-            Opcode::Dsll32 | Opcode::Dsrl32 | Opcode::Dsra32 => {
+            Opcode::Dsll
+            | Opcode::Dsrl
+            | Opcode::Dsra
+            | Opcode::Dsll32
+            | Opcode::Dsrl32
+            | Opcode::Dsra32 => {
                 effects.gpr_read_mask = rt;
                 effects.gpr_write_mask = rd;
             }
@@ -340,9 +444,15 @@ impl Instruction {
                 };
             }
 
-            Opcode::Addi | Opcode::Addiu | Opcode::Daddi | Opcode::Daddiu |
-            Opcode::Slti | Opcode::Sltiu | Opcode::Andi |
-            Opcode::Ori | Opcode::Xori => {
+            Opcode::Addi
+            | Opcode::Addiu
+            | Opcode::Daddi
+            | Opcode::Daddiu
+            | Opcode::Slti
+            | Opcode::Sltiu
+            | Opcode::Andi
+            | Opcode::Ori
+            | Opcode::Xori => {
                 effects.gpr_read_mask = rs;
                 effects.gpr_write_mask = rt;
                 effects.may_raise_exception = matches!(self.opcode, Opcode::Addi | Opcode::Daddi);
@@ -351,9 +461,14 @@ impl Instruction {
                 effects.gpr_write_mask = rt;
             }
 
-            Opcode::Lb | Opcode::Lh | Opcode::Lw |
-            Opcode::Lbu | Opcode::Lhu | Opcode::Lwu |
-            Opcode::Ld | Opcode::Lq => {
+            Opcode::Lb
+            | Opcode::Lh
+            | Opcode::Lw
+            | Opcode::Lbu
+            | Opcode::Lhu
+            | Opcode::Lwu
+            | Opcode::Ld
+            | Opcode::Lq => {
                 effects.gpr_read_mask = rs;
                 effects.gpr_write_mask = rt;
                 effects.memory = MemoryEffect::Read;
@@ -367,9 +482,15 @@ impl Instruction {
                 effects.memory = MemoryEffect::Read;
                 effects.may_raise_exception = true;
             }
-            Opcode::Sb | Opcode::Sh | Opcode::Sw |
-            Opcode::Sd | Opcode::Sq |
-            Opcode::Swl | Opcode::Swr | Opcode::Sdl | Opcode::Sdr => {
+            Opcode::Sb
+            | Opcode::Sh
+            | Opcode::Sw
+            | Opcode::Sd
+            | Opcode::Sq
+            | Opcode::Swl
+            | Opcode::Swr
+            | Opcode::Sdl
+            | Opcode::Sdr => {
                 effects.gpr_read_mask = rs | rt;
                 effects.memory = MemoryEffect::Write;
                 effects.may_raise_exception = true;
@@ -485,19 +606,22 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                     _ => Opcode::Unknown,
                 };
                 if opcode != Opcode::Unknown {
-                    instruction.target = pc.wrapping_add(4)
+                    instruction.target = pc
+                        .wrapping_add(4)
                         .wrapping_add(((immediate as i16 as i32).wrapping_mul(4)) as u32);
                     instruction.has_delay_slot = true;
                 }
                 opcode
             }
             0x02 => {
-                instruction.target = (pc.wrapping_add(4) & 0xF000_0000) | ((word & 0x03FF_FFFF) << 2);
+                instruction.target =
+                    (pc.wrapping_add(4) & 0xF000_0000) | ((word & 0x03FF_FFFF) << 2);
                 instruction.has_delay_slot = true;
                 Opcode::J
             }
             0x03 => {
-                instruction.target = (pc.wrapping_add(4) & 0xF000_0000) | ((word & 0x03FF_FFFF) << 2);
+                instruction.target =
+                    (pc.wrapping_add(4) & 0xF000_0000) | ((word & 0x03FF_FFFF) << 2);
                 instruction.has_delay_slot = true;
                 Opcode::Jal
             }
@@ -548,10 +672,21 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
         };
     }
 
-    if !matches!(instruction.opcode,
-        Opcode::J | Opcode::Jal | Opcode::Beq | Opcode::Bne |
-        Opcode::Blez | Opcode::Bgtz | Opcode::Bltz | Opcode::Bgez |
-        Opcode::Bltzal | Opcode::Bgezal | Opcode::Jr | Opcode::Jalr) {
+    if !matches!(
+        instruction.opcode,
+        Opcode::J
+            | Opcode::Jal
+            | Opcode::Beq
+            | Opcode::Bne
+            | Opcode::Blez
+            | Opcode::Bgtz
+            | Opcode::Bltz
+            | Opcode::Bgez
+            | Opcode::Bltzal
+            | Opcode::Bgezal
+            | Opcode::Jr
+            | Opcode::Jalr
+    ) {
         instruction.has_delay_slot = false;
     }
     instruction
@@ -612,8 +747,14 @@ mod tests {
             assert_eq!(decoded.rs, 4);
             assert_eq!(decoded.rt, 5);
         }
-        assert_eq!(decode((0x20 << 26) | (4 << 21) | (5 << 16) | 0xFFFC, 0).signed_immediate(), -4);
-        assert_eq!(decode((0x37 << 26) | (4 << 21) | (5 << 16) | 0xFFF8, 0).signed_immediate(), -8);
+        assert_eq!(
+            decode((0x20 << 26) | (4 << 21) | (5 << 16) | 0xFFFC, 0).signed_immediate(),
+            -4
+        );
+        assert_eq!(
+            decode((0x37 << 26) | (4 << 21) | (5 << 16) | 0xFFF8, 0).signed_immediate(),
+            -8
+        );
     }
 
     #[test]
@@ -636,7 +777,10 @@ mod tests {
         let cases = [
             (((8 << 21) | (9 << 16) | (10 << 11) | 0x2D), Opcode::Daddu),
             (((8 << 21) | (9 << 16) | (10 << 11) | 0x2F), Opcode::Dsubu),
-            (((0x19 << 26) | (8 << 21) | (10 << 16) | 0xFFF0), Opcode::Daddiu),
+            (
+                ((0x19 << 26) | (8 << 21) | (10 << 16) | 0xFFF0),
+                Opcode::Daddiu,
+            ),
             (((9 << 16) | (10 << 11) | (7 << 6) | 0x38), Opcode::Dsll),
             (((9 << 16) | (10 << 11) | (7 << 6) | 0x3A), Opcode::Dsrl),
             (((9 << 16) | (10 << 11) | (7 << 6) | 0x3B), Opcode::Dsra),
@@ -649,7 +793,10 @@ mod tests {
             assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
             assert!(!decoded.has_delay_slot);
         }
-        assert_eq!(decode((0x19 << 26) | (8 << 21) | (9 << 16) | 0xFFF0, 0).signed_immediate(), -16);
+        assert_eq!(
+            decode((0x19 << 26) | (8 << 21) | (9 << 16) | 0xFFF0, 0).signed_immediate(),
+            -16
+        );
     }
 
     #[test]
@@ -671,7 +818,10 @@ mod tests {
     fn rejects_nonzero_reserved_shift_amount_for_variable_shifts() {
         for function in [0x04, 0x06, 0x07, 0x14, 0x16, 0x17] {
             let invalid = (4 << 21) | (5 << 16) | (6 << 11) | (1 << 6) | function;
-            assert!(!decode(invalid, 0).is_supported(), "function 0x{function:02X}");
+            assert!(
+                !decode(invalid, 0).is_supported(),
+                "function 0x{function:02X}"
+            );
         }
     }
 
@@ -679,7 +829,10 @@ mod tests {
     fn rejects_reserved_source_fields_for_doubleword_immediate_shifts() {
         for function in [0x38, 0x3A, 0x3B, 0x3C, 0x3E, 0x3F] {
             let invalid = (1 << 21) | (9 << 16) | (10 << 11) | function;
-            assert!(!decode(invalid, 0).is_supported(), "function 0x{function:02X}");
+            assert!(
+                !decode(invalid, 0).is_supported(),
+                "function 0x{function:02X}"
+            );
         }
     }
 
@@ -765,7 +918,10 @@ mod tests {
         let jalr_without_link = decode((4 << 21) | 0x09, 0x400C).effects();
         assert_eq!(jalr_without_link.gpr_read_mask, 1 << 4);
         assert_eq!(jalr_without_link.gpr_write_mask, 0);
-        assert_eq!(jalr_without_link.control_flow, ControlFlowEffect::IndirectJump);
+        assert_eq!(
+            jalr_without_link.control_flow,
+            ControlFlowEffect::IndirectJump
+        );
     }
 
     #[test]
@@ -788,7 +944,6 @@ mod tests {
         assert!(unknown.may_raise_exception);
     }
 
-
     #[test]
     fn decodes_r5900_three_operand_multiply_and_hilo_moves() {
         let mult = decode((8 << 21) | (9 << 16) | (10 << 11) | 0x18, 0x6000);
@@ -805,9 +960,18 @@ mod tests {
         assert_eq!(decode((20 << 11) | 0x10, 0x6014).opcode, Opcode::Mfhi);
         assert_eq!(decode((21 << 11) | 0x12, 0x6018).opcode, Opcode::Mflo);
         // DIV/DIVU keep their reserved rd field; only MULT/MULTU gained rd.
-        assert_eq!(decode((8 << 21) | (9 << 16) | (10 << 11) | 0x1A, 0x601C).opcode, Opcode::Unknown);
-        assert_eq!(decode((8 << 21) | (9 << 16) | 0x1B, 0x6020).opcode, Opcode::Divu);
-        assert_eq!(decode((8 << 21) | (9 << 16) | (10 << 11) | 0x18 | (1 << 6), 0x6024).opcode, Opcode::Unknown);
+        assert_eq!(
+            decode((8 << 21) | (9 << 16) | (10 << 11) | 0x1A, 0x601C).opcode,
+            Opcode::Unknown
+        );
+        assert_eq!(
+            decode((8 << 21) | (9 << 16) | 0x1B, 0x6020).opcode,
+            Opcode::Divu
+        );
+        assert_eq!(
+            decode((8 << 21) | (9 << 16) | (10 << 11) | 0x18 | (1 << 6), 0x6024).opcode,
+            Opcode::Unknown
+        );
     }
 
     #[test]
@@ -839,7 +1003,6 @@ mod tests {
         assert!(div.writes_hi && div.writes_lo);
     }
 
-
     #[test]
     fn decodes_r5900_compare_and_nor_operations() {
         let register_cases = [
@@ -856,13 +1019,22 @@ mod tests {
         }
 
         let immediate_cases = [
-            (((0x0A << 26) | (9 << 21) | (10 << 16) | 0x8001), Opcode::Slti),
-            (((0x0B << 26) | (11 << 21) | (12 << 16) | 0xFFFF), Opcode::Sltiu),
+            (
+                ((0x0A << 26) | (9 << 21) | (10 << 16) | 0x8001),
+                Opcode::Slti,
+            ),
+            (
+                ((0x0B << 26) | (11 << 21) | (12 << 16) | 0xFFFF),
+                Opcode::Sltiu,
+            ),
         ];
         for (word, expected) in immediate_cases {
             let decoded = decode(word, 0x7100);
             assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
-            assert_eq!(decoded.signed_immediate(), if expected == Opcode::Slti { -32767 } else { -1 });
+            assert_eq!(
+                decoded.signed_immediate(),
+                if expected == Opcode::Slti { -32767 } else { -1 }
+            );
         }
     }
 
@@ -885,13 +1057,15 @@ mod tests {
         assert!(!sltiu.may_raise_exception);
     }
 
-
     #[test]
     fn decodes_signed_doubleword_arithmetic_and_reserved_fields() {
         let cases = [
             (((8 << 21) | (9 << 16) | (10 << 11) | 0x2C), Opcode::Dadd),
             (((12 << 21) | (13 << 16) | (11 << 11) | 0x2E), Opcode::Dsub),
-            (((0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE), Opcode::Daddi),
+            (
+                ((0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE),
+                Opcode::Daddi,
+            ),
         ];
         for (word, expected) in cases {
             let decoded = decode(word, 0xB000);
@@ -925,5 +1099,4 @@ mod tests {
         assert_eq!(dadd_to_zero.gpr_write_mask, 0);
         assert!(dadd_to_zero.may_raise_exception);
     }
-
 }
