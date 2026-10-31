@@ -1,0 +1,22 @@
+[package]
+name = "reps2-frontend"
+version = "0.2.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Independent PlayStation 2 static recompilation frontend"
+publish = false
+
+[lib]
+name = "reps2_frontend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "reps2"
+path = "src/main.rs"
+
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
