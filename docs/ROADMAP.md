@@ -31,6 +31,8 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 ## M2 — R5900 decoder and analysis
 
 - [ ] Cover the documented R5900 integer, 64-bit, MMI0–MMI3, COP0, and FPU instruction families.
+- [x] Decode, lift, and AOT-lower the non-trapping 64-bit scalar subset (DADDU, DSUBU, DADDIU, DSLL/DSRL/DSRA and their 32-shift variants); test modulo arithmetic, sign-extended immediates, shift boundaries, and upper GPR-lane preservation.
+
 - [ ] Encode instruction operand/side-effect/exception metadata.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
 - [x] Direct branch/call recovery and unresolved indirect-edge tracking.
