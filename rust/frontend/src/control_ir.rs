@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::analysis::{BranchCondition, ControlFlowGraph, Terminator};
+use crate::analysis::{BranchCondition, ControlFlowGraph, DelaySlotPolicy, Terminator};
 use crate::ir::{
     self, Instruction as ScalarInstruction, LiftError, VerifyError as ScalarVerifyError,
 };
@@ -30,6 +30,7 @@ pub enum ControlTerminator {
         fallthrough_pc: u32,
         link_register: Option<u8>,
         delay_slot: ScalarInstruction,
+        delay_slot_policy: DelaySlotPolicy,
     },
     DirectJump {
         guest_pc: u32,
@@ -339,6 +340,7 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             target_pc,
             fallthrough_pc,
             delay_slot,
+            delay_slot_policy,
             link_register,
         } => Ok(ControlTerminator::ConditionalBranch {
             guest_pc: instruction.pc,
@@ -347,6 +349,7 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             fallthrough_pc: *fallthrough_pc,
             link_register: *link_register,
             delay_slot: lift_delay_slot(delay_slot)?,
+            delay_slot_policy: *delay_slot_policy,
         }),
         Terminator::DirectJump {
             instruction,
@@ -613,6 +616,39 @@ mod tests {
                 );
             }
             other => panic!("expected conditional branch terminator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_branch_likely_annulment_in_typed_ir() {
+        let words = [
+            (0x14 << 26) | (8 << 21) | 2, // beql t0, zero, 0x200C
+            0x2409_0007,                  // delay slot
+            0x240A_0005,                  // fallthrough path
+            0x03E0_0008,
+            0x0000_0000,
+        ];
+        let segments = [segment(0x2000, &words)];
+        let roots = [0x2000];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x2000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic branch-likely CFG");
+        let program = ControlProgram::lift(&graph).expect("typed branch-likely IR");
+
+        match &program.blocks[&0x2000].terminator {
+            ControlTerminator::ConditionalBranch {
+                delay_slot_policy,
+                delay_slot,
+                ..
+            } => {
+                assert_eq!(*delay_slot_policy, DelaySlotPolicy::AnnulWhenNotTaken);
+                assert_eq!(delay_slot.guest_pc, 0x2004);
+            }
+            other => panic!("expected conditional branch, got {other:?}"),
         }
     }
 

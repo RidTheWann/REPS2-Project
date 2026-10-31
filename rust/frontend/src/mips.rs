@@ -58,6 +58,14 @@ pub enum Opcode {
     Bgez,
     Bltzal,
     Bgezal,
+    Beql,
+    Bnel,
+    Blezl,
+    Bgtzl,
+    Bltzl,
+    Bgezl,
+    Bltzall,
+    Bgezall,
     Addi,
     Addiu,
     Slti,
@@ -149,6 +157,14 @@ impl Opcode {
             Self::Bgez => "bgez",
             Self::Bltzal => "bltzal",
             Self::Bgezal => "bgezal",
+            Self::Beql => "beql",
+            Self::Bnel => "bnel",
+            Self::Blezl => "blezl",
+            Self::Bgtzl => "bgtzl",
+            Self::Bltzl => "bltzl",
+            Self::Bgezl => "bgezl",
+            Self::Bltzall => "bltzall",
+            Self::Bgezall => "bgezall",
             Self::Addi => "addi",
             Self::Addiu => "addiu",
             Self::Slti => "slti",
@@ -300,6 +316,14 @@ impl Instruction {
                 | Opcode::Bgez
                 | Opcode::Bltzal
                 | Opcode::Bgezal
+                | Opcode::Beql
+                | Opcode::Bnel
+                | Opcode::Blezl
+                | Opcode::Bgtzl
+                | Opcode::Bltzl
+                | Opcode::Bgezl
+                | Opcode::Bltzall
+                | Opcode::Bgezall
                 | Opcode::Jr
                 | Opcode::Jalr
         )
@@ -318,6 +342,32 @@ impl Instruction {
                 | Opcode::Bgez
                 | Opcode::Bltzal
                 | Opcode::Bgezal
+                | Opcode::Beql
+                | Opcode::Bnel
+                | Opcode::Blezl
+                | Opcode::Bgtzl
+                | Opcode::Bltzl
+                | Opcode::Bgezl
+                | Opcode::Bltzall
+                | Opcode::Bgezall
+        )
+    }
+
+    /// Returns whether the branch annuls its delay slot when the branch is not
+    /// taken. The R5900 branch-likely family only executes the immediately
+    /// following instruction on the taken path.
+    #[must_use]
+    pub const fn is_branch_likely(self) -> bool {
+        matches!(
+            self.opcode,
+            Opcode::Beql
+                | Opcode::Bnel
+                | Opcode::Blezl
+                | Opcode::Bgtzl
+                | Opcode::Bltzl
+                | Opcode::Bgezl
+                | Opcode::Bltzall
+                | Opcode::Bgezall
         )
     }
 
@@ -415,18 +465,26 @@ impl Instruction {
                 effects.gpr_write_mask = gpr_bit(31);
                 effects.control_flow = ControlFlowEffect::DirectCall;
             }
-            Opcode::Beq | Opcode::Bne => {
+            Opcode::Beq | Opcode::Bne | Opcode::Beql | Opcode::Bnel => {
                 effects.gpr_read_mask = rs | rt;
                 effects.control_flow = ControlFlowEffect::ConditionalDirect;
             }
-            Opcode::Blez | Opcode::Bgtz | Opcode::Bltz | Opcode::Bgez => {
+            Opcode::Blez
+            | Opcode::Bgtz
+            | Opcode::Bltz
+            | Opcode::Bgez
+            | Opcode::Blezl
+            | Opcode::Bgtzl
+            | Opcode::Bltzl
+            | Opcode::Bgezl => {
                 effects.gpr_read_mask = rs;
                 effects.control_flow = ControlFlowEffect::ConditionalDirect;
             }
-            Opcode::Bltzal | Opcode::Bgezal => {
+            Opcode::Bltzal | Opcode::Bgezal | Opcode::Bltzall | Opcode::Bgezall => {
                 effects.gpr_read_mask = rs;
-                // The EE link register is written before the branch outcome
-                // is committed for these non-likely link variants.
+                // The link register is written unconditionally by the branch,
+                // including branch-likely variants; annulment applies only to
+                // the delay-slot instruction on the not-taken path.
                 effects.gpr_write_mask = gpr_bit(31);
                 effects.control_flow = ControlFlowEffect::ConditionalCall;
             }
@@ -601,8 +659,12 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 let opcode = match rt {
                     0x00 => Opcode::Bltz,
                     0x01 => Opcode::Bgez,
+                    0x02 => Opcode::Bltzl,
+                    0x03 => Opcode::Bgezl,
                     0x10 => Opcode::Bltzal,
                     0x11 => Opcode::Bgezal,
+                    0x12 => Opcode::Bltzall,
+                    0x13 => Opcode::Bgezall,
                     _ => Opcode::Unknown,
                 };
                 if opcode != Opcode::Unknown {
@@ -634,6 +696,18 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                     0x05 => Opcode::Bne,
                     0x06 if rt == 0 => Opcode::Blez,
                     0x07 if rt == 0 => Opcode::Bgtz,
+                    _ => Opcode::Unknown,
+                }
+            }
+            0x14..=0x17 => {
+                let offset = ((immediate as i16 as i32).wrapping_mul(4)) as u32;
+                instruction.target = pc.wrapping_add(4).wrapping_add(offset);
+                instruction.has_delay_slot = true;
+                match primary {
+                    0x14 => Opcode::Beql,
+                    0x15 => Opcode::Bnel,
+                    0x16 if rt == 0 => Opcode::Blezl,
+                    0x17 if rt == 0 => Opcode::Bgtzl,
                     _ => Opcode::Unknown,
                 }
             }
@@ -684,6 +758,14 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             | Opcode::Bgez
             | Opcode::Bltzal
             | Opcode::Bgezal
+            | Opcode::Beql
+            | Opcode::Bnel
+            | Opcode::Blezl
+            | Opcode::Bgtzl
+            | Opcode::Bltzl
+            | Opcode::Bgezl
+            | Opcode::Bltzall
+            | Opcode::Bgezall
             | Opcode::Jr
             | Opcode::Jalr
     ) {
@@ -850,6 +932,53 @@ mod tests {
         assert!(decoded_bgezal.has_delay_slot);
         assert_eq!(decoded_bgezal.target, 0x1FFC);
         assert!(decoded_bgezal.is_control_transfer());
+    }
+
+    #[test]
+    fn decodes_branch_likely_family_and_annulment_metadata() {
+        let cases = [
+            ((0x14 << 26) | (8 << 21) | (9 << 16) | 2, Opcode::Beql),
+            ((0x15 << 26) | (8 << 21) | (9 << 16) | 2, Opcode::Bnel),
+            ((0x16 << 26) | (8 << 21) | 2, Opcode::Blezl),
+            ((0x17 << 26) | (8 << 21) | 2, Opcode::Bgtzl),
+            ((0x01 << 26) | (8 << 21) | (0x02 << 16) | 2, Opcode::Bltzl),
+            ((0x01 << 26) | (8 << 21) | (0x03 << 16) | 2, Opcode::Bgezl),
+            ((0x01 << 26) | (8 << 21) | (0x12 << 16) | 2, Opcode::Bltzall),
+            ((0x01 << 26) | (8 << 21) | (0x13 << 16) | 2, Opcode::Bgezall),
+        ];
+        for (word, expected) in cases {
+            let decoded = decode(word, 0x1000);
+            assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
+            assert!(decoded.is_supported());
+            assert!(decoded.has_delay_slot);
+            assert!(decoded.is_control_transfer());
+            assert!(decoded.is_conditional_branch());
+            assert!(decoded.is_branch_likely(), "word 0x{word:08X}");
+            assert_eq!(decoded.target, 0x100C);
+        }
+
+        let branch = decode((0x04 << 26) | (8 << 21) | (9 << 16) | 2, 0x1000);
+        assert!(!branch.is_branch_likely());
+        assert!(!decode((0x16 << 26) | (8 << 21) | (1 << 16), 0x1000).is_supported());
+        assert!(!decode((0x17 << 26) | (8 << 21) | (1 << 16), 0x1000).is_supported());
+    }
+
+    #[test]
+    fn effects_classify_branch_likely_and_write_link_unconditionally() {
+        let beql = decode((0x14 << 26) | (4 << 21) | (5 << 16) | 1, 0x5000).effects();
+        assert_eq!(beql.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(beql.gpr_write_mask, 0);
+        assert_eq!(beql.control_flow, ControlFlowEffect::ConditionalDirect);
+
+        let bltzall = decode((0x01 << 26) | (4 << 21) | (0x12 << 16) | 1, 0x5004).effects();
+        assert_eq!(bltzall.gpr_read_mask, 1 << 4);
+        assert_eq!(bltzall.gpr_write_mask, 1 << 31);
+        assert_eq!(bltzall.control_flow, ControlFlowEffect::ConditionalCall);
+
+        let bgezall = decode((0x01 << 26) | (9 << 21) | (0x13 << 16) | 1, 0x5008).effects();
+        assert_eq!(bgezall.gpr_read_mask, 1 << 9);
+        assert_eq!(bgezall.gpr_write_mask, 1 << 31);
+        assert_eq!(bgezall.control_flow, ControlFlowEffect::ConditionalCall);
     }
 
     #[test]

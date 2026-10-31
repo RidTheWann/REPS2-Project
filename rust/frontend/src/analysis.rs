@@ -35,6 +35,17 @@ pub struct EntryPoint {
     pub is_elf_entry: bool,
 }
 
+/// Delay-slot execution policy for a conditional branch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DelaySlotPolicy {
+    /// The delay-slot instruction executes on both the taken and fallthrough
+    /// paths.
+    ExecuteAlways,
+    /// The delay-slot instruction executes only when the branch is taken.
+    /// This is the R5900 branch-likely annulment rule.
+    AnnulWhenNotTaken,
+}
+
 /// Conditions used by supported direct conditional branches.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BranchCondition {
@@ -77,6 +88,7 @@ pub enum Terminator {
         target_pc: u32,
         fallthrough_pc: u32,
         delay_slot: DecodedInstruction,
+        delay_slot_policy: DelaySlotPolicy,
         link_register: Option<u8>,
     },
     DirectJump {
@@ -607,8 +619,16 @@ pub fn discover_cfg(
                     target_pc: instruction.target,
                     fallthrough_pc,
                     delay_slot,
-                    link_register: matches!(instruction.opcode, Opcode::Bltzal | Opcode::Bgezal)
-                        .then_some(31),
+                    delay_slot_policy: if instruction.is_branch_likely() {
+                        DelaySlotPolicy::AnnulWhenNotTaken
+                    } else {
+                        DelaySlotPolicy::ExecuteAlways
+                    },
+                    link_register: matches!(
+                        instruction.opcode,
+                        Opcode::Bltzal | Opcode::Bgezal | Opcode::Bltzall | Opcode::Bgezall
+                    )
+                    .then_some(31),
                 };
             }
 
@@ -797,26 +817,30 @@ fn fetch_delay_slot(
 
 fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> {
     match instruction.opcode {
-        Opcode::Beq => Some(BranchCondition::Equal {
+        Opcode::Beq | Opcode::Beql => Some(BranchCondition::Equal {
             lhs: instruction.rs,
             rhs: instruction.rt,
         }),
-        Opcode::Bne => Some(BranchCondition::NotEqual {
+        Opcode::Bne | Opcode::Bnel => Some(BranchCondition::NotEqual {
             lhs: instruction.rs,
             rhs: instruction.rt,
         }),
-        Opcode::Blez => Some(BranchCondition::LessThanOrEqualZero {
+        Opcode::Blez | Opcode::Blezl => Some(BranchCondition::LessThanOrEqualZero {
             register: instruction.rs,
         }),
-        Opcode::Bgtz => Some(BranchCondition::GreaterThanZero {
+        Opcode::Bgtz | Opcode::Bgtzl => Some(BranchCondition::GreaterThanZero {
             register: instruction.rs,
         }),
-        Opcode::Bltz | Opcode::Bltzal => Some(BranchCondition::LessThanZero {
-            register: instruction.rs,
-        }),
-        Opcode::Bgez | Opcode::Bgezal => Some(BranchCondition::GreaterThanOrEqualZero {
-            register: instruction.rs,
-        }),
+        Opcode::Bltz | Opcode::Bltzal | Opcode::Bltzl | Opcode::Bltzall => {
+            Some(BranchCondition::LessThanZero {
+                register: instruction.rs,
+            })
+        }
+        Opcode::Bgez | Opcode::Bgezal | Opcode::Bgezl | Opcode::Bgezall => {
+            Some(BranchCondition::GreaterThanOrEqualZero {
+                register: instruction.rs,
+            })
+        }
         _ => None,
     }
 }
@@ -1040,6 +1064,77 @@ mod tests {
             &graph.blocks[&0x1010].terminator,
             Terminator::Return { .. }
         ));
+    }
+
+    #[test]
+    fn records_branch_likely_annulment_and_link_semantics() {
+        let words = [
+            (0x14 << 26) | (8 << 21) | 2, // beql t0, zero, 0x600C
+            0x2409_0007,                  // delay slot: t1 = 7
+            0x240A_0005,                  // not-taken path: t2 = 5
+            0x03E0_0008,                  // jr ra
+            0x0000_0000,                  // return delay slot
+        ];
+        let segments = [segment(0x6000, &words)];
+        let roots = [0x6000];
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x6000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("valid branch-likely CFG");
+
+        match &graph.blocks[&0x6000].terminator {
+            Terminator::ConditionalBranch {
+                target_pc,
+                fallthrough_pc,
+                delay_slot,
+                delay_slot_policy,
+                link_register,
+                ..
+            } => {
+                assert_eq!(*target_pc, 0x600C);
+                assert_eq!(*fallthrough_pc, 0x6008);
+                assert_eq!(delay_slot.pc, 0x6004);
+                assert_eq!(*delay_slot_policy, DelaySlotPolicy::AnnulWhenNotTaken);
+                assert_eq!(*link_register, None);
+            }
+            other => panic!("expected branch-likely terminator, got {other:?}"),
+        }
+        assert_eq!(graph.blocks[&0x6008].instructions.len(), 1);
+        assert_eq!(graph.blocks[&0x6008].instructions[0].opcode, Opcode::Addiu);
+        assert!(matches!(
+            graph.blocks[&0x6008].terminator,
+            Terminator::Fallthrough { next_pc: 0x600C }
+        ));
+
+        let link_words = [
+            (0x01 << 26) | (8 << 21) | (0x12 << 16) | 2, // bltzall t0, zero, 0x610C
+            0x2409_0007,                                 // delay slot: t1 = 7
+            0x240A_0005,                                 // not-taken path: t2 = 5
+            0x03E0_0008,                                 // jr ra
+            0x0000_0000,                                 // return delay slot
+        ];
+        let link_segments = [segment(0x6100, &link_words)];
+        let link_graph = discover_cfg(
+            &link_segments,
+            vec![entry(0x6100)],
+            &[0x6100],
+            AnalysisLimits::default(),
+        )
+        .expect("valid link-likely CFG");
+        match &link_graph.blocks[&0x6100].terminator {
+            Terminator::ConditionalBranch {
+                delay_slot_policy,
+                link_register,
+                ..
+            } => {
+                assert_eq!(*delay_slot_policy, DelaySlotPolicy::AnnulWhenNotTaken);
+                assert_eq!(*link_register, Some(31));
+            }
+            other => panic!("expected link-likely terminator, got {other:?}"),
+        }
     }
 
     #[test]
