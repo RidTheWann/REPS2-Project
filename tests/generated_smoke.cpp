@@ -10,11 +10,11 @@ int main() {
     using reps2::runtime::Status;
 
     EeState state{};
-    state.gpr[19].low = 0xFFFFFFFFFFFFFFF0ULL;
-    state.gpr[19].high = 0x1111222233334444ULL;
-    state.gpr[20].low = 0x0000000000000030ULL;
-    state.gpr[20].high = 0x5555666677778888ULL;
-    state.gpr[21].low = 0xFFFFFFFFFFFFFFFFULL;
+    state.gpr[1].low = 0xFFFFFFFFFFFFFFF0ULL;
+    state.gpr[1].high = 0x1111222233334444ULL;
+    state.gpr[2].low = 0x0000000000000030ULL;
+    state.gpr[2].high = 0x5555666677778888ULL;
+    state.gpr[3].low = 0xFFFFFFFFFFFFFFFFULL;
     state.gpr[23].high = 0xABCDEF0123456789ULL;
     state.gpr[24].high = 0xABCDEF0123456789ULL;
     state.gpr[25].high = 0xABCDEF0123456789ULL;
@@ -100,8 +100,8 @@ int main() {
         || state.gpr[27].high != 0xABCDEF0123456789ULL
         || state.gpr[28].high != 0xABCDEF0123456789ULL
         || state.gpr[29].high != 0xABCDEF0123456789ULL) return 24;
-    if (state.gpr[19].high != 0x1111222233334444ULL
-        || state.gpr[20].high != 0x5555666677778888ULL) return 25;
+    if (state.gpr[1].high != 0x1111222233334444ULL
+        || state.gpr[2].high != 0x5555666677778888ULL) return 25;
 
     return 0;
 }
