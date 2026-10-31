@@ -17,7 +17,9 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 ## M1 — Executable intelligence
 
 - [ ] Complete ELF string/symbol/relocation validation, PS2 ABI metadata, and supported ELF variant diagnostics.
-- [ ] PT_LOAD address-space model, permissions, and unmapped-range behavior.
+- [x] Default EE main-RAM physical mapping for supported direct, uncached, accelerated and KSEG PT_LOAD aliases.
+- [x] PT_LOAD-to-32 MiB initial RAM image construction with BSS zeroing and physical alias overlap checks.
+- [ ] Full address-space permissions and COP0/TLB mapping.
 - [ ] PS2 optical filesystem inspection and executable extraction, read-only.
 - [ ] Real local ELF inventory manifest with no binaries committed.
 - [x] Discover ELF entry points and executable STT_FUNC symbol roots.
@@ -48,12 +50,14 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
 - [x] Main-RAM backing span, documented aliases, endian-safe accessors, natural-alignment checks and explicit MMIO/unmapped statuses.
 - [x] Generated memory code compiled/executed on Windows/MSVC and Linux/GCC for load extension, store width, aliasing, alignment and bounds.
+- [x] Generated ELF entry-point initializer which validates/copies a companion RAM image, resets GPRs and selects the ELF entry PC.
+- [x] Reject allocated REL/RELA relocations and ELF segments outside the implemented default main-RAM mapping.
 - [ ] Full EE virtual-memory/TLB mapping, exception delivery, cache semantics and memory-mapped device models.
 - [ ] Build manifest with input hash, compiler options, and generated function metadata.
 - [x] CFG-aware C++20 dispatcher for the implemented direct and register-indirect control-flow subset.
 - [x] Synthetic generated control-flow code compiled and executed on Windows/MSVC and Linux/GCC, including branch-taken, branch-not-taken, delay slots, JAL/JR return, and instruction-budget behaviour.
 - [x] ELF-to-CFG-IR-to-C++ command path for the currently supported subset.
-- [ ] Validate recompile-elf against a lawfully owned PS2 ELF and document translated coverage/unsupported stops.
+- [ ] Validate recompile-elf and the generated RAM image against a lawfully owned PS2 ELF; document translated coverage and unresolved relocations.
 
 **Exit gate:** a synthetic instruction block can be lifted, verified, lowered, compiled, and produce the expected guest-state transitions.
 

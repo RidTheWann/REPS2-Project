@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <bit>
@@ -36,6 +37,7 @@ enum class Status : std::uint8_t {
     address_error,
     unmapped_memory,
     unsupported_memory_access,
+    invalid_memory_image,
 };
 
 [[nodiscard]] constexpr bool is_unsupported_physical_region(std::uint32_t address) noexcept {
@@ -72,6 +74,29 @@ enum class Status : std::uint8_t {
         }
     }
     return false;
+}
+
+[[nodiscard]] inline Status initialize_ee_state(
+    EeState& state,
+    std::span<const std::uint8_t> initial_main_ram,
+    std::uint32_t entry_pc
+) noexcept {
+    if (state.memory.main_ram.size() != kEeMainRamSize
+        || initial_main_ram.size() != kEeMainRamSize
+        || (entry_pc & 3U) != 0U) {
+        return Status::invalid_memory_image;
+    }
+    std::uint32_t entry_physical{};
+    if (!resolve_ee_main_ram_address(entry_pc, entry_physical)
+        || static_cast<std::size_t>(entry_physical) + 4U > state.memory.main_ram.size()) {
+        return Status::invalid_memory_image;
+    }
+
+    std::copy(initial_main_ram.begin(), initial_main_ram.end(), state.memory.main_ram.begin());
+    state.gpr = {};
+    state.gpr[0] = {};
+    state.pc = entry_pc;
+    return Status::ok;
 }
 
 [[nodiscard]] inline Status resolve_ee_memory_access(

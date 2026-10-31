@@ -4,7 +4,7 @@
 
 The frontend is written in Rust: executable inspection, instruction decoding, analysis, typed IR, verification, and AOT C++ source generation. Generated C++ is compiled by the host compiler and linked against the independently implemented C++20 runtime.
 
-> **Status: experimental AOT foundation (v0.6.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed scalar IR, a reachability-guided CFG, a CFG-aware control IR, deterministic C++20 lowering for a documented scalar/control-flow subset, and byte/halfword/word EE main-RAM loads and stores. CMake builds synthetic scalar, control-flow, and memory programs, compiles the generated C++, and executes them in CI on Windows and Linux. The ELF-to-C++ command is usable for owned ELF files, but full R5900 coverage, TLB/exception semantics, MMIO devices, system services, native module linking, and game compatibility are not complete.
+> **Status: experimental AOT foundation (v0.7.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed scalar IR, a reachability-guided CFG, a CFG-aware control IR, deterministic C++20 lowering for a documented scalar/control-flow subset, byte/halfword/word EE main-RAM loads and stores, plus PT_LOAD-to-main-RAM image construction and a generated ELF-entry initializer. CMake builds synthetic scalar, control-flow, memory and initialization programs, compiles the generated C++, and executes them in CI on Windows and Linux. The ELF-to-C++ command now emits a C++ translation and a companion 32 MiB initial RAM image for eligible static ELFs; full R5900 coverage, relocations, TLB/exception semantics, MMIO devices, system services, native module linking, and game compatibility are not complete.
 
 ## Current capabilities
 
@@ -21,6 +21,9 @@ The frontend is written in Rust: executable inspection, instruction decoding, an
 - Decode and lift LB/LBU/LH/LHU/LW/LWU and SB/SH/SW into typed memory IR with sign/zero extension and signed 16-bit offsets.
 - Provide caller-owned 32 MiB little-endian EE main RAM with the documented direct, uncached, accelerated, KSEG0 and KSEG1 aliases.
 - Perform checked byte/halfword/word accesses without unaligned pointer casts; report address errors, unmapped ranges, and unimplemented device/MMIO accesses as distinct statuses.
+- Materialize eligible ET_EXEC PT_LOAD segments into a 32 MiB initial EE RAM image, including zero-filled BSS and supported RAM aliases; reject physical alias overlap and out-of-RAM segments.
+- Emit a generated initialize_ee_state entry-point wrapper that installs the companion RAM image into caller-owned EE RAM and sets the ELF entry PC.
+- Reject ET_DYN/relocatable ELFs and relocations targeting allocated sections until a verified relocation engine is implemented.
 - Lift a supported straight-line instruction subset into typed Rust IR with guest-PC provenance and verification.
 - Emit deterministic C++20 for supported scalar operations: NOP, ADD/ADDI/ADDU/ADDIU, SUB/SUBU, AND/OR/XOR, immediate logical operations, LUI, and word shifts.
 - Keep a 128-bit EE GPR state shape in the runtime ABI; scalar instructions update only the low 64-bit lane and preserve the high lane.
@@ -67,12 +70,13 @@ For Rust-only work:
 Example:
 
     reps2 elf-info "D:\List Games\some-owned-game\SLUS_123.45"
+    reps2 recompile-elf "D:\List Games\some-owned-game\SLUS_123.45" build\game.cpp
     reps2 decode 0x2485FFFC 0x00100000
     reps2 compile-words output.cpp 0x00100000 0x24080005 0x24090007 0x01095021
 
 analyze-elf is a read-only, reachability-guided analysis command. It starts from the ELF entry point and executable STT_FUNC symbols, reports basic blocks and static edges, and explicitly lists indirect targets that cannot be resolved. It deliberately does not decode zero-filled BSS bytes.
 
-recompile-elf performs ELF-to-CFG-IR-to-C++ lowering for the currently supported scalar and control-flow subset. The output exports reps2::generated::execute_cfg(EeState&, instruction_budget); the caller supplies the initial guest PC and EE state. Direct branches, J/JAL, JR/JALR, and the supported REGIMM branches are represented with explicit delay slots. Unsupported instructions and control transfers outside the translated graph return a structured status instead of being guessed. This is a compiler vertical slice, not a complete game recompiler or runnable PS2 module.
+recompile-elf accepts a static little-endian MIPS ET_EXEC whose PT_LOAD segments all map into the documented default 32 MiB EE main RAM and whose allocated sections have no unapplied relocations. It writes the requested C++ source plus a companion file formed by replacing the output extension with ram.bin (for example, game.cpp and game.ram.bin). The binary is a raw 32 MiB initial RAM image with PT_LOAD bytes copied into physical main-RAM offsets and BSS zero-filled. Generated C++ exports initialize_ee_state(EeState&, std::span<const std::uint8_t>), which validates both buffers, copies the image into caller-owned RAM, clears GPRs, and sets the PC to the ELF entry; it also exports execute_cfg(EeState&, instruction_budget). The caller must load the ram.bin file into a 32 MiB byte vector, attach a writable 32 MiB RAM span to EeState::memory.main_ram, call the generated initializer, then execute. Direct branches, J/JAL, JR/JALR and the supported REGIMM branches are represented with explicit delay slots. Unsupported instructions and out-of-graph control flow return structured statuses. This is a compiler vertical slice, not a complete game recompiler or runnable PS2 module.
 
 compile-words remains a narrow straight-line development command. compile-cfg-fixture is an internal synthetic fixture generator used by CTest. Neither command consumes or distributes game data. `EeState::memory.main_ram` must be supplied by the host as a 32 MiB writable byte span before executing generated code that performs memory operations; the generated module does not allocate or own the console's RAM.
 

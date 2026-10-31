@@ -5,6 +5,9 @@ use std::{fmt, ops::Range};
 pub const EM_MIPS: u16 = 8;
 pub const ET_EXEC: u16 = 2;
 pub const PT_LOAD: u32 = 1;
+pub const SHF_ALLOC: u32 = 0x2;
+pub const PF_X: u32 = 0x1;
+pub const EE_MAIN_RAM_SIZE: usize = 32 * 1024 * 1024;
 pub const SHT_SYMTAB: u32 = 2;
 pub const SHT_STRTAB: u32 = 3;
 pub const SHT_RELA: u32 = 4;
@@ -151,6 +154,49 @@ pub struct LoadedSegment {
     pub flags: u32,
     pub file_size: usize,
     pub bytes: Vec<u8>,
+}
+
+/// Metadata describing one PT_LOAD segment after placement in EE main RAM.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MainRamSegment {
+    pub virtual_address: u32,
+    pub physical_address: u32,
+    pub flags: u32,
+    pub file_size: usize,
+    pub memory_size: usize,
+}
+
+/// A complete 32 MiB initial EE main-RAM image constructed from PT_LOAD data.
+/// BSS bytes are already zero-filled; no host pointers or guest aliases remain.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MainRamImage {
+    pub entry_point: u32,
+    pub bytes: Vec<u8>,
+    pub segments: Vec<MainRamSegment>,
+}
+
+/// Translate only the documented direct main-RAM aliases. This deliberately
+/// does not apply COP0/TLB mappings or map MMIO/BIOS/IOP/VU memory.
+#[must_use]
+pub fn ee_main_ram_physical_address(virtual_address: u32) -> Option<u32> {
+    if virtual_address < EE_MAIN_RAM_SIZE as u32 {
+        return Some(virtual_address);
+    }
+    if (0x2000_0000..0x2200_0000).contains(&virtual_address) {
+        return Some(virtual_address - 0x2000_0000);
+    }
+    if (0x3010_0000..0x3200_0000).contains(&virtual_address) {
+        return Some(virtual_address - 0x3000_0000);
+    }
+    if (0x8000_0000..0xA000_0000).contains(&virtual_address)
+        || (0xA000_0000..0xC000_0000).contains(&virtual_address)
+    {
+        let physical = virtual_address & 0x1FFF_FFFF;
+        if physical < EE_MAIN_RAM_SIZE as u32 {
+            return Some(physical);
+        }
+    }
+    None
 }
 
 fn read_u8(bytes: &[u8], offset: usize) -> Result<u8, Error> {
@@ -495,6 +541,116 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
 
 /// Materializes PT_LOAD data and zero-fills each memory-only tail. Overlapping
 /// guest virtual ranges are rejected rather than silently mapped in an order.
+/// Build a strict default-EE main-RAM image from a static MIPS ET_EXEC ELF.
+///
+/// All loadable segments must fit in the 32 MiB main-RAM aliases. Distinct
+/// virtual aliases that collide on the same physical bytes are rejected.
+/// Allocated REL/RELA relocations are rejected until a relocation engine exists.
+pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage, Error> {
+    if !image.is_mips() {
+        return Err(Error::new("EE main-RAM image requires EM_MIPS"));
+    }
+    if !image.is_executable() {
+        return Err(Error::new("EE main-RAM image currently requires ET_EXEC; relocatable/shared ELF loading is not implemented"));
+    }
+
+    if image.entry_point & 3 != 0 {
+        return Err(Error::new("ELF EE entry point is not word-aligned"));
+    }
+
+    for relocation in &image.relocations {
+        let target = image.section_headers.get(relocation.target_section_index)
+            .ok_or_else(|| Error::new("ELF relocation target section index is invalid"))?;
+        if target.flags & SHF_ALLOC != 0 {
+            return Err(Error::new(format!(
+                "allocated ELF relocation type {} at 0x{:08X} is not supported yet",
+                relocation.relocation_type,
+                relocation.offset
+            )));
+        }
+    }
+
+    let loaded = load_segments(bytes, image, EE_MAIN_RAM_SIZE)?;
+    let mut ram = vec![0u8; EE_MAIN_RAM_SIZE];
+    let mut physical_ranges: Vec<Range<u64>> = Vec::new();
+    let mut segments = Vec::with_capacity(loaded.len());
+
+    for segment in loaded {
+        let memory_size = segment.bytes.len();
+        let physical_address = ee_main_ram_physical_address(segment.virtual_address)
+            .ok_or_else(|| Error::new(format!(
+                "PT_LOAD at 0x{:08X} is outside the supported EE main-RAM aliases",
+                segment.virtual_address
+            )))?;
+
+        let start = u64::from(physical_address);
+        let end = start.checked_add(memory_size as u64)
+            .ok_or_else(|| Error::new("PT_LOAD physical main-RAM range overflows"))?;
+        if end > EE_MAIN_RAM_SIZE as u64 {
+            return Err(Error::new(format!(
+                "PT_LOAD at 0x{:08X} extends beyond the 32 MiB EE main RAM",
+                segment.virtual_address
+            )));
+        }
+
+        if memory_size > 0 {
+            let last_virtual = segment.virtual_address.checked_add(
+                u32::try_from(memory_size - 1)
+                    .map_err(|_| Error::new("PT_LOAD memory size does not fit guest address width"))?
+            ).ok_or_else(|| Error::new("PT_LOAD guest virtual range overflows"))?;
+            let last_physical = ee_main_ram_physical_address(last_virtual)
+                .ok_or_else(|| Error::new("PT_LOAD crosses out of the supported EE main-RAM aliases"))?;
+            if u64::from(last_physical) != end - 1 {
+                return Err(Error::new("PT_LOAD crosses a non-contiguous EE main-RAM alias boundary"));
+            }
+
+            if physical_ranges.iter().any(|range| start < range.end && range.start < end) {
+                return Err(Error::new(format!(
+                    "PT_LOAD at 0x{:08X} overlaps another segment after EE RAM alias translation",
+                    segment.virtual_address
+                )));
+            }
+            physical_ranges.push(start..end);
+            let offset = usize::try_from(physical_address)
+                .map_err(|_| Error::new("PT_LOAD physical address does not fit host size"))?;
+            let copy_end = offset.checked_add(memory_size)
+                .ok_or_else(|| Error::new("PT_LOAD host memory range overflows"))?;
+            ram[offset..copy_end].copy_from_slice(&segment.bytes);
+        }
+
+        segments.push(MainRamSegment {
+            virtual_address: segment.virtual_address,
+            physical_address,
+            flags: segment.flags,
+            file_size: segment.file_size,
+            memory_size,
+        });
+    }
+
+    let entry_physical = ee_main_ram_physical_address(image.entry_point)
+        .ok_or_else(|| Error::new("ELF entry point is outside the supported EE main-RAM aliases"))?;
+    let entry_is_file_backed_code = segments.iter().any(|segment| {
+        segment.flags & PF_X != 0
+            && image.entry_point >= segment.virtual_address
+            && u64::from(image.entry_point)
+                < u64::from(segment.virtual_address) + segment.file_size as u64
+    });
+    if !entry_is_file_backed_code {
+        return Err(Error::new("ELF entry point is not inside file-backed executable PT_LOAD data"));
+    }
+    let entry_offset = usize::try_from(entry_physical)
+        .map_err(|_| Error::new("ELF entry physical address does not fit host size"))?;
+    if entry_offset.checked_add(4).is_none_or(|end| end > ram.len()) {
+        return Err(Error::new("ELF entry instruction extends beyond EE main RAM"));
+    }
+
+    Ok(MainRamImage {
+        entry_point: image.entry_point,
+        bytes: ram,
+        segments,
+    })
+}
+
 pub fn load_segments(bytes: &[u8], image: &Image, maximum_total_memory: usize) -> Result<Vec<LoadedSegment>, Error> {
     let mut total = 0usize;
     let mut ranges: Vec<Range<u64>> = Vec::new();
@@ -694,6 +850,100 @@ mod tests {
         let mut malformed_image = image.clone();
         malformed_image.program_headers[0].file_size = 17;
         assert!(load_segments(&bytes, &malformed_image, 1024).is_err());
+    }
+
+    #[test]
+    fn builds_a_32_mib_ee_ram_image_and_zero_fills_bss() {
+        let bytes = minimal_elf();
+        let image = parse(&bytes, ParseLimits::default()).expect("valid fixture");
+        let ram = build_main_ram_image(&bytes, &image).expect("default EE main-RAM image");
+
+        assert_eq!(ram.entry_point, 0x0010_0000);
+        assert_eq!(ram.bytes.len(), EE_MAIN_RAM_SIZE);
+        assert_eq!(&ram.bytes[0x0010_0000..0x0010_0008], &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(&ram.bytes[0x0010_0008..0x0010_0010], &[0; 8]);
+        assert_eq!(ram.segments.len(), 1);
+        assert_eq!(ram.segments[0].physical_address, 0x0010_0000);
+        assert_eq!(ram.segments[0].file_size, 8);
+        assert_eq!(ram.segments[0].memory_size, 16);
+        assert_eq!(ram.segments[0].flags & PF_X, PF_X);
+    }
+
+    #[test]
+    fn resolves_default_main_ram_aliases_to_one_physical_backing() {
+        let cases = [
+            (0x0000_1000, Some(0x0000_1000)),
+            (0x2000_1000, Some(0x0000_1000)),
+            (0x3010_1000, Some(0x0010_1000)),
+            (0x8000_1000, Some(0x0000_1000)),
+            (0xA000_1000, Some(0x0000_1000)),
+            (0x0200_0000, None),
+            (0x1000_0000, None),
+            (0x8200_0000, None),
+        ];
+        for (virtual_address, expected) in cases {
+            assert_eq!(
+                ee_main_ram_physical_address(virtual_address),
+                expected,
+                "address 0x{virtual_address:08X}"
+            );
+        }
+    }
+
+    #[test]
+    fn builds_ram_image_from_a_kseg_alias() {
+        let mut bytes = minimal_elf();
+        put_u32(&mut bytes, 24, 0x8010_0000);
+        put_u32(&mut bytes, 60, 0x8010_0000);
+        put_u32(&mut bytes, 64, 0x8010_0000);
+        let image = parse(&bytes, ParseLimits::default()).expect("KSEG ELF parses");
+        let ram = build_main_ram_image(&bytes, &image).expect("KSEG0 maps to EE RAM");
+        assert_eq!(ram.segments[0].physical_address, 0x0010_0000);
+        assert_eq!(&ram.bytes[0x0010_0000..0x0010_0008], &[1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn rejects_non_exec_unsupported_ranges_and_alias_collisions() {
+        let mut dynamic = minimal_elf();
+        put_u16(&mut dynamic, 16, 3);
+        let dynamic_image = parse(&dynamic, ParseLimits::default()).expect("ET_DYN parses");
+        assert!(build_main_ram_image(&dynamic, &dynamic_image).is_err());
+
+        let mut unaligned_entry = minimal_elf();
+        put_u32(&mut unaligned_entry, 24, 0x0010_0002);
+        let unaligned_image = parse(&unaligned_entry, ParseLimits::default()).expect("unaligned entry metadata parses");
+        assert!(build_main_ram_image(&unaligned_entry, &unaligned_image).is_err());
+
+        let mut mmio = minimal_elf();
+        put_u32(&mut mmio, 24, 0x1000_0000);
+        put_u32(&mut mmio, 60, 0x1000_0000);
+        put_u32(&mut mmio, 64, 0x1000_0000);
+        let mmio_image = parse(&mmio, ParseLimits::default()).expect("MMIO ELF metadata parses");
+        assert!(build_main_ram_image(&mmio, &mmio_image).is_err());
+
+        let mut aliased = minimal_elf();
+        aliased.resize(160, 0);
+        put_u16(&mut aliased, 44, 2);
+        put_u32(&mut aliased, 84, PT_LOAD);
+        put_u32(&mut aliased, 88, 112);
+        put_u32(&mut aliased, 92, 0x2010_0000);
+        put_u32(&mut aliased, 96, 0x2010_0000);
+        put_u32(&mut aliased, 100, 0);
+        put_u32(&mut aliased, 104, 4);
+        put_u32(&mut aliased, 108, 6);
+        let aliased_image = parse(&aliased, ParseLimits::default()).expect("non-overlapping virtual aliases parse");
+        assert!(build_main_ram_image(&aliased, &aliased_image).is_err());
+    }
+
+    #[test]
+    fn rejects_allocated_relocations_until_relocation_application_exists() {
+        let mut bytes = elf_with_symbol_and_rel();
+        put_u32(&mut bytes, 52 + 160 + 8, SHF_ALLOC);
+        let image = parse(&bytes, ParseLimits::default()).expect("allocated REL fixture parses");
+        assert!(build_main_ram_image(&bytes, &image)
+            .expect_err("allocated relocation cannot be ignored")
+            .to_string()
+            .contains("relocation"));
     }
 
     #[test]

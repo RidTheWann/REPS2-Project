@@ -138,24 +138,34 @@ fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
         return Err("ELF machine is not EM_MIPS; refusing PS2 EE compilation".to_owned());
     }
 
+    let ram_image = elf::build_main_ram_image(&bytes, &image)
+        .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
     let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph)
         .map_err(|error| error.to_string())?;
-    let cpp = control_codegen::emit_cpp(&program)
+    let cpp = control_codegen::emit_cpp_with_entry(&program, image.entry_point)
         .map_err(|error| error.to_string())?;
+    let ram_output = output.with_extension("ram.bin");
+    fs::write(&ram_output, &ram_image.bytes)
+        .map_err(|error| format!("cannot write initial EE RAM image: {error}"))?;
     fs::write(output, cpp).map_err(|error| format!("cannot write generated C++: {error}"))?;
 
-    println!("Generated CFG-aware C++20 translation");
+    println!("Generated CFG-aware C++20 translation and initial EE RAM image");
     println!("  Input: {}", input.display());
-    println!("  Output: {}", output.display());
+    println!("  C++ output: {}", output.display());
+    println!("  RAM image: {}", ram_output.display());
+    println!("  RAM image bytes: {}", ram_image.bytes.len());
+    println!("  ELF entry point: 0x{:08X}", image.entry_point);
+    println!("  PT_LOAD segments placed: {}", ram_image.segments.len());
     println!("  Entry points: {}", program.entry_points.len());
     println!("  Basic blocks: {}", program.blocks.len());
     println!("  Guest instructions represented: {}", program.instruction_count());
     println!("  Explicit unsupported stops: {}", program.unsupported_count());
     println!("  Unresolved indirect targets: {}", graph.unresolved_indirect_jumps.len());
     println!("  External/unmapped targets: {}", graph.external_targets.len());
-    println!("  Runtime entry: reps2::generated::execute_cfg(EeState&, instruction_budget)");
+    println!("  Runtime entry: reps2::generated::initialize_ee_state(EeState&, ram_image)");
+    println!("  Execution entry: reps2::generated::execute_cfg(EeState&, instruction_budget)");
     Ok(())
 }
 
@@ -253,7 +263,7 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph)
         .map_err(|error| error.to_string())?;
-    let cpp = control_codegen::emit_cpp(&program)
+    let cpp = control_codegen::emit_cpp_with_entry(&program, 0x1000)
         .map_err(|error| error.to_string())?;
     fs::write(output, cpp).map_err(|error| format!("cannot write generated C++ fixture: {error}"))?;
     println!(
@@ -309,8 +319,8 @@ fn usage() {
     println!("  reps2 compile-cfg-fixture <output.cpp>");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
-    println!("recompile-elf lowers the supported CFG/scalar subset to a bounded C++20 dispatcher.");
-    println!("Memory, full R5900 semantics, branch-likely instructions and PS2 runtime services remain unsupported.");
+    println!("recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images.");
+    println!("Allocated relocations, non-main-RAM PT_LOAD segments, branch-likely and PS2 hardware services remain unsupported.");
 }
 
 fn run() -> Result<(), String> {
