@@ -700,14 +700,12 @@ mod tests {
         for _ in 0..2 {
             cursor += usize::from(image[cursor]);
         }
-        let record_length = usize::from(image[cursor]);
         let identifier_length = usize::from(image[cursor + 32]);
         assert_eq!(identifier_length, b"README.TXT;1".len());
         image[cursor + 33..cursor + 33 + identifier_length]
             .copy_from_slice(b"README.TXT;1");
         let mut iso = Iso9660::open(Cursor::new(image)).expect("ISO without SYSTEM.CNF");
         assert_eq!(iso.boot_executable_path().expect("missing config"), None);
-        let _ = record_length;
     }
 
     #[test]
