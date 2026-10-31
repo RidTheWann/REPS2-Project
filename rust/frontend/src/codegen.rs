@@ -258,12 +258,12 @@ fn emit_partial_memory_load(
     let tag = format!("{index:04}");
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
-        "    std::uint64_t merged_value_{tag}{{}};\\n    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, state.gpr[{}].low, merged_value_{tag});\\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\\n",
+        "    std::uint64_t merged_value_{tag}{{}};\n    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, state.gpr[{}].low, merged_value_{tag});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
         dst.index()
     ));
     if !dst.is_zero() {
         output.push_str(&format!(
-            "    state.gpr[{}].low = merged_value_{tag};\\n",
+            "    state.gpr[{}].low = merged_value_{tag};\n",
             dst.index()
         ));
     }
@@ -281,7 +281,7 @@ fn emit_partial_memory_store(
     let tag = format!("{index:04}");
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
-        "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\\n",
+        "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
         src.index()
     ));
 }
