@@ -9,6 +9,7 @@ pub enum Opcode {
     Jr, Jalr, Syscall, Break,
     Mfhi, Mflo, Mult, Multu, Div, Divu,
     Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
+    Daddu, Dsubu, Daddiu, Dsll, Dsrl, Dsra, Dsll32, Dsrl32, Dsra32,
     J, Jal, Beq, Bne, Blez, Bgtz, Bltz, Bgez, Bltzal, Bgezal,
     Addi, Addiu, Slti, Sltiu, Andi, Ori, Xori, Lui,
     Lb, Lh, Lw, Lbu, Lhu, Lwu, Sb, Sh, Sw,
@@ -46,6 +47,15 @@ impl Opcode {
             Self::Nor => "nor",
             Self::Slt => "slt",
             Self::Sltu => "sltu",
+            Self::Daddu => "daddu",
+            Self::Dsubu => "dsubu",
+            Self::Daddiu => "daddiu",
+            Self::Dsll => "dsll",
+            Self::Dsrl => "dsrl",
+            Self::Dsra => "dsra",
+            Self::Dsll32 => "dsll32",
+            Self::Dsrl32 => "dsrl32",
+            Self::Dsra32 => "dsra32",
             Self::J => "j",
             Self::Jal => "jal",
             Self::Beq => "beq",
@@ -194,6 +204,14 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x27 if shift_amount == 0 => Opcode::Nor,
             0x2A if shift_amount == 0 => Opcode::Slt,
             0x2B if shift_amount == 0 => Opcode::Sltu,
+            0x2D if shift_amount == 0 => Opcode::Daddu,
+            0x2F if shift_amount == 0 => Opcode::Dsubu,
+            0x38 if rs == 0 => Opcode::Dsll,
+            0x3A if rs == 0 => Opcode::Dsrl,
+            0x3B if rs == 0 => Opcode::Dsra,
+            0x3C if rs == 0 => Opcode::Dsll32,
+            0x3E if rs == 0 => Opcode::Dsrl32,
+            0x3F if rs == 0 => Opcode::Dsra32,
             _ => Opcode::Unknown,
         };
     } else {
@@ -237,6 +255,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             }
             0x08 => Opcode::Addi,
             0x09 => Opcode::Addiu,
+            0x19 => Opcode::Daddiu,
             0x0A => Opcode::Slti,
             0x0B => Opcode::Sltiu,
             0x0C => Opcode::Andi,
@@ -349,6 +368,35 @@ mod tests {
         let decoded = decode((0x03 << 26) | 1, 0x8000_0000);
         assert_eq!(decoded.opcode, Opcode::Jal);
         assert_eq!(decoded.target, 0x8000_0004);
+    }
+
+    #[test]
+    fn decodes_r5900_nontrapping_doubleword_integer_operations() {
+        let cases = [
+            (((8 << 21) | (9 << 16) | (10 << 11) | 0x2D), Opcode::Daddu),
+            (((8 << 21) | (9 << 16) | (10 << 11) | 0x2F), Opcode::Dsubu),
+            (((0x19 << 26) | (8 << 21) | (10 << 16) | 0xFFF0), Opcode::Daddiu),
+            (((9 << 16) | (10 << 11) | (7 << 6) | 0x38), Opcode::Dsll),
+            (((9 << 16) | (10 << 11) | (7 << 6) | 0x3A), Opcode::Dsrl),
+            (((9 << 16) | (10 << 11) | (7 << 6) | 0x3B), Opcode::Dsra),
+            (((9 << 16) | (10 << 11) | (7 << 6) | 0x3C), Opcode::Dsll32),
+            (((9 << 16) | (10 << 11) | (7 << 6) | 0x3E), Opcode::Dsrl32),
+            (((9 << 16) | (10 << 11) | (7 << 6) | 0x3F), Opcode::Dsra32),
+        ];
+        for (word, expected) in cases {
+            let decoded = decode(word, 0x4000);
+            assert_eq!(decoded.opcode, expected, "word 0x{word:08X}");
+            assert!(!decoded.has_delay_slot);
+        }
+        assert_eq!(decode((0x19 << 26) | (8 << 21) | (9 << 16) | 0xFFF0, 0).signed_immediate(), -16);
+    }
+
+    #[test]
+    fn rejects_reserved_source_fields_for_doubleword_immediate_shifts() {
+        for function in [0x38, 0x3A, 0x3B, 0x3C, 0x3E, 0x3F] {
+            let invalid = (1 << 21) | (9 << 16) | (10 << 11) | function;
+            assert!(!decode(invalid, 0).is_supported(), "function 0x{function:02X}");
+        }
     }
 
     #[test]

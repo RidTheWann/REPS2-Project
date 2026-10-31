@@ -443,6 +443,26 @@ enum class Status : std::uint8_t {
     return (value >> 32U) == expected_high;
 }
 
+[[nodiscard]] constexpr std::uint64_t arithmetic_shift_right_doubleword(
+    std::uint64_t value,
+    std::uint8_t amount
+) noexcept {
+    if (amount == 0U) {
+        return value;
+    }
+    if (amount >= 64U) {
+        return (value & 0x8000000000000000ULL) != 0U
+            ? 0xFFFFFFFFFFFFFFFFULL
+            : 0ULL;
+    }
+
+    const auto shifted = value >> amount;
+    if ((value & 0x8000000000000000ULL) == 0U) {
+        return shifted;
+    }
+    return shifted | (0xFFFFFFFFFFFFFFFFULL << (64U - amount));
+}
+
 [[nodiscard]] constexpr std::uint32_t arithmetic_shift_right_word(
     std::uint32_t value,
     std::uint8_t amount

@@ -43,6 +43,12 @@ pub enum Operation {
     AddImmediateUnsignedWord { dst: Gpr, src: Gpr, immediate: u16 },
     SubWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     SubUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    AddDoublewordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    SubDoublewordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    AddImmediateDoublewordUnsigned { dst: Gpr, src: Gpr, immediate: u16 },
+    ShiftLeftDoubleword { dst: Gpr, src: Gpr, amount: u8 },
+    ShiftRightLogicalDoubleword { dst: Gpr, src: Gpr, amount: u8 },
+    ShiftRightArithmeticDoubleword { dst: Gpr, src: Gpr, amount: u8 },
     And64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Or64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Xor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -180,11 +186,14 @@ fn verify_operation(operation: Operation) -> Result<(), VerifyError> {
     let shift = match operation {
         Operation::ShiftLeftWord { amount, .. }
         | Operation::ShiftRightLogicalWord { amount, .. }
-        | Operation::ShiftRightArithmeticWord { amount, .. } => Some(amount),
+        | Operation::ShiftRightArithmeticWord { amount, .. } => Some((amount, 32)),
+        Operation::ShiftLeftDoubleword { amount, .. }
+        | Operation::ShiftRightLogicalDoubleword { amount, .. }
+        | Operation::ShiftRightArithmeticDoubleword { amount, .. } => Some((amount, 64)),
         _ => None,
     };
-    if let Some(amount) = shift
-        && amount >= 32
+    if let Some((amount, limit)) = shift
+        && amount >= limit
     {
         return Err(VerifyError::InvalidShiftAmount(amount));
     }
@@ -215,6 +224,33 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             },
             Opcode::Subu => Operation::SubUnsignedWord {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Daddu => Operation::AddDoublewordUnsigned {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Dsubu => Operation::SubDoublewordUnsigned {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Daddiu => Operation::AddImmediateDoublewordUnsigned {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+            },
+            Opcode::Dsll => Operation::ShiftLeftDoubleword {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+            },
+            Opcode::Dsrl => Operation::ShiftRightLogicalDoubleword {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+            },
+            Opcode::Dsra => Operation::ShiftRightArithmeticDoubleword {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+            },
+            Opcode::Dsll32 => Operation::ShiftLeftDoubleword {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
+            },
+            Opcode::Dsrl32 => Operation::ShiftRightLogicalDoubleword {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
+            },
+            Opcode::Dsra32 => Operation::ShiftRightArithmeticDoubleword {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
             },
             Opcode::And => Operation::And64 {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
@@ -410,6 +446,59 @@ mod tests {
             Operation::StoreQuadword { src, base, offset: 12 }
                 if src.index() == 12 && base.index() == 4
         ));
+    }
+
+    #[test]
+    fn lifts_r5900_doubleword_integer_operations() {
+        let words = [
+            (8 << 21) | (9 << 16) | (10 << 11) | 0x2D,
+            (8 << 21) | (9 << 16) | (11 << 11) | 0x2F,
+            (0x19 << 26) | (8 << 21) | (12 << 16) | 0xFFF0,
+            (9 << 16) | (13 << 11) | (7 << 6) | 0x38,
+            (9 << 16) | (14 << 11) | (7 << 6) | 0x3E,
+            (9 << 16) | (15 << 11) | (7 << 6) | 0x3F,
+        ];
+        let stream = words.iter().enumerate()
+            .map(|(index, word)| decoded(*word, 0x3000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&stream).expect("R5900 doubleword operations lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::AddDoublewordUnsigned { dst, lhs, rhs }
+                if dst.index() == 10 && lhs.index() == 8 && rhs.index() == 9
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::SubDoublewordUnsigned { dst, .. } if dst.index() == 11
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::AddImmediateDoublewordUnsigned { dst, src, immediate: 0xFFF0 }
+                if dst.index() == 12 && src.index() == 8
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::ShiftLeftDoubleword { amount: 7, .. }
+        ));
+        assert!(matches!(
+            program.instructions()[4].operation,
+            Operation::ShiftRightLogicalDoubleword { amount: 39, .. }
+        ));
+        assert!(matches!(
+            program.instructions()[5].operation,
+            Operation::ShiftRightArithmeticDoubleword { amount: 39, .. }
+        ));
+    }
+
+    #[test]
+    fn verifier_rejects_doubleword_shift_amount_outside_sixty_four_bit_range() {
+        let invalid = Instruction {
+            guest_pc: 0x1000,
+            operation: Operation::ShiftLeftDoubleword {
+                dst: gpr(2), src: gpr(3), amount: 64,
+            },
+        };
+        assert_eq!(Program::new(vec![invalid]), Err(VerifyError::InvalidShiftAmount(64)));
     }
 
     #[test]
