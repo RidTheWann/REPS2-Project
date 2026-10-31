@@ -466,6 +466,28 @@ int main() {
         return fail(53);
     }
 
+    // Every partial helper must reject a short aligned backing unit atomically.
+    std::uint64_t partial_load64 = 0x1122334455667788ULL;
+    if (reps2::runtime::load_u32_left(short_backing.memory, 0x6001U, old_word_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL
+        || reps2::runtime::load_u32_right(short_backing.memory, 0x6002U, old_word_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL
+        || reps2::runtime::load_u64_left(short_backing.memory, 0x6003U, old_doubleword_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL
+        || reps2::runtime::load_u64_right(short_backing.memory, 0x6004U, old_doubleword_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL) {
+        std::fprintf(stderr, "partial load helper changed its destination after a failed aligned read\\n");
+        return fail(54);
+    }
+    if (reps2::runtime::store_u32_left(short_backing.memory, 0x6001U, 0x89ABCDEFU) != Status::unmapped_memory
+        || reps2::runtime::store_u32_right(short_backing.memory, 0x6002U, 0x89ABCDEFU) != Status::unmapped_memory
+        || reps2::runtime::store_u64_left(short_backing.memory, 0x6003U, 0x89ABCDEF01234567ULL) != Status::unmapped_memory
+        || reps2::runtime::store_u64_right(short_backing.memory, 0x6004U, 0x89ABCDEF01234567ULL) != Status::unmapped_memory
+        || std::any_of(short_ram.begin(), short_ram.end(), [](std::uint8_t byte) { return byte != 0; })) {
+        std::fprintf(stderr, "partial store helper modified short backing after a failed aligned read\\n");
+        return fail(55);
+    }
+
     // The generated module initializer accepts a complete 32 MiB image,
     // copies it into caller-owned RAM, clears architectural GPR state, and
     // selects the ELF entry point.
