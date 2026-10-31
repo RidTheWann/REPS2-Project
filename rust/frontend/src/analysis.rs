@@ -634,8 +634,8 @@ fn read_instruction_word(segments: &[LoadedSegment], pc: u32) -> Option<u32> {
             continue;
         }
         let start = u64::from(segment.virtual_address);
-        let file_size = segment.file_size.min(segment.bytes.len()) as u64;
-        let end = start.checked_add(file_size)?;
+        let file_size = segment.file_size.min(segment.bytes.len());
+        let end = start.checked_add(file_size as u64)?;
         if address < start || address >= end {
             continue;
         }
