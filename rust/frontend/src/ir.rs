@@ -162,10 +162,10 @@ fn verify_operation(operation: Operation) -> Result<(), VerifyError> {
         | Operation::ShiftRightArithmeticWord { amount, .. } => Some(amount),
         _ => None,
     };
-    if let Some(amount) = shift {
-        if amount >= 32 {
-            return Err(VerifyError::InvalidShiftAmount(amount));
-        }
+    if let Some(amount) = shift
+        && amount >= 32
+    {
+        return Err(VerifyError::InvalidShiftAmount(amount));
     }
     Ok(())
 }
