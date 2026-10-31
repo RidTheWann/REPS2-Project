@@ -692,7 +692,8 @@ mod tests {
         for _ in 0..2 {
             cursor += usize::from(image[cursor]);
         }
-        put_both_u16(&mut image[cursor..cursor + usize::from(image[cursor])], 28, 2);
+        let record_length = usize::from(image[cursor]);
+        put_both_u16(&mut image[cursor..cursor + record_length], 28, 2);
         let mut iso = Iso9660::open(Cursor::new(image)).expect("single-volume PVD");
         assert!(iso.root_entries().expect_err("secondary volume entry").to_string()
             .contains("secondary ISO volume"));
