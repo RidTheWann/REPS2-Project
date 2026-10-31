@@ -499,15 +499,15 @@ fn emit_variable_word_shift(
     let s = src.index();
     let a = amount.index();
     output.push_str(&format!(
-        "    if (!is_word_value(state.gpr[{s}].low)) return Status::undefined_word_operand;\\n    const std::uint32_t shift_amount_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low) & 0x1FU;\\n"
+        "    if (!is_word_value(state.gpr[{s}].low)) return Status::undefined_word_operand;\n    const std::uint32_t shift_amount_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low) & 0x1FU;\n"
     ));
     if arithmetic {
         output.push_str(&format!(
-            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(arithmetic_shift_right_word(static_cast<std::uint32_t>(state.gpr[{s}].low), static_cast<std::uint8_t>(shift_amount_{tag})));\\n"
+            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(arithmetic_shift_right_word(static_cast<std::uint32_t>(state.gpr[{s}].low), static_cast<std::uint8_t>(shift_amount_{tag})));\n"
         ));
     } else {
         output.push_str(&format!(
-            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[{s}].low) {operator} shift_amount_{tag});\\n"
+            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[{s}].low) {operator} shift_amount_{tag});\n"
         ));
     }
 }
@@ -526,15 +526,15 @@ fn emit_variable_doubleword_shift(
     let s = src.index();
     let a = amount.index();
     output.push_str(&format!(
-        "    const std::uint32_t shift_amount_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low) & 0x3FU;\\n"
+        "    const std::uint32_t shift_amount_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low) & 0x3FU;\n"
     ));
     if arithmetic {
         output.push_str(&format!(
-            "    if ({d} != 0) state.gpr[{d}].low = arithmetic_shift_right_doubleword(state.gpr[{s}].low, static_cast<std::uint8_t>(shift_amount_{tag}));\\n"
+            "    if ({d} != 0) state.gpr[{d}].low = arithmetic_shift_right_doubleword(state.gpr[{s}].low, static_cast<std::uint8_t>(shift_amount_{tag}));\n"
         ));
     } else {
         output.push_str(&format!(
-            "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low {operator} shift_amount_{tag};\\n"
+            "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low {operator} shift_amount_{tag};\n"
         ));
     }
 }
