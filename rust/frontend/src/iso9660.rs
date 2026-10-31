@@ -51,6 +51,8 @@ pub struct DirectoryEntry {
     pub extent_lba: u32,
     pub size_bytes: u32,
     pub flags: u8,
+    file_unit_size: u8,
+    interleave_gap_size: u8,
 }
 
 impl DirectoryEntry {
@@ -188,6 +190,9 @@ impl<R: Read + Seek> Iso9660<R> {
         if !directory.is_directory() {
             return Err(Error::new(format!("{} is not a directory", directory.name)));
         }
+        if directory.flags & 0x80 != 0 || directory.file_unit_size != 0 || directory.interleave_gap_size != 0 {
+            return Err(Error::new(format!("directory {} uses unsupported multi-extent/interleaved storage", directory.name)));
+        }
         let directory_size = u64::from(directory.size_bytes);
         if directory_size > MAX_DIRECTORY_BYTES {
             return Err(Error::new(format!(
@@ -296,6 +301,9 @@ impl<R: Read + Seek> Iso9660<R> {
     pub fn read_entry(&mut self, entry: &DirectoryEntry, max_bytes: u64) -> Result<Vec<u8>, Error> {
         if entry.is_directory() {
             return Err(Error::new(format!("{} is a directory, not a file", entry.name)));
+        }
+        if entry.flags & 0x80 != 0 || entry.file_unit_size != 0 || entry.interleave_gap_size != 0 {
+            return Err(Error::new(format!("{} uses unsupported multi-extent/interleaved storage", entry.name)));
         }
         let size = u64::from(entry.size_bytes);
         if size > max_bytes {
@@ -412,13 +420,6 @@ fn parse_directory_record(bytes: &[u8], volume_bytes: u64) -> Result<DirectoryEn
     if identifier_length == 0 || identifier_end > record_length {
         return Err(Error::new("ISO file identifier is missing or truncated"));
     }
-    if file_unit_size != 0 || interleave_gap_size != 0 {
-        return Err(Error::new("interleaved ISO files/directories are not supported"));
-    }
-    if flags & 0x80 != 0 {
-        return Err(Error::new("multi-extent ISO files/directories are not supported"));
-    }
-
     let identifier = &bytes[33..identifier_end];
     let name = match identifier {
         [0] => ".".to_owned(),
@@ -436,7 +437,14 @@ fn parse_directory_record(bytes: &[u8], volume_bytes: u64) -> Result<DirectoryEn
         return Err(Error::new(format!("ISO entry {name} extends beyond the declared volume")));
     }
 
-    Ok(DirectoryEntry { name, extent_lba: data_lba, size_bytes, flags })
+    Ok(DirectoryEntry {
+        name,
+        extent_lba: data_lba,
+        size_bytes,
+        flags,
+        file_unit_size,
+        interleave_gap_size,
+    })
 }
 
 fn decode_identifier(bytes: &[u8]) -> Result<String, Error> {
