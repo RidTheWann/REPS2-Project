@@ -29,6 +29,14 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::store_u32;\n\
              using reps2::runtime::store_u64;\n\
              using reps2::runtime::store_u128;\n\
+             using reps2::runtime::load_u32_left;\n\
+             using reps2::runtime::load_u32_right;\n\
+             using reps2::runtime::store_u32_left;\n\
+             using reps2::runtime::store_u32_right;\n\
+             using reps2::runtime::load_u64_left;\n\
+             using reps2::runtime::load_u64_right;\n\
+             using reps2::runtime::store_u64_left;\n\
+             using reps2::runtime::store_u64_right;\n\
              state.gpr[0] = {};\n"
     );
 
@@ -118,6 +126,30 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         }
         Operation::StoreWord { src, base, offset } => {
             emit_memory_store(output, index, src, base, offset, 4);
+        }
+        Operation::LoadWordLeft { dst, base, offset } => {
+            emit_partial_memory_load(output, index, dst, base, offset, "load_u32_left");
+        }
+        Operation::LoadWordRight { dst, base, offset } => {
+            emit_partial_memory_load(output, index, dst, base, offset, "load_u32_right");
+        }
+        Operation::StoreWordLeft { src, base, offset } => {
+            emit_partial_memory_store(output, index, src, base, offset, "store_u32_left", "std::uint32_t");
+        }
+        Operation::StoreWordRight { src, base, offset } => {
+            emit_partial_memory_store(output, index, src, base, offset, "store_u32_right", "std::uint32_t");
+        }
+        Operation::LoadDoublewordLeft { dst, base, offset } => {
+            emit_partial_memory_load(output, index, dst, base, offset, "load_u64_left");
+        }
+        Operation::LoadDoublewordRight { dst, base, offset } => {
+            emit_partial_memory_load(output, index, dst, base, offset, "load_u64_right");
+        }
+        Operation::StoreDoublewordLeft { src, base, offset } => {
+            emit_partial_memory_store(output, index, src, base, offset, "store_u64_left", "std::uint64_t");
+        }
+        Operation::StoreDoublewordRight { src, base, offset } => {
+            emit_partial_memory_store(output, index, src, base, offset, "store_u64_right", "std::uint64_t");
         }
         Operation::LoadDoubleword { dst, base, offset } => {
             emit_memory_load(output, index, dst, base, offset, 8, false);
@@ -211,6 +243,45 @@ fn emit_memory_store(
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
         "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
+        src.index()
+    ));
+}
+
+fn emit_partial_memory_load(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    base: Gpr,
+    offset: u16,
+    helper: &str,
+) {
+    let tag = format!("{index:04}");
+    emit_effective_address(output, &tag, base, offset);
+    output.push_str(&format!(
+        "    std::uint64_t merged_value_{tag}{{}};\\n    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, state.gpr[{}].low, merged_value_{tag});\\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\\n",
+        dst.index()
+    ));
+    if !dst.is_zero() {
+        output.push_str(&format!(
+            "    state.gpr[{}].low = merged_value_{tag};\\n",
+            dst.index()
+        ));
+    }
+}
+
+fn emit_partial_memory_store(
+    output: &mut String,
+    index: usize,
+    src: Gpr,
+    base: Gpr,
+    offset: u16,
+    helper: &str,
+    value_type: &str,
+) {
+    let tag = format!("{index:04}");
+    emit_effective_address(output, &tag, base, offset);
+    output.push_str(&format!(
+        "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\\n",
         src.index()
     ));
 }
