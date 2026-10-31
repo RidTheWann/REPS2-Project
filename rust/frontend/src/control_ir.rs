@@ -156,7 +156,7 @@ impl ControlProgram {
                 match ir::lift(std::slice::from_ref(decoded)) {
                     Ok(program) => instructions.extend_from_slice(program.instructions()),
                     Err(LiftError::UnsupportedOpcode { pc, mnemonic }) => {
-                        unsupported = Some((*pc, mnemonic.to_owned()));
+                        unsupported = Some((pc, mnemonic.to_owned()));
                         break;
                     }
                     Err(error @ LiftError::Verification(_)) => {
