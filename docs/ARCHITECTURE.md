@@ -66,6 +66,30 @@ CMake orchestrates the build, Cargo builds/tests the Rust frontend, and CMake's 
             v
     Runtime profiles: EE / VU / GS / IOP / DMA / audio / input / storage
 
+## Product-facing game library
+
+The user-facing workflow is **select one ISO → add game → later press Play**. Users are not expected to extract BOOT.ELF, create title-specific folders, or invoke developer-only compiler steps. The Rust frontend owns the import transaction and records a stable, versioned manifest that a future desktop library UI can consume.
+
+Each imported image receives a content-addressed identity derived from a streaming SHA-256 digest. The managed layout is:
+
+    <library>/
+      games/
+        sha256-<iso-digest>/
+          game.json
+          boot.elf
+          recompiled.cpp       (optional)
+          ee-main-ram.bin      (optional)
+
+The ISO itself remains at its canonical source path to avoid duplicating multi-gigabyte images. A future UI must detect a missing source and provide a relink flow; it must not silently substitute another image. Re-importing unchanged content is idempotent and validates the stored boot ELF before returning the existing record. Staging and atomic directory publication prevent partially written records from appearing in the library.
+
+The manifest separates discovery facts from execution claims. It records disc/ELF identity, loadable ranges, analysis coverage, unresolved edges, and optional generated artifacts. The current command always reports `playable: false`: parser success, a valid PT_LOAD image, and generated C++ are not evidence that the game can boot. This distinction is a required invariant for the launcher and compatibility catalog.
+
+The current import command is:
+
+    reps2 add-game <disc-image.iso> <library-directory>
+
+This is the first library/backend slice, not yet the desktop shell, a complete compiler, or a game launcher.
+
 ## Module invariants
 
 ### ELF and disc readers
