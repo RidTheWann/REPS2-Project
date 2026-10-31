@@ -536,12 +536,69 @@ fn parse_boot_path(system_cnf: &str) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use std::io::{self, Cursor, Read, Seek, SeekFrom};
 
     const TEST_BLOCKS: usize = 32;
     const ROOT_LBA: usize = 20;
     const SYSTEM_LBA: usize = 21;
     const EXECUTABLE_LBA: usize = 22;
+
+    struct SparseDisc {
+        image_bytes: u64,
+        position: u64,
+        sectors: std::collections::BTreeMap<u64, Vec<u8>>,
+        bytes_returned: usize,
+    }
+
+    impl Read for SparseDisc {
+        fn read(&mut self, destination: &mut [u8]) -> io::Result<usize> {
+            if self.position >= self.image_bytes || destination.is_empty() {
+                return Ok(0);
+            }
+            let remaining = usize::try_from(self.image_bytes - self.position)
+                .unwrap_or(usize::MAX);
+            let count = destination.len().min(remaining);
+            destination[..count].fill(0);
+
+            let read_start = self.position;
+            let read_end = read_start + count as u64;
+            for (lba, sector) in &self.sectors {
+                let sector_start = lba * LOGICAL_BLOCK_SIZE;
+                let sector_end = sector_start + sector.len() as u64;
+                let overlap_start = read_start.max(sector_start);
+                let overlap_end = read_end.min(sector_end);
+                if overlap_start < overlap_end {
+                    let source_start = usize::try_from(overlap_start - sector_start)
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "sparse sector offset overflow"))?;
+                    let destination_start = usize::try_from(overlap_start - read_start)
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "sparse read offset overflow"))?;
+                    let length = usize::try_from(overlap_end - overlap_start)
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "sparse read length overflow"))?;
+                    destination[destination_start..destination_start + length]
+                        .copy_from_slice(&sector[source_start..source_start + length]);
+                }
+            }
+
+            self.position = read_end;
+            self.bytes_returned += count;
+            Ok(count)
+        }
+    }
+
+    impl Seek for SparseDisc {
+        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+            let target = match position {
+                SeekFrom::Start(offset) => i128::from(offset),
+                SeekFrom::Current(offset) => i128::from(self.position) + i128::from(offset),
+                SeekFrom::End(offset) => i128::from(self.image_bytes) + i128::from(offset),
+            };
+            if !(0..=i128::from(u64::MAX)).contains(&target) {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "sparse image seek is out of range"));
+            }
+            self.position = target as u64;
+            Ok(self.position)
+        }
+    }
 
     fn put_both_u16(bytes: &mut [u8], offset: usize, value: u16) {
         bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -643,6 +700,42 @@ mod tests {
         let executable_offset = EXECUTABLE_LBA * LOGICAL_BLOCK_SIZE as usize;
         image[executable_offset..executable_offset + executable.len()].copy_from_slice(&executable);
         image
+    }
+
+    #[test]
+    fn inspects_an_eight_gibibyte_sparse_image_without_buffering_the_disc() {
+        let mut fixture = valid_image();
+        let image_bytes = 8 * 1024 * 1024 * 1024u64;
+        let volume_blocks = u32::try_from(image_bytes / LOGICAL_BLOCK_SIZE)
+            .expect("8 GiB volume fits ISO 9660 volume-space field");
+        let pvd_offset = 16 * LOGICAL_BLOCK_SIZE as usize;
+        put_both_u32(
+            &mut fixture[pvd_offset..pvd_offset + LOGICAL_BLOCK_SIZE as usize],
+            80,
+            volume_blocks,
+        );
+
+        let mut sectors = std::collections::BTreeMap::new();
+        sectors.insert(
+            16,
+            fixture[pvd_offset..pvd_offset + LOGICAL_BLOCK_SIZE as usize].to_vec(),
+        );
+        let terminator_offset = 17 * LOGICAL_BLOCK_SIZE as usize;
+        sectors.insert(
+            17,
+            fixture[terminator_offset..terminator_offset + LOGICAL_BLOCK_SIZE as usize].to_vec(),
+        );
+
+        let sparse = SparseDisc {
+            image_bytes,
+            position: 0,
+            sectors,
+            bytes_returned: 0,
+        };
+        let iso = Iso9660::open(sparse).expect("sparse multi-gigabyte ISO");
+        assert_eq!(iso.volume_info().image_bytes, image_bytes);
+        assert_eq!(iso.volume_info().volume_bytes, image_bytes);
+        assert_eq!(iso.reader.bytes_returned, 2 * LOGICAL_BLOCK_SIZE as usize);
     }
 
     #[test]
