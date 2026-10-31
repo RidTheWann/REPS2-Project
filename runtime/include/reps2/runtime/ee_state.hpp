@@ -21,6 +21,18 @@ struct EeMemory {
     std::span<std::uint8_t> main_ram{};
 };
 
+// FCR31 bits 1..0 read as 0b01: the EE rounding mode is fixed to round toward
+// zero and is not programmable. Bit 24 is the single FPU condition bit. The EE
+// manual's reset figure shows bit 24 set, which emulators do not agree with, so
+// FCR31 bits 1..0 read as 0b01: the EE rounding mode is fixed to round toward
+// zero and is not programmable. Bit 24 is the single FPU condition bit. The EE
+// manual's reset figure shows bit 24 set, which emulators do not agree with, so
+// the value is named rather than inlined and stays an open differential case.
+inline constexpr std::uint32_t kFpuControlResetValue{0x0100'0001U};
+inline constexpr std::uint32_t kFpuControlReadOnlyMask{0x0000'0003U};
+// FIR (FCR0) identifies the implementation and is read-only.
+inline constexpr std::uint32_t kFpuImplementationRegister{0x0000'2E00U};
+
 struct EeState {
     std::uint32_t pc{};
     std::array<Gpr128, 32> gpr{};
@@ -32,6 +44,10 @@ struct EeState {
     // MMI SA holds a bit count consumed by QFSRV. MTSA transfers the full
     // 64-bit source lane, so the model keeps 64 bits rather than a byte.
     std::uint64_t sa{};
+    // The EE FPU is single-precision only: 32 x 32-bit FPRs, plus FCR0 (FIR,
+    // read-only) and FCR31 (FCSR). FCR1..FCR30 are reserved and store nothing.
+    std::array<std::uint32_t, 32> fpr{};
+    std::uint32_t fcsr{kFpuControlResetValue};
     EeMemory memory{};
 };
 
@@ -108,8 +124,15 @@ enum class Status : std::uint8_t {
     state.hi1 = 0;
     state.lo1 = 0;
     state.sa = 0;
+    state.fpr = {};
+    state.fcsr = kFpuControlResetValue;
     state.pc = entry_pc;
     return Status::ok;
+}
+
+// CTC1 cannot program the EE rounding field, so bits 1..0 always read back 01.
+constexpr void store_fpu_control(std::uint32_t& control, std::uint32_t value) noexcept {
+    control = (value & ~kFpuControlReadOnlyMask) | 0x0000'0001U;
 }
 
 [[nodiscard]] inline Status resolve_ee_memory_access(
