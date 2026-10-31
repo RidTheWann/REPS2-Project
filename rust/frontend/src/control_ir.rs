@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn unsupported_scalar_operation_becomes_an_explicit_stop() {
         let words = [
-            0x0000_0018, // mult: decoded, outside scalar AOT subset
+            0x0000_001A, // div: decoded but not yet lifted into executable scalar IR
             0x03E0_0008,
             0x0000_0000,
         ];
@@ -519,8 +519,34 @@ mod tests {
         let program = ControlProgram::lift(&graph).expect("unsupported remains explicit");
         assert!(matches!(
             &program.blocks[&0x2000].terminator,
-            ControlTerminator::Unsupported { guest_pc: 0x2000, mnemonic } if mnemonic == "mult"
+            ControlTerminator::Unsupported { guest_pc: 0x2000, mnemonic } if mnemonic == "div"
         ));
         assert_eq!(program.unsupported_count(), 1);
+    }
+
+    #[test]
+    fn hilo_and_multiply_instructions_lift_inside_cfg_blocks() {
+        let words = [
+            0x0020_0011, // mthi r1
+            0x0000_1010, // mfhi r2
+            0x0022_1818, // mult r3, r1, r2
+            0x03E0_0008, // jr ra
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x3000, &words)];
+        let roots = [0x3000];
+        let graph = analysis::discover_cfg(&segments, vec![entry(0x3000)], &roots, AnalysisLimits::default())
+            .expect("synthetic HI/LO CFG");
+        let program = ControlProgram::lift(&graph).expect("HI/LO scalar operations lift in CFG");
+
+        let block = &program.blocks[&0x3000];
+        assert_eq!(block.instructions.len(), 3);
+        assert!(matches!(block.instructions[0].operation, ir::Operation::MoveToHi { src } if src.index() == 1));
+        assert!(matches!(block.instructions[1].operation, ir::Operation::MoveFromHi { dst } if dst.index() == 2));
+        assert!(matches!(block.instructions[2].operation,
+            ir::Operation::MultiplyWordSigned { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2));
+        assert!(matches!(block.terminator, ControlTerminator::IndirectJump { .. }));
+        assert_eq!(program.unsupported_count(), 0);
     }
 }
