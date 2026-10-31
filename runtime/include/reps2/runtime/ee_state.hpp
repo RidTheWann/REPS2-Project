@@ -266,6 +266,144 @@ enum class Status : std::uint8_t {
     return Status::ok;
 }
 
+// EE left/right operations align the backing access down and merge the
+// selected byte lanes. They intentionally reuse checked aligned accessors.
+[[nodiscard]] inline Status load_u32_left(
+    const EeMemory& memory,
+    std::uint32_t address,
+    std::uint64_t previous,
+    std::uint64_t& value
+) noexcept {
+    const auto byte_offset = address & 3U;
+    std::uint32_t loaded{};
+    const auto status = load_u32(memory, address & ~3U, loaded);
+    if (status != Status::ok) return status;
+    const auto shift = (3U - byte_offset) * 8U;
+    const auto preserve_mask = 0x00FFFFFFU >> (byte_offset * 8U);
+    const auto merged = (static_cast<std::uint32_t>(previous) & preserve_mask)
+        | (loaded << shift);
+    value = static_cast<std::uint64_t>(merged)
+        | ((merged & 0x80000000U) != 0U ? 0xFFFFFFFF00000000ULL : 0ULL);
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status load_u32_right(
+    const EeMemory& memory,
+    std::uint32_t address,
+    std::uint64_t previous,
+    std::uint64_t& value
+) noexcept {
+    const auto byte_offset = address & 3U;
+    std::uint32_t loaded{};
+    const auto status = load_u32(memory, address & ~3U, loaded);
+    if (status != Status::ok) return status;
+    const auto shift = byte_offset * 8U;
+    const auto preserve_mask = 0xFFFFFF00U << ((3U - byte_offset) * 8U);
+    const auto merged = (static_cast<std::uint32_t>(previous) & preserve_mask)
+        | (loaded >> shift);
+    value = byte_offset == 0U
+        ? (static_cast<std::uint64_t>(merged)
+            | ((merged & 0x80000000U) != 0U ? 0xFFFFFFFF00000000ULL : 0ULL))
+        : ((previous & 0xFFFFFFFF00000000ULL) | static_cast<std::uint64_t>(merged));
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status store_u32_left(
+    EeMemory& memory,
+    std::uint32_t address,
+    std::uint32_t value
+) noexcept {
+    const auto byte_offset = address & 3U;
+    const auto aligned_address = address & ~3U;
+    std::uint32_t previous{};
+    const auto load_status = load_u32(memory, aligned_address, previous);
+    if (load_status != Status::ok) return load_status;
+    const auto shift = (3U - byte_offset) * 8U;
+    const auto preserve_mask = 0xFFFFFF00U << (byte_offset * 8U);
+    const auto merged = (value >> shift) | (previous & preserve_mask);
+    return store_u32(memory, aligned_address, merged);
+}
+
+[[nodiscard]] inline Status store_u32_right(
+    EeMemory& memory,
+    std::uint32_t address,
+    std::uint32_t value
+) noexcept {
+    const auto byte_offset = address & 3U;
+    const auto aligned_address = address & ~3U;
+    std::uint32_t previous{};
+    const auto load_status = load_u32(memory, aligned_address, previous);
+    if (load_status != Status::ok) return load_status;
+    const auto shift = byte_offset * 8U;
+    const auto preserve_mask = 0x00FFFFFFU >> ((3U - byte_offset) * 8U);
+    const auto merged = (value << shift) | (previous & preserve_mask);
+    return store_u32(memory, aligned_address, merged);
+}
+
+[[nodiscard]] inline Status load_u64_left(
+    const EeMemory& memory,
+    std::uint32_t address,
+    std::uint64_t previous,
+    std::uint64_t& value
+) noexcept {
+    const auto byte_offset = address & 7U;
+    std::uint64_t loaded{};
+    const auto status = load_u64(memory, address & ~7U, loaded);
+    if (status != Status::ok) return status;
+    const auto shift = (7U - byte_offset) * 8U;
+    const auto preserve_mask = 0x00FFFFFFFFFFFFFFULL >> (byte_offset * 8U);
+    value = (previous & preserve_mask) | (loaded << shift);
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status load_u64_right(
+    const EeMemory& memory,
+    std::uint32_t address,
+    std::uint64_t previous,
+    std::uint64_t& value
+) noexcept {
+    const auto byte_offset = address & 7U;
+    std::uint64_t loaded{};
+    const auto status = load_u64(memory, address & ~7U, loaded);
+    if (status != Status::ok) return status;
+    const auto shift = byte_offset * 8U;
+    const auto preserve_mask = 0xFFFFFFFFFFFFFF00ULL << ((7U - byte_offset) * 8U);
+    value = (previous & preserve_mask) | (loaded >> shift);
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status store_u64_left(
+    EeMemory& memory,
+    std::uint32_t address,
+    std::uint64_t value
+) noexcept {
+    const auto byte_offset = address & 7U;
+    const auto aligned_address = address & ~7U;
+    std::uint64_t previous{};
+    const auto load_status = load_u64(memory, aligned_address, previous);
+    if (load_status != Status::ok) return load_status;
+    const auto shift = (7U - byte_offset) * 8U;
+    const auto preserve_mask = 0xFFFFFFFFFFFFFF00ULL << (byte_offset * 8U);
+    const auto merged = (value >> shift) | (previous & preserve_mask);
+    return store_u64(memory, aligned_address, merged);
+}
+
+[[nodiscard]] inline Status store_u64_right(
+    EeMemory& memory,
+    std::uint32_t address,
+    std::uint64_t value
+) noexcept {
+    const auto byte_offset = address & 7U;
+    const auto aligned_address = address & ~7U;
+    std::uint64_t previous{};
+    const auto load_status = load_u64(memory, aligned_address, previous);
+    if (load_status != Status::ok) return load_status;
+    const auto shift = byte_offset * 8U;
+    const auto preserve_mask = 0x00FFFFFFFFFFFFFFULL >> ((7U - byte_offset) * 8U);
+    const auto merged = (value << shift) | (previous & preserve_mask);
+    return store_u64(memory, aligned_address, merged);
+}
+
 [[nodiscard]] inline Status store_u128(
     EeMemory& memory,
     std::uint32_t address,

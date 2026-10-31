@@ -76,6 +76,8 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
         mips::Opcode::Sltiu | mips::Opcode::Lb | mips::Opcode::Lh |
         mips::Opcode::Lw | mips::Opcode::Lbu | mips::Opcode::Lhu |
         mips::Opcode::Lwu | mips::Opcode::Ld | mips::Opcode::Sd |
+        mips::Opcode::Lwl | mips::Opcode::Lwr | mips::Opcode::Swl | mips::Opcode::Swr |
+        mips::Opcode::Ldl | mips::Opcode::Ldr | mips::Opcode::Sdl | mips::Opcode::Sdr |
         mips::Opcode::Sb | mips::Opcode::Sh | mips::Opcode::Sw) {
         print!("  imm={}", instruction.signed_immediate());
     }
@@ -252,6 +254,44 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         0x03E0_0008, // jr ra
         0x0000_0000, // delay slot
     ];
+    let mut unaligned_word_merge = Vec::with_capacity(18);
+    for lane in 0u32..4 {
+        let offset = lane * 4 + lane;
+        unaligned_word_merge.push((0x22u32 << 26) | (8 << 21) | ((10 + lane) << 16) | offset);
+    }
+    for lane in 0u32..4 {
+        let offset = 0x10 + lane * 4 + lane;
+        unaligned_word_merge.push((0x26u32 << 26) | (8 << 21) | ((14 + lane) << 16) | offset);
+    }
+    for lane in 0u32..4 {
+        let offset = 0x20 + lane * 4 + lane;
+        unaligned_word_merge.push((0x2Au32 << 26) | (8 << 21) | (9 << 16) | offset);
+    }
+    for lane in 0u32..4 {
+        let offset = 0x30 + lane * 4 + lane;
+        unaligned_word_merge.push((0x2Eu32 << 26) | (8 << 21) | (9 << 16) | offset);
+    }
+    unaligned_word_merge.extend([0x03E0_0008, 0x0000_0000]);
+
+    let mut unaligned_doubleword_merge = Vec::with_capacity(34);
+    for lane in 0u32..8 {
+        let offset = lane * 8 + lane;
+        unaligned_doubleword_merge.push((0x1Au32 << 26) | (8 << 21) | ((10 + lane) << 16) | offset);
+    }
+    for lane in 0u32..8 {
+        let offset = 0x40 + lane * 8 + lane;
+        unaligned_doubleword_merge.push((0x1Bu32 << 26) | (8 << 21) | ((18 + lane) << 16) | offset);
+    }
+    for lane in 0u32..8 {
+        let offset = 0x80 + lane * 8 + lane;
+        unaligned_doubleword_merge.push((0x2Cu32 << 26) | (8 << 21) | (9 << 16) | offset);
+    }
+    for lane in 0u32..8 {
+        let offset = 0xC0 + lane * 8 + lane;
+        unaligned_doubleword_merge.push((0x2Du32 << 26) | (8 << 21) | (9 << 16) | offset);
+    }
+    unaligned_doubleword_merge.extend([0x03E0_0008, 0x0000_0000]);
+
     let segments = [
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
@@ -260,6 +300,8 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         segment(0x5000, &memory_ops),
         segment(0x5100, &unaligned_load),
         segment(0x5200, &unaligned_doubleword),
+        segment(0x5300, &unaligned_word_merge),
+        segment(0x5400, &unaligned_doubleword_merge),
     ];
     let entries = vec![
         entry(0x1000, "branch-fixture"),
@@ -269,8 +311,10 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         entry(0x5000, "ee-memory-fixture"),
         entry(0x5100, "unaligned-load-fixture"),
         entry(0x5200, "unaligned-doubleword-fixture"),
+        entry(0x5300, "unaligned-word-merge-fixture"),
+        entry(0x5400, "unaligned-doubleword-merge-fixture"),
     ];
-    let roots = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100, 0x5200];
+    let roots = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph)

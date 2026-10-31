@@ -62,6 +62,14 @@ pub enum Operation {
     StoreByte { src: Gpr, base: Gpr, offset: u16 },
     StoreHalf { src: Gpr, base: Gpr, offset: u16 },
     StoreWord { src: Gpr, base: Gpr, offset: u16 },
+    LoadWordLeft { dst: Gpr, base: Gpr, offset: u16 },
+    LoadWordRight { dst: Gpr, base: Gpr, offset: u16 },
+    StoreWordLeft { src: Gpr, base: Gpr, offset: u16 },
+    StoreWordRight { src: Gpr, base: Gpr, offset: u16 },
+    LoadDoublewordLeft { dst: Gpr, base: Gpr, offset: u16 },
+    LoadDoublewordRight { dst: Gpr, base: Gpr, offset: u16 },
+    StoreDoublewordLeft { src: Gpr, base: Gpr, offset: u16 },
+    StoreDoublewordRight { src: Gpr, base: Gpr, offset: u16 },
     LoadDoubleword { dst: Gpr, base: Gpr, offset: u16 },
     StoreDoubleword { src: Gpr, base: Gpr, offset: u16 },
     LoadQuadword { dst: Gpr, base: Gpr, offset: u16 },
@@ -269,6 +277,30 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
             },
             Opcode::Sw => Operation::StoreWord {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Lwl => Operation::LoadWordLeft {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Lwr => Operation::LoadWordRight {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Swl => Operation::StoreWordLeft {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Swr => Operation::StoreWordRight {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Ldl => Operation::LoadDoublewordLeft {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Ldr => Operation::LoadDoublewordRight {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Sdl => Operation::StoreDoublewordLeft {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Sdr => Operation::StoreDoublewordRight {
                 src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
             },
             Opcode::Ld => Operation::LoadDoubleword {

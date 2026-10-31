@@ -330,6 +330,164 @@ int main() {
         return fail(44);
     }
 
+    // Generated LWL/LWR/SWL/SWR instructions exercise all four byte lanes.
+    EeState unaligned_words{};
+    unaligned_words.pc = 0x5300U;
+    unaligned_words.memory.main_ram = main_ram;
+    unaligned_words.gpr[8].low = 0x6000U;
+    unaligned_words.gpr[9].low = 0x89ABCDEFU;
+    unaligned_words.gpr[31].low = 0x9000U;
+    constexpr std::uint64_t old_word_register = 0x1122334455667788ULL;
+    constexpr std::uint32_t loaded_word = 0xA1B2C3D4U;
+    constexpr std::uint32_t original_word = 0x11223344U;
+    constexpr std::uint32_t word_source = 0x89ABCDEFU;
+    for (std::uint32_t lane = 0; lane < 4U; ++lane) {
+        if (reps2::runtime::store_u32(unaligned_words.memory, 0x6000U + lane * 4U, loaded_word) != Status::ok
+            || reps2::runtime::store_u32(unaligned_words.memory, 0x6010U + lane * 4U, loaded_word) != Status::ok
+            || reps2::runtime::store_u32(unaligned_words.memory, 0x6020U + lane * 4U, original_word) != Status::ok
+            || reps2::runtime::store_u32(unaligned_words.memory, 0x6030U + lane * 4U, original_word) != Status::ok) {
+            return fail(45);
+        }
+        unaligned_words.gpr[10U + lane].low = old_word_register;
+        unaligned_words.gpr[10U + lane].high = 0xAABBCCDD00000000ULL + lane;
+        unaligned_words.gpr[14U + lane].low = old_word_register;
+        unaligned_words.gpr[14U + lane].high = 0xBBCCDDEE00000000ULL + lane;
+    }
+    const auto word_merge_status = reps2::generated::execute_cfg(unaligned_words, 64U);
+    if (word_merge_status != Status::external_control_flow || unaligned_words.pc != 0x9000U) {
+        std::fprintf(stderr, "generated word-merge fixture failed: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(word_merge_status), unaligned_words.pc);
+        return fail(46);
+    }
+    for (std::uint32_t lane = 0; lane < 4U; ++lane) {
+        const auto left_shift = (3U - lane) * 8U;
+        const auto left_mask = 0x00FFFFFFU >> (lane * 8U);
+        const auto left_merged = (static_cast<std::uint32_t>(old_word_register) & left_mask)
+            | (loaded_word << left_shift);
+        const auto expected_left = reps2::runtime::sign_extend_word(left_merged);
+        const auto right_shift = lane * 8U;
+        const auto right_mask = 0xFFFFFF00U << ((3U - lane) * 8U);
+        const auto right_merged = (static_cast<std::uint32_t>(old_word_register) & right_mask)
+            | (loaded_word >> right_shift);
+        const auto expected_right = lane == 0U
+            ? reps2::runtime::sign_extend_word(right_merged)
+            : ((old_word_register & 0xFFFFFFFF00000000ULL) | right_merged);
+        if (unaligned_words.gpr[10U + lane].low != expected_left
+            || unaligned_words.gpr[14U + lane].low != expected_right
+            || unaligned_words.gpr[10U + lane].high != 0xAABBCCDD00000000ULL + lane
+            || unaligned_words.gpr[14U + lane].high != 0xBBCCDDEE00000000ULL + lane) {
+            std::fprintf(stderr, "LWL/LWR lane mismatch at byte offset %u\n", lane);
+            return fail(47);
+        }
+        const auto swl_shift = (3U - lane) * 8U;
+        const auto swl_mask = 0xFFFFFF00U << (lane * 8U);
+        const auto expected_swl = (word_source >> swl_shift) | (original_word & swl_mask);
+        const auto swr_shift = lane * 8U;
+        const auto swr_mask = 0x00FFFFFFU >> ((3U - lane) * 8U);
+        const auto expected_swr = (word_source << swr_shift) | (original_word & swr_mask);
+        std::uint32_t observed_swl{}, observed_swr{};
+        if (reps2::runtime::load_u32(unaligned_words.memory, 0x6020U + lane * 4U, observed_swl) != Status::ok
+            || reps2::runtime::load_u32(unaligned_words.memory, 0x6030U + lane * 4U, observed_swr) != Status::ok
+            || observed_swl != expected_swl || observed_swr != expected_swr) {
+            std::fprintf(stderr, "SWL/SWR lane mismatch at byte offset %u\n", lane);
+            return fail(48);
+        }
+    }
+
+    // Generated LDL/LDR/SDL/SDR instructions exercise all eight byte lanes.
+    EeState unaligned_doublewords{};
+    unaligned_doublewords.pc = 0x5400U;
+    unaligned_doublewords.memory.main_ram = main_ram;
+    unaligned_doublewords.gpr[8].low = 0x6100U;
+    unaligned_doublewords.gpr[9].low = 0x89ABCDEF01234567ULL;
+    unaligned_doublewords.gpr[31].low = 0x9000U;
+    constexpr std::uint64_t old_doubleword_register = 0x1122334455667788ULL;
+    constexpr std::uint64_t loaded_doubleword = 0xA1B2C3D4E5F60718ULL;
+    constexpr std::uint64_t original_doubleword = 0x1122334455667788ULL;
+    constexpr std::uint64_t doubleword_source = 0x89ABCDEF01234567ULL;
+    for (std::uint32_t lane = 0; lane < 8U; ++lane) {
+        if (reps2::runtime::store_u64(unaligned_doublewords.memory, 0x6100U + lane * 8U, loaded_doubleword) != Status::ok
+            || reps2::runtime::store_u64(unaligned_doublewords.memory, 0x6140U + lane * 8U, loaded_doubleword) != Status::ok
+            || reps2::runtime::store_u64(unaligned_doublewords.memory, 0x6180U + lane * 8U, original_doubleword) != Status::ok
+            || reps2::runtime::store_u64(unaligned_doublewords.memory, 0x61C0U + lane * 8U, original_doubleword) != Status::ok) {
+            return fail(49);
+        }
+        unaligned_doublewords.gpr[10U + lane].low = old_doubleword_register;
+        unaligned_doublewords.gpr[10U + lane].high = 0xC000000000000000ULL + lane;
+        unaligned_doublewords.gpr[18U + lane].low = old_doubleword_register;
+        unaligned_doublewords.gpr[18U + lane].high = 0xD000000000000000ULL + lane;
+    }
+    const auto doubleword_merge_status = reps2::generated::execute_cfg(unaligned_doublewords, 64U);
+    if (doubleword_merge_status != Status::external_control_flow || unaligned_doublewords.pc != 0x9000U) {
+        std::fprintf(stderr, "generated doubleword-merge fixture failed: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(doubleword_merge_status), unaligned_doublewords.pc);
+        return fail(50);
+    }
+    for (std::uint32_t lane = 0; lane < 8U; ++lane) {
+        const auto left_shift = (7U - lane) * 8U;
+        const auto left_mask = 0x00FFFFFFFFFFFFFFULL >> (lane * 8U);
+        const auto expected_left = (old_doubleword_register & left_mask) | (loaded_doubleword << left_shift);
+        const auto right_shift = lane * 8U;
+        const auto right_mask = 0xFFFFFFFFFFFFFF00ULL << ((7U - lane) * 8U);
+        const auto expected_right = (old_doubleword_register & right_mask) | (loaded_doubleword >> right_shift);
+        if (unaligned_doublewords.gpr[10U + lane].low != expected_left
+            || unaligned_doublewords.gpr[18U + lane].low != expected_right
+            || unaligned_doublewords.gpr[10U + lane].high != 0xC000000000000000ULL + lane
+            || unaligned_doublewords.gpr[18U + lane].high != 0xD000000000000000ULL + lane) {
+            std::fprintf(stderr, "LDL/LDR lane mismatch at byte offset %u\n", lane);
+            return fail(51);
+        }
+        const auto sdl_shift = (7U - lane) * 8U;
+        const auto sdl_mask = 0xFFFFFFFFFFFFFF00ULL << (lane * 8U);
+        const auto expected_sdl = (doubleword_source >> sdl_shift) | (original_doubleword & sdl_mask);
+        const auto sdr_shift = lane * 8U;
+        const auto sdr_mask = 0x00FFFFFFFFFFFFFFULL >> ((7U - lane) * 8U);
+        const auto expected_sdr = (doubleword_source << sdr_shift) | (original_doubleword & sdr_mask);
+        std::uint64_t observed_sdl{}, observed_sdr{};
+        if (reps2::runtime::load_u64(unaligned_doublewords.memory, 0x6180U + lane * 8U, observed_sdl) != Status::ok
+            || reps2::runtime::load_u64(unaligned_doublewords.memory, 0x61C0U + lane * 8U, observed_sdr) != Status::ok
+            || observed_sdl != expected_sdl || observed_sdr != expected_sdr) {
+            std::fprintf(stderr, "SDL/SDR lane mismatch at byte offset %u\n", lane);
+            return fail(52);
+        }
+    }
+
+    // Unaligned instructions still validate the complete aligned backing access
+    // before modifying guest state.
+    EeState unaligned_short{};
+    unaligned_short.pc = 0x5300U;
+    unaligned_short.memory.main_ram = short_ram;
+    unaligned_short.gpr[8].low = 0x6000U;
+    unaligned_short.gpr[10].low = old_word_register;
+    const auto unaligned_short_status = reps2::generated::execute_cfg(unaligned_short, 64U);
+    if (unaligned_short_status != Status::unmapped_memory || unaligned_short.pc != 0x5300U
+        || unaligned_short.gpr[10].low != old_word_register) {
+        std::fprintf(stderr, "failed LWL backing access was not atomic\n");
+        return fail(53);
+    }
+
+    // Every partial helper must reject a short aligned backing unit atomically.
+    std::uint64_t partial_load64 = 0x1122334455667788ULL;
+    if (reps2::runtime::load_u32_left(short_backing.memory, 0x6001U, old_word_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL
+        || reps2::runtime::load_u32_right(short_backing.memory, 0x6002U, old_word_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL
+        || reps2::runtime::load_u64_left(short_backing.memory, 0x6003U, old_doubleword_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL
+        || reps2::runtime::load_u64_right(short_backing.memory, 0x6004U, old_doubleword_register, partial_load64) != Status::unmapped_memory
+        || partial_load64 != 0x1122334455667788ULL) {
+        std::fprintf(stderr, "partial load helper changed its destination after a failed aligned read\\n");
+        return fail(54);
+    }
+    if (reps2::runtime::store_u32_left(short_backing.memory, 0x6001U, 0x89ABCDEFU) != Status::unmapped_memory
+        || reps2::runtime::store_u32_right(short_backing.memory, 0x6002U, 0x89ABCDEFU) != Status::unmapped_memory
+        || reps2::runtime::store_u64_left(short_backing.memory, 0x6003U, 0x89ABCDEF01234567ULL) != Status::unmapped_memory
+        || reps2::runtime::store_u64_right(short_backing.memory, 0x6004U, 0x89ABCDEF01234567ULL) != Status::unmapped_memory
+        || std::any_of(short_ram.begin(), short_ram.end(), [](std::uint8_t byte) { return byte != 0; })) {
+        std::fprintf(stderr, "partial store helper modified short backing after a failed aligned read\\n");
+        return fail(55);
+    }
+
     // The generated module initializer accepts a complete 32 MiB image,
     // copies it into caller-owned RAM, clears architectural GPR state, and
     // selects the ELF entry point.
