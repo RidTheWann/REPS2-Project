@@ -15,7 +15,7 @@ int main() {
     state.gpr[2].low = 0x0000000000000030ULL;
     state.gpr[2].high = 0x5555666677778888ULL;
     state.gpr[3].low = 0xFFFFFFFFFFFFFFFFULL;
-    state.gpr[4].low = 5ULL;
+    state.gpr[4].low = 0xC5ULL; // Word and doubleword shifts must mask the architectural count bits.
     state.gpr[5].low = 0xFFFFFFFF80000001ULL;
     state.gpr[5].high = 0x13579BDF2468ACE0ULL;
     state.gpr[6].high = 0xABCDEF0123456789ULL;
