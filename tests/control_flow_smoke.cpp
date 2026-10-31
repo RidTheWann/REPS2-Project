@@ -7,11 +7,20 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include <span>
 
 namespace reps2::generated {
 [[nodiscard]] reps2::runtime::Status execute_cfg(
     reps2::runtime::EeState& state,
     std::uint64_t instruction_budget
+) noexcept;
+[[nodiscard]] reps2::runtime::Status initialize_ee_state(
+    reps2::runtime::EeState& state,
+    std::span<const std::uint8_t> main_ram_image
+) noexcept;
+[[nodiscard]] reps2::runtime::Status initialize_ee_state(
+    reps2::runtime::EeState& state,
+    std::span<const std::uint8_t> main_ram_image
 ) noexcept;
 }
 
@@ -246,6 +255,41 @@ int main() {
     if (short_backing_status != Status::unmapped_memory || short_backing.pc != 0x5000U) {
         std::fprintf(stderr, "short-backing status mismatch: status=%u pc=0x%08X\n", static_cast<unsigned>(short_backing_status), short_backing.pc);
         return fail(31);
+    }
+
+    // The generated module initializer accepts a complete 32 MiB image,
+    // copies it into caller-owned RAM, clears architectural GPR state, and
+    // selects the ELF entry point.
+    std::vector<std::uint8_t> initial_image(reps2::runtime::kEeMainRamSize, std::uint8_t{0});
+    initial_image[0x1000U] = 0x12U;
+    initial_image[0x1001U] = 0x34U;
+    EeState initialized{};
+    initialized.memory.main_ram = main_ram;
+    initialized.pc = 0xDEADBEEFU;
+    initialized.gpr[8].low = 0x12345678U;
+    const auto initialize_status = reps2::generated::initialize_ee_state(initialized, initial_image);
+    if (initialize_status != Status::ok || initialized.pc != 0x1000U) {
+        std::fprintf(stderr, "ELF runtime initializer failed: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(initialize_status), initialized.pc);
+        return fail(32);
+    }
+    if (initialized.gpr[8].low != 0 || initialized.gpr[0].low != 0
+        || initialized.memory.main_ram[0x1000U] != 0x12U
+        || initialized.memory.main_ram[0x1001U] != 0x34U) {
+        std::fprintf(stderr, "ELF runtime initializer did not copy RAM/reset GPR state\n");
+        return fail(33);
+    }
+
+    // Invalid image sizes fail before mutating guest state or the existing RAM.
+    initialized.pc = 0x4444U;
+    initialized.gpr[8].low = 0x5555U;
+    initialized.memory.main_ram[0x1000U] = 0xAAU;
+    const std::array<std::uint8_t, 8> short_image{};
+    const auto invalid_image_status = reps2::generated::initialize_ee_state(initialized, short_image);
+    if (invalid_image_status != Status::invalid_memory_image || initialized.pc != 0x4444U
+        || initialized.gpr[8].low != 0x5555U || initialized.memory.main_ram[0x1000U] != 0xAAU) {
+        std::fprintf(stderr, "invalid RAM image was not rejected atomically\n");
+        return fail(34);
     }
 
     return 0;
