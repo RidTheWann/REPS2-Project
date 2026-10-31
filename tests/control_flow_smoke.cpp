@@ -157,6 +157,8 @@ int main() {
                   main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 16U), std::uint8_t{0});
         std::fill(main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x20U),
                   main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x30U), std::uint8_t{0});
+        std::fill(main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x38U),
+                  main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x41U), std::uint8_t{0xCC});
 
         EeState memory_state{};
         memory_state.pc = 0x5000U;
@@ -165,6 +167,7 @@ int main() {
         memory_state.gpr[9].low = 0xFFFFFFFF80FF8001ULL;
         memory_state.gpr[10].high = 0xAAAAAAAAAAAAAAAAULL;
         memory_state.gpr[12].high = 0xBBBBBBBBBBBBBBBBULL;
+        memory_state.gpr[17].high = 0xCCCCCCCCCCCCCCCCULL;
         memory_state.gpr[31].low = 0x9000U;
 
         const auto memory_status = reps2::generated::execute_cfg(memory_state, 64U);
@@ -197,6 +200,24 @@ int main() {
                 index, static_cast<unsigned long long>(memory_state.gpr[16].low),
                 static_cast<unsigned long long>(memory_state.gpr[16].high));
             return fail(35);
+        }
+        if (memory_state.gpr[17].low != 0x0000000080FF8001ULL
+            || memory_state.gpr[17].high != 0xCCCCCCCCCCCCCCCCULL) {
+            std::fprintf(stderr, "LD did not load only the low GPR lane alias[%zu]\n", index);
+            return fail(38);
+        }
+        const std::array<std::uint8_t, 8> expected_doubleword{
+            0x01U, 0x80U, 0xFFU, 0x80U, 0x00U, 0x00U, 0x00U, 0x00U
+        };
+        for (std::size_t byte = 0; byte < expected_doubleword.size(); ++byte) {
+            if (main_ram[physical + 0x38U + byte] != expected_doubleword[byte]) {
+                std::fprintf(stderr, "SD byte mismatch alias[%zu] byte[%zu]\n", index, byte);
+                return fail(39);
+            }
+        }
+        if (main_ram[physical + 0x40U] != 0xCCU) {
+            std::fprintf(stderr, "SD wrote outside its 8-byte destination alias[%zu]\n", index);
+            return fail(40);
         }
         for (std::size_t byte = 0; byte < 16U; ++byte) {
             if (main_ram[physical + 0x20U + byte] != main_ram[physical + byte]) {
@@ -234,6 +255,22 @@ int main() {
         || unaligned.gpr[14].high != 0x0BADF00D0BADF00DULL) {
         std::fprintf(stderr, "alignment fault modified LW destination\n");
         return fail(28);
+    }
+
+    // LD uses natural 8-byte alignment and must leave both GPR lanes intact on a fault.
+    EeState unaligned_doubleword{};
+    unaligned_doubleword.pc = 0x5200U;
+    unaligned_doubleword.memory.main_ram = main_ram;
+    unaligned_doubleword.gpr[8].low = 0x1004U;
+    unaligned_doubleword.gpr[14].low = 0x123456789ABCDEF0ULL;
+    unaligned_doubleword.gpr[14].high = 0x0BADF00D0BADF00DULL;
+    const auto doubleword_alignment_status = reps2::generated::execute_cfg(unaligned_doubleword, 8U);
+    if (doubleword_alignment_status != Status::address_error || unaligned_doubleword.pc != 0x5200U
+        || unaligned_doubleword.gpr[14].low != 0x123456789ABCDEF0ULL
+        || unaligned_doubleword.gpr[14].high != 0x0BADF00D0BADF00DULL) {
+        std::fprintf(stderr, "LD alignment fault was not precise: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(doubleword_alignment_status), unaligned_doubleword.pc);
+        return fail(41);
     }
 
     // MMIO and hardware regions are not silently modelled as RAM.
@@ -276,6 +313,21 @@ int main() {
     if (short_quadword_status != Status::unmapped_memory) {
         std::fprintf(stderr, "short quadword backing status mismatch: %u\n", static_cast<unsigned>(short_quadword_status));
         return fail(37);
+    }
+    std::uint64_t short_doubleword = 0x1122334455667788ULL;
+    if (reps2::runtime::load_u64(short_backing.memory, 0x10U, short_doubleword) != Status::unmapped_memory
+        || short_doubleword != 0x1122334455667788ULL) {
+        std::fprintf(stderr, "short LD backing span was not rejected atomically\n");
+        return fail(42);
+    }
+    if (reps2::runtime::store_u64(short_backing.memory, 0x10U, 0x8877665544332211ULL) != Status::unmapped_memory
+        || std::any_of(short_ram.begin(), short_ram.end(), [](std::uint8_t byte) { return byte != 0; })) {
+        std::fprintf(stderr, "short SD backing span was not rejected atomically\n");
+        return fail(43);
+    }
+    if (reps2::runtime::store_u64(short_backing.memory, 0x11U, 0x8877665544332211ULL) != Status::address_error) {
+        std::fprintf(stderr, "unaligned SD did not report an address error\n");
+        return fail(44);
     }
 
     // The generated module initializer accepts a complete 32 MiB image,

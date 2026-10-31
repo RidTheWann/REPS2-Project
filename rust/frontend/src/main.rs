@@ -75,7 +75,8 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
         mips::Opcode::Addi | mips::Opcode::Addiu | mips::Opcode::Slti |
         mips::Opcode::Sltiu | mips::Opcode::Lb | mips::Opcode::Lh |
         mips::Opcode::Lw | mips::Opcode::Lbu | mips::Opcode::Lhu |
-        mips::Opcode::Lwu | mips::Opcode::Sb | mips::Opcode::Sh | mips::Opcode::Sw) {
+        mips::Opcode::Lwu | mips::Opcode::Ld | mips::Opcode::Sd |
+        mips::Opcode::Sb | mips::Opcode::Sh | mips::Opcode::Sw) {
         print!("  imm={}", instruction.signed_immediate());
     }
     println!();
@@ -236,11 +237,18 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         (0x2B << 26) | (8 << 21) | (9 << 16) | 4, // sw t1, 4(t0)
         (0x1E << 26) | (8 << 21) | (16 << 16), // lq s0, 0(t0)
         (0x1F << 26) | (8 << 21) | (16 << 16) | 0x20, // sq s0, 0x20(t0)
+        (0x37 << 26) | (8 << 21) | (17 << 16) | 4, // ld s1, 4(t0)
+        (0x3F << 26) | (8 << 21) | (17 << 16) | 0x34, // sd s1, 0x34(t0)
         0x03E0_0008, // jr ra
         0x0000_0000, // delay slot
     ];
     let unaligned_load = [
         (0x23 << 26) | (8 << 21) | (14 << 16), // lw t6, 0(t0)
+        0x03E0_0008, // jr ra
+        0x0000_0000, // delay slot
+    ];
+    let unaligned_doubleword = [
+        (0x37 << 26) | (8 << 21) | (14 << 16), // ld t6, 0(t0)
         0x03E0_0008, // jr ra
         0x0000_0000, // delay slot
     ];
@@ -251,6 +259,7 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         segment(0x4000, &jalr_alias),
         segment(0x5000, &memory_ops),
         segment(0x5100, &unaligned_load),
+        segment(0x5200, &unaligned_doubleword),
     ];
     let entries = vec![
         entry(0x1000, "branch-fixture"),
@@ -259,8 +268,9 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         entry(0x4000, "jalr-alias-fixture"),
         entry(0x5000, "ee-memory-fixture"),
         entry(0x5100, "unaligned-load-fixture"),
+        entry(0x5200, "unaligned-doubleword-fixture"),
     ];
-    let roots = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100];
+    let roots = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100, 0x5200];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph)
