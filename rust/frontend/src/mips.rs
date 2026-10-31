@@ -16,6 +16,10 @@ pub enum Opcode {
     Mthi,
     Mflo,
     Mtlo,
+    Mfhi1,
+    Mthi1,
+    Mflo1,
+    Mtlo1,
     Mult,
     Multu,
     Div,
@@ -193,6 +197,10 @@ impl Opcode {
             Self::Mthi => "mthi",
             Self::Mflo => "mflo",
             Self::Mtlo => "mtlo",
+            Self::Mfhi1 => "mfhi1",
+            Self::Mthi1 => "mthi1",
+            Self::Mflo1 => "mflo1",
+            Self::Mtlo1 => "mtlo1",
             Self::Mult => "mult",
             Self::Multu => "multu",
             Self::Div => "div",
@@ -317,6 +325,10 @@ pub struct InstructionEffects {
     pub reads_lo: bool,
     pub writes_hi: bool,
     pub writes_lo: bool,
+    pub reads_hi1: bool,
+    pub reads_lo1: bool,
+    pub writes_hi1: bool,
+    pub writes_lo1: bool,
     pub memory: MemoryEffect,
     pub control_flow: ControlFlowEffect,
     /// True when instruction execution can synchronously raise an exception.
@@ -335,6 +347,10 @@ impl InstructionEffects {
             reads_lo: false,
             writes_hi: false,
             writes_lo: false,
+            reads_hi1: false,
+            reads_lo1: false,
+            writes_hi1: false,
+            writes_lo1: false,
             memory: MemoryEffect::None,
             control_flow: ControlFlowEffect::None,
             may_raise_exception: false,
@@ -525,6 +541,22 @@ impl Instruction {
                 effects.gpr_read_mask = rs;
                 effects.writes_lo = true;
             }
+            Opcode::Mfhi1 => {
+                effects.reads_hi1 = true;
+                effects.gpr_write_mask = rd;
+            }
+            Opcode::Mthi1 => {
+                effects.gpr_read_mask = rs;
+                effects.writes_hi1 = true;
+            }
+            Opcode::Mflo1 => {
+                effects.reads_lo1 = true;
+                effects.gpr_write_mask = rd;
+            }
+            Opcode::Mtlo1 => {
+                effects.gpr_read_mask = rs;
+                effects.writes_lo1 = true;
+            }
             Opcode::Mult | Opcode::Multu => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
@@ -651,6 +683,10 @@ impl Instruction {
                 effects.reads_lo = true;
                 effects.writes_hi = true;
                 effects.writes_lo = true;
+                effects.reads_hi1 = true;
+                effects.reads_lo1 = true;
+                effects.writes_hi1 = true;
+                effects.writes_lo1 = true;
                 effects.memory = MemoryEffect::Unknown;
                 effects.control_flow = ControlFlowEffect::Unknown;
                 effects.may_raise_exception = true;
@@ -808,6 +844,10 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x1B => Opcode::Ldr,
             0x1C => match (word & 0x3F) as u8 {
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
+                0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
+                0x11 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mthi1,
+                0x12 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mflo1,
+                0x13 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mtlo1,
                 _ => Opcode::Unknown,
             },
             0x20 => Opcode::Lb,
@@ -1008,6 +1048,48 @@ mod tests {
         assert_eq!(decode(mmi0, 0).opcode, Opcode::Unknown);
         let other_mmi1 = (word & !(0x1F << 6)) | (0x11 << 6);
         assert_eq!(decode(other_mmi1, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi_pipeline_one_hilo_moves_and_reserved_fields() {
+        let mthi1 = (0x1C << 26) | (4 << 21) | 0x11;
+        let mtlo1 = (0x1C << 26) | (5 << 21) | 0x13;
+        let mfhi1 = (0x1C << 26) | (6 << 11) | 0x10;
+        let mflo1 = (0x1C << 26) | (7 << 11) | 0x12;
+        assert_eq!(decode(mthi1, 0xF000).opcode, Opcode::Mthi1);
+        assert_eq!(decode(mtlo1, 0xF004).opcode, Opcode::Mtlo1);
+        assert_eq!(decode(mfhi1, 0xF008).opcode, Opcode::Mfhi1);
+        assert_eq!(decode(mflo1, 0xF00C).opcode, Opcode::Mflo1);
+
+        // Reserved fields and non-zero MMI selector bits remain unsupported.
+        assert!(!decode(mthi1 | (1 << 16), 0).is_supported());
+        assert!(!decode(mthi1 | (1 << 11), 0).is_supported());
+        assert!(!decode(mfhi1 | (1 << 21), 0).is_supported());
+        assert!(!decode(mfhi1 | (1 << 16), 0).is_supported());
+        assert!(!decode(mthi1 | (1 << 6), 0).is_supported());
+    }
+
+    #[test]
+    fn effects_track_mmi_pipeline_one_hilo_dependencies() {
+        let mthi1 = decode((0x1C << 26) | (4 << 21) | 0x11, 0).effects();
+        assert_eq!(mthi1.gpr_read_mask, 1 << 4);
+        assert_eq!(mthi1.gpr_write_mask, 0);
+        assert!(mthi1.writes_hi1);
+        assert!(!mthi1.writes_lo1);
+        assert!(!mthi1.writes_hi && !mthi1.writes_lo);
+
+        let mtlo1 = decode((0x1C << 26) | (5 << 21) | 0x13, 0).effects();
+        assert_eq!(mtlo1.gpr_read_mask, 1 << 5);
+        assert!(mtlo1.writes_lo1);
+        assert!(!mtlo1.writes_hi1);
+
+        let mfhi1 = decode((0x1C << 26) | (6 << 11) | 0x10, 0).effects();
+        assert!(mfhi1.reads_hi1);
+        assert_eq!(mfhi1.gpr_write_mask, 1 << 6);
+
+        let mflo1 = decode((0x1C << 26) | (7 << 11) | 0x12, 0).effects();
+        assert!(mflo1.reads_lo1);
+        assert_eq!(mflo1.gpr_write_mask, 1 << 7);
     }
 
     #[test]
