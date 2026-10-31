@@ -21,12 +21,12 @@ constexpr Gpr128 kFunnelLower{0x0000'0000'0000'0001ULL, 0x0000'0000'0000'0002ULL
 constexpr Gpr128 kFunnelUpper{0x0000'0000'0000'0003ULL, 0x0000'0000'0000'0004ULL};
 
 void preset(EeState& state) {
-    // A non-zero GPR[0] proves the generated prologue and MFSA both keep the
-    // hard-wired zero register unwritable.
+    // A non-zero GPR[0] proves the generated prologue resets it and MFSA $0
+    // cannot re-write it: the word block issues MFSA $0 while SA is non-zero.
     state.gpr[0] = Gpr128{0xDEAD'BEEFULL, 0xBAD0BAD0'BAD0BAD0ULL};
     state.gpr[1] = Gpr128{kMtsaSource, 0x1111'2222'3333'4444ULL};
     state.gpr[2] = Gpr128{0ULL, 0x2222'3333'4444'5555ULL};
-    // MTSAB input: (0x4 ^ 0xF) * 8 = 11 * 8 = 88 bits.
+    // MTSAB input: (0x4 ^ 0xF) * 8 = 88 bits and (0x4 ^ 0x3) * 8 = 56 bits.
     state.gpr[3] = Gpr128{0x0000'0000'0000'0014ULL, 0x3333'4444'5555'6666ULL};
     state.gpr[5] = kFunnelUpper;
     // A dirty destination proves QFSRV writes both 64-bit lanes.
@@ -69,11 +69,13 @@ int main() {
     if (state.gpr[12].low != kFunnelLower.low) return 10;
     if (state.gpr[12].high != kFunnelLower.high) return 11;
 
-    // MTSA and MTSAB leave SA as a bit count, not a byte or halfword index.
-    if (state.sa != 0ULL) return 12;
+    // The final MTSAB keeps SA as a bit count: (0x4 ^ 0x3) * 8 = 56, which a
+    // missing scale factor or a wrong nibble mask cannot reproduce.
+    if (state.sa != 56ULL) return 12;
     if (state.gpr[1].low != kMtsaSource) return 13;
 
-    // MFSA targeting GPR[0] must not create a writable register.
+    // MFSA $0 executed while SA held MTSA's value, so an unguarded write would
+    // have stored 0xDEADBEEFCAFE0001 here.
     if (state.gpr[0].low != 0ULL || state.gpr[0].high != 0ULL) return 14;
 
     return 0;

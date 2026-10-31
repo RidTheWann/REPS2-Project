@@ -38,7 +38,7 @@ Research against the EE Core Instruction Set Manual, GNU binutils `opcodes/mips-
 
 ### Fixture
 
-The compiled word block is now `MTSA $1` / `MFSA $2` / `MTSAB $3, 0x0F` / `QFSRV $6, $5, $7` / `MFSA $9` / `MTSAH $8, 0x07` / `QFSRV $10, $5, $7` / `MTSAB $11, 0x05` / `QFSRV $12, $5, $7` / `MFSA $0`. Funnel operands are `{1,2}` and `{3,4}` so the expected results for SA = 88, 64 and 0 are hand-computable, and `MFSA $9` after `QFSRV` proves SA is read rather than consumed.
+The compiled word block is `MTSA $1` / `MFSA $0` / `MFSA $2` / `MTSAB $3, 0x0F` / `QFSRV $6, $5, $7` / `MFSA $9` / `MTSAH $8, 0x07` / `QFSRV $10, $5, $7` / `MTSAB $11, 0x05` / `QFSRV $12, $5, $7` / `MTSAB $3, 0x03`. Funnel operands are `{1,2}` and `{3,4}` so the expected results for SA = 88, 64 and 0 are hand-computable, `MFSA $9` after `QFSRV` proves SA is read rather than consumed, and `MFSA $0` sits where SA is still non-zero so the zero-register guard is observable.
 
 ## Consequences
 
@@ -51,7 +51,14 @@ The compiled word block is now `MTSA $1` / `MFSA $2` / `MTSAB $3, 0x0F` / `QFSRV
 
 - `cargo test --workspace --locked` reports 114 passing unit tests, including new decoder, effect, lift and emitter cases for the SA family and QFSRV.
 - `cargo clippy --workspace --all-targets -- -D warnings` is clean; this also required replacing a `Default::default()` plus field-reassignment pattern in `analysis.rs` that failed the CI lint gate.
-- `cmake --build build --config Release` plus `ctest -C Release` pass all 7 native targets on Windows/MSVC with `/W4 /permissive-`, including the regenerated `build/generated/sa_program.cpp`.
+- `cmake --build build --config Release` plus `ctest --test-dir build -C Release` pass all 7 native targets on Windows/MSVC with `/W4 /permissive-`, including the regenerated `build/generated/sa_program.cpp`. Run from the repository root, plain `ctest -C Release` discovers no tests and must not be quoted as evidence.
+
+## Amendment (post-merge review, same day)
+
+An independent review of the landed head found that one native assertion was presented as evidence it could not provide, and that one research claim was too broad.
+
+- `tests/sa_codegen_smoke.cpp` checked `GPR[0] == 0` after a trailing `MFSA $0`, but SA was already zero at that point, so deleting the emitter's zero-register guard left the test green. The fixture word block now issues `MFSA $0` immediately after `MTSA $1`, while SA holds `0xDEAD'BEEF'CAFE'0001`, so the assertion fails if the guard is removed. The final `state.sa == 0` check had the same weakness in a different way - `(0x5 ^ 0x5) * 8` is zero under any scaling - and is replaced by a trailing `MTSAB $3, 0x03` that must leave SA at 56, which no missing scale factor or wrong nibble mask reproduces. Verified by mutation: with the emitter guard removed, the native target fails; restored, `ctest --test-dir build -C Release` is 7/7.
+- `docs/RESEARCH.md` stated that the Sony and PCSX2 readings "produce the same QFSRV result". That holds only for `MTSAB`/`MTSAH`, whose PCSX2 rec paths defer the `<< 3`. `recMTSA` stores `GPR[rs][31:0] & 0xF`, so `MTSA` feeding `QFSRV` differs from REPS2 by truncation and a factor of eight. The claim is now scoped and the `MTSA` divergence recorded as an open differential-testing item.
 
 ## References
 
