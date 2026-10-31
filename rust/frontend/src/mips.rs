@@ -98,6 +98,83 @@ pub enum Opcode {
     Unknown,
 }
 
+/// Broad instruction family used for deterministic coverage accounting.
+///
+/// The classification is based only on encoding fields. It does not imply that
+/// an instruction is decoded, supported, or reachable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum EncodingFamily {
+    Special,
+    RegImm,
+    Jump,
+    Branch,
+    Immediate,
+    Cop0,
+    Cop1,
+    Cop2,
+    Mmi0,
+    Mmi1,
+    Mmi2,
+    Mmi3,
+    Mmi,
+    LoadStore,
+    Other,
+}
+
+impl EncodingFamily {
+    /// Returns a stable lower-case label for diagnostic output.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Special => "special",
+            Self::RegImm => "regimm",
+            Self::Jump => "jump",
+            Self::Branch => "branch",
+            Self::Immediate => "immediate",
+            Self::Cop0 => "cop0",
+            Self::Cop1 => "cop1",
+            Self::Cop2 => "cop2",
+            Self::Mmi0 => "mmi0",
+            Self::Mmi1 => "mmi1",
+            Self::Mmi2 => "mmi2",
+            Self::Mmi3 => "mmi3",
+            Self::Mmi => "mmi",
+            Self::LoadStore => "load-store",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Classifies a raw word into a broad encoding family for coverage summaries.
+///
+/// MMI groups follow the R5900 encoding: primary opcode `0x1C` with selectors
+/// `0x08`, `0x09`, `0x28`, and `0x29` selecting MMI0, MMI2, MMI1, and MMI3.
+#[must_use]
+pub const fn encoding_family(word: u32) -> EncodingFamily {
+    let primary = (word >> 26) as u8;
+    match primary {
+        0x00 => EncodingFamily::Special,
+        0x01 => EncodingFamily::RegImm,
+        0x02 | 0x03 => EncodingFamily::Jump,
+        0x04..=0x07 | 0x14..=0x17 => EncodingFamily::Branch,
+        0x08..=0x0F | 0x18 | 0x19 => EncodingFamily::Immediate,
+        0x10 => EncodingFamily::Cop0,
+        0x11 => EncodingFamily::Cop1,
+        0x12 => EncodingFamily::Cop2,
+        0x1C => match (word & 0x3F) as u8 {
+            0x08 => EncodingFamily::Mmi0,
+            0x09 => EncodingFamily::Mmi2,
+            0x28 => EncodingFamily::Mmi1,
+            0x29 => EncodingFamily::Mmi3,
+            _ => EncodingFamily::Mmi,
+        },
+        0x1A | 0x1B | 0x1E | 0x1F | 0x20..=0x2E | 0x31 | 0x36 | 0x37 | 0x39 | 0x3E | 0x3F => {
+            EncodingFamily::LoadStore
+        }
+        _ => EncodingFamily::Other,
+    }
+}
+
 impl Opcode {
     /// Returns a stable mnemonic for diagnostics.
     #[must_use]
@@ -961,6 +1038,28 @@ mod tests {
         assert!(!branch.is_branch_likely());
         assert!(!decode((0x16 << 26) | (8 << 21) | (1 << 16), 0x1000).is_supported());
         assert!(!decode((0x17 << 26) | (8 << 21) | (1 << 16), 0x1000).is_supported());
+    }
+
+    #[test]
+    fn classifies_encoding_families_for_coverage() {
+        assert_eq!(encoding_family(0x0000_000C), EncodingFamily::Special);
+        assert_eq!(encoding_family(0x0419_0000), EncodingFamily::RegImm);
+        assert_eq!(encoding_family(0x0800_0000), EncodingFamily::Jump);
+        assert_eq!(encoding_family(0x1420_FFFA), EncodingFamily::Branch);
+        assert_eq!(encoding_family(0x2408_0005), EncodingFamily::Immediate);
+        assert_eq!(encoding_family(0x4080_0000), EncodingFamily::Cop0);
+        assert_eq!(encoding_family(0x4480_0000), EncodingFamily::Cop1);
+        assert_eq!(encoding_family(0x4840_0000), EncodingFamily::Cop2);
+        assert_eq!(encoding_family(0x7000_0008), EncodingFamily::Mmi0);
+        assert_eq!(encoding_family(0x7000_0009), EncodingFamily::Mmi2);
+        assert_eq!(encoding_family(0x7000_0C28), EncodingFamily::Mmi1);
+        assert_eq!(encoding_family(0x7000_0029), EncodingFamily::Mmi3);
+        assert_eq!(encoding_family(0x7000_0410), EncodingFamily::Mmi);
+        assert_eq!(encoding_family(0x8C44_0000), EncodingFamily::LoadStore);
+        assert_eq!(encoding_family(0x4C00_0000), EncodingFamily::Other);
+
+        assert_eq!(EncodingFamily::Mmi1.label(), "mmi1");
+        assert_eq!(EncodingFamily::LoadStore.label(), "load-store");
     }
 
     #[test]

@@ -9,6 +9,7 @@ use reps2_frontend::analysis::{self, AnalysisLimits};
 use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
+use reps2_frontend::coverage;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
 use reps2_frontend::iso9660::{self, Iso9660};
@@ -206,6 +207,117 @@ fn analyze_elf(path: &Path) -> Result<(), String> {
     }
     if graph.blocks.len() > 64 {
         println!("    ... {} more block(s)", graph.blocks.len() - 64);
+    }
+
+    Ok(())
+}
+
+fn profile_elf(path: &Path) -> Result<(), String> {
+    let bytes = read_input(path)?;
+    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
+    if !image.is_mips() {
+        return Err("ELF machine is not EM_MIPS; refusing PS2 EE profiling".to_owned());
+    }
+    let profile = coverage::profile(&image, &bytes).map_err(|error| error.to_string())?;
+
+    let percentage = |count: u64| {
+        if profile.scanned_words == 0 {
+            0.0
+        } else {
+            100.0 * count as f64 / profile.scanned_words as f64
+        }
+    };
+
+    println!("REPS2 decoder coverage profile");
+    println!("  Entry point: 0x{:08X}", image.entry_point);
+    println!(
+        "  File-backed executable bytes: {}",
+        profile.file_backed_executable_bytes
+    );
+    println!("  Scanned complete words: {}", profile.scanned_words);
+    println!(
+        "  Supported words: {} ({:.2}%)",
+        profile.supported_words,
+        percentage(profile.supported_words)
+    );
+    println!(
+        "  Trap words (syscall/break): {} ({:.2}%)",
+        profile.trap_words,
+        percentage(profile.trap_words)
+    );
+    println!(
+        "  Unsupported words: {} ({:.2}%)",
+        profile.unsupported_words,
+        percentage(profile.unsupported_words)
+    );
+    println!(
+        "  Scope: every aligned word in executable PT_LOAD file bytes; embedded data is included and no word is claimed reachable."
+    );
+
+    println!("  Supported opcodes:");
+    for (mnemonic, count) in &profile.supported_opcodes {
+        println!("    {mnemonic:<10} {count}");
+    }
+
+    println!("  Unsupported families:");
+    for (family, count) in &profile.unsupported_families {
+        println!("    {:<10} {count}", family.label());
+    }
+
+    let mut unsupported: Vec<(u32, u64)> = profile
+        .unsupported_encodings
+        .iter()
+        .map(|(word, count)| (*word, *count))
+        .collect();
+    unsupported.sort_by(|(left_word, left_count), (right_word, right_count)| {
+        right_count
+            .cmp(left_count)
+            .then_with(|| left_word.cmp(right_word))
+    });
+    println!("  Unsupported encodings (most frequent first):");
+    for (word, count) in unsupported.iter().take(32) {
+        println!(
+            "    0x{word:08X} count={count:<8} family={}",
+            mips::encoding_family(*word).label()
+        );
+    }
+    if unsupported.len() > 32 {
+        println!("    ... {} additional encoding(s)", unsupported.len() - 32);
+    }
+
+    match &profile.entry_scan {
+        Some(scan) => {
+            println!("  Linear entry scan (bounded, not reachability):");
+            println!(
+                "    {} decoded word(s) from 0x{:08X} before stop",
+                scan.decoded_words, image.entry_point
+            );
+            match scan.stop {
+                coverage::EntryScanStop::Unsupported(family) => println!(
+                    "    stop at 0x{:08X}: word 0x{:08X} is unsupported ({})",
+                    scan.stop_pc,
+                    scan.stop_word.unwrap_or(0),
+                    family.label()
+                ),
+                coverage::EntryScanStop::Trap(mnemonic) => println!(
+                    "    stop at 0x{:08X}: word 0x{:08X} is a trap ({mnemonic})",
+                    scan.stop_pc,
+                    scan.stop_word.unwrap_or(0)
+                ),
+                coverage::EntryScanStop::SegmentEnd => println!(
+                    "    stop at 0x{:08X}: end of file-backed executable bytes",
+                    scan.stop_pc
+                ),
+                coverage::EntryScanStop::WordLimit => println!(
+                    "    stop at 0x{:08X}: reached the {}-word linear scan limit",
+                    scan.stop_pc,
+                    coverage::LINEAR_ENTRY_SCAN_LIMIT
+                ),
+            }
+        }
+        None => {
+            println!("  Linear entry scan: entry point is not inside file-backed executable bytes")
+        }
     }
 
     Ok(())
@@ -703,6 +815,7 @@ fn usage() {
     println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
     println!("  reps2 elf-info <elf-file>");
     println!("  reps2 analyze-elf <elf-file>");
+    println!("  reps2 profile-elf <elf-file>");
     println!("  reps2 recompile-elf <input-elf> <output.cpp>");
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!("  reps2 compile-cfg-fixture <output.cpp>");
@@ -748,6 +861,7 @@ fn run() -> Result<(), String> {
         }
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
         Some("analyze-elf") if arguments.len() == 3 => analyze_elf(Path::new(&arguments[2])),
+        Some("profile-elf") if arguments.len() == 3 => profile_elf(Path::new(&arguments[2])),
         Some("recompile-elf") if arguments.len() == 4 => {
             compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
         }
