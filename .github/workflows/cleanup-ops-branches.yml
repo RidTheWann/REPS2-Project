@@ -1,0 +1,46 @@
+name: One-shot operations branch cleanup
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.repository == 'RidTheWann/REPS2-Project'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove temporary operations refs and this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          refs=(
+            "ops/retire-completed-r5900-branches"
+            "ops/remove-one-shot-r5900-cleanup"
+            "ops/cleanup-ops-branches"
+          )
+
+          for branch in "${refs[@]}"; do
+            ref="heads/${branch}"
+            if gh api "repos/${GH_REPO}/git/ref/${ref}" >/dev/null 2>&1; then
+              gh api --silent --method DELETE "repos/${GH_REPO}/git/refs/${ref}"
+              echo "::notice::Deleted temporary branch ${branch}"
+            else
+              echo "::notice::Temporary branch ${branch} is already absent"
+            fi
+          done
+
+          workflow_path=".github/workflows/cleanup-ops-branches.yml"
+          workflow_sha="$(gh api "repos/${GH_REPO}/contents/${workflow_path}?ref=main" --jq '.sha')"
+          gh api --method DELETE "repos/${GH_REPO}/contents/${workflow_path}" \
+            -f message="chore(ops): remove one-shot operations cleanup workflow" \
+            -f sha="${workflow_sha}" \
+            -f branch="main"
+          echo "::notice::Deleted temporary workflow ${workflow_path}"
