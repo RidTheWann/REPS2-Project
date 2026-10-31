@@ -14,10 +14,6 @@ path = "src/lib.rs"
 name = "reps2"
 path = "src/main.rs"
 
-[profile.release]
-lto = "thin"
-codegen-units = 1
-strip = "symbols"
 
 [lints.rust]
 unsafe_code = "forbid"

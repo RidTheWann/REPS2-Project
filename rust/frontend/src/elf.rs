@@ -568,9 +568,7 @@ mod tests {
         bytes
     }
 
-    fn write_section(
-        bytes: &mut [u8],
-        base: usize,
+    struct SectionSpec {
         name: u32,
         kind: u32,
         address: u32,
@@ -580,17 +578,19 @@ mod tests {
         info: u32,
         alignment: u32,
         entry_size: u32,
-    ) {
-        put_u32(bytes, base, name);
-        put_u32(bytes, base + 4, kind);
+    }
+
+    fn write_section(bytes: &mut [u8], base: usize, section: SectionSpec) {
+        put_u32(bytes, base, section.name);
+        put_u32(bytes, base + 4, section.kind);
         put_u32(bytes, base + 8, 0);
-        put_u32(bytes, base + 12, address);
-        put_u32(bytes, base + 16, offset);
-        put_u32(bytes, base + 20, size);
-        put_u32(bytes, base + 24, link);
-        put_u32(bytes, base + 28, info);
-        put_u32(bytes, base + 32, alignment);
-        put_u32(bytes, base + 36, entry_size);
+        put_u32(bytes, base + 12, section.address);
+        put_u32(bytes, base + 16, section.offset);
+        put_u32(bytes, base + 20, section.size);
+        put_u32(bytes, base + 24, section.link);
+        put_u32(bytes, base + 28, section.info);
+        put_u32(bytes, base + 32, section.alignment);
+        put_u32(bytes, base + 36, section.entry_size);
     }
 
     fn elf_with_symbol_and_rel() -> Vec<u8> {
@@ -632,16 +632,31 @@ mod tests {
         put_u32(&mut bytes, rel_offset, 0x1000);
         put_u32(&mut bytes, rel_offset + 4, (1 << 8) | 2);
 
-        write_section(&mut bytes, 52 + 40, find_name(b".shstrtab"), SHT_STRTAB,
-            0, shstr_offset as u32, shstr.len() as u32, 0, 0, 1, 0);
-        write_section(&mut bytes, 52 + 80, find_name(b".strtab"), SHT_STRTAB,
-            0, strtab_offset as u32, strtab.len() as u32, 0, 0, 1, 0);
-        write_section(&mut bytes, 52 + 120, find_name(b".symtab"), SHT_SYMTAB,
-            0, symtab_offset as u32, 32, 2, 1, 4, 16);
-        write_section(&mut bytes, 52 + 160, find_name(b".text"), 1,
-            0x1000, text_offset as u32, 4, 0, 0, 4, 0);
-        write_section(&mut bytes, 52 + 200, find_name(b".rel.text"), SHT_REL,
-            0, rel_offset as u32, 8, 3, 4, 4, 8);
+        write_section(&mut bytes, 52 + 40, SectionSpec {
+            name: find_name(b".shstrtab"), kind: SHT_STRTAB, address: 0,
+            offset: shstr_offset as u32, size: shstr.len() as u32,
+            link: 0, info: 0, alignment: 1, entry_size: 0,
+        });
+        write_section(&mut bytes, 52 + 80, SectionSpec {
+            name: find_name(b".strtab"), kind: SHT_STRTAB, address: 0,
+            offset: strtab_offset as u32, size: strtab.len() as u32,
+            link: 0, info: 0, alignment: 1, entry_size: 0,
+        });
+        write_section(&mut bytes, 52 + 120, SectionSpec {
+            name: find_name(b".symtab"), kind: SHT_SYMTAB, address: 0,
+            offset: symtab_offset as u32, size: 32,
+            link: 2, info: 1, alignment: 4, entry_size: 16,
+        });
+        write_section(&mut bytes, 52 + 160, SectionSpec {
+            name: find_name(b".text"), kind: 1, address: 0x1000,
+            offset: text_offset as u32, size: 4,
+            link: 0, info: 0, alignment: 4, entry_size: 0,
+        });
+        write_section(&mut bytes, 52 + 200, SectionSpec {
+            name: find_name(b".rel.text"), kind: SHT_REL, address: 0,
+            offset: rel_offset as u32, size: 8,
+            link: 3, info: 4, alignment: 4, entry_size: 8,
+        });
         bytes
     }
 

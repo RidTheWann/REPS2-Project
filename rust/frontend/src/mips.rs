@@ -168,7 +168,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 instruction.has_delay_slot = true;
                 Opcode::Jal
             }
-            0x04 | 0x05 | 0x06 | 0x07 => {
+            0x04..=0x07 => {
                 let offset = ((immediate as i16 as i32).wrapping_mul(4)) as u32;
                 instruction.target = pc.wrapping_add(4).wrapping_add(offset);
                 instruction.has_delay_slot = true;
