@@ -24,6 +24,9 @@ struct EeMemory {
 struct EeState {
     std::uint32_t pc{};
     std::array<Gpr128, 32> gpr{};
+    // Base EE HI/LO state; MMI pipeline-1 HI1/LO1 is not modeled yet.
+    std::uint64_t hi{};
+    std::uint64_t lo{};
     EeMemory memory{};
 };
 
@@ -95,6 +98,8 @@ enum class Status : std::uint8_t {
     std::copy(initial_main_ram.begin(), initial_main_ram.end(), state.memory.main_ram.begin());
     state.gpr = {};
     state.gpr[0] = {};
+    state.hi = 0;
+    state.lo = 0;
     state.pc = entry_pc;
     return Status::ok;
 }

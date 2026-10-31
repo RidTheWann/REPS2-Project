@@ -122,6 +122,57 @@ if(BUILD_TESTING)
 
     add_test(NAME reps2_codegen_smoke COMMAND reps2_codegen_smoke)
 
+    set(REPS2_HILO_GENERATED_CPP "${REPS2_GENERATED_DIR}/hilo_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_HILO_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_HILO_GENERATED_CPP}"
+            0x00009000
+            0x00200011
+            0x0000A010
+            0x00400013
+            0x0000A812
+            0x0022B018
+            0x0000C010
+            0x0000C812
+            0x00220018
+            0x0000D010
+            0x0000D812
+            0x0062B819
+            0x00853018
+            0x00006810
+            0x00007012
+            0x01095018
+            0x00007810
+            0x00008012
+            0x016C8818
+            0x00009010
+            0x00009812
+            0x00621819
+            0x00220818
+        DEPENDS reps2
+        COMMENT "AOT-compiling the synthetic R5900 HI/LO and multiply block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_HILO_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_hilo_codegen_fixture DEPENDS "${REPS2_HILO_GENERATED_CPP}")
+    add_executable(reps2_hilo_codegen_smoke
+        "${REPS2_HILO_GENERATED_CPP}"
+        tests/hilo_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_hilo_codegen_smoke reps2_hilo_codegen_fixture)
+    target_link_libraries(reps2_hilo_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_hilo_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_hilo_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_hilo_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_hilo_codegen_smoke COMMAND reps2_hilo_codegen_smoke)
+
     set(REPS2_CFG_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow.cpp")
     add_custom_command(
         OUTPUT "${REPS2_CFG_GENERATED_CPP}"

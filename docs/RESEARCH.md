@@ -59,6 +59,15 @@ These projects have different goals and different completion levels. Their demos
 - The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 (2014), §§5.1.2–5.1.3 remains the general ISA reference; R5900 GPR lane behaviour is cross-checked independently and is not inferred solely from the generic MIPS64 description.
 - These operations remain scoped to the current direct/uncached/accelerated/KSEG main-RAM aliases. No COP0/TLB remapping, cache/coherency, MMIO, bus exception delivery, or complete hardware compatibility is claimed.
 
+## EE HI/LO and R5900 multiply cross-checks
+
+- QEMU's R5900-specific implementation description defines `MULT[U] rd, rs, rt` and its state transfer as `(rd, LO, HI) <- rs * rt`: the low 32-bit result is written to both `rd` and LO, and the high 32-bit result is written to HI. Omitting `rd` means register zero, but HI/LO still update. The implementation captures both sources before writing any destination: [QEMU R5900 three-operand MULT/MULTU patch](https://patchew.org/QEMU/cover.1540134918.git.noring@nocrew.org/ff1edd3989b06e9cae67c962cec79081e4d7af0a.1540134918.git.noring@nocrew.org/).
+- The associated QEMU TCG test checks several positive and boundary products, including `17 * 19`, `77773 * 99991`, `12207031 * 305175781`, and the INT32_MIN edge cases. REPS2's independent native smoke fixture now includes the INT32_MIN/INT32_MAX combinations, destination-zero behavior, and source/destination aliasing: [QEMU three-operand MULT test](https://patchew.org/QEMU/cover.1540134918.git.noring@nocrew.org/b72eb39dd9c465d110e3df2e3660c32c979d0e4d.1540134918.git.noring@nocrew.org/).
+- PCSX2's R5900 interpreter independently shows `MULT` multiplying the low 32-bit signed operands and `MULTU` multiplying the low 32-bit unsigned operands; both sign-extend each 32-bit result lane into the 64-bit HI/LO representation and copy LO into non-zero `rd`. It also documents base `MFHI/MFLO/MTHI/MTLO` transfers: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/R5900OpcodeImpl.cpp. This is a non-normative behavioral reference, not a hardware specification.
+- REPS2 stores only base EE HI/LO in the current runtime ABI. `MFHI/MFLO` write GPR[63:0] while preserving GPR[127:64]; `MTHI/MTLO` read GPR[63:0]. Signed and unsigned multiplication use the low 32 bits of the input GPRs; the 32-bit high/low product lanes are sign-extended into their 64-bit destinations as cross-checked above.
+- This increment does not model multiply pipeline latency, HI1/LO1, MMI pipeline-1 operations, MADD/MADDU, MULT1/MULTU1, DIV/DIVU semantics, or exception timing. The public implementation references note disagreements over DIVU sign-extension and special division cases; those operations stay out of the executable IR until separately researched and differential-tested.
+
+
 ## ELF load-image policy
 
 - REPS2 currently constructs an initial memory image only for little-endian MIPS ET_EXEC files whose PT_LOAD virtual addresses can be translated using the documented default 32 MiB EE main-RAM aliases.

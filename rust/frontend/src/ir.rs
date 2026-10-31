@@ -37,6 +37,12 @@ impl Gpr {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Operation {
     Nop,
+    MoveFromHi { dst: Gpr },
+    MoveFromLo { dst: Gpr },
+    MoveToHi { src: Gpr },
+    MoveToLo { src: Gpr },
+    MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     AddWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     AddImmediateWord { dst: Gpr, src: Gpr, immediate: u16 },
     AddUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -219,6 +225,16 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
     for instruction in decoded {
         let operation = match instruction.opcode {
             Opcode::Nop => Operation::Nop,
+            Opcode::Mfhi => Operation::MoveFromHi { dst: gpr(instruction.rd) },
+            Opcode::Mflo => Operation::MoveFromLo { dst: gpr(instruction.rd) },
+            Opcode::Mthi => Operation::MoveToHi { src: gpr(instruction.rs) },
+            Opcode::Mtlo => Operation::MoveToLo { src: gpr(instruction.rs) },
+            Opcode::Mult => Operation::MultiplyWordSigned {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Multu => Operation::MultiplyWordUnsigned {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
             Opcode::Add => Operation::AddWord {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
             },
@@ -580,4 +596,27 @@ mod tests {
             Err(VerifyError::NonSequentialGuestPc { .. })
         ));
     }
+
+    #[test]
+    fn lifts_r5900_hilo_moves_and_three_operand_multiply() {
+        let words = [
+            (4 << 21) | 0x11, (12 << 11) | 0x10,
+            (5 << 21) | 0x13, (13 << 11) | 0x12,
+            (4 << 21) | (5 << 16) | (6 << 11) | 0x18,
+            (4 << 21) | (5 << 16) | (7 << 11) | 0x19,
+        ];
+        let decoded_stream = words.iter().enumerate()
+            .map(|(index, word)| decoded(*word, 0x8000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("R5900 HI/LO and multiply IR");
+        assert!(matches!(program.instructions()[0].operation, Operation::MoveToHi { src } if src.index() == 4));
+        assert!(matches!(program.instructions()[1].operation, Operation::MoveFromHi { dst } if dst.index() == 12));
+        assert!(matches!(program.instructions()[2].operation, Operation::MoveToLo { src } if src.index() == 5));
+        assert!(matches!(program.instructions()[3].operation, Operation::MoveFromLo { dst } if dst.index() == 13));
+        assert!(matches!(program.instructions()[4].operation,
+            Operation::MultiplyWordSigned { dst, lhs, rhs } if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5));
+        assert!(matches!(program.instructions()[5].operation,
+            Operation::MultiplyWordUnsigned { dst, lhs, rhs } if dst.index() == 7 && lhs.index() == 4 && rhs.index() == 5));
+    }
+
 }

@@ -7,7 +7,7 @@ pub enum Opcode {
     Nop,
     Sll, Srl, Sra,
     Jr, Jalr, Syscall, Break,
-    Mfhi, Mflo, Mult, Multu, Div, Divu,
+    Mfhi, Mthi, Mflo, Mtlo, Mult, Multu, Div, Divu,
     Add, Addu, Sub, Subu, And, Or, Xor, Nor, Slt, Sltu,
     Daddu, Dsubu, Daddiu, Dsll, Dsrl, Dsra, Dsll32, Dsrl32, Dsra32,
     Sllv, Srlv, Srav, Dsllv, Dsrlv, Dsrav,
@@ -33,7 +33,9 @@ impl Opcode {
             Self::Syscall => "syscall",
             Self::Break => "break",
             Self::Mfhi => "mfhi",
+            Self::Mthi => "mthi",
             Self::Mflo => "mflo",
+            Self::Mtlo => "mtlo",
             Self::Mult => "mult",
             Self::Multu => "multu",
             Self::Div => "div",
@@ -274,11 +276,25 @@ impl Instruction {
                 effects.reads_hi = true;
                 effects.gpr_write_mask = rd;
             }
+            Opcode::Mthi => {
+                effects.gpr_read_mask = rs;
+                effects.writes_hi = true;
+            }
             Opcode::Mflo => {
                 effects.reads_lo = true;
                 effects.gpr_write_mask = rd;
             }
-            Opcode::Mult | Opcode::Multu | Opcode::Div | Opcode::Divu => {
+            Opcode::Mtlo => {
+                effects.gpr_read_mask = rs;
+                effects.writes_lo = true;
+            }
+            Opcode::Mult | Opcode::Multu => {
+                effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rd;
+                effects.writes_hi = true;
+                effects.writes_lo = true;
+            }
+            Opcode::Div | Opcode::Divu => {
                 effects.gpr_read_mask = rs | rt;
                 effects.writes_hi = true;
                 effects.writes_lo = true;
@@ -418,9 +434,12 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x0C => Opcode::Syscall,
             0x0D => Opcode::Break,
             0x10 if rs == 0 && rt == 0 && shift_amount == 0 => Opcode::Mfhi,
+            0x11 if rt == 0 && rd == 0 && shift_amount == 0 => Opcode::Mthi,
             0x12 if rs == 0 && rt == 0 && shift_amount == 0 => Opcode::Mflo,
-            0x18 if rd == 0 && shift_amount == 0 => Opcode::Mult,
-            0x19 if rd == 0 && shift_amount == 0 => Opcode::Multu,
+            0x13 if rt == 0 && rd == 0 && shift_amount == 0 => Opcode::Mtlo,
+            // R5900 MULT/MULTU use rd as an optional third destination.
+            0x18 if shift_amount == 0 => Opcode::Mult,
+            0x19 if shift_amount == 0 => Opcode::Multu,
             0x1A if rd == 0 && shift_amount == 0 => Opcode::Div,
             0x1B if rd == 0 && shift_amount == 0 => Opcode::Divu,
             0x20 if shift_amount == 0 => Opcode::Add,
@@ -760,6 +779,57 @@ mod tests {
         assert!(unknown.reads_hi && unknown.reads_lo);
         assert!(unknown.writes_hi && unknown.writes_lo);
         assert!(unknown.may_raise_exception);
+    }
+
+
+    #[test]
+    fn decodes_r5900_three_operand_multiply_and_hilo_moves() {
+        let mult = decode((8 << 21) | (9 << 16) | (10 << 11) | 0x18, 0x6000);
+        assert_eq!(mult.opcode, Opcode::Mult);
+        assert_eq!((mult.rs, mult.rt, mult.rd), (8, 9, 10));
+        let multu = decode((8 << 21) | (9 << 16) | (11 << 11) | 0x19, 0x6004);
+        assert_eq!(multu.opcode, Opcode::Multu);
+        assert_eq!((multu.rs, multu.rt, multu.rd), (8, 9, 11));
+        let mult_to_zero = decode((8 << 21) | (9 << 16) | 0x18, 0x6008);
+        assert_eq!(mult_to_zero.opcode, Opcode::Mult);
+        assert_eq!(mult_to_zero.rd, 0);
+        assert_eq!(decode((4 << 21) | 0x11, 0x600C).opcode, Opcode::Mthi);
+        assert_eq!(decode((5 << 21) | 0x13, 0x6010).opcode, Opcode::Mtlo);
+        assert_eq!(decode((20 << 11) | 0x10, 0x6014).opcode, Opcode::Mfhi);
+        assert_eq!(decode((21 << 11) | 0x12, 0x6018).opcode, Opcode::Mflo);
+        // DIV/DIVU keep their reserved rd field; only MULT/MULTU gained rd.
+        assert_eq!(decode((8 << 21) | (9 << 16) | (10 << 11) | 0x1A, 0x601C).opcode, Opcode::Unknown);
+        assert_eq!(decode((8 << 21) | (9 << 16) | 0x1B, 0x6020).opcode, Opcode::Divu);
+        assert_eq!(decode((8 << 21) | (9 << 16) | (10 << 11) | 0x18 | (1 << 6), 0x6024).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn effects_model_r5900_hilo_moves_and_three_operand_multiply() {
+        let mthi = decode((4 << 21) | 0x11, 0x6100).effects();
+        assert_eq!(mthi.gpr_read_mask, 1 << 4);
+        assert_eq!(mthi.gpr_write_mask, 0);
+        assert!(mthi.writes_hi);
+        assert!(!mthi.writes_lo);
+        let mtlo = decode((5 << 21) | 0x13, 0x6104).effects();
+        assert_eq!(mtlo.gpr_read_mask, 1 << 5);
+        assert!(mtlo.writes_lo);
+        assert!(!mtlo.writes_hi);
+        let mfhi = decode((12 << 11) | 0x10, 0x6108).effects();
+        assert!(mfhi.reads_hi);
+        assert_eq!(mfhi.gpr_write_mask, 1 << 12);
+        let mflo = decode((13 << 11) | 0x12, 0x610C).effects();
+        assert!(mflo.reads_lo);
+        assert_eq!(mflo.gpr_write_mask, 1 << 13);
+        let mult = decode((4 << 21) | (5 << 16) | (6 << 11) | 0x18, 0x6110).effects();
+        assert_eq!(mult.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(mult.gpr_write_mask, 1 << 6);
+        assert!(mult.writes_hi && mult.writes_lo);
+        let mult_to_zero = decode((4 << 21) | (5 << 16) | 0x19, 0x6114).effects();
+        assert_eq!(mult_to_zero.gpr_write_mask, 0);
+        assert!(mult_to_zero.writes_hi && mult_to_zero.writes_lo);
+        let div = decode((4 << 21) | (5 << 16) | 0x1A, 0x6118).effects();
+        assert_eq!(div.gpr_write_mask, 0);
+        assert!(div.writes_hi && div.writes_lo);
     }
 
 }
