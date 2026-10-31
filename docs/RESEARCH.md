@@ -82,6 +82,19 @@ These projects have different goals and different completion levels. Their demos
 - REPS2 stores only base EE HI/LO in the current runtime ABI. `MFHI/MFLO` write GPR[63:0] while preserving GPR[127:64]; `MTHI/MTLO` read GPR[63:0]. Signed and unsigned multiplication use the low 32 bits of the input GPRs; the 32-bit high/low product lanes are sign-extended into their 64-bit destinations as cross-checked above.
 - This increment does not model multiply pipeline latency, HI1/LO1, MMI pipeline-1 operations, MADD/MADDU, MULT1/MULTU1, DIV/DIVU semantics, or exception timing. The public implementation references note disagreements over DIVU sign-extension and special division cases; those operations stay out of the executable IR until separately researched and differential-tested.
 
+## R5900 MMI PADDUW cross-checks
+
+- PADDUW is encoded under primary opcode `0x1C` in the MMI1 group: the low six function bits are `0x28` and the group selector bits 10:6 are `0x10`. REPS2 additionally verifies both fields so another MMI group with the same low function bits is not mistaken for PADDUW.
+- QEMU's R5900 instruction overview names PADDUW as "Parallel Add with Unsigned saturation Word": https://lists.nongnu.org/archive/html/qemu-devel/2018-10/msg04741.html. PCSX2's MMI interpreter performs four independent unsigned 32-bit additions and clamps each overflowing lane to `0xFFFFFFFF`: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/MMI.cpp. These are non-normative behavioural references, not a hardware specification.
+- REPS2 therefore updates all four 32-bit lanes of the destination GPR and does not let carry or saturation cross a lane boundary. The native fixture cross-checks a lane-0 overflow that saturates while the upper lanes retain ordinary sums, plus the hard-wired zero destination.
+- Only PADDUW from the MMI families is implemented in this increment. Other MMI0–MMI3 operations, MMI pipeline-1 HI1/LO1 state, and MMI latency remain unsupported and are counted by the coverage profiler.
+
+## Decoder coverage profiling
+
+- `profile-elf` treats every complete, naturally aligned 32-bit word in file-backed executable PT_LOAD ranges as a census unit. It does not claim those words are reachable code; embedded data, padding, and never-executed functions are included.
+- Supported, `SYSCALL`/`BREAK` trap, and unsupported words are counted separately. Unsupported words are grouped by the broad encoding family derived from primary opcode/MMI selector fields and by exact 32-bit encoding. This makes the next instruction-family investment measurable without overstating semantic coverage.
+- The entry scan is a separate bounded linear diagnostic. It stops at the first unsupported word or trap and reports the guest PC and raw word. It does not follow branches, and a clean scan does not establish CFG reachability or playability.
+
 
 ## ELF load-image policy
 
