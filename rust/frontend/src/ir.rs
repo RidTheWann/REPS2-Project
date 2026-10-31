@@ -139,7 +139,8 @@ impl Program {
             }
             if index > 0 {
                 let previous = self.instructions[index - 1].guest_pc;
-                let expected = previous.checked_add(4)
+                let expected = previous
+                    .checked_add(4)
                     .ok_or(VerifyError::GuestPcOverflow(previous))?;
                 if instruction.guest_pc != expected {
                     return Err(VerifyError::NonSequentialGuestPc {
@@ -233,195 +234,326 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
     for instruction in decoded {
         let operation = match instruction.opcode {
             Opcode::Nop => Operation::Nop,
-            Opcode::Mfhi => Operation::MoveFromHi { dst: gpr(instruction.rd) },
-            Opcode::Mflo => Operation::MoveFromLo { dst: gpr(instruction.rd) },
-            Opcode::Mthi => Operation::MoveToHi { src: gpr(instruction.rs) },
-            Opcode::Mtlo => Operation::MoveToLo { src: gpr(instruction.rs) },
+            Opcode::Mfhi => Operation::MoveFromHi {
+                dst: gpr(instruction.rd),
+            },
+            Opcode::Mflo => Operation::MoveFromLo {
+                dst: gpr(instruction.rd),
+            },
+            Opcode::Mthi => Operation::MoveToHi {
+                src: gpr(instruction.rs),
+            },
+            Opcode::Mtlo => Operation::MoveToLo {
+                src: gpr(instruction.rs),
+            },
             Opcode::Mult => Operation::MultiplyWordSigned {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Multu => Operation::MultiplyWordUnsigned {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Nor => Operation::Nor64 {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Slt => Operation::SetLessThanSigned64 {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Sltu => Operation::SetLessThanUnsigned64 {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Slti => Operation::SetLessThanImmediateSigned64 {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Sltiu => Operation::SetLessThanImmediateUnsigned64 {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Add => Operation::AddWord {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Addu => Operation::AddUnsignedWord {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Sub => Operation::SubWord {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Subu => Operation::SubUnsignedWord {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Dadd => Operation::AddDoublewordSigned {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Dsub => Operation::SubDoublewordSigned {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Daddi => Operation::AddImmediateDoublewordSigned {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Daddu => Operation::AddDoublewordUnsigned {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Dsubu => Operation::SubDoublewordUnsigned {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Daddiu => Operation::AddImmediateDoublewordUnsigned {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Dsll => Operation::ShiftLeftDoubleword {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount,
             },
             Opcode::Dsrl => Operation::ShiftRightLogicalDoubleword {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount,
             },
             Opcode::Dsra => Operation::ShiftRightArithmeticDoubleword {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount,
             },
             Opcode::Dsll32 => Operation::ShiftLeftDoubleword {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount + 32,
             },
             Opcode::Dsrl32 => Operation::ShiftRightLogicalDoubleword {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount + 32,
             },
             Opcode::Dsra32 => Operation::ShiftRightArithmeticDoubleword {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount + 32,
             },
             Opcode::Sllv => Operation::ShiftLeftWordVariable {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: gpr(instruction.rs),
             },
             Opcode::Srlv => Operation::ShiftRightLogicalWordVariable {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: gpr(instruction.rs),
             },
             Opcode::Srav => Operation::ShiftRightArithmeticWordVariable {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: gpr(instruction.rs),
             },
             Opcode::Dsllv => Operation::ShiftLeftDoublewordVariable {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: gpr(instruction.rs),
             },
             Opcode::Dsrlv => Operation::ShiftRightLogicalDoublewordVariable {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: gpr(instruction.rs),
             },
             Opcode::Dsrav => Operation::ShiftRightArithmeticDoublewordVariable {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: gpr(instruction.rs),
             },
             Opcode::And => Operation::And64 {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Or => Operation::Or64 {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Xor => Operation::Xor64 {
-                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
             },
             Opcode::Addi => Operation::AddImmediateWord {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Addiu => Operation::AddImmediateUnsignedWord {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Andi => Operation::AndImmediate64 {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Ori => Operation::OrImmediate64 {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Xori => Operation::XorImmediate64 {
-                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                src: gpr(instruction.rs),
+                immediate: instruction.immediate,
             },
             Opcode::Lui => Operation::LoadUpperWord {
-                dst: gpr(instruction.rt), immediate: instruction.immediate,
+                dst: gpr(instruction.rt),
+                immediate: instruction.immediate,
             },
             Opcode::Sll => Operation::ShiftLeftWord {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount,
             },
             Opcode::Srl => Operation::ShiftRightLogicalWord {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount,
             },
             Opcode::Sra => Operation::ShiftRightArithmeticWord {
-                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+                amount: instruction.shift_amount,
             },
             Opcode::Lb => Operation::LoadByteSigned {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lbu => Operation::LoadByteUnsigned {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lh => Operation::LoadHalfSigned {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lhu => Operation::LoadHalfUnsigned {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lw => Operation::LoadWordSigned {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lwu => Operation::LoadWordUnsigned {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Sb => Operation::StoreByte {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Sh => Operation::StoreHalf {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Sw => Operation::StoreWord {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lwl => Operation::LoadWordLeft {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lwr => Operation::LoadWordRight {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Swl => Operation::StoreWordLeft {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Swr => Operation::StoreWordRight {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Ldl => Operation::LoadDoublewordLeft {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Ldr => Operation::LoadDoublewordRight {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Sdl => Operation::StoreDoublewordLeft {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Sdr => Operation::StoreDoublewordRight {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Ld => Operation::LoadDoubleword {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Sd => Operation::StoreDoubleword {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Lq => Operation::LoadQuadword {
-                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                dst: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             Opcode::Sq => Operation::StoreQuadword {
-                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+                src: gpr(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
             },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
@@ -465,7 +597,10 @@ mod tests {
         let error = lift(&[branch]).expect_err("branch needs a CFG/delay-slot representation");
         assert_eq!(
             error,
-            LiftError::UnsupportedOpcode { pc: 0x2000, mnemonic: "beq" }
+            LiftError::UnsupportedOpcode {
+                pc: 0x2000,
+                mnemonic: "beq"
+            }
         );
     }
 
@@ -484,7 +619,9 @@ mod tests {
             (0x1E << 26) | (4 << 21) | (11 << 16) | 8,
             (0x1F << 26) | (4 << 21) | (12 << 16) | 12,
         ];
-        let stream = words.iter().enumerate()
+        let stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| decoded(*word, 0x2000 + (index as u32 * 4)))
             .collect::<Vec<_>>();
         let program = lift(&stream).expect("load/store scalar IR");
@@ -530,7 +667,9 @@ mod tests {
             (9 << 16) | (14 << 11) | (7 << 6) | 0x3E,
             (9 << 16) | (15 << 11) | (7 << 6) | 0x3F,
         ];
-        let stream = words.iter().enumerate()
+        let stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| decoded(*word, 0x3000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = lift(&stream).expect("R5900 doubleword operations lift");
@@ -572,7 +711,9 @@ mod tests {
             (4 << 21) | (5 << 16) | (31 << 11) | 0x16,
             (4 << 21) | (5 << 16) | (22 << 11) | 0x17,
         ];
-        let decoded = words.iter().enumerate()
+        let decoded = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| decoded(*word, 0x7000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = lift(&decoded).expect("variable shifts lift");
@@ -613,16 +754,27 @@ mod tests {
         let invalid = Instruction {
             guest_pc: 0x1000,
             operation: Operation::ShiftLeftDoubleword {
-                dst: gpr(2), src: gpr(3), amount: 64,
+                dst: gpr(2),
+                src: gpr(3),
+                amount: 64,
             },
         };
-        assert_eq!(Program::new(vec![invalid]), Err(VerifyError::InvalidShiftAmount(64)));
+        assert_eq!(
+            Program::new(vec![invalid]),
+            Err(VerifyError::InvalidShiftAmount(64))
+        );
     }
 
     #[test]
     fn verifier_rejects_non_sequential_or_misaligned_guest_pc() {
-        let first = Instruction { guest_pc: 0x1000, operation: Operation::Nop };
-        let second = Instruction { guest_pc: 0x1008, operation: Operation::Nop };
+        let first = Instruction {
+            guest_pc: 0x1000,
+            operation: Operation::Nop,
+        };
+        let second = Instruction {
+            guest_pc: 0x1008,
+            operation: Operation::Nop,
+        };
         assert!(matches!(
             Program::new(vec![first, second]),
             Err(VerifyError::NonSequentialGuestPc { .. })
@@ -632,25 +784,36 @@ mod tests {
     #[test]
     fn lifts_r5900_hilo_moves_and_three_operand_multiply() {
         let words = [
-            (4 << 21) | 0x11, (12 << 11) | 0x10,
-            (5 << 21) | 0x13, (13 << 11) | 0x12,
+            (4 << 21) | 0x11,
+            (12 << 11) | 0x10,
+            (5 << 21) | 0x13,
+            (13 << 11) | 0x12,
             (4 << 21) | (5 << 16) | (6 << 11) | 0x18,
             (4 << 21) | (5 << 16) | (7 << 11) | 0x19,
         ];
-        let decoded_stream = words.iter().enumerate()
+        let decoded_stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| decoded(*word, 0x8000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = lift(&decoded_stream).expect("R5900 HI/LO and multiply IR");
-        assert!(matches!(program.instructions()[0].operation, Operation::MoveToHi { src } if src.index() == 4));
-        assert!(matches!(program.instructions()[1].operation, Operation::MoveFromHi { dst } if dst.index() == 12));
-        assert!(matches!(program.instructions()[2].operation, Operation::MoveToLo { src } if src.index() == 5));
-        assert!(matches!(program.instructions()[3].operation, Operation::MoveFromLo { dst } if dst.index() == 13));
+        assert!(
+            matches!(program.instructions()[0].operation, Operation::MoveToHi { src } if src.index() == 4)
+        );
+        assert!(
+            matches!(program.instructions()[1].operation, Operation::MoveFromHi { dst } if dst.index() == 12)
+        );
+        assert!(
+            matches!(program.instructions()[2].operation, Operation::MoveToLo { src } if src.index() == 5)
+        );
+        assert!(
+            matches!(program.instructions()[3].operation, Operation::MoveFromLo { dst } if dst.index() == 13)
+        );
         assert!(matches!(program.instructions()[4].operation,
             Operation::MultiplyWordSigned { dst, lhs, rhs } if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5));
         assert!(matches!(program.instructions()[5].operation,
             Operation::MultiplyWordUnsigned { dst, lhs, rhs } if dst.index() == 7 && lhs.index() == 4 && rhs.index() == 5));
     }
-
 
     #[test]
     fn lifts_r5900_signed_unsigned_comparisons_and_nor() {
@@ -661,7 +824,9 @@ mod tests {
             (0x0A << 26) | (9 << 21) | (10 << 16) | 0x8001, // slti r10, r9, -32767
             (0x0B << 26) | (11 << 21) | (12 << 16) | 0xFFFF, // sltiu r12, r11, -1
         ];
-        let decoded_stream = words.iter().enumerate()
+        let decoded_stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| decoded(*word, 0xA000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = lift(&decoded_stream).expect("R5900 comparisons and NOR lift");
@@ -683,7 +848,6 @@ mod tests {
                 if dst.index() == 12 && src.index() == 11));
     }
 
-
     #[test]
     fn lifts_trapping_signed_doubleword_arithmetic_separately_from_unsigned_ops() {
         let words = [
@@ -694,7 +858,9 @@ mod tests {
             (8 << 21) | (9 << 16) | (17 << 11) | 0x2F,
             (0x19 << 26) | (15 << 21) | (18 << 16) | 0xFFFE,
         ];
-        let decoded_stream = words.iter().enumerate()
+        let decoded_stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| decoded(*word, 0xB000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = lift(&decoded_stream).expect("signed and unsigned doubleword IR");
@@ -715,5 +881,4 @@ mod tests {
         assert!(matches!(program.instructions()[5].operation,
             Operation::AddImmediateDoublewordUnsigned { dst, .. } if dst.index() == 18));
     }
-
 }

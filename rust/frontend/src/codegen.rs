@@ -39,7 +39,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::load_u64_right;\n\
              using reps2::runtime::store_u64_left;\n\
              using reps2::runtime::store_u64_right;\n\
-             state.gpr[0] = {};\n"
+             state.gpr[0] = {};\n",
     );
 
     for (index, instruction) in program.instructions().iter().enumerate() {
@@ -61,8 +61,12 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::MoveFromLo { dst } => emit_move_from_hilo(output, dst, "lo"),
         Operation::MoveToHi { src } => emit_move_to_hilo(output, src, "hi"),
         Operation::MoveToLo { src } => emit_move_to_hilo(output, src, "lo"),
-        Operation::MultiplyWordSigned { dst, lhs, rhs } => emit_multiply_word(output, index, dst, lhs, rhs, true),
-        Operation::MultiplyWordUnsigned { dst, lhs, rhs } => emit_multiply_word(output, index, dst, lhs, rhs, false),
+        Operation::MultiplyWordSigned { dst, lhs, rhs } => {
+            emit_multiply_word(output, index, dst, lhs, rhs, true)
+        }
+        Operation::MultiplyWordUnsigned { dst, lhs, rhs } => {
+            emit_multiply_word(output, index, dst, lhs, rhs, false)
+        }
         Operation::Nor64 { dst, lhs, rhs } => emit_binary64_not_or(output, dst, lhs, rhs),
         Operation::SetLessThanSigned64 { dst, lhs, rhs } => {
             emit_set_less_than(output, dst, lhs, rhs, true);
@@ -70,42 +74,66 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::SetLessThanUnsigned64 { dst, lhs, rhs } => {
             emit_set_less_than(output, dst, lhs, rhs, false);
         }
-        Operation::SetLessThanImmediateSigned64 { dst, src, immediate } => {
+        Operation::SetLessThanImmediateSigned64 {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_set_less_than_immediate(output, dst, src, immediate, true);
         }
-        Operation::SetLessThanImmediateUnsigned64 { dst, src, immediate } => {
+        Operation::SetLessThanImmediateUnsigned64 {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_set_less_than_immediate(output, dst, src, immediate, false);
         }
-        Operation::AddWord { dst, lhs, rhs } => emit_word_add(
-            output, index, dst, lhs, rhs, true
-        ),
-        Operation::AddImmediateWord { dst, src, immediate } => {
+        Operation::AddWord { dst, lhs, rhs } => emit_word_add(output, index, dst, lhs, rhs, true),
+        Operation::AddImmediateWord {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_word_immediate_add(output, index, dst, src, immediate, true);
         }
-        Operation::AddUnsignedWord { dst, lhs, rhs } => emit_word_add(
-            output, index, dst, lhs, rhs, false
-        ),
-        Operation::AddImmediateUnsignedWord { dst, src, immediate } => {
+        Operation::AddUnsignedWord { dst, lhs, rhs } => {
+            emit_word_add(output, index, dst, lhs, rhs, false)
+        }
+        Operation::AddImmediateUnsignedWord {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_word_immediate_add(output, index, dst, src, immediate, false);
         }
-        Operation::SubWord { dst, lhs, rhs } => emit_word_sub(
-            output, index, dst, lhs, rhs, true
-        ),
-        Operation::SubUnsignedWord { dst, lhs, rhs } => emit_word_sub(
-            output, index, dst, lhs, rhs, false
-        ),
+        Operation::SubWord { dst, lhs, rhs } => emit_word_sub(output, index, dst, lhs, rhs, true),
+        Operation::SubUnsignedWord { dst, lhs, rhs } => {
+            emit_word_sub(output, index, dst, lhs, rhs, false)
+        }
         Operation::AddDoublewordSigned { dst, lhs, rhs } => {
             emit_doubleword_signed_add(output, index, dst, lhs, rhs);
         }
         Operation::SubDoublewordSigned { dst, lhs, rhs } => {
             emit_doubleword_signed_sub(output, index, dst, lhs, rhs);
         }
-        Operation::AddImmediateDoublewordSigned { dst, src, immediate } => {
+        Operation::AddImmediateDoublewordSigned {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_doubleword_signed_immediate_add(output, index, dst, src, immediate);
         }
-        Operation::AddDoublewordUnsigned { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "+"),
-        Operation::SubDoublewordUnsigned { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "-"),
-        Operation::AddImmediateDoublewordUnsigned { dst, src, immediate } => {
+        Operation::AddDoublewordUnsigned { dst, lhs, rhs } => {
+            emit_binary64(output, dst, lhs, rhs, "+")
+        }
+        Operation::SubDoublewordUnsigned { dst, lhs, rhs } => {
+            emit_binary64(output, dst, lhs, rhs, "-")
+        }
+        Operation::AddImmediateDoublewordUnsigned {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_doubleword_immediate_add(output, dst, src, immediate);
         }
         Operation::ShiftLeftDoubleword { dst, src, amount } => {
@@ -138,13 +166,25 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::And64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "&"),
         Operation::Or64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "|"),
         Operation::Xor64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "^"),
-        Operation::AndImmediate64 { dst, src, immediate } => {
+        Operation::AndImmediate64 {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_immediate64(output, dst, src, immediate, "&");
         }
-        Operation::OrImmediate64 { dst, src, immediate } => {
+        Operation::OrImmediate64 {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_immediate64(output, dst, src, immediate, "|");
         }
-        Operation::XorImmediate64 { dst, src, immediate } => {
+        Operation::XorImmediate64 {
+            dst,
+            src,
+            immediate,
+        } => {
             emit_immediate64(output, dst, src, immediate, "^");
         }
         Operation::LoadUpperWord { dst, immediate } => {
@@ -196,10 +236,26 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
             emit_partial_memory_load(output, index, dst, base, offset, "load_u32_right");
         }
         Operation::StoreWordLeft { src, base, offset } => {
-            emit_partial_memory_store(output, index, src, base, offset, "store_u32_left", "std::uint32_t");
+            emit_partial_memory_store(
+                output,
+                index,
+                src,
+                base,
+                offset,
+                "store_u32_left",
+                "std::uint32_t",
+            );
         }
         Operation::StoreWordRight { src, base, offset } => {
-            emit_partial_memory_store(output, index, src, base, offset, "store_u32_right", "std::uint32_t");
+            emit_partial_memory_store(
+                output,
+                index,
+                src,
+                base,
+                offset,
+                "store_u32_right",
+                "std::uint32_t",
+            );
         }
         Operation::LoadDoublewordLeft { dst, base, offset } => {
             emit_partial_memory_load(output, index, dst, base, offset, "load_u64_left");
@@ -208,10 +264,26 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
             emit_partial_memory_load(output, index, dst, base, offset, "load_u64_right");
         }
         Operation::StoreDoublewordLeft { src, base, offset } => {
-            emit_partial_memory_store(output, index, src, base, offset, "store_u64_left", "std::uint64_t");
+            emit_partial_memory_store(
+                output,
+                index,
+                src,
+                base,
+                offset,
+                "store_u64_left",
+                "std::uint64_t",
+            );
         }
         Operation::StoreDoublewordRight { src, base, offset } => {
-            emit_partial_memory_store(output, index, src, base, offset, "store_u64_right", "std::uint64_t");
+            emit_partial_memory_store(
+                output,
+                index,
+                src,
+                base,
+                offset,
+                "store_u64_right",
+                "std::uint64_t",
+            );
         }
         Operation::LoadDoubleword { dst, base, offset } => {
             emit_memory_load(output, index, dst, base, offset, 8, false);
@@ -355,7 +427,10 @@ fn emit_quadword_load(output: &mut String, index: usize, dst: Gpr, base: Gpr, of
         "    reps2::runtime::Gpr128 quadword_value_{tag}{{}};\n    const auto memory_status_{tag} = load_u128(state.memory, effective_address_{tag}, quadword_value_{tag});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n"
     ));
     if !dst.is_zero() {
-        output.push_str(&format!("    state.gpr[{}] = quadword_value_{tag};\n", dst.index()));
+        output.push_str(&format!(
+            "    state.gpr[{}] = quadword_value_{tag};\n",
+            dst.index()
+        ));
     }
 }
 
@@ -469,7 +544,9 @@ fn emit_word_sub(
 
 fn emit_move_from_hilo(output: &mut String, dst: Gpr, special: &str) {
     let d = dst.index();
-    output.push_str(&format!("    if ({d} != 0) state.gpr[{d}].low = state.{special};\n"));
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}].low = state.{special};\n"
+    ));
 }
 
 fn emit_move_to_hilo(output: &mut String, src: Gpr, special: &str) {
@@ -477,7 +554,14 @@ fn emit_move_to_hilo(output: &mut String, src: Gpr, special: &str) {
     output.push_str(&format!("    state.{special} = state.gpr[{s}].low;\n"));
 }
 
-fn emit_multiply_word(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr, signed: bool) {
+fn emit_multiply_word(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
+    signed: bool,
+) {
     let tag = format!("{index:04}");
     let d = dst.index();
     let a = lhs.index();
@@ -561,13 +645,7 @@ fn emit_set_less_than_immediate(
     ));
 }
 
-fn emit_doubleword_signed_add(
-    output: &mut String,
-    index: usize,
-    dst: Gpr,
-    lhs: Gpr,
-    rhs: Gpr,
-) {
+fn emit_doubleword_signed_add(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr) {
     let tag = format!("{index:04}");
     let d = dst.index();
     let a = lhs.index();
@@ -581,13 +659,7 @@ fn emit_doubleword_signed_add(
     ));
 }
 
-fn emit_doubleword_signed_sub(
-    output: &mut String,
-    index: usize,
-    dst: Gpr,
-    lhs: Gpr,
-    rhs: Gpr,
-) {
+fn emit_doubleword_signed_sub(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr) {
     let tag = format!("{index:04}");
     let d = dst.index();
     let a = lhs.index();
@@ -722,7 +794,14 @@ fn emit_variable_doubleword_shift(
     }
 }
 
-fn emit_shift(output: &mut String, dst: Gpr, src: Gpr, amount: u8, operator: &str, arithmetic: bool) {
+fn emit_shift(
+    output: &mut String,
+    dst: Gpr,
+    src: Gpr,
+    amount: u8,
+    operator: &str,
+    arithmetic: bool,
+) {
     let d = dst.index();
     let s = src.index();
     if arithmetic {
@@ -747,24 +826,26 @@ mod tests {
     fn emits_checked_little_endian_memory_accesses_and_sign_extension() {
         let words = [
             (0x20 << 26) | (8 << 21) | (9 << 16) | 0xFFFC, // lb t1, -4(t0)
-            (0x25 << 26) | (8 << 21) | (10 << 16) | 2, // lhu t2, 2(t0)
-            (0x21 << 26) | (8 << 21) | (11 << 16) | 4, // lh t3, 4(t0)
-            (0x23 << 26) | (8 << 21) | (12 << 16) | 8, // lw t4, 8(t0)
-            (0x2B << 26) | (8 << 21) | (13 << 16) | 12, // sw t5, 12(t0)
-            (0x1E << 26) | (8 << 21) | (14 << 16) | 4, // lq t6, 4(t0)
-            (0x1F << 26) | (8 << 21) | (15 << 16) | 8, // sq t7, 8(t0)
-            (0x37 << 26) | (8 << 21) | (16 << 16) | 4, // ld s0, 4(t0)
-            (0x3F << 26) | (8 << 21) | (16 << 16) | 0x34, // sd s0, 0x34(t0)
-            (0x22 << 26) | (8 << 21) | (17 << 16) | 1, // lwl s1, 1(t0)
-            (0x26 << 26) | (8 << 21) | (18 << 16) | 2, // lwr s2, 2(t0)
-            (0x2A << 26) | (8 << 21) | (19 << 16) | 3, // swl s3, 3(t0)
-            (0x2E << 26) | (8 << 21) | (20 << 16) | 1, // swr s4, 1(t0)
-            (0x1A << 26) | (8 << 21) | (21 << 16) | 3, // ldl s5, 3(t0)
-            (0x1B << 26) | (8 << 21) | (22 << 16) | 5, // ldr s6, 5(t0)
-            (0x2C << 26) | (8 << 21) | (23 << 16) | 6, // sdl s7, 6(t0)
-            (0x2D << 26) | (8 << 21) | (24 << 16) | 7, // sdr t8, 7(t0)
+            (0x25 << 26) | (8 << 21) | (10 << 16) | 2,     // lhu t2, 2(t0)
+            (0x21 << 26) | (8 << 21) | (11 << 16) | 4,     // lh t3, 4(t0)
+            (0x23 << 26) | (8 << 21) | (12 << 16) | 8,     // lw t4, 8(t0)
+            (0x2B << 26) | (8 << 21) | (13 << 16) | 12,    // sw t5, 12(t0)
+            (0x1E << 26) | (8 << 21) | (14 << 16) | 4,     // lq t6, 4(t0)
+            (0x1F << 26) | (8 << 21) | (15 << 16) | 8,     // sq t7, 8(t0)
+            (0x37 << 26) | (8 << 21) | (16 << 16) | 4,     // ld s0, 4(t0)
+            (0x3F << 26) | (8 << 21) | (16 << 16) | 0x34,  // sd s0, 0x34(t0)
+            (0x22 << 26) | (8 << 21) | (17 << 16) | 1,     // lwl s1, 1(t0)
+            (0x26 << 26) | (8 << 21) | (18 << 16) | 2,     // lwr s2, 2(t0)
+            (0x2A << 26) | (8 << 21) | (19 << 16) | 3,     // swl s3, 3(t0)
+            (0x2E << 26) | (8 << 21) | (20 << 16) | 1,     // swr s4, 1(t0)
+            (0x1A << 26) | (8 << 21) | (21 << 16) | 3,     // ldl s5, 3(t0)
+            (0x1B << 26) | (8 << 21) | (22 << 16) | 5,     // ldr s6, 5(t0)
+            (0x2C << 26) | (8 << 21) | (23 << 16) | 6,     // sdl s7, 6(t0)
+            (0x2D << 26) | (8 << 21) | (24 << 16) | 7,     // sdr t8, 7(t0)
         ];
-        let decoded = words.iter().enumerate()
+        let decoded = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x2000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = ir::lift(&decoded).expect("memory IR");
@@ -804,7 +885,9 @@ mod tests {
             (9 << 16) | (14 << 11) | (7 << 6) | 0x3E,
             (9 << 16) | (15 << 11) | (7 << 6) | 0x3F,
         ];
-        let decoded = words.iter().enumerate()
+        let decoded = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x5000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = ir::lift(&decoded).expect("doubleword operations lift");
@@ -828,20 +911,32 @@ mod tests {
             (4 << 21) | (5 << 16) | (31 << 11) | 0x16,
             (4 << 21) | (5 << 16) | (22 << 11) | 0x17,
         ];
-        let decoded = words.iter().enumerate()
+        let decoded = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x8000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = ir::lift(&decoded).expect("variable shifts lift");
         let cpp = emit_cpp(&program).expect("variable shift C++");
-        assert!(cpp.contains("shift_amount_0000 = static_cast<std::uint32_t>(state.gpr[4].low) & 0x1FU"));
+        assert!(
+            cpp.contains(
+                "shift_amount_0000 = static_cast<std::uint32_t>(state.gpr[4].low) & 0x1FU"
+            )
+        );
         assert!(cpp.contains("state.gpr[6].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[5].low) << shift_amount_0000)"));
         assert!(cpp.contains("state.gpr[7].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[5].low) >> shift_amount_0001)"));
         assert!(cpp.contains("arithmetic_shift_right_word(static_cast<std::uint32_t>(state.gpr[5].low), static_cast<std::uint8_t>(shift_amount_0002))"));
-        assert!(cpp.contains("shift_amount_0003 = static_cast<std::uint32_t>(state.gpr[4].low) & 0x3FU"));
+        assert!(
+            cpp.contains(
+                "shift_amount_0003 = static_cast<std::uint32_t>(state.gpr[4].low) & 0x3FU"
+            )
+        );
         assert!(cpp.contains("state.gpr[30].low = state.gpr[5].low << shift_amount_0003"));
         assert!(cpp.contains("state.gpr[31].low = state.gpr[5].low >> shift_amount_0004"));
         assert!(cpp.contains("arithmetic_shift_right_doubleword(state.gpr[5].low, static_cast<std::uint8_t>(shift_amount_0005))"));
-        assert!(cpp.contains("if (!is_word_value(state.gpr[5].low)) return Status::undefined_word_operand"));
+        assert!(cpp.contains(
+            "if (!is_word_value(state.gpr[5].low)) return Status::undefined_word_operand"
+        ));
     }
 
     #[test]
@@ -863,13 +958,18 @@ mod tests {
     #[test]
     fn emits_r5900_hilo_moves_and_signed_unsigned_three_operand_multiply() {
         let words = [
-            (1 << 21) | 0x11, (20 << 11) | 0x10,
-            (2 << 21) | 0x13, (21 << 11) | 0x12,
+            (1 << 21) | 0x11,
+            (20 << 11) | 0x10,
+            (2 << 21) | 0x13,
+            (21 << 11) | 0x12,
             (1 << 21) | (2 << 16) | (22 << 11) | 0x18,
-            (24 << 11) | 0x10, (25 << 11) | 0x12,
+            (24 << 11) | 0x10,
+            (25 << 11) | 0x12,
             (3 << 21) | (2 << 16) | (23 << 11) | 0x19,
         ];
-        let decoded_stream = words.iter().enumerate()
+        let decoded_stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x9000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = ir::lift(&decoded_stream).expect("HI/LO and multiply IR");
@@ -878,7 +978,9 @@ mod tests {
         assert!(cpp.contains("state.gpr[20].low = state.hi"));
         assert!(cpp.contains("state.lo = state.gpr[2].low"));
         assert!(cpp.contains("state.gpr[21].low = state.lo"));
-        assert!(cpp.contains("sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[1].low))"));
+        assert!(
+            cpp.contains("sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[1].low))")
+        );
         assert!(cpp.contains("multiply_product_0004 = multiply_lhs_0004 * multiply_rhs_0004"));
         assert!(cpp.contains("state.gpr[22].low = state.lo"));
         assert!(cpp.contains("state.gpr[24].low = state.hi"));
@@ -889,7 +991,6 @@ mod tests {
         assert!(cpp.contains("state.hi = sign_extend_word(multiply_high_0007)"));
     }
 
-
     #[test]
     fn emits_r5900_signed_unsigned_comparisons_and_nor_with_exact_lane_semantics() {
         let words = [
@@ -899,7 +1000,9 @@ mod tests {
             (0x0A << 26) | (9 << 21) | (10 << 16) | 0x8001,
             (0x0B << 26) | (11 << 21) | (12 << 16) | 0xFFFF,
         ];
-        let decoded_stream = words.iter().enumerate()
+        let decoded_stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0xA000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = ir::lift(&decoded_stream).expect("comparison/NOR IR");
@@ -908,12 +1011,13 @@ mod tests {
         assert!(cpp.contains("~(state.gpr[4].low | state.gpr[5].low)"));
         assert!(cpp.contains("std::bit_cast<std::int64_t>(state.gpr[4].low) < std::bit_cast<std::int64_t>(state.gpr[5].low)"));
         assert!(cpp.contains("state.gpr[4].low < state.gpr[5].low"));
-        assert!(cpp.contains("std::bit_cast<std::int64_t>(state.gpr[9].low) < static_cast<std::int64_t>(-32767LL)"));
+        assert!(cpp.contains(
+            "std::bit_cast<std::int64_t>(state.gpr[9].low) < static_cast<std::int64_t>(-32767LL)"
+        ));
         assert!(cpp.contains("state.gpr[11].low < static_cast<std::uint64_t>(-1LL)"));
         assert!(cpp.contains("? 1ULL : 0ULL"));
         assert!(cpp.contains("#include <bit>"));
     }
-
 
     #[test]
     fn emits_trapping_doubleword_arithmetic_with_portable_overflow_detection() {
@@ -922,7 +1026,9 @@ mod tests {
             (12 << 21) | (13 << 16) | (11 << 11) | 0x2E,
             (0x18 << 26) | (15 << 21) | (14 << 16) | 0xFFFE,
         ];
-        let decoded_stream = words.iter().enumerate()
+        let decoded_stream = words
+            .iter()
+            .enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0xB000 + index as u32 * 4))
             .collect::<Vec<_>>();
         let program = ir::lift(&decoded_stream).expect("signed doubleword IR");
@@ -933,11 +1039,12 @@ mod tests {
         assert!(cpp.contains("signed_sub_result_0001 = signed_sub_lhs_0001 - signed_sub_rhs_0001"));
         assert!(cpp.contains("(signed_sub_lhs_0001 ^ signed_sub_rhs_0001)"));
         assert!(cpp.contains("signed_addi_rhs_0002 = static_cast<std::uint64_t>(-2LL)"));
-        assert!(cpp.contains("signed_addi_result_0002 = signed_addi_lhs_0002 + signed_addi_rhs_0002"));
+        assert!(
+            cpp.contains("signed_addi_result_0002 = signed_addi_lhs_0002 + signed_addi_rhs_0002")
+        );
         assert_eq!(cpp.matches("return Status::integer_overflow;").count(), 3);
         assert!(cpp.contains("if (10 != 0) state.gpr[10].low = signed_add_result_0000"));
         assert!(cpp.contains("if (11 != 0) state.gpr[11].low = signed_sub_result_0001"));
         assert!(cpp.contains("if (14 != 0) state.gpr[14].low = signed_addi_result_0002"));
     }
-
 }

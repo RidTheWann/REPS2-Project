@@ -18,7 +18,10 @@ use reps2_frontend::mips;
 const MAX_INPUT_SIZE: u64 = 512 * 1024 * 1024;
 
 fn parse_hex(value: &str) -> Result<u32, String> {
-    let value = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")).unwrap_or(value);
+    let value = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
     if value.is_empty() {
         return Err("expected a hexadecimal 32-bit value".to_owned());
     }
@@ -26,7 +29,8 @@ fn parse_hex(value: &str) -> Result<u32, String> {
 }
 
 fn read_input(path: &Path) -> Result<Vec<u8>, String> {
-    let metadata = fs::metadata(path).map_err(|error| format!("cannot inspect input file: {error}"))?;
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("cannot inspect input file: {error}"))?;
     if metadata.len() > MAX_INPUT_SIZE {
         return Err("input file exceeds the 512 MiB safety limit".to_owned());
     }
@@ -38,8 +42,24 @@ fn elf_info(path: &Path) -> Result<(), String> {
     let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
 
     println!("ELF32 little-endian image");
-    println!("  Type: {}{}", image.file_type, if image.is_executable() { " (executable)" } else { "" });
-    println!("  Machine: {}{}", image.machine, if image.is_mips() { " (MIPS)" } else { " (not MIPS)" });
+    println!(
+        "  Type: {}{}",
+        image.file_type,
+        if image.is_executable() {
+            " (executable)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "  Machine: {}{}",
+        image.machine,
+        if image.is_mips() {
+            " (MIPS)"
+        } else {
+            " (not MIPS)"
+        }
+    );
     println!("  Entry point: 0x{:08X}", image.entry_point);
     println!("  Program headers: {}", image.program_headers.len());
     println!("  Section headers: {}", image.section_headers.len());
@@ -48,8 +68,10 @@ fn elf_info(path: &Path) -> Result<(), String> {
     println!("  Relocations: {}", image.relocations.len());
 
     for (index, section) in image.section_headers.iter().enumerate() {
-        println!("  [{index:>3}] {:<20} type={:<3} addr=0x{:08X} size=0x{:X}",
-            section.name, section.kind, section.virtual_address, section.size);
+        println!(
+            "  [{index:>3}] {:<20} type={:<3} addr=0x{:08X} size=0x{:X}",
+            section.name, section.kind, section.virtual_address, section.size
+        );
     }
 
     if !image.is_mips() {
@@ -62,26 +84,57 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
     let word = parse_hex(word_text)?;
     let pc = pc_text.map(parse_hex).transpose()?.unwrap_or(0);
     let instruction = mips::decode(word, pc);
-    println!("0x{word:08X}  {}  rs={} rt={} rd={}",
-        instruction.opcode.mnemonic(), instruction.rs, instruction.rt, instruction.rd);
+    println!(
+        "0x{word:08X}  {}  rs={} rt={} rd={}",
+        instruction.opcode.mnemonic(),
+        instruction.rs,
+        instruction.rt,
+        instruction.rd
+    );
     if instruction.has_delay_slot {
         print!("  [delay-slot]");
     }
-    if matches!(instruction.opcode,
-        mips::Opcode::J | mips::Opcode::Jal | mips::Opcode::Beq |
-        mips::Opcode::Bne | mips::Opcode::Blez | mips::Opcode::Bgtz |
-        mips::Opcode::Bltz | mips::Opcode::Bgez |
-        mips::Opcode::Bltzal | mips::Opcode::Bgezal) {
+    if matches!(
+        instruction.opcode,
+        mips::Opcode::J
+            | mips::Opcode::Jal
+            | mips::Opcode::Beq
+            | mips::Opcode::Bne
+            | mips::Opcode::Blez
+            | mips::Opcode::Bgtz
+            | mips::Opcode::Bltz
+            | mips::Opcode::Bgez
+            | mips::Opcode::Bltzal
+            | mips::Opcode::Bgezal
+    ) {
         print!("  target=0x{:08X}", instruction.target);
     }
-    if matches!(instruction.opcode,
-        mips::Opcode::Addi | mips::Opcode::Addiu | mips::Opcode::Slti |
-        mips::Opcode::Sltiu | mips::Opcode::Lb | mips::Opcode::Lh |
-        mips::Opcode::Lw | mips::Opcode::Lbu | mips::Opcode::Lhu |
-        mips::Opcode::Lwu | mips::Opcode::Ld | mips::Opcode::Sd |
-        mips::Opcode::Lwl | mips::Opcode::Lwr | mips::Opcode::Swl | mips::Opcode::Swr |
-        mips::Opcode::Ldl | mips::Opcode::Ldr | mips::Opcode::Sdl | mips::Opcode::Sdr |
-        mips::Opcode::Sb | mips::Opcode::Sh | mips::Opcode::Sw) {
+    if matches!(
+        instruction.opcode,
+        mips::Opcode::Addi
+            | mips::Opcode::Addiu
+            | mips::Opcode::Slti
+            | mips::Opcode::Sltiu
+            | mips::Opcode::Lb
+            | mips::Opcode::Lh
+            | mips::Opcode::Lw
+            | mips::Opcode::Lbu
+            | mips::Opcode::Lhu
+            | mips::Opcode::Lwu
+            | mips::Opcode::Ld
+            | mips::Opcode::Sd
+            | mips::Opcode::Lwl
+            | mips::Opcode::Lwr
+            | mips::Opcode::Swl
+            | mips::Opcode::Swr
+            | mips::Opcode::Ldl
+            | mips::Opcode::Ldr
+            | mips::Opcode::Sdl
+            | mips::Opcode::Sdr
+            | mips::Opcode::Sb
+            | mips::Opcode::Sh
+            | mips::Opcode::Sw
+    ) {
         print!("  imm={}", instruction.signed_immediate());
     }
     println!();
@@ -105,14 +158,27 @@ fn analyze_elf(path: &Path) -> Result<(), String> {
     println!("REPS2 reachable executable analysis");
     println!("  Entry roots: {}", graph.entry_points.len());
     println!("  Basic blocks: {}", graph.blocks.len());
-    println!("  Decoded instructions: {}", graph.decoded_instruction_count);
+    println!(
+        "  Decoded instructions: {}",
+        graph.decoded_instruction_count
+    );
     println!("  Static edges: {}", edges.len());
     println!("  Unsupported blocks: {}", graph.unsupported_block_count());
-    println!("  Unresolved indirect jumps: {}", graph.unresolved_indirect_jumps.len());
-    println!("  External/unmapped targets: {}", graph.external_targets.len());
+    println!(
+        "  Unresolved indirect jumps: {}",
+        graph.unresolved_indirect_jumps.len()
+    );
+    println!(
+        "  External/unmapped targets: {}",
+        graph.external_targets.len()
+    );
 
     for entry in &graph.entry_points {
-        let role = if entry.is_elf_entry { "ELF entry" } else { "function" };
+        let role = if entry.is_elf_entry {
+            "ELF entry"
+        } else {
+            "function"
+        };
         let labels = if entry.labels.is_empty() {
             String::new()
         } else {
@@ -138,8 +204,12 @@ fn analyze_elf(path: &Path) -> Result<(), String> {
 }
 
 fn open_iso(path: &Path) -> Result<Iso9660<File>, String> {
-    let file = File::open(path)
-        .map_err(|error| format!("cannot open read-only disc image {}: {error}", path.display()))?;
+    let file = File::open(path).map_err(|error| {
+        format!(
+            "cannot open read-only disc image {}: {error}",
+            path.display()
+        )
+    })?;
     Iso9660::open(file).map_err(|error| error.to_string())
 }
 
@@ -151,20 +221,32 @@ fn disc_info(path: &Path) -> Result<(), String> {
     println!("  Image: {}", path.display());
     println!("  Volume identifier: {}", info.volume_identifier);
     println!("  Logical block size: {} bytes", info.logical_block_size);
-    println!("  Declared volume: {} blocks ({} bytes)", info.volume_space_blocks, info.volume_bytes);
+    println!(
+        "  Declared volume: {} blocks ({} bytes)",
+        info.volume_space_blocks, info.volume_bytes
+    );
     println!("  Image size: {} bytes", info.image_bytes);
     println!("  Root directory:");
 
     let entries = iso.root_entries().map_err(|error| error.to_string())?;
     for entry in entries.iter().take(128) {
         let kind = if entry.is_directory() { "DIR " } else { "FILE" };
-        println!("    [{kind}] {:<24} {} byte(s)", entry.name, entry.size_bytes);
+        println!(
+            "    [{kind}] {:<24} {} byte(s)",
+            entry.name, entry.size_bytes
+        );
     }
     if entries.len() > 128 {
-        println!("    ... {} additional root entr(y/ies)", entries.len() - 128);
+        println!(
+            "    ... {} additional root entr(y/ies)",
+            entries.len() - 128
+        );
     }
 
-    match iso.boot_executable_path().map_err(|error| error.to_string())? {
+    match iso
+        .boot_executable_path()
+        .map_err(|error| error.to_string())?
+    {
         Some(boot_path) => println!("  SYSTEM.CNF boot executable: {boot_path}"),
         None => println!("  SYSTEM.CNF: not present in the ISO root"),
     }
@@ -175,41 +257,69 @@ fn disc_info(path: &Path) -> Result<(), String> {
 
 fn extract_boot_elf(input: &Path, output: &Path) -> Result<(), String> {
     if output.exists() {
-        let input_canonical = input.canonicalize()
+        let input_canonical = input
+            .canonicalize()
             .map_err(|error| format!("cannot resolve disc image path: {error}"))?;
-        let output_canonical = output.canonicalize()
+        let output_canonical = output
+            .canonicalize()
             .map_err(|error| format!("cannot resolve existing output path: {error}"))?;
         if input_canonical == output_canonical {
-            return Err("output path resolves to the input ISO; refusing to overwrite the disc image".to_owned());
+            return Err(
+                "output path resolves to the input ISO; refusing to overwrite the disc image"
+                    .to_owned(),
+            );
         }
-        return Err(format!("output already exists; refusing to overwrite: {}", output.display()));
+        return Err(format!(
+            "output already exists; refusing to overwrite: {}",
+            output.display()
+        ));
     }
 
     let mut iso = open_iso(input)?;
-    let boot_path = iso.boot_executable_path()
+    let boot_path = iso
+        .boot_executable_path()
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| "ISO root does not contain SYSTEM.CNF with a BOOT2 or BOOT entry".to_owned())?;
+        .ok_or_else(|| {
+            "ISO root does not contain SYSTEM.CNF with a BOOT2 or BOOT entry".to_owned()
+        })?;
 
-    let executable = iso.read_file(&boot_path, iso9660::MAX_BOOT_EXECUTABLE_BYTES)
+    let executable = iso
+        .read_file(&boot_path, iso9660::MAX_BOOT_EXECUTABLE_BYTES)
         .map_err(|error| format!("cannot extract SYSTEM.CNF boot target {boot_path}: {error}"))?;
-    let image = elf::parse(&executable, ParseLimits::default())
-        .map_err(|error| format!("SYSTEM.CNF target {boot_path} is not a valid supported ELF32 image: {error}"))?;
+    let image = elf::parse(&executable, ParseLimits::default()).map_err(|error| {
+        format!("SYSTEM.CNF target {boot_path} is not a valid supported ELF32 image: {error}")
+    })?;
     if !image.is_mips() {
-        return Err(format!("SYSTEM.CNF target {boot_path} is not EM_MIPS; refusing extraction as a PS2 EE boot ELF"));
+        return Err(format!(
+            "SYSTEM.CNF target {boot_path} is not EM_MIPS; refusing extraction as a PS2 EE boot ELF"
+        ));
     }
     if !image.is_executable() {
-        return Err(format!("SYSTEM.CNF target {boot_path} is not ET_EXEC; only static executable boot images are supported"));
+        return Err(format!(
+            "SYSTEM.CNF target {boot_path} is not ET_EXEC; only static executable boot images are supported"
+        ));
     }
 
     let mut destination = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(output)
-        .map_err(|error| format!("cannot create new output file {}: {error}", output.display()))?;
-    if let Err(error) = destination.write_all(&executable).and_then(|()| destination.sync_all()) {
+        .map_err(|error| {
+            format!(
+                "cannot create new output file {}: {error}",
+                output.display()
+            )
+        })?;
+    if let Err(error) = destination
+        .write_all(&executable)
+        .and_then(|()| destination.sync_all())
+    {
         drop(destination);
         let _ = fs::remove_file(output);
-        return Err(format!("cannot write extracted ELF to {}: {error}", output.display()));
+        return Err(format!(
+            "cannot write extracted ELF to {}: {error}",
+            output.display()
+        ));
     }
 
     println!("Extracted PS2 boot executable");
@@ -234,8 +344,7 @@ fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
         .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
     let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
-    let program = control_ir::ControlProgram::lift(&graph)
-        .map_err(|error| error.to_string())?;
+    let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
     let cpp = control_codegen::emit_cpp_with_entry(&program, image.entry_point)
         .map_err(|error| error.to_string())?;
     let ram_output = output.with_extension("ram.bin");
@@ -252,10 +361,22 @@ fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
     println!("  PT_LOAD segments placed: {}", ram_image.segments.len());
     println!("  Entry points: {}", program.entry_points.len());
     println!("  Basic blocks: {}", program.blocks.len());
-    println!("  Guest instructions represented: {}", program.instruction_count());
-    println!("  Explicit unsupported stops: {}", program.unsupported_count());
-    println!("  Unresolved indirect targets: {}", graph.unresolved_indirect_jumps.len());
-    println!("  External/unmapped targets: {}", graph.external_targets.len());
+    println!(
+        "  Guest instructions represented: {}",
+        program.instruction_count()
+    );
+    println!(
+        "  Explicit unsupported stops: {}",
+        program.unsupported_count()
+    );
+    println!(
+        "  Unresolved indirect targets: {}",
+        graph.unresolved_indirect_jumps.len()
+    );
+    println!(
+        "  External/unmapped targets: {}",
+        graph.external_targets.len()
+    );
     println!("  Runtime entry: reps2::generated::initialize_ee_state(EeState&, ram_image)");
     println!("  Execution entry: reps2::generated::execute_cfg(EeState&, instruction_budget)");
     Ok(())
@@ -268,16 +389,23 @@ fn default_library_root() -> Result<std::path::PathBuf, String> {
 
     #[cfg(windows)]
     {
-        let root = env::var_os("LOCALAPPDATA")
-            .ok_or_else(|| "LOCALAPPDATA is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
+        let root = env::var_os("LOCALAPPDATA").ok_or_else(|| {
+            "LOCALAPPDATA is unavailable; set REPS2_LIBRARY_DIR to choose a library folder"
+                .to_owned()
+        })?;
         Ok(Path::new(&root).join("REPS2").join("Library"))
     }
 
     #[cfg(target_os = "macos")]
     {
-        let home = env::var_os("HOME")
-            .ok_or_else(|| "HOME is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
-        Ok(Path::new(&home).join("Library").join("Application Support").join("REPS2").join("Library"))
+        let home = env::var_os("HOME").ok_or_else(|| {
+            "HOME is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned()
+        })?;
+        Ok(Path::new(&home)
+            .join("Library")
+            .join("Application Support")
+            .join("REPS2")
+            .join("Library"))
     }
 
     #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -285,9 +413,14 @@ fn default_library_root() -> Result<std::path::PathBuf, String> {
         if let Some(root) = env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
             return Ok(Path::new(&root).join("reps2").join("Library"));
         }
-        let home = env::var_os("HOME")
-            .ok_or_else(|| "HOME is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
-        Ok(Path::new(&home).join(".local").join("share").join("reps2").join("Library"))
+        let home = env::var_os("HOME").ok_or_else(|| {
+            "HOME is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned()
+        })?;
+        Ok(Path::new(&home)
+            .join(".local")
+            .join("share")
+            .join("reps2")
+            .join("Library"))
     }
 }
 
@@ -306,9 +439,26 @@ fn add_game(input: &Path, library_override: Option<&Path>) -> Result<(), String>
     println!("  Game ID: {}", result.game_id);
     println!("  Game directory: {}", result.game_directory.display());
     println!("  Library root: {}", library_root.display());
-    println!("  Boot ELF: {}", result.game_directory.join("boot.elf").display());
-    println!("  Generated C++: {}", if result.generated_cpp { "yes (experimental/partial)" } else { "not yet" });
-    println!("  Initial EE RAM image: {}", if result.generated_ram_image { "yes" } else { "not yet" });
+    println!(
+        "  Boot ELF: {}",
+        result.game_directory.join("boot.elf").display()
+    );
+    println!(
+        "  Generated C++: {}",
+        if result.generated_cpp {
+            "yes (experimental/partial)"
+        } else {
+            "not yet"
+        }
+    );
+    println!(
+        "  Initial EE RAM image: {}",
+        if result.generated_ram_image {
+            "yes"
+        } else {
+            "not yet"
+        }
+    );
     println!("  Playable: no — the PS2 runtime and title-stage validation are not complete");
     Ok(())
 }
@@ -359,13 +509,13 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
     ];
     let branch_and_link = [
         (0x01 << 26) | (8 << 21) | (0x10 << 16) | 2, // bltzal t0, 0x300C
-        0x2409_0017, // delay slot: t1 = 23
-        0x0000_000C, // syscall on not-taken path
-        0x0000_000C, // syscall on taken path
+        0x2409_0017,                                 // delay slot: t1 = 23
+        0x0000_000C,                                 // syscall on not-taken path
+        0x0000_000C,                                 // syscall on taken path
     ];
     let jalr_alias = [
         (8 << 21) | (8 << 11) | 0x09, // jalr t0, t0
-        0x2409_001F, // delay slot: t1 = 31
+        0x2409_001F,                  // delay slot: t1 = 31
     ];
     let memory_ops = [
         (0x2B << 26) | (8 << 21) | (9 << 16) | 0xFFFC, // sw t1, -4(t0)
@@ -375,25 +525,25 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         (0x25 << 26) | (8 << 21) | (13 << 16) | 0xFFFE, // lhu t5, -2(t0)
         (0x23 << 26) | (8 << 21) | (14 << 16) | 0xFFFC, // lw t6, -4(t0)
         (0x27 << 26) | (8 << 21) | (15 << 16) | 0xFFFC, // lwu t7, -4(t0)
-        (0x28 << 26) | (8 << 21) | (9 << 16), // sb t1, 0(t0)
-        (0x29 << 26) | (8 << 21) | (9 << 16) | 2, // sh t1, 2(t0)
-        (0x2B << 26) | (8 << 21) | (9 << 16) | 4, // sw t1, 4(t0)
-        (0x1E << 26) | (8 << 21) | (16 << 16), // lq s0, 0(t0)
-        (0x1F << 26) | (8 << 21) | (16 << 16) | 0x20, // sq s0, 0x20(t0)
-        (0x37 << 26) | (8 << 21) | (17 << 16) | 4, // ld s1, 4(t0)
-        (0x3F << 26) | (8 << 21) | (17 << 16) | 0x34, // sd s1, 0x34(t0)
-        0x03E0_0008, // jr ra
-        0x0000_0000, // delay slot
+        (0x28 << 26) | (8 << 21) | (9 << 16),          // sb t1, 0(t0)
+        (0x29 << 26) | (8 << 21) | (9 << 16) | 2,      // sh t1, 2(t0)
+        (0x2B << 26) | (8 << 21) | (9 << 16) | 4,      // sw t1, 4(t0)
+        (0x1E << 26) | (8 << 21) | (16 << 16),         // lq s0, 0(t0)
+        (0x1F << 26) | (8 << 21) | (16 << 16) | 0x20,  // sq s0, 0x20(t0)
+        (0x37 << 26) | (8 << 21) | (17 << 16) | 4,     // ld s1, 4(t0)
+        (0x3F << 26) | (8 << 21) | (17 << 16) | 0x34,  // sd s1, 0x34(t0)
+        0x03E0_0008,                                   // jr ra
+        0x0000_0000,                                   // delay slot
     ];
     let unaligned_load = [
         (0x23 << 26) | (8 << 21) | (14 << 16), // lw t6, 0(t0)
-        0x03E0_0008, // jr ra
-        0x0000_0000, // delay slot
+        0x03E0_0008,                           // jr ra
+        0x0000_0000,                           // delay slot
     ];
     let unaligned_doubleword = [
         (0x37 << 26) | (8 << 21) | (14 << 16), // ld t6, 0(t0)
-        0x03E0_0008, // jr ra
-        0x0000_0000, // delay slot
+        0x03E0_0008,                           // jr ra
+        0x0000_0000,                           // delay slot
     ];
     let mut unaligned_word_merge = Vec::with_capacity(18);
     for lane in 0u32..4 {
@@ -455,14 +605,16 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         entry(0x5300, "unaligned-word-merge-fixture"),
         entry(0x5400, "unaligned-doubleword-merge-fixture"),
     ];
-    let roots = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400];
+    let roots = [
+        0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
+    ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
-    let program = control_ir::ControlProgram::lift(&graph)
-        .map_err(|error| error.to_string())?;
+    let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
     let cpp = control_codegen::emit_cpp_with_entry(&program, 0x1000)
         .map_err(|error| error.to_string())?;
-    fs::write(output, cpp).map_err(|error| format!("cannot write generated C++ fixture: {error}"))?;
+    fs::write(output, cpp)
+        .map_err(|error| format!("cannot write generated C++ fixture: {error}"))?;
     println!(
         "Generated synthetic CFG fixture: {} block(s), {} guest instruction(s), {} unsupported stop(s)",
         program.blocks.len(),
@@ -488,7 +640,8 @@ fn compile_words(output: &Path, base_pc_text: &str, word_texts: &[String]) -> Re
             .ok()
             .and_then(|value| value.checked_mul(4))
             .ok_or_else(|| "instruction stream is too large".to_owned())?;
-        let pc = base_pc.checked_add(offset)
+        let pc = base_pc
+            .checked_add(offset)
             .ok_or_else(|| "instruction stream guest PC overflows".to_owned())?;
         decoded.push(mips::decode(parse_hex(word_text)?, pc));
     }
@@ -519,28 +672,41 @@ fn usage() {
     println!("  reps2 compile-cfg-fixture <output.cpp>");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
-    println!("add-game imports one ISO into the default per-user REPS2 library; --library overrides the location.");
-    println!("The original ISO remains at its source path; generated artifacts are experimental and do not imply playability.");
-    println!("disc-info and extract-boot-elf read raw 2048-byte-sector ISO 9660 images without loading the whole disc into memory.");
-    println!("extract-boot-elf resolves SYSTEM.CNF BOOT2 (preferred) or BOOT and accepts only MIPS ET_EXEC images.");
-    println!("recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images.");
-    println!("Allocated relocations, non-main-RAM PT_LOAD segments, branch-likely and PS2 hardware services remain unsupported.");
+    println!(
+        "add-game imports one ISO into the default per-user REPS2 library; --library overrides the location."
+    );
+    println!(
+        "The original ISO remains at its source path; generated artifacts are experimental and do not imply playability."
+    );
+    println!(
+        "disc-info and extract-boot-elf read raw 2048-byte-sector ISO 9660 images without loading the whole disc into memory."
+    );
+    println!(
+        "extract-boot-elf resolves SYSTEM.CNF BOOT2 (preferred) or BOOT and accepts only MIPS ET_EXEC images."
+    );
+    println!(
+        "recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images."
+    );
+    println!(
+        "Allocated relocations, non-main-RAM PT_LOAD segments, branch-likely and PS2 hardware services remain unsupported."
+    );
 }
 
 fn run() -> Result<(), String> {
     let arguments: Vec<String> = env::args().collect();
     match arguments.get(1).map(String::as_str) {
         Some("version") if arguments.len() == 2 => {
-            println!("REPS2 {} (Rust frontend, experimental)", reps2_frontend::VERSION);
+            println!(
+                "REPS2 {} (Rust frontend, experimental)",
+                reps2_frontend::VERSION
+            );
             Ok(())
         }
         Some("disc-info") if arguments.len() == 3 => disc_info(Path::new(&arguments[2])),
-        Some("add-game") if arguments.len() == 3 => {
-            add_game(Path::new(&arguments[2]), None)
-        }
+        Some("add-game") if arguments.len() == 3 => add_game(Path::new(&arguments[2]), None),
         Some("add-game") if arguments.len() == 5 && arguments[3] == "--library" => {
             add_game(Path::new(&arguments[2]), Some(Path::new(&arguments[4])))
-        },
+        }
         Some("extract-boot-elf") if arguments.len() == 4 => {
             extract_boot_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
         }

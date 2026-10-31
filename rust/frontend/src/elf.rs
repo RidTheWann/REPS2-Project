@@ -48,7 +48,9 @@ pub struct Error {
 
 impl Error {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self {
+            message: message.into(),
+        }
     }
 }
 
@@ -143,7 +145,10 @@ impl Image {
 
     #[must_use]
     pub fn loadable_segment_count(&self) -> usize {
-        self.program_headers.iter().filter(|header| header.kind == PT_LOAD).count()
+        self.program_headers
+            .iter()
+            .filter(|header| header.kind == PT_LOAD)
+            .count()
     }
 }
 
@@ -200,18 +205,29 @@ pub fn ee_main_ram_physical_address(virtual_address: u32) -> Option<u32> {
 }
 
 fn read_u8(bytes: &[u8], offset: usize) -> Result<u8, Error> {
-    bytes.get(offset).copied().ok_or_else(|| Error::new("ELF field extends beyond the input buffer"))
+    bytes
+        .get(offset)
+        .copied()
+        .ok_or_else(|| Error::new("ELF field extends beyond the input buffer"))
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, Error> {
-    let end = offset.checked_add(2).ok_or_else(|| Error::new("ELF offset overflow"))?;
-    let part = bytes.get(offset..end).ok_or_else(|| Error::new("ELF 16-bit field extends beyond the input buffer"))?;
+    let end = offset
+        .checked_add(2)
+        .ok_or_else(|| Error::new("ELF offset overflow"))?;
+    let part = bytes
+        .get(offset..end)
+        .ok_or_else(|| Error::new("ELF 16-bit field extends beyond the input buffer"))?;
     Ok(u16::from_le_bytes([part[0], part[1]]))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, Error> {
-    let end = offset.checked_add(4).ok_or_else(|| Error::new("ELF offset overflow"))?;
-    let part = bytes.get(offset..end).ok_or_else(|| Error::new("ELF 32-bit field extends beyond the input buffer"))?;
+    let end = offset
+        .checked_add(4)
+        .ok_or_else(|| Error::new("ELF offset overflow"))?;
+    let part = bytes
+        .get(offset..end)
+        .ok_or_else(|| Error::new("ELF 32-bit field extends beyond the input buffer"))?;
     Ok(u32::from_le_bytes([part[0], part[1], part[2], part[3]]))
 }
 
@@ -220,11 +236,17 @@ fn read_i32(bytes: &[u8], offset: usize) -> Result<i32, Error> {
 }
 
 fn checked_range(bytes: &[u8], offset: u64, size: u64, label: &str) -> Result<Range<usize>, Error> {
-    let end = offset.checked_add(size).ok_or_else(|| Error::new(format!("{label} range overflows")))?;
-    let start = usize::try_from(offset).map_err(|_| Error::new(format!("{label} offset does not fit host size")))?;
-    let end = usize::try_from(end).map_err(|_| Error::new(format!("{label} end does not fit host size")))?;
+    let end = offset
+        .checked_add(size)
+        .ok_or_else(|| Error::new(format!("{label} range overflows")))?;
+    let start = usize::try_from(offset)
+        .map_err(|_| Error::new(format!("{label} offset does not fit host size")))?;
+    let end = usize::try_from(end)
+        .map_err(|_| Error::new(format!("{label} end does not fit host size")))?;
     if end > bytes.len() {
-        return Err(Error::new(format!("{label} extends beyond the input buffer")));
+        return Err(Error::new(format!(
+            "{label} extends beyond the input buffer"
+        )));
     }
     Ok(start..end)
 }
@@ -244,25 +266,42 @@ fn validate_table(
         return Err(Error::new(format!("ELF {label} entry size is too small")));
     }
     let size = u64::from(entry_size) * u64::from(count);
-    checked_range(bytes, u64::from(offset), size, &format!("ELF {label} table"))?;
+    checked_range(
+        bytes,
+        u64::from(offset),
+        size,
+        &format!("ELF {label} table"),
+    )?;
     Ok(())
 }
 
-fn section_data<'a>(bytes: &'a [u8], section: &SectionHeader, label: &str) -> Result<&'a [u8], Error> {
+fn section_data<'a>(
+    bytes: &'a [u8],
+    section: &SectionHeader,
+    label: &str,
+) -> Result<&'a [u8], Error> {
     if section.kind == SHT_NOBITS {
         return Ok(&[]);
     }
-    let range = checked_range(bytes, u64::from(section.offset), u64::from(section.size), label)?;
+    let range = checked_range(
+        bytes,
+        u64::from(section.offset),
+        u64::from(section.size),
+        label,
+    )?;
     Ok(&bytes[range])
 }
 
 fn read_string(table: &[u8], offset: u32, label: &str) -> Result<String, Error> {
-    let start = usize::try_from(offset).map_err(|_| Error::new(format!("{label} offset does not fit host size")))?;
+    let start = usize::try_from(offset)
+        .map_err(|_| Error::new(format!("{label} offset does not fit host size")))?;
     if start >= table.len() {
         return Err(Error::new(format!("{label} offset is out of range")));
     }
     let tail = &table[start..];
-    let end = tail.iter().position(|value| *value == 0)
+    let end = tail
+        .iter()
+        .position(|value| *value == 0)
         .ok_or_else(|| Error::new(format!("{label} is not null-terminated")))?;
     let value = std::str::from_utf8(&tail[..end])
         .map_err(|_| Error::new(format!("{label} is not valid UTF-8")))?;
@@ -285,7 +324,11 @@ fn read_section_header(bytes: &[u8], offset: usize) -> Result<SectionHeader, Err
     })
 }
 
-fn parse_symbols(bytes: &[u8], sections: &[SectionHeader], limits: ParseLimits) -> Result<Vec<Symbol>, Error> {
+fn parse_symbols(
+    bytes: &[u8],
+    sections: &[SectionHeader],
+    limits: ParseLimits,
+) -> Result<Vec<Symbol>, Error> {
     let mut symbols = Vec::new();
     for (section_index, section) in sections.iter().enumerate() {
         if section.kind != SHT_SYMTAB && section.kind != SHT_DYNSYM {
@@ -294,36 +337,49 @@ fn parse_symbols(bytes: &[u8], sections: &[SectionHeader], limits: ParseLimits) 
         if section.entry_size < SYMBOL_SIZE as u32 || section.size % section.entry_size != 0 {
             return Err(Error::new("ELF symbol table has an invalid entry size"));
         }
-        let string_index = usize::try_from(section.link).map_err(|_| Error::new("Symbol string-table index overflow"))?;
-        let strings = sections.get(string_index).ok_or_else(|| Error::new("ELF symbol table links to an invalid string table"))?;
+        let string_index = usize::try_from(section.link)
+            .map_err(|_| Error::new("Symbol string-table index overflow"))?;
+        let strings = sections
+            .get(string_index)
+            .ok_or_else(|| Error::new("ELF symbol table links to an invalid string table"))?;
         if strings.kind != SHT_STRTAB {
-            return Err(Error::new("ELF symbol table link does not reference SHT_STRTAB"));
+            return Err(Error::new(
+                "ELF symbol table link does not reference SHT_STRTAB",
+            ));
         }
         let count = usize::try_from(section.size / section.entry_size)
             .map_err(|_| Error::new("ELF symbol count does not fit host size"))?;
         if count > limits.max_symbols.saturating_sub(symbols.len()) {
-            return Err(Error::new("ELF symbol count exceeds configured parser limit"));
+            return Err(Error::new(
+                "ELF symbol count exceeds configured parser limit",
+            ));
         }
         let string_data = section_data(bytes, strings, "ELF symbol string table")?;
         let table = section_data(bytes, section, "ELF symbol table")?;
         for index in 0..count {
-            let base = index.checked_mul(section.entry_size as usize)
+            let base = index
+                .checked_mul(section.entry_size as usize)
                 .ok_or_else(|| Error::new("ELF symbol entry offset overflow"))?;
             let name_offset = read_u32(table, base)?;
             let info = read_u8(table, base + 12)?;
             let other = read_u8(table, base + 13)?;
             let symbol_section = read_u16(table, base + 14)?;
             if symbol_section == u16::MAX {
-                return Err(Error::new("Extended ELF symbol section indices are not supported yet"));
+                return Err(Error::new(
+                    "Extended ELF symbol section indices are not supported yet",
+                ));
             }
             symbols.push(Symbol {
-                name: if name_offset == 0 { String::new() } else {
+                name: if name_offset == 0 {
+                    String::new()
+                } else {
                     read_string(string_data, name_offset, "ELF symbol name")?
                 },
                 value: read_u32(table, base + 4)?,
                 size: read_u32(table, base + 8)?,
                 table_section_index: section_index,
-                table_index: u32::try_from(index).map_err(|_| Error::new("ELF symbol index overflow"))?,
+                table_index: u32::try_from(index)
+                    .map_err(|_| Error::new("ELF symbol index overflow"))?,
                 section_index: symbol_section,
                 binding: info >> 4,
                 kind: info & 0x0F,
@@ -334,7 +390,11 @@ fn parse_symbols(bytes: &[u8], sections: &[SectionHeader], limits: ParseLimits) 
     Ok(symbols)
 }
 
-fn parse_relocations(bytes: &[u8], sections: &[SectionHeader], limits: ParseLimits) -> Result<Vec<Relocation>, Error> {
+fn parse_relocations(
+    bytes: &[u8],
+    sections: &[SectionHeader],
+    limits: ParseLimits,
+) -> Result<Vec<Relocation>, Error> {
     let mut relocations = Vec::new();
     for (section_index, section) in sections.iter().enumerate() {
         let rela = section.kind == SHT_RELA;
@@ -345,40 +405,60 @@ fn parse_relocations(bytes: &[u8], sections: &[SectionHeader], limits: ParseLimi
         if section.entry_size < minimum as u32 || section.size % section.entry_size != 0 {
             return Err(Error::new("ELF relocation table has an invalid entry size"));
         }
-        let symbol_table_index = usize::try_from(section.link).map_err(|_| Error::new("Relocation symbol table index overflow"))?;
-        let target_section_index = usize::try_from(section.info).map_err(|_| Error::new("Relocation target section index overflow"))?;
-        let symbol_table = sections.get(symbol_table_index)
+        let symbol_table_index = usize::try_from(section.link)
+            .map_err(|_| Error::new("Relocation symbol table index overflow"))?;
+        let target_section_index = usize::try_from(section.info)
+            .map_err(|_| Error::new("Relocation target section index overflow"))?;
+        let symbol_table = sections
+            .get(symbol_table_index)
             .ok_or_else(|| Error::new("ELF relocation references an invalid symbol table"))?;
         if symbol_table.kind != SHT_SYMTAB && symbol_table.kind != SHT_DYNSYM {
-            return Err(Error::new("ELF relocation does not reference a symbol table"));
+            return Err(Error::new(
+                "ELF relocation does not reference a symbol table",
+            ));
         }
         if sections.get(target_section_index).is_none() {
-            return Err(Error::new("ELF relocation references an invalid target section"));
+            return Err(Error::new(
+                "ELF relocation references an invalid target section",
+            ));
         }
-        if symbol_table.entry_size < SYMBOL_SIZE as u32 || symbol_table.size % symbol_table.entry_size != 0 {
-            return Err(Error::new("ELF relocation references a malformed symbol table"));
+        if symbol_table.entry_size < SYMBOL_SIZE as u32
+            || symbol_table.size % symbol_table.entry_size != 0
+        {
+            return Err(Error::new(
+                "ELF relocation references a malformed symbol table",
+            ));
         }
         let symbol_count = symbol_table.size / symbol_table.entry_size;
         let count = usize::try_from(section.size / section.entry_size)
             .map_err(|_| Error::new("ELF relocation count does not fit host size"))?;
         if count > limits.max_relocations.saturating_sub(relocations.len()) {
-            return Err(Error::new("ELF relocation count exceeds configured parser limit"));
+            return Err(Error::new(
+                "ELF relocation count exceeds configured parser limit",
+            ));
         }
         let table = section_data(bytes, section, "ELF relocation table")?;
         for index in 0..count {
-            let base = index.checked_mul(section.entry_size as usize)
+            let base = index
+                .checked_mul(section.entry_size as usize)
                 .ok_or_else(|| Error::new("ELF relocation entry offset overflow"))?;
             let offset = read_u32(table, base)?;
             let info = read_u32(table, base + 4)?;
             let symbol_index = info >> 8;
             if symbol_index >= symbol_count {
-                return Err(Error::new("ELF relocation references an invalid symbol index"));
+                return Err(Error::new(
+                    "ELF relocation references an invalid symbol index",
+                ));
             }
             relocations.push(Relocation {
                 offset,
                 symbol_index,
                 relocation_type: (info & 0xFF) as u8,
-                addend: if rela { Some(read_i32(table, base + 8)?) } else { None },
+                addend: if rela {
+                    Some(read_i32(table, base + 8)?)
+                } else {
+                    None
+                },
                 relocation_section_index: section_index,
                 target_section_index,
                 symbol_table_section_index: symbol_table_index,
@@ -425,38 +505,71 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     if usize::from(header_size) < ELF_HEADER_SIZE || usize::from(header_size) > bytes.len() {
         return Err(Error::new("Invalid ELF header size"));
     }
-    if program_count == u16::MAX || section_name_table_index == u16::MAX
-        || (section_count == 0 && section_offset != 0) {
+    if program_count == u16::MAX
+        || section_name_table_index == u16::MAX
+        || (section_count == 0 && section_offset != 0)
+    {
         return Err(Error::new("Extended ELF numbering is not supported yet"));
     }
     if section_count == 0 && section_name_table_index != 0 {
-        return Err(Error::new("ELF has a section-name table index but no section table"));
+        return Err(Error::new(
+            "ELF has a section-name table index but no section table",
+        ));
     }
-    if section_count != 0 && section_name_table_index != 0 && section_name_table_index >= section_count {
+    if section_count != 0
+        && section_name_table_index != 0
+        && section_name_table_index >= section_count
+    {
         return Err(Error::new("ELF section-name table index is out of range"));
     }
     if program_count != 0 && program_offset < u32::from(header_size) {
-        return Err(Error::new("ELF program-header table overlaps the ELF header"));
+        return Err(Error::new(
+            "ELF program-header table overlaps the ELF header",
+        ));
     }
     if section_count != 0 && section_offset < u32::from(header_size) {
-        return Err(Error::new("ELF section-header table overlaps the ELF header"));
+        return Err(Error::new(
+            "ELF section-header table overlaps the ELF header",
+        ));
     }
-    validate_table(bytes, program_offset, program_entry_size, program_count, PROGRAM_HEADER_SIZE, "program-header")?;
-    validate_table(bytes, section_offset, section_entry_size, section_count, SECTION_HEADER_SIZE, "section-header")?;
+    validate_table(
+        bytes,
+        program_offset,
+        program_entry_size,
+        program_count,
+        PROGRAM_HEADER_SIZE,
+        "program-header",
+    )?;
+    validate_table(
+        bytes,
+        section_offset,
+        section_entry_size,
+        section_count,
+        SECTION_HEADER_SIZE,
+        "section-header",
+    )?;
 
     if program_count != 0 && section_count != 0 {
-        let program_end = u64::from(program_offset) + u64::from(program_entry_size) * u64::from(program_count);
-        let section_end = u64::from(section_offset) + u64::from(section_entry_size) * u64::from(section_count);
+        let program_end =
+            u64::from(program_offset) + u64::from(program_entry_size) * u64::from(program_count);
+        let section_end =
+            u64::from(section_offset) + u64::from(section_entry_size) * u64::from(section_count);
         if u64::from(program_offset) < section_end && u64::from(section_offset) < program_end {
-            return Err(Error::new("ELF program-header and section-header tables overlap"));
+            return Err(Error::new(
+                "ELF program-header and section-header tables overlap",
+            ));
         }
     }
 
     let mut program_headers = Vec::with_capacity(usize::from(program_count));
     for index in 0..usize::from(program_count) {
-        let base = usize::try_from(program_offset).map_err(|_| Error::new("Program-header offset overflow"))?
-            .checked_add(index.checked_mul(usize::from(program_entry_size))
-                .ok_or_else(|| Error::new("Program-header index overflow"))?)
+        let base = usize::try_from(program_offset)
+            .map_err(|_| Error::new("Program-header offset overflow"))?
+            .checked_add(
+                index
+                    .checked_mul(usize::from(program_entry_size))
+                    .ok_or_else(|| Error::new("Program-header index overflow"))?,
+            )
             .ok_or_else(|| Error::new("Program-header offset overflow"))?;
         let header = ProgramHeader {
             kind: read_u32(bytes, base)?,
@@ -468,7 +581,12 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             flags: read_u32(bytes, base + 24)?,
             alignment: read_u32(bytes, base + 28)?,
         };
-        checked_range(bytes, u64::from(header.offset), u64::from(header.file_size), "ELF segment data")?;
+        checked_range(
+            bytes,
+            u64::from(header.offset),
+            u64::from(header.file_size),
+            "ELF segment data",
+        )?;
         if header.kind == PT_LOAD {
             if header.file_size > header.memory_size {
                 return Err(Error::new("ELF PT_LOAD file size exceeds memory size"));
@@ -477,11 +595,18 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
                 return Err(Error::new("ELF PT_LOAD alignment is not a power of two"));
             }
             if header.alignment > 1
-                && header.virtual_address % header.alignment != header.offset % header.alignment {
-                return Err(Error::new("ELF PT_LOAD address and offset violate alignment"));
+                && header.virtual_address % header.alignment != header.offset % header.alignment
+            {
+                return Err(Error::new(
+                    "ELF PT_LOAD address and offset violate alignment",
+                ));
             }
-            if u64::from(header.virtual_address) + u64::from(header.memory_size) > (u64::from(u32::MAX) + 1) {
-                return Err(Error::new("ELF PT_LOAD virtual range overflows 32-bit address space"));
+            if u64::from(header.virtual_address) + u64::from(header.memory_size)
+                > (u64::from(u32::MAX) + 1)
+            {
+                return Err(Error::new(
+                    "ELF PT_LOAD virtual range overflows 32-bit address space",
+                ));
             }
         }
         program_headers.push(header);
@@ -489,38 +614,60 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
 
     let mut section_headers = Vec::with_capacity(usize::from(section_count));
     for index in 0..usize::from(section_count) {
-        let base = usize::try_from(section_offset).map_err(|_| Error::new("Section-header offset overflow"))?
-            .checked_add(index.checked_mul(usize::from(section_entry_size))
-                .ok_or_else(|| Error::new("Section-header index overflow"))?)
+        let base = usize::try_from(section_offset)
+            .map_err(|_| Error::new("Section-header offset overflow"))?
+            .checked_add(
+                index
+                    .checked_mul(usize::from(section_entry_size))
+                    .ok_or_else(|| Error::new("Section-header index overflow"))?,
+            )
             .ok_or_else(|| Error::new("Section-header offset overflow"))?;
         let section = read_section_header(bytes, base)?;
         if section.kind != SHT_NOBITS {
-            checked_range(bytes, u64::from(section.offset), u64::from(section.size), "ELF section data")?;
+            checked_range(
+                bytes,
+                u64::from(section.offset),
+                u64::from(section.size),
+                "ELF section data",
+            )?;
         }
         section_headers.push(section);
     }
 
-    let string_table_bytes = section_headers.iter()
+    let string_table_bytes = section_headers
+        .iter()
         .filter(|section| section.kind == SHT_STRTAB)
-        .try_fold(0usize, |sum, section| sum.checked_add(section.size as usize)
-            .ok_or_else(|| Error::new("ELF string-table size overflow")))?;
+        .try_fold(0usize, |sum, section| {
+            sum.checked_add(section.size as usize)
+                .ok_or_else(|| Error::new("ELF string-table size overflow"))
+        })?;
     if string_table_bytes > limits.max_string_table_bytes {
-        return Err(Error::new("ELF string tables exceed configured parser limit"));
+        return Err(Error::new(
+            "ELF string tables exceed configured parser limit",
+        ));
     }
 
     if section_name_table_index != 0 {
-        let names = section_headers.get(usize::from(section_name_table_index))
+        let names = section_headers
+            .get(usize::from(section_name_table_index))
             .ok_or_else(|| Error::new("ELF section-name table index is invalid"))?;
         if names.kind != SHT_STRTAB {
-            return Err(Error::new("ELF section-name table does not reference SHT_STRTAB"));
+            return Err(Error::new(
+                "ELF section-name table does not reference SHT_STRTAB",
+            ));
         }
         let name_data = section_data(bytes, names, "ELF section-name string table")?;
         if name_data.first() != Some(&0) {
-            return Err(Error::new("ELF section-name string table must begin with null"));
+            return Err(Error::new(
+                "ELF section-name string table must begin with null",
+            ));
         }
         for section in &mut section_headers {
-            section.name = if section.name_offset == 0 { String::new() }
-                else { read_string(name_data, section.name_offset, "ELF section name")? };
+            section.name = if section.name_offset == 0 {
+                String::new()
+            } else {
+                read_string(name_data, section.name_offset, "ELF section name")?
+            };
         }
     }
 
@@ -551,7 +698,9 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
         return Err(Error::new("EE main-RAM image requires EM_MIPS"));
     }
     if !image.is_executable() {
-        return Err(Error::new("EE main-RAM image currently requires ET_EXEC; relocatable/shared ELF loading is not implemented"));
+        return Err(Error::new(
+            "EE main-RAM image currently requires ET_EXEC; relocatable/shared ELF loading is not implemented",
+        ));
     }
 
     if image.entry_point & 3 != 0 {
@@ -559,13 +708,14 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
     }
 
     for relocation in &image.relocations {
-        let target = image.section_headers.get(relocation.target_section_index)
+        let target = image
+            .section_headers
+            .get(relocation.target_section_index)
             .ok_or_else(|| Error::new("ELF relocation target section index is invalid"))?;
         if target.flags & SHF_ALLOC != 0 {
             return Err(Error::new(format!(
                 "allocated ELF relocation type {} at 0x{:08X} is not supported yet",
-                relocation.relocation_type,
-                relocation.offset
+                relocation.relocation_type, relocation.offset
             )));
         }
     }
@@ -577,14 +727,17 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
 
     for segment in loaded {
         let memory_size = segment.bytes.len();
-        let physical_address = ee_main_ram_physical_address(segment.virtual_address)
-            .ok_or_else(|| Error::new(format!(
-                "PT_LOAD at 0x{:08X} is outside the supported EE main-RAM aliases",
-                segment.virtual_address
-            )))?;
+        let physical_address =
+            ee_main_ram_physical_address(segment.virtual_address).ok_or_else(|| {
+                Error::new(format!(
+                    "PT_LOAD at 0x{:08X} is outside the supported EE main-RAM aliases",
+                    segment.virtual_address
+                ))
+            })?;
 
         let start = u64::from(physical_address);
-        let end = start.checked_add(memory_size as u64)
+        let end = start
+            .checked_add(memory_size as u64)
             .ok_or_else(|| Error::new("PT_LOAD physical main-RAM range overflows"))?;
         if end > EE_MAIN_RAM_SIZE as u64 {
             return Err(Error::new(format!(
@@ -594,17 +747,25 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
         }
 
         if memory_size > 0 {
-            let last_virtual = segment.virtual_address.checked_add(
-                u32::try_from(memory_size - 1)
-                    .map_err(|_| Error::new("PT_LOAD memory size does not fit guest address width"))?
-            ).ok_or_else(|| Error::new("PT_LOAD guest virtual range overflows"))?;
-            let last_physical = ee_main_ram_physical_address(last_virtual)
-                .ok_or_else(|| Error::new("PT_LOAD crosses out of the supported EE main-RAM aliases"))?;
+            let last_virtual = segment
+                .virtual_address
+                .checked_add(u32::try_from(memory_size - 1).map_err(|_| {
+                    Error::new("PT_LOAD memory size does not fit guest address width")
+                })?)
+                .ok_or_else(|| Error::new("PT_LOAD guest virtual range overflows"))?;
+            let last_physical = ee_main_ram_physical_address(last_virtual).ok_or_else(|| {
+                Error::new("PT_LOAD crosses out of the supported EE main-RAM aliases")
+            })?;
             if u64::from(last_physical) != end - 1 {
-                return Err(Error::new("PT_LOAD crosses a non-contiguous EE main-RAM alias boundary"));
+                return Err(Error::new(
+                    "PT_LOAD crosses a non-contiguous EE main-RAM alias boundary",
+                ));
             }
 
-            if physical_ranges.iter().any(|range| start < range.end && range.start < end) {
+            if physical_ranges
+                .iter()
+                .any(|range| start < range.end && range.start < end)
+            {
                 return Err(Error::new(format!(
                     "PT_LOAD at 0x{:08X} overlaps another segment after EE RAM alias translation",
                     segment.virtual_address
@@ -613,7 +774,8 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
             physical_ranges.push(start..end);
             let offset = usize::try_from(physical_address)
                 .map_err(|_| Error::new("PT_LOAD physical address does not fit host size"))?;
-            let copy_end = offset.checked_add(memory_size)
+            let copy_end = offset
+                .checked_add(memory_size)
                 .ok_or_else(|| Error::new("PT_LOAD host memory range overflows"))?;
             ram[offset..copy_end].copy_from_slice(&segment.bytes);
         }
@@ -627,8 +789,9 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
         });
     }
 
-    let entry_physical = ee_main_ram_physical_address(image.entry_point)
-        .ok_or_else(|| Error::new("ELF entry point is outside the supported EE main-RAM aliases"))?;
+    let entry_physical = ee_main_ram_physical_address(image.entry_point).ok_or_else(|| {
+        Error::new("ELF entry point is outside the supported EE main-RAM aliases")
+    })?;
     let entry_is_file_backed_code = segments.iter().any(|segment| {
         segment.flags & PF_X != 0
             && image.entry_point >= segment.virtual_address
@@ -636,12 +799,19 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
                 < u64::from(segment.virtual_address) + segment.file_size as u64
     });
     if !entry_is_file_backed_code {
-        return Err(Error::new("ELF entry point is not inside file-backed executable PT_LOAD data"));
+        return Err(Error::new(
+            "ELF entry point is not inside file-backed executable PT_LOAD data",
+        ));
     }
     let entry_offset = usize::try_from(entry_physical)
         .map_err(|_| Error::new("ELF entry physical address does not fit host size"))?;
-    if entry_offset.checked_add(4).is_none_or(|end| end > ram.len()) {
-        return Err(Error::new("ELF entry instruction extends beyond EE main RAM"));
+    if entry_offset
+        .checked_add(4)
+        .is_none_or(|end| end > ram.len())
+    {
+        return Err(Error::new(
+            "ELF entry instruction extends beyond EE main RAM",
+        ));
     }
 
     Ok(MainRamImage {
@@ -651,32 +821,56 @@ pub fn build_main_ram_image(bytes: &[u8], image: &Image) -> Result<MainRamImage,
     })
 }
 
-pub fn load_segments(bytes: &[u8], image: &Image, maximum_total_memory: usize) -> Result<Vec<LoadedSegment>, Error> {
+pub fn load_segments(
+    bytes: &[u8],
+    image: &Image,
+    maximum_total_memory: usize,
+) -> Result<Vec<LoadedSegment>, Error> {
     let mut total = 0usize;
     let mut ranges: Vec<Range<u64>> = Vec::new();
     let mut segments = Vec::new();
 
-    for header in image.program_headers.iter().filter(|header| header.kind == PT_LOAD) {
+    for header in image
+        .program_headers
+        .iter()
+        .filter(|header| header.kind == PT_LOAD)
+    {
         if header.file_size > header.memory_size {
             return Err(Error::new("ELF PT_LOAD file size exceeds memory size"));
         }
-        if u64::from(header.virtual_address) + u64::from(header.memory_size) > (u64::from(u32::MAX) + 1) {
-            return Err(Error::new("ELF PT_LOAD virtual range overflows 32-bit address space"));
+        if u64::from(header.virtual_address) + u64::from(header.memory_size)
+            > (u64::from(u32::MAX) + 1)
+        {
+            return Err(Error::new(
+                "ELF PT_LOAD virtual range overflows 32-bit address space",
+            ));
         }
         let memory_size = usize::try_from(header.memory_size)
             .map_err(|_| Error::new("ELF segment memory size does not fit host size"))?;
-        total = total.checked_add(memory_size).ok_or_else(|| Error::new("ELF loaded memory size overflow"))?;
+        total = total
+            .checked_add(memory_size)
+            .ok_or_else(|| Error::new("ELF loaded memory size overflow"))?;
         if total > maximum_total_memory {
-            return Err(Error::new("ELF PT_LOAD memory exceeds configured load limit"));
+            return Err(Error::new(
+                "ELF PT_LOAD memory exceeds configured load limit",
+            ));
         }
         let start = u64::from(header.virtual_address);
         let end = start + u64::from(header.memory_size);
-        if ranges.iter().any(|range| start < range.end && range.start < end) {
+        if ranges
+            .iter()
+            .any(|range| start < range.end && range.start < end)
+        {
             return Err(Error::new("ELF PT_LOAD virtual memory ranges overlap"));
         }
         ranges.push(start..end);
 
-        let file_range = checked_range(bytes, u64::from(header.offset), u64::from(header.file_size), "ELF PT_LOAD data")?;
+        let file_range = checked_range(
+            bytes,
+            u64::from(header.offset),
+            u64::from(header.file_size),
+            "ELF PT_LOAD data",
+        )?;
         let file_size = usize::try_from(header.file_size)
             .map_err(|_| Error::new("ELF segment file size does not fit host size"))?;
         let mut memory = vec![0; memory_size];
@@ -761,7 +955,10 @@ mod tests {
         let shstr = b"\0.shstrtab\0.strtab\0.symtab\0.text\0.rel.text\0";
         let strtab = b"\0entry\0";
         let find_name = |name: &[u8]| -> u32 {
-            shstr.windows(name.len()).position(|window| window == name).unwrap() as u32
+            shstr
+                .windows(name.len())
+                .position(|window| window == name)
+                .unwrap() as u32
         };
         let section_table_end = 52 + (6 * 40);
         let shstr_offset = section_table_end;
@@ -796,31 +993,81 @@ mod tests {
         put_u32(&mut bytes, rel_offset, 0x1000);
         put_u32(&mut bytes, rel_offset + 4, (1 << 8) | 2);
 
-        write_section(&mut bytes, 52 + 40, SectionSpec {
-            name: find_name(b".shstrtab"), kind: SHT_STRTAB, address: 0,
-            offset: shstr_offset as u32, size: shstr.len() as u32,
-            link: 0, info: 0, alignment: 1, entry_size: 0,
-        });
-        write_section(&mut bytes, 52 + 80, SectionSpec {
-            name: find_name(b".strtab"), kind: SHT_STRTAB, address: 0,
-            offset: strtab_offset as u32, size: strtab.len() as u32,
-            link: 0, info: 0, alignment: 1, entry_size: 0,
-        });
-        write_section(&mut bytes, 52 + 120, SectionSpec {
-            name: find_name(b".symtab"), kind: SHT_SYMTAB, address: 0,
-            offset: symtab_offset as u32, size: 32,
-            link: 2, info: 1, alignment: 4, entry_size: 16,
-        });
-        write_section(&mut bytes, 52 + 160, SectionSpec {
-            name: find_name(b".text"), kind: 1, address: 0x1000,
-            offset: text_offset as u32, size: 4,
-            link: 0, info: 0, alignment: 4, entry_size: 0,
-        });
-        write_section(&mut bytes, 52 + 200, SectionSpec {
-            name: find_name(b".rel.text"), kind: SHT_REL, address: 0,
-            offset: rel_offset as u32, size: 8,
-            link: 3, info: 4, alignment: 4, entry_size: 8,
-        });
+        write_section(
+            &mut bytes,
+            52 + 40,
+            SectionSpec {
+                name: find_name(b".shstrtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: shstr_offset as u32,
+                size: shstr.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_section(
+            &mut bytes,
+            52 + 80,
+            SectionSpec {
+                name: find_name(b".strtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: strtab_offset as u32,
+                size: strtab.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_section(
+            &mut bytes,
+            52 + 120,
+            SectionSpec {
+                name: find_name(b".symtab"),
+                kind: SHT_SYMTAB,
+                address: 0,
+                offset: symtab_offset as u32,
+                size: 32,
+                link: 2,
+                info: 1,
+                alignment: 4,
+                entry_size: 16,
+            },
+        );
+        write_section(
+            &mut bytes,
+            52 + 160,
+            SectionSpec {
+                name: find_name(b".text"),
+                kind: 1,
+                address: 0x1000,
+                offset: text_offset as u32,
+                size: 4,
+                link: 0,
+                info: 0,
+                alignment: 4,
+                entry_size: 0,
+            },
+        );
+        write_section(
+            &mut bytes,
+            52 + 200,
+            SectionSpec {
+                name: find_name(b".rel.text"),
+                kind: SHT_REL,
+                address: 0,
+                offset: rel_offset as u32,
+                size: 8,
+                link: 3,
+                info: 4,
+                alignment: 4,
+                entry_size: 8,
+            },
+        );
         bytes
     }
 
@@ -860,7 +1107,10 @@ mod tests {
 
         assert_eq!(ram.entry_point, 0x0010_0000);
         assert_eq!(ram.bytes.len(), EE_MAIN_RAM_SIZE);
-        assert_eq!(&ram.bytes[0x0010_0000..0x0010_0008], &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            &ram.bytes[0x0010_0000..0x0010_0008],
+            &[1, 2, 3, 4, 5, 6, 7, 8]
+        );
         assert_eq!(&ram.bytes[0x0010_0008..0x0010_0010], &[0; 8]);
         assert_eq!(ram.segments.len(), 1);
         assert_eq!(ram.segments[0].physical_address, 0x0010_0000);
@@ -899,7 +1149,10 @@ mod tests {
         let image = parse(&bytes, ParseLimits::default()).expect("KSEG ELF parses");
         let ram = build_main_ram_image(&bytes, &image).expect("KSEG0 maps to EE RAM");
         assert_eq!(ram.segments[0].physical_address, 0x0010_0000);
-        assert_eq!(&ram.bytes[0x0010_0000..0x0010_0008], &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            &ram.bytes[0x0010_0000..0x0010_0008],
+            &[1, 2, 3, 4, 5, 6, 7, 8]
+        );
     }
 
     #[test]
@@ -911,7 +1164,8 @@ mod tests {
 
         let mut unaligned_entry = minimal_elf();
         put_u32(&mut unaligned_entry, 24, 0x0010_0002);
-        let unaligned_image = parse(&unaligned_entry, ParseLimits::default()).expect("unaligned entry metadata parses");
+        let unaligned_image = parse(&unaligned_entry, ParseLimits::default())
+            .expect("unaligned entry metadata parses");
         assert!(build_main_ram_image(&unaligned_entry, &unaligned_image).is_err());
 
         let mut mmio = minimal_elf();
@@ -931,7 +1185,8 @@ mod tests {
         put_u32(&mut aliased, 100, 0);
         put_u32(&mut aliased, 104, 4);
         put_u32(&mut aliased, 108, 6);
-        let aliased_image = parse(&aliased, ParseLimits::default()).expect("non-overlapping virtual aliases parse");
+        let aliased_image =
+            parse(&aliased, ParseLimits::default()).expect("non-overlapping virtual aliases parse");
         assert!(build_main_ram_image(&aliased, &aliased_image).is_err());
     }
 
@@ -940,10 +1195,12 @@ mod tests {
         let mut bytes = elf_with_symbol_and_rel();
         put_u32(&mut bytes, 52 + 160 + 8, SHF_ALLOC);
         let image = parse(&bytes, ParseLimits::default()).expect("allocated REL fixture parses");
-        assert!(build_main_ram_image(&bytes, &image)
-            .expect_err("allocated relocation cannot be ignored")
-            .to_string()
-            .contains("relocation"));
+        assert!(
+            build_main_ram_image(&bytes, &image)
+                .expect_err("allocated relocation cannot be ignored")
+                .to_string()
+                .contains("relocation")
+        );
     }
 
     #[test]
