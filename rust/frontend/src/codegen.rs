@@ -62,6 +62,19 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::MoveToLo { src } => emit_move_to_hilo(output, src, "lo"),
         Operation::MultiplyWordSigned { dst, lhs, rhs } => emit_multiply_word(output, index, dst, lhs, rhs, true),
         Operation::MultiplyWordUnsigned { dst, lhs, rhs } => emit_multiply_word(output, index, dst, lhs, rhs, false),
+        Operation::Nor64 { dst, lhs, rhs } => emit_binary64_not_or(output, dst, lhs, rhs),
+        Operation::SetLessThanSigned64 { dst, lhs, rhs } => {
+            emit_set_less_than(output, dst, lhs, rhs, true);
+        }
+        Operation::SetLessThanUnsigned64 { dst, lhs, rhs } => {
+            emit_set_less_than(output, dst, lhs, rhs, false);
+        }
+        Operation::SetLessThanImmediateSigned64 { dst, src, immediate } => {
+            emit_set_less_than_immediate(output, dst, src, immediate, true);
+        }
+        Operation::SetLessThanImmediateUnsigned64 { dst, src, immediate } => {
+            emit_set_less_than_immediate(output, dst, src, immediate, false);
+        }
         Operation::AddWord { dst, lhs, rhs } => emit_word_add(
             output, index, dst, lhs, rhs, true
         ),
@@ -486,6 +499,58 @@ fn emit_multiply_word(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs
     ));
 }
 
+fn emit_binary64_not_or(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr) {
+    let d = dst.index();
+    let a = lhs.index();
+    let b = rhs.index();
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}].low = ~(state.gpr[{a}].low | state.gpr[{b}].low);\n"
+    ));
+}
+
+fn emit_set_less_than(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr, signed: bool) {
+    let d = dst.index();
+    let a = lhs.index();
+    let b = rhs.index();
+    let expression = if signed {
+        format!(
+            "std::bit_cast<std::int64_t>(state.gpr[{a}].low) < std::bit_cast<std::int64_t>(state.gpr[{b}].low)"
+        )
+    } else {
+        format!("state.gpr[{a}].low < state.gpr[{b}].low")
+    };
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}].low = ({expression}) ? 1ULL : 0ULL;\n"
+    ));
+}
+
+fn emit_set_less_than_immediate(
+    output: &mut String,
+    dst: Gpr,
+    src: Gpr,
+    immediate: u16,
+    signed: bool,
+) {
+    let d = dst.index();
+    let s = src.index();
+    // Both SLTI and SLTIU sign-extend the 16-bit immediate. SLTIU then
+    // interprets that sign-extended bit pattern as an unsigned 64-bit value.
+    let signed_immediate = immediate as i16 as i64;
+    let rhs = if signed {
+        format!("static_cast<std::int64_t>({signed_immediate}LL)")
+    } else {
+        format!("static_cast<std::uint64_t>({signed_immediate}LL)")
+    };
+    let lhs = if signed {
+        format!("std::bit_cast<std::int64_t>(state.gpr[{s}].low)")
+    } else {
+        format!("state.gpr[{s}].low")
+    };
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}].low = ({lhs} < {rhs}) ? 1ULL : 0ULL;\n"
+    ));
+}
+
 fn emit_binary64(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr, operator: &str) {
     let d = dst.index();
     let a = lhs.index();
@@ -752,6 +817,31 @@ mod tests {
         assert!(cpp.contains("multiply_product_bits_0007 = multiply_lhs_0007 * multiply_rhs_0007"));
         assert!(cpp.contains("state.gpr[23].low = state.lo"));
         assert!(cpp.contains("state.hi = sign_extend_word(multiply_high_0007)"));
+    }
+
+
+    #[test]
+    fn emits_r5900_signed_unsigned_comparisons_and_nor_with_exact_lane_semantics() {
+        let words = [
+            (4 << 21) | (5 << 16) | (6 << 11) | 0x27,
+            (4 << 21) | (5 << 16) | (7 << 11) | 0x2A,
+            (4 << 21) | (5 << 16) | (8 << 11) | 0x2B,
+            (0x0A << 26) | (9 << 21) | (10 << 16) | 0x8001,
+            (0x0B << 26) | (11 << 21) | (12 << 16) | 0xFFFF,
+        ];
+        let decoded_stream = words.iter().enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xA000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("comparison/NOR IR");
+        let cpp = emit_cpp(&program).expect("comparison/NOR C++");
+
+        assert!(cpp.contains("~(state.gpr[4].low | state.gpr[5].low)"));
+        assert!(cpp.contains("std::bit_cast<std::int64_t>(state.gpr[4].low) < std::bit_cast<std::int64_t>(state.gpr[5].low)"));
+        assert!(cpp.contains("state.gpr[4].low < state.gpr[5].low"));
+        assert!(cpp.contains("std::bit_cast<std::int64_t>(state.gpr[9].low) < static_cast<std::int64_t>(-32767LL)"));
+        assert!(cpp.contains("state.gpr[11].low < static_cast<std::uint64_t>(-1LL)"));
+        assert!(cpp.contains("? 1ULL : 0ULL"));
+        assert!(cpp.contains("#include <bit>"));
     }
 
 }
