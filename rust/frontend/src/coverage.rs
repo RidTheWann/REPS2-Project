@@ -278,28 +278,35 @@ mod tests {
 
     #[test]
     fn counts_supported_trap_and_unsupported_words() {
-        let words = [0x0000_0000, 0x2408_0005, 0x7000_0C28, 0x0000_000C];
+        let words = [
+            0x0000_0000,
+            0x2408_0005,
+            0x7000_0C28,
+            0x7000_0468,
+            0x0000_000C,
+        ];
         let bytes = words_to_bytes(&words);
-        let image = image_with_segment(0x1000, 0x1000, 16, 16, PF_X);
+        let image = image_with_segment(0x1000, 0x1000, 20, 20, PF_X);
 
         let profile = profile(&image, &bytes).expect("valid executable segment");
-        assert_eq!(profile.file_backed_executable_bytes, 16);
-        assert_eq!(profile.scanned_words, 4);
-        assert_eq!(profile.supported_words, 2);
+        assert_eq!(profile.file_backed_executable_bytes, 20);
+        assert_eq!(profile.scanned_words, 5);
+        assert_eq!(profile.supported_words, 3);
         assert_eq!(profile.trap_words, 1);
         assert_eq!(profile.unsupported_words, 1);
         assert_eq!(profile.supported_opcodes.get("nop"), Some(&1));
         assert_eq!(profile.supported_opcodes.get("addiu"), Some(&1));
+        assert_eq!(profile.supported_opcodes.get("padduw"), Some(&1));
         assert_eq!(
             profile.unsupported_families.get(&EncodingFamily::Mmi1),
             Some(&1)
         );
-        assert_eq!(profile.unsupported_encodings.get(&0x7000_0C28), Some(&1));
+        assert_eq!(profile.unsupported_encodings.get(&0x7000_0468), Some(&1));
 
         let scan = profile.entry_scan.expect("entry is executable");
-        assert_eq!(scan.decoded_words, 2);
-        assert_eq!(scan.stop_pc, 0x1008);
-        assert_eq!(scan.stop_word, Some(0x7000_0C28));
+        assert_eq!(scan.decoded_words, 3);
+        assert_eq!(scan.stop_pc, 0x100C);
+        assert_eq!(scan.stop_word, Some(0x7000_0468));
         assert_eq!(scan.stop, EntryScanStop::Unsupported(EncodingFamily::Mmi1));
     }
 
@@ -322,7 +329,7 @@ mod tests {
 
     #[test]
     fn scans_only_complete_aligned_words() {
-        let bytes = [0xAA, 0xBB, 0x05, 0x00, 0x08, 0x24, 0x28, 0x0C, 0x00, 0x70];
+        let bytes = [0xAA, 0xBB, 0x05, 0x00, 0x08, 0x24, 0x68, 0x04, 0x00, 0x70];
         let image = image_with_segment(0x1004, 0x1002, 10, 10, PF_X);
 
         let profile = profile(&image, &bytes).expect("valid segment");
@@ -334,7 +341,7 @@ mod tests {
         let scan = profile.entry_scan.expect("entry is executable");
         assert_eq!(scan.decoded_words, 1);
         assert_eq!(scan.stop_pc, 0x1008);
-        assert_eq!(scan.stop_word, Some(0x7000_0C28));
+        assert_eq!(scan.stop_word, Some(0x7000_0468));
     }
 
     #[test]

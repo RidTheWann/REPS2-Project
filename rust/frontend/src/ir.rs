@@ -32,8 +32,9 @@ impl Gpr {
 }
 
 /// Operations whose guest-visible behavior is explicitly represented by this
-/// initial IR. Word operations write a sign-extended 32-bit result into the
-/// low 64 bits of a 128-bit EE GPR. Logical operations update only GPR[63:0].
+/// initial IR. Scalar word operations write a sign-extended 32-bit result into
+/// the low 64 bits of a 128-bit EE GPR. Parallel word operations update all
+/// four 32-bit lanes, and logical operations update only GPR[63:0].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Operation {
     Nop,
@@ -52,6 +53,7 @@ pub enum Operation {
     AddImmediateWord { dst: Gpr, src: Gpr, immediate: u16 },
     AddUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     AddImmediateUnsignedWord { dst: Gpr, src: Gpr, immediate: u16 },
+    ParallelAddUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     SubWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     SubUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
     AddDoublewordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -297,6 +299,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::Subu => Operation::SubUnsignedWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelAddUnsignedWord => Operation::ParallelAddUnsignedWord {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -846,6 +853,26 @@ mod tests {
         assert!(matches!(program.instructions()[4].operation,
             Operation::SetLessThanImmediateUnsigned64 { dst, src, immediate: 0xFFFF }
                 if dst.index() == 12 && src.index() == 11));
+    }
+
+    #[test]
+    fn lifts_r5900_parallel_add_unsigned_word() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x10 << 6) | 0x28,
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (0x10 << 6) | 0x28,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xC000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PADDUW lifts into typed IR");
+
+        assert!(matches!(program.instructions()[0].operation,
+            Operation::ParallelAddUnsignedWord { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2));
+        assert!(matches!(program.instructions()[1].operation,
+            Operation::ParallelAddUnsignedWord { dst, .. } if dst.is_zero()));
     }
 
     #[test]
