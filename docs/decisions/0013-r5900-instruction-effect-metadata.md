@@ -21,7 +21,7 @@ The summary records:
 - **GPR read/write masks:** bit N represents architectural GPR N. For known instructions, GPR[0] is omitted because reads return the constant zero and writes are discarded.
 - **HI/LO dependencies:** separate read/write flags for the base HI and LO registers. This does not imply that the unimplemented HI1/LO1 or MMI accumulator state is modeled.
 - **Memory effect:** none, read, write, or unknown. Partial left/right loads consume the prior destination GPR; partial stores remain guest-visible writes.
-- **Control flow:** none, conditional direct branch, direct jump/call, indirect jump/call, synchronous trap, or unknown.
+- **Control flow:** none, conditional direct branch/call, direct jump/call, indirect jump/call, synchronous trap, or unknown.
 - **Possible synchronous exception:** includes known signed integer overflow operations, explicit SYSCALL/BREAK traps, and memory operations that may fail due to address/alignment/translation or backing behavior. Instruction-fetch faults and asynchronous interrupts are out of scope.
 
 The summary is a conservative may-effect description, not a replacement for instruction semantics. It does not implement exception delivery, timing, pipeline behavior, or instruction execution.
@@ -35,7 +35,7 @@ Unknown instructions must remain explicit unsupported diagnostics in lifting/cod
 ## Architectural details encoded
 
 - `ADD`, `ADDI`, and `SUB` are marked as potentially raising integer-overflow exceptions; their non-trapping unsigned counterparts are not.
-- `JAL`, `JALR`, `BLTZAL`, and `BGEZAL` expose their encoded link-register destination. The conditional link forms remain conditional control-flow operations; their link write is represented independently from the branch outcome.
+- `JAL`, `JALR`, `BLTZAL`, and `BGEZAL` expose their encoded link-register destination. `BLTZAL`/`BGEZAL` are conditional calls with the EE link write represented independently from the branch outcome. `JALR` with `rd = 0` is classified as an indirect jump because it has no architectural link destination.
 - `MFHI`/`MFLO` consume the corresponding special register; `MULT`/`MULTU`/`DIV`/`DIVU` produce both HI and LO.
 - Loads and stores are marked as potentially faulting memory operations. Left/right merge loads read the old destination value as well as the base register.
 - Known GPR dependencies omit register zero, while memory and exception effects remain present even when a load's encoded destination is GPR zero.

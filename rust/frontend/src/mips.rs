@@ -122,6 +122,7 @@ pub enum MemoryEffect {
 pub enum ControlFlowEffect {
     None,
     ConditionalDirect,
+    ConditionalCall,
     DirectJump,
     DirectCall,
     IndirectJump,
@@ -303,7 +304,7 @@ impl Instruction {
                 // The EE link register is written before the branch outcome
                 // is committed for these non-likely link variants.
                 effects.gpr_write_mask = gpr_bit(31);
-                effects.control_flow = ControlFlowEffect::ConditionalDirect;
+                effects.control_flow = ControlFlowEffect::ConditionalCall;
             }
             Opcode::Jr => {
                 effects.gpr_read_mask = rs;
@@ -312,7 +313,11 @@ impl Instruction {
             Opcode::Jalr => {
                 effects.gpr_read_mask = rs;
                 effects.gpr_write_mask = rd;
-                effects.control_flow = ControlFlowEffect::IndirectCall;
+                effects.control_flow = if self.rd == 0 {
+                    ControlFlowEffect::IndirectJump
+                } else {
+                    ControlFlowEffect::IndirectCall
+                };
             }
 
             Opcode::Addi | Opcode::Addiu | Opcode::Daddiu |
@@ -720,7 +725,7 @@ mod tests {
         let effects = bgezal.effects();
         assert_eq!(effects.gpr_read_mask, 1 << 4);
         assert_eq!(effects.gpr_write_mask, 1 << 31);
-        assert_eq!(effects.control_flow, ControlFlowEffect::ConditionalDirect);
+        assert_eq!(effects.control_flow, ControlFlowEffect::ConditionalCall);
 
         let jal = decode((0x03 << 26) | 0x20, 0x4004).effects();
         assert_eq!(jal.gpr_write_mask, 1 << 31);
@@ -730,6 +735,11 @@ mod tests {
         assert_eq!(jalr.gpr_read_mask, 1 << 4);
         assert_eq!(jalr.gpr_write_mask, 1 << 7);
         assert_eq!(jalr.control_flow, ControlFlowEffect::IndirectCall);
+
+        let jalr_without_link = decode((4 << 21) | 0x09, 0x400C).effects();
+        assert_eq!(jalr_without_link.gpr_read_mask, 1 << 4);
+        assert_eq!(jalr_without_link.gpr_write_mask, 0);
+        assert_eq!(jalr_without_link.control_flow, ControlFlowEffect::IndirectJump);
     }
 
     #[test]
