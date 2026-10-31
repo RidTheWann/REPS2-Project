@@ -261,8 +261,42 @@ fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn add_game(input: &Path, library_root: &Path) -> Result<(), String> {
-    let result = library::import_disc(input, library_root)?;
+fn default_library_root() -> Result<std::path::PathBuf, String> {
+    if let Some(path) = env::var_os("REPS2_LIBRARY_DIR").filter(|value| !value.is_empty()) {
+        return Ok(Path::new(&path).to_path_buf());
+    }
+
+    #[cfg(windows)]
+    {
+        let root = env::var_os("LOCALAPPDATA")
+            .ok_or_else(|| "LOCALAPPDATA is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
+        return Ok(Path::new(&root).join("REPS2").join("Library"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var_os("HOME")
+            .ok_or_else(|| "HOME is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
+        return Ok(Path::new(&home).join("Library").join("Application Support").join("REPS2").join("Library"));
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        if let Some(root) = env::var_os("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
+            return Ok(Path::new(&root).join("reps2").join("Library"));
+        }
+        let home = env::var_os("HOME")
+            .ok_or_else(|| "HOME is unavailable; set REPS2_LIBRARY_DIR to choose a library folder".to_owned())?;
+        Ok(Path::new(&home).join(".local").join("share").join("reps2").join("Library"))
+    }
+}
+
+fn add_game(input: &Path, library_override: Option<&Path>) -> Result<(), String> {
+    let library_root = match library_override {
+        Some(path) => path.to_path_buf(),
+        None => default_library_root()?,
+    };
+    let result = library::import_disc(input, &library_root)?;
     if result.already_imported {
         println!("Game is already present in the REPS2 library");
     } else {
@@ -271,6 +305,7 @@ fn add_game(input: &Path, library_root: &Path) -> Result<(), String> {
     println!("  Title: {}", result.title);
     println!("  Game ID: {}", result.game_id);
     println!("  Game directory: {}", result.game_directory.display());
+    println!("  Library root: {}", library_root.display());
     println!("  Boot ELF: {}", result.game_directory.join("boot.elf").display());
     println!("  Generated C++: {}", if result.generated_cpp { "yes (experimental/partial)" } else { "not yet" });
     println!("  Initial EE RAM image: {}", if result.generated_ram_image { "yes" } else { "not yet" });
@@ -475,7 +510,7 @@ fn usage() {
     println!("Usage:");
     println!("  reps2 version");
     println!("  reps2 disc-info <disc-image.iso>");
-    println!("  reps2 add-game <disc-image.iso> <library-directory>");
+    println!("  reps2 add-game <disc-image.iso> [--library <directory>]");
     println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
     println!("  reps2 elf-info <elf-file>");
     println!("  reps2 analyze-elf <elf-file>");
@@ -484,7 +519,7 @@ fn usage() {
     println!("  reps2 compile-cfg-fixture <output.cpp>");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
-    println!("add-game imports one ISO into a content-addressed library entry and creates a versioned game.json manifest.");
+    println!("add-game imports one ISO into the default per-user REPS2 library; --library overrides the location.");
     println!("The original ISO remains at its source path; generated artifacts are experimental and do not imply playability.");
     println!("disc-info and extract-boot-elf read raw 2048-byte-sector ISO 9660 images without loading the whole disc into memory.");
     println!("extract-boot-elf resolves SYSTEM.CNF BOOT2 (preferred) or BOOT and accepts only MIPS ET_EXEC images.");
@@ -500,8 +535,11 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Some("disc-info") if arguments.len() == 3 => disc_info(Path::new(&arguments[2])),
-        Some("add-game") if arguments.len() == 4 => {
-            add_game(Path::new(&arguments[2]), Path::new(&arguments[3]))
+        Some("add-game") if arguments.len() == 3 => {
+            add_game(Path::new(&arguments[2]), None)
+        }
+        Some("add-game") if arguments.len() == 5 && arguments[3] == "--library" => {
+            add_game(Path::new(&arguments[2]), Some(Path::new(&arguments[4])))
         },
         Some("extract-boot-elf") if arguments.len() == 4 => {
             extract_boot_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
