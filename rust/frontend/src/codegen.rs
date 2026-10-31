@@ -62,6 +62,10 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::MoveFromLo { dst } => emit_move_from_hilo(output, dst, "lo"),
         Operation::MoveToHi { src } => emit_move_to_hilo(output, src, "hi"),
         Operation::MoveToLo { src } => emit_move_to_hilo(output, src, "lo"),
+        Operation::MoveFromHi1 { dst } => emit_move_from_hilo(output, dst, "hi1"),
+        Operation::MoveFromLo1 { dst } => emit_move_from_hilo(output, dst, "lo1"),
+        Operation::MoveToHi1 { src } => emit_move_to_hilo(output, src, "hi1"),
+        Operation::MoveToLo1 { src } => emit_move_to_hilo(output, src, "lo1"),
         Operation::MultiplyWordSigned { dst, lhs, rhs } => {
             emit_multiply_word(output, index, dst, lhs, rhs, true)
         }
@@ -1059,6 +1063,29 @@ mod tests {
         assert!(cpp.contains("if (10 != 0) state.gpr[10].low = signed_add_result_0000"));
         assert!(cpp.contains("if (11 != 0) state.gpr[11].low = signed_sub_result_0001"));
         assert!(cpp.contains("if (14 != 0) state.gpr[14].low = signed_addi_result_0002"));
+    }
+
+    #[test]
+    fn emits_mmi_pipeline_one_hilo_moves_with_upper_lane_preservation() {
+        let words = [
+            (0x1C << 26) | (4 << 21) | 0x11,
+            (0x1C << 26) | (5 << 21) | 0x13,
+            (0x1C << 26) | (6 << 11) | 0x10,
+            (0x1C << 26) | (7 << 11) | 0x12,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xD000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("HI1/LO1 IR");
+        let cpp = emit_cpp(&program).expect("HI1/LO1 C++");
+
+        assert!(cpp.contains("state.hi1 = state.gpr[4].low;"));
+        assert!(cpp.contains("state.lo1 = state.gpr[5].low;"));
+        assert!(cpp.contains("if (6 != 0) state.gpr[6].low = state.hi1;"));
+        assert!(cpp.contains("if (7 != 0) state.gpr[7].low = state.lo1;"));
+        assert!(!cpp.contains("state.gpr[6] = state.hi1"));
     }
 
     #[test]
