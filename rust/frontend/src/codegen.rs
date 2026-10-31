@@ -22,10 +22,12 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::load_u8;\n\
              using reps2::runtime::load_u16;\n\
              using reps2::runtime::load_u32;\n\
+             using reps2::runtime::load_u64;\n\
              using reps2::runtime::load_u128;\n\
              using reps2::runtime::store_u8;\n\
              using reps2::runtime::store_u16;\n\
              using reps2::runtime::store_u32;\n\
+             using reps2::runtime::store_u64;\n\
              using reps2::runtime::store_u128;\n\
              state.gpr[0] = {};\n"
     );
@@ -117,6 +119,12 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::StoreWord { src, base, offset } => {
             emit_memory_store(output, index, src, base, offset, 4);
         }
+        Operation::LoadDoubleword { dst, base, offset } => {
+            emit_memory_load(output, index, dst, base, offset, 8, false);
+        }
+        Operation::StoreDoubleword { src, base, offset } => {
+            emit_memory_store(output, index, src, base, offset, 8);
+        }
         Operation::LoadQuadword { dst, base, offset } => {
             emit_quadword_load(output, index, dst, base, offset);
         }
@@ -147,13 +155,15 @@ fn emit_memory_load(
         1 => "std::uint8_t",
         2 => "std::uint16_t",
         4 => "std::uint32_t",
-        _ => unreachable!("memory IR only permits byte, halfword and word"),
+        8 => "std::uint64_t",
+        _ => unreachable!("memory IR only permits byte, halfword, word and doubleword"),
     };
     let helper = match width {
         1 => "load_u8",
         2 => "load_u16",
         4 => "load_u32",
-        _ => unreachable!("memory IR only permits byte, halfword and word"),
+        8 => "load_u64",
+        _ => unreachable!("memory IR only permits byte, halfword, word and doubleword"),
     };
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
@@ -171,6 +181,7 @@ fn emit_memory_load(
             "static_cast<std::uint64_t>(memory_value_{tag}) | ((memory_value_{tag} & 0x8000U) != 0 ? 0xFFFFFFFFFFFF0000ULL : 0ULL)"
         ),
         (4, true) => format!("sign_extend_word(memory_value_{tag})"),
+        (8, _) => format!("memory_value_{tag}"),
         _ => unreachable!("memory IR only permits supported load variants"),
     };
     if !dst.is_zero() {
@@ -194,7 +205,8 @@ fn emit_memory_store(
         1 => ("store_u8", "std::uint8_t"),
         2 => ("store_u16", "std::uint16_t"),
         4 => ("store_u32", "std::uint32_t"),
-        _ => unreachable!("memory IR only permits byte, halfword and word"),
+        8 => ("store_u64", "std::uint64_t"),
+        _ => unreachable!("memory IR only permits byte, halfword, word and doubleword"),
     };
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
@@ -370,6 +382,8 @@ mod tests {
             (0x2B << 26) | (8 << 21) | (13 << 16) | 12, // sw t5, 12(t0)
             (0x1E << 26) | (8 << 21) | (14 << 16) | 4, // lq t6, 4(t0)
             (0x1F << 26) | (8 << 21) | (15 << 16) | 8, // sq t7, 8(t0)
+            (0x37 << 26) | (8 << 21) | (16 << 16) | 4, // ld s0, 4(t0)
+            (0x3F << 26) | (8 << 21) | (16 << 16) | 0x34, // sd s0, 0x34(t0)
         ];
         let decoded = words.iter().enumerate()
             .map(|(index, word)| crate::mips::decode(*word, 0x2000 + index as u32 * 4))
@@ -382,7 +396,10 @@ mod tests {
         assert!(cpp.contains("store_u32(state.memory"));
         assert!(cpp.contains("load_u128(state.memory"));
         assert!(cpp.contains("store_u128(state.memory"));
+        assert!(cpp.contains("load_u64(state.memory"));
+        assert!(cpp.contains("store_u64(state.memory"));
         assert!(cpp.contains("state.gpr[14] = quadword_value_0005"));
+        assert!(cpp.contains("state.gpr[16].low = memory_value_0007"));
         assert!(cpp.contains("0xFFFFFFFFFFFFFF00ULL"));
         assert!(cpp.contains("0xFFFFFFFFFFFF0000ULL"));
         assert!(cpp.contains("sign_extend_word(memory_value_0003)"));
