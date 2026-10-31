@@ -634,8 +634,8 @@ fn read_instruction_word(segments: &[LoadedSegment], pc: u32) -> Option<u32> {
             continue;
         }
         let start = u64::from(segment.virtual_address);
-        let file_size = segment.file_size.min(segment.bytes.len());
-        let end = start.checked_add(file_size as u64)?;
+        let file_size = segment.file_size.min(segment.bytes.len()) as u64;
+        let end = start.checked_add(file_size)?;
         if address < start || address >= end {
             continue;
         }
@@ -741,22 +741,22 @@ fn register_block_owners(
         }
     }
 
-    if let Some(instruction) = block.terminator.control_instruction() {
-        if owners.insert(instruction.pc, InstructionOwner {
+    if let Some(instruction) = block.terminator.control_instruction()
+        && owners.insert(instruction.pc, InstructionOwner {
             block_start: block.start_pc,
             location: OwnerLocation::Control,
-        }).is_some() {
-            return Err(AnalysisError::InternalBlockOwnershipError(instruction.pc));
-        }
+        }).is_some()
+    {
+        return Err(AnalysisError::InternalBlockOwnershipError(instruction.pc));
     }
 
-    if let Some(delay_slot) = block.terminator.delay_slot() {
-        if owners.insert(delay_slot.pc, InstructionOwner {
+    if let Some(delay_slot) = block.terminator.delay_slot()
+        && owners.insert(delay_slot.pc, InstructionOwner {
             block_start: block.start_pc,
             location: OwnerLocation::DelaySlot,
-        }).is_some() {
-            return Err(AnalysisError::InternalBlockOwnershipError(delay_slot.pc));
-        }
+        }).is_some()
+    {
+        return Err(AnalysisError::InternalBlockOwnershipError(delay_slot.pc));
     }
     Ok(())
 }
