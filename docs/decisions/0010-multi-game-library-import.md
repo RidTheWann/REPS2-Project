@@ -11,7 +11,7 @@ A game serial alone is not a safe cache identity: revisions, regional releases, 
 
 ## Decision
 
-1. The import boundary is one ISO per operation: `reps2 add-game <iso> <library-root>`.
+1. The import boundary is one ISO per operation: `reps2 add-game <iso>`. The library root is selected automatically from the per-user application-data directory; an environment variable or explicit advanced override can change it.
 2. The Rust frontend streams SHA-256 over the source image and derives the immutable record id from the content digest.
 3. The import code opens the source ISO read-only, resolves SYSTEM.CNF BOOT2 then BOOT, validates the target as an ELF32 little-endian EM_MIPS ET_EXEC, and extracts it internally.
 4. Each record is stored under `<library-root>/games/sha256-<digest>/` with a schema-versioned `game.json`, `boot.elf`, and optional generated artifacts.
