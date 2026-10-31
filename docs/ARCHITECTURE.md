@@ -84,9 +84,9 @@ The ISO itself remains at its canonical source path to avoid duplicating multi-g
 
 The manifest separates discovery facts from execution claims. It records disc/ELF identity, loadable ranges, analysis coverage, unresolved edges, and optional generated artifacts. The current command always reports `playable: false`: parser success, a valid PT_LOAD image, and generated C++ are not evidence that the game can boot. This distinction is a required invariant for the launcher and compatibility catalog.
 
-The current import command is:
+The current import command defaults to the per-user application-data library (Windows: `%LOCALAPPDATA%\\REPS2\\Library`; Linux: `$XDG_DATA_HOME/reps2/Library` or `$HOME/.local/share/reps2/Library`). Set `REPS2_LIBRARY_DIR` or use the optional `--library` argument to override the path. A normal user supplies only the ISO path.\n\nThe current import command is:
 
-    reps2 add-game <disc-image.iso> <library-directory>
+    reps2 add-game <disc-image.iso> [--library <directory>]
 
 This is the first library/backend slice, not yet the desktop shell, a complete compiler, or a game launcher.
 
