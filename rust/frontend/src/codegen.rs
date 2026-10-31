@@ -56,6 +56,12 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
 
     match instruction.operation {
         Operation::Nop => output.push_str("    // nop\n"),
+        Operation::MoveFromHi { dst } => emit_move_from_hilo(output, dst, "hi"),
+        Operation::MoveFromLo { dst } => emit_move_from_hilo(output, dst, "lo"),
+        Operation::MoveToHi { src } => emit_move_to_hilo(output, src, "hi"),
+        Operation::MoveToLo { src } => emit_move_to_hilo(output, src, "lo"),
+        Operation::MultiplyWordSigned { dst, lhs, rhs } => emit_multiply_word(output, index, dst, lhs, rhs, true),
+        Operation::MultiplyWordUnsigned { dst, lhs, rhs } => emit_multiply_word(output, index, dst, lhs, rhs, false),
         Operation::AddWord { dst, lhs, rhs } => emit_word_add(
             output, index, dst, lhs, rhs, true
         ),
@@ -438,6 +444,48 @@ fn emit_word_sub(
     }
 }
 
+fn emit_move_from_hilo(output: &mut String, dst: Gpr, special: &str) {
+    let d = dst.index();
+    output.push_str(&format!("    if ({d} != 0) state.gpr[{d}].low = state.{special};\n"));
+}
+
+fn emit_move_to_hilo(output: &mut String, src: Gpr, special: &str) {
+    let s = src.index();
+    output.push_str(&format!("    state.{special} = state.gpr[{s}].low;\n"));
+}
+
+fn emit_multiply_word(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr, signed: bool) {
+    let tag = format!("{index:04}");
+    let d = dst.index();
+    let a = lhs.index();
+    let b = rhs.index();
+
+    if signed {
+        output.push_str(&format!(
+            "    const std::int64_t multiply_lhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{a}].low));\n\
+             \x20   const std::int64_t multiply_rhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{b}].low));\n\
+             \x20   const std::int64_t multiply_product_{tag} = multiply_lhs_{tag} * multiply_rhs_{tag};\n\
+             \x20   const std::uint64_t multiply_product_bits_{tag} = static_cast<std::uint64_t>(multiply_product_{tag});\n\
+             \x20   const std::uint32_t multiply_low_{tag} = static_cast<std::uint32_t>(multiply_product_bits_{tag});\n\
+             \x20   const std::uint32_t multiply_high_{tag} = static_cast<std::uint32_t>(multiply_product_bits_{tag} >> 32U);\n"
+        ));
+    } else {
+        output.push_str(&format!(
+            "    const std::uint64_t multiply_lhs_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low);\n\
+             \x20   const std::uint64_t multiply_rhs_{tag} = static_cast<std::uint32_t>(state.gpr[{b}].low);\n\
+             \x20   const std::uint64_t multiply_product_bits_{tag} = multiply_lhs_{tag} * multiply_rhs_{tag};\n\
+             \x20   const std::uint32_t multiply_low_{tag} = static_cast<std::uint32_t>(multiply_product_bits_{tag});\n\
+             \x20   const std::uint32_t multiply_high_{tag} = static_cast<std::uint32_t>(multiply_product_bits_{tag} >> 32U);\n"
+        ));
+    }
+
+    output.push_str(&format!(
+        "    state.lo = sign_extend_word(multiply_low_{tag});\n\
+         \x20   state.hi = sign_extend_word(multiply_high_{tag});\n\
+         \x20   if ({d} != 0) state.gpr[{d}].low = state.lo;\n"
+    ));
+}
+
 fn emit_binary64(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr, operator: &str) {
     let d = dst.index();
     let a = lhs.index();
@@ -676,4 +724,34 @@ mod tests {
         assert!(first.contains("state.gpr[10].low"));
         assert!(first.contains("sign_extend_word"));
     }
+
+    #[test]
+    fn emits_r5900_hilo_moves_and_signed_unsigned_three_operand_multiply() {
+        let words = [
+            (1 << 21) | 0x11, (20 << 11) | 0x10,
+            (2 << 21) | 0x13, (21 << 11) | 0x12,
+            (1 << 21) | (2 << 16) | (22 << 11) | 0x18,
+            (24 << 11) | 0x10, (25 << 11) | 0x12,
+            (3 << 21) | (2 << 16) | (23 << 11) | 0x19,
+        ];
+        let decoded_stream = words.iter().enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x9000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("HI/LO and multiply IR");
+        let cpp = emit_cpp(&program).expect("HI/LO and multiply C++");
+        assert!(cpp.contains("state.hi = state.gpr[1].low"));
+        assert!(cpp.contains("state.gpr[20].low = state.hi"));
+        assert!(cpp.contains("state.lo = state.gpr[2].low"));
+        assert!(cpp.contains("state.gpr[21].low = state.lo"));
+        assert!(cpp.contains("sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[1].low))"));
+        assert!(cpp.contains("multiply_product_0004 = multiply_lhs_0004 * multiply_rhs_0004"));
+        assert!(cpp.contains("state.gpr[22].low = state.lo"));
+        assert!(cpp.contains("state.gpr[24].low = state.hi"));
+        assert!(cpp.contains("state.gpr[25].low = state.lo"));
+        assert!(cpp.contains("multiply_lhs_0007 = static_cast<std::uint32_t>(state.gpr[3].low)"));
+        assert!(cpp.contains("multiply_product_bits_0007 = multiply_lhs_0007 * multiply_rhs_0007"));
+        assert!(cpp.contains("state.gpr[23].low = state.lo"));
+        assert!(cpp.contains("state.hi = sign_extend_word(multiply_high_0007)"));
+    }
+
 }
