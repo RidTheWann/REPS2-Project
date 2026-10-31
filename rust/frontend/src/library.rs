@@ -136,13 +136,15 @@ pub fn import_disc(iso_path: &Path, library_root: &Path) -> Result<ImportSummary
                 final_directory.display()
             ));
         }
+        let generated_cpp = final_directory.join("recompiled.cpp").is_file();
+        let generated_ram_image = final_directory.join("ee-main-ram.bin").is_file();
         return Ok(ImportSummary {
             game_id,
             title,
             game_directory: final_directory,
             already_imported: true,
-            generated_cpp: final_directory.join("recompiled.cpp").is_file(),
-            generated_ram_image: final_directory.join("ee-main-ram.bin").is_file(),
+            generated_cpp,
+            generated_ram_image,
         });
     }
 
