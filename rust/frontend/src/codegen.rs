@@ -9,7 +9,8 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
 
     let mut output = String::new();
     output.push_str(
-        "#include <cstdint>\n\
+        "#include <bit>\n\
+         #include <cstdint>\n\
          #include \"reps2/runtime/ee_state.hpp\"\n\n\
          namespace reps2::generated {\n\
          [[nodiscard]] reps2::runtime::Status execute(reps2::runtime::EeState& state) noexcept {\n\
