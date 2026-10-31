@@ -158,7 +158,7 @@ int main() {
         std::fill(main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x20U),
                   main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x30U), std::uint8_t{0});
         std::fill(main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x38U),
-                  main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x40U), std::uint8_t{0xCC});
+                  main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 0x41U), std::uint8_t{0xCC});
 
         EeState memory_state{};
         memory_state.pc = 0x5000U;
