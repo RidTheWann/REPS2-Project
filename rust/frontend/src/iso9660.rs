@@ -329,9 +329,10 @@ impl<R: Read + Seek> Iso9660<R> {
             return Err(Error::new(format!("{} uses unsupported multi-extent/interleaved storage", entry.name)));
         }
         let size = u64::from(entry.size_bytes);
-        if size > max_bytes {
+        let effective_limit = max_bytes.min(MAX_BOOT_EXECUTABLE_BYTES);
+        if size > effective_limit {
             return Err(Error::new(format!(
-                "ISO file {} is {size} bytes, exceeding the {max_bytes}-byte extraction limit",
+                "ISO file {} is {size} bytes, exceeding the {effective_limit}-byte read limit",
                 entry.name
             )));
         }
@@ -862,6 +863,23 @@ mod tests {
         image[pvd_offset + 84..pvd_offset + 88].copy_from_slice(&1u32.to_be_bytes());
         let error = Iso9660::open(Cursor::new(image)).expect_err("inconsistent volume length");
         assert!(error.to_string().contains("both-endian values disagree"));
+    }
+
+    #[test]
+    fn enforces_an_absolute_file_read_limit_even_when_caller_limit_is_unbounded() {
+        let image = valid_image();
+        let mut iso = Iso9660::open(Cursor::new(image)).expect("valid ISO");
+        let oversized = DirectoryEntry {
+            name: "HUGE.BIN;1".to_owned(),
+            extent_lba: 22,
+            size_bytes: u32::MAX,
+            flags: 0,
+            file_unit_size: 0,
+            interleave_gap_size: 0,
+        };
+        let error = iso.read_entry(&oversized, u64::MAX)
+            .expect_err("caller must not bypass the absolute allocation bound");
+        assert!(error.to_string().contains("exceeding 536870912-byte read limit"));
     }
 
     #[test]
