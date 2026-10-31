@@ -74,7 +74,11 @@ Validate every offset, size, table count, cross-table index, and arithmetic oper
 
 ### EE decoder and analysis
 
-Decoding is pure and deterministic. Every input word produces a classified instruction or an explicit unsupported result. Static analysis must not assume every byte in an executable segment is code. Indirect control-flow targets remain unresolved until evidence is available.
+Decoding is pure and deterministic. Every input word produces a classified instruction or an explicit unsupported result. Static analysis must not assume every byte in an executable segment is code.
+
+The initial analyzer is reachability-guided. Roots come from the ELF entry point and executable STT_FUNC symbols. It scans file-backed bytes in executable PT_LOAD segments, constructs basic blocks, records direct conditional taken/fallthrough edges, direct jump/call edges, return continuations, and unresolved indirect targets. Control instructions and their delay-slot instructions remain explicit in terminators; they are not flattened into ordinary instruction sequences.
+
+The analyzer rejects targets that enter another instruction's delay slot and currently rejects control transfers or unsupported encodings in delay slots. It does not infer dynamic jump targets from data flow, and its CFG is not yet lowered to executable branch IR. It uses bounded instruction/block limits and rejects inconsistent externally constructed segment metadata.
 
 ### IR
 
@@ -98,9 +102,11 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 
 - Rust ELF32 little-endian parser with section names, symbol tables, and REL/RELA metadata.
 - Bounded PT_LOAD materialization with zero-filled tails and overlap detection.
-- Initial base-MIPS decoder subset with delay-slot metadata.
+- Initial base-MIPS decoder subset, including selected REGIMM branches.
+- Reachability-guided CFG discovery with explicit branch/delay-slot terminators and unresolved indirect-target reporting.
+- Executable instruction reads restricted to file-backed PT_LOAD bytes, with BSS kept non-executable by default.
 - Typed linear IR for a bounded scalar instruction subset.
 - Deterministic C++20 emitter with a small EE GPR state ABI.
 - CMake-generated C++ smoke test executed on Windows and Linux CI.
 
-No complete R5900 semantic engine, CFG, game ELF AOT pipeline, or PS2 runtime is claimed yet.
+No complete R5900 semantic engine, branch-aware IR/AOT lowering, game ELF AOT pipeline, or PS2 runtime is claimed yet.
