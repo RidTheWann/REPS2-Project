@@ -11,7 +11,6 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] PT_LOAD materialization with zero-filled tails and overlap checks.
 - [x] Explicitly partial base-MIPS decoder and delay-slot metadata.
 - [x] CMake/Cargo build orchestration and Windows/Linux CI.
-- [ ] Confirm Rust/Windows/Linux CI for the Rust migration.
 
 **Exit gate:** Rust frontend builds on Windows and Linux; malformed ELF inputs are rejected deterministically.
 
@@ -38,13 +37,16 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 
 ## M3 — IR and generated-code vertical slice
 
-- [ ] Typed Rust IR and architectural-state model.
-- [ ] IR verifier for type, control-flow, and side-effect invariants.
-- [ ] Delay-slot-safe code lowering.
-- [ ] Deterministic C++20 source and build-manifest generation.
-- [ ] Synthetic generated C++ compiled and executed against a test runtime.
+- [x] Typed Rust IR for a documented straight-line scalar subset.
+- [x] IR verifier for register, PC alignment/sequencing, and word-shift invariants.
+- [x] Deterministic C++20 source generation for the implemented IR operations.
+- [x] Synthetic generated C++ compiled and executed against the minimal EE state ABI on Windows and Linux CI.
+- [ ] Delay-slot-safe CFG and branch IR.
+- [ ] Memory-operation IR with alignment, address-space and exception outcomes.
+- [ ] Build manifest with input hash, compiler options, and generated function metadata.
+- [ ] ELF-to-IR-to-C++ compilation path for a real executable code region.
 
-**Exit gate:** a synthetic ELF code region can be decoded, lowered, compiled, and produce the expected guest-state transitions.
+**Exit gate:** a synthetic instruction block can be lifted, verified, lowered, compiled, and produce the expected guest-state transitions.
 
 ## M4 — First real executable slice
 

@@ -1,0 +1,289 @@
+//! Typed, host-independent IR for a deliberately bounded scalar EE subset.
+
+use std::fmt;
+
+use crate::mips::{self, Opcode};
+
+/// A validated architectural GPR index.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Gpr(u8);
+
+impl Gpr {
+    /// Constructs a GPR index, rejecting values outside the 32-register file.
+    pub fn new(index: u8) -> Result<Self, VerifyError> {
+        if index < 32 {
+            Ok(Self(index))
+        } else {
+            Err(VerifyError::InvalidRegister(index))
+        }
+    }
+
+    /// Returns the architectural register number.
+    #[must_use]
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+
+    /// Returns true for the architectural hard-wired zero register.
+    #[must_use]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Operations whose guest-visible behavior is explicitly represented by this
+/// initial IR. Word operations write a sign-extended 32-bit result into the
+/// low 64 bits of a 128-bit EE GPR. Logical operations update only GPR[63:0].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Operation {
+    Nop,
+    AddWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    AddImmediateWord { dst: Gpr, src: Gpr, immediate: u16 },
+    AddUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    AddImmediateUnsignedWord { dst: Gpr, src: Gpr, immediate: u16 },
+    SubWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    SubUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    And64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    Or64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    Xor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
+    AndImmediate64 { dst: Gpr, src: Gpr, immediate: u16 },
+    OrImmediate64 { dst: Gpr, src: Gpr, immediate: u16 },
+    XorImmediate64 { dst: Gpr, src: Gpr, immediate: u16 },
+    LoadUpperWord { dst: Gpr, immediate: u16 },
+    ShiftLeftWord { dst: Gpr, src: Gpr, amount: u8 },
+    ShiftRightLogicalWord { dst: Gpr, src: Gpr, amount: u8 },
+    ShiftRightArithmeticWord { dst: Gpr, src: Gpr, amount: u8 },
+}
+
+/// One IR operation with its original guest instruction address.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Instruction {
+    pub guest_pc: u32,
+    pub operation: Operation,
+}
+
+/// A straight-line basic block. Control-flow and delay slots are not silently
+/// flattened into this type; they remain outside this initial IR subset.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Program {
+    instructions: Vec<Instruction>,
+}
+
+impl Program {
+    /// Creates a verified straight-line program.
+    pub fn new(instructions: Vec<Instruction>) -> Result<Self, VerifyError> {
+        let program = Self { instructions };
+        program.verify()?;
+        Ok(program)
+    }
+
+    /// Returns the immutable IR instruction sequence.
+    #[must_use]
+    pub fn instructions(&self) -> &[Instruction] {
+        &self.instructions
+    }
+
+    /// Verifies source-PC alignment, sequential layout, and instruction
+    /// operand invariants before code generation.
+    pub fn verify(&self) -> Result<(), VerifyError> {
+        for (index, instruction) in self.instructions.iter().enumerate() {
+            if instruction.guest_pc & 3 != 0 {
+                return Err(VerifyError::MisalignedGuestPc(instruction.guest_pc));
+            }
+            if index > 0 {
+                let previous = self.instructions[index - 1].guest_pc;
+                let expected = previous.checked_add(4)
+                    .ok_or(VerifyError::GuestPcOverflow(previous))?;
+                if instruction.guest_pc != expected {
+                    return Err(VerifyError::NonSequentialGuestPc {
+                        previous,
+                        current: instruction.guest_pc,
+                    });
+                }
+            }
+            verify_operation(instruction.operation)?;
+        }
+        Ok(())
+    }
+}
+
+/// Instruction lifting failure. Unsupported operations are not converted to
+/// no-ops, host calls, or guessed behavior.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LiftError {
+    UnsupportedOpcode { pc: u32, mnemonic: &'static str },
+    Verification(VerifyError),
+}
+
+impl fmt::Display for LiftError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedOpcode { pc, mnemonic } => {
+                write!(f, "unsupported opcode {mnemonic} at guest PC 0x{pc:08X}")
+            }
+            Self::Verification(error) => write!(f, "IR verification failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for LiftError {}
+
+/// IR verification failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VerifyError {
+    InvalidRegister(u8),
+    MisalignedGuestPc(u32),
+    GuestPcOverflow(u32),
+    NonSequentialGuestPc { previous: u32, current: u32 },
+    InvalidShiftAmount(u8),
+}
+
+impl fmt::Display for VerifyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRegister(register) => write!(f, "invalid GPR index {register}"),
+            Self::MisalignedGuestPc(pc) => write!(f, "unaligned guest PC 0x{pc:08X}"),
+            Self::GuestPcOverflow(pc) => write!(f, "guest PC overflows after 0x{pc:08X}"),
+            Self::NonSequentialGuestPc { previous, current } => write!(
+                f,
+                "linear IR is not sequential: 0x{previous:08X} is followed by 0x{current:08X}"
+            ),
+            Self::InvalidShiftAmount(amount) => write!(f, "invalid word shift amount {amount}"),
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
+fn verify_operation(operation: Operation) -> Result<(), VerifyError> {
+    let shift = match operation {
+        Operation::ShiftLeftWord { amount, .. }
+        | Operation::ShiftRightLogicalWord { amount, .. }
+        | Operation::ShiftRightArithmeticWord { amount, .. } => Some(amount),
+        _ => None,
+    };
+    if let Some(amount) = shift
+        && amount >= 32
+    {
+        return Err(VerifyError::InvalidShiftAmount(amount));
+    }
+    Ok(())
+}
+
+fn gpr(index: u8) -> Gpr {
+    // Decoder register fields are five bits wide by construction.
+    Gpr(index & 0x1F)
+}
+
+/// Lifts a sequential decoded instruction stream into the supported IR.
+/// Branches, memory operations, exceptions and other unsupported semantics
+/// are returned as an explicit error.
+pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
+    let mut instructions = Vec::with_capacity(decoded.len());
+    for instruction in decoded {
+        let operation = match instruction.opcode {
+            Opcode::Nop => Operation::Nop,
+            Opcode::Add => Operation::AddWord {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Addu => Operation::AddUnsignedWord {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Sub => Operation::SubWord {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Subu => Operation::SubUnsignedWord {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::And => Operation::And64 {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Or => Operation::Or64 {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Xor => Operation::Xor64 {
+                dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
+            },
+            Opcode::Addi => Operation::AddImmediateWord {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+            },
+            Opcode::Addiu => Operation::AddImmediateUnsignedWord {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+            },
+            Opcode::Andi => Operation::AndImmediate64 {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+            },
+            Opcode::Ori => Operation::OrImmediate64 {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+            },
+            Opcode::Xori => Operation::XorImmediate64 {
+                dst: gpr(instruction.rt), src: gpr(instruction.rs), immediate: instruction.immediate,
+            },
+            Opcode::Lui => Operation::LoadUpperWord {
+                dst: gpr(instruction.rt), immediate: instruction.immediate,
+            },
+            Opcode::Sll => Operation::ShiftLeftWord {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+            },
+            Opcode::Srl => Operation::ShiftRightLogicalWord {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+            },
+            Opcode::Sra => Operation::ShiftRightArithmeticWord {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
+            },
+            other => {
+                return Err(LiftError::UnsupportedOpcode {
+                    pc: instruction.pc,
+                    mnemonic: other.mnemonic(),
+                });
+            }
+        };
+        instructions.push(Instruction {
+            guest_pc: instruction.pc,
+            operation,
+        });
+    }
+
+    Program::new(instructions).map_err(LiftError::Verification)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decoded(word: u32, pc: u32) -> mips::Instruction {
+        mips::decode(word, pc)
+    }
+
+    #[test]
+    fn lifts_a_supported_straight_line_subset() {
+        let stream = [
+            decoded((0x09 << 26) | (8 << 16) | 5, 0x1000),
+            decoded((0x0F << 26) | (9 << 16) | 0x8000, 0x1004),
+            decoded((0x0D << 26) | (10 << 16) | 0x1234, 0x1008),
+        ];
+        let program = lift(&stream).expect("supported operations lift");
+        assert_eq!(program.instructions().len(), 3);
+        assert_eq!(program.instructions()[0].guest_pc, 0x1000);
+    }
+
+    #[test]
+    fn refuses_control_flow_in_a_straight_line_block() {
+        let branch = decoded((0x04 << 26) | 4, 0x2000);
+        let error = lift(&[branch]).expect_err("branch needs a CFG/delay-slot representation");
+        assert_eq!(
+            error,
+            LiftError::UnsupportedOpcode { pc: 0x2000, mnemonic: "beq" }
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_non_sequential_or_misaligned_guest_pc() {
+        let first = Instruction { guest_pc: 0x1000, operation: Operation::Nop };
+        let second = Instruction { guest_pc: 0x1008, operation: Operation::Nop };
+        assert!(matches!(
+            Program::new(vec![first, second]),
+            Err(VerifyError::NonSequentialGuestPc { .. })
+        ));
+    }
+}

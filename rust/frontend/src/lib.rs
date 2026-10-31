@@ -4,7 +4,9 @@
 //! code generation. The later C++20 runtime consumes generated C++ and a
 //! machine-readable build manifest; no per-instruction FFI boundary is used.
 
+pub mod codegen;
 pub mod elf;
+pub mod ir;
 pub mod mips;
 
 /// Frontend version reported by the command-line tool.

@@ -1,10 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(REPS2
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Independent PlayStation 2 static recompilation toolchain"
-    LANGUAGES NONE
+    LANGUAGES CXX
 )
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_program(REPS2_CARGO_EXECUTABLE cargo REQUIRED)
 
@@ -41,6 +45,14 @@ add_custom_command(
 
 add_custom_target(reps2 ALL DEPENDS "${REPS2_FRONTEND_EXECUTABLE}")
 
+add_library(reps2_runtime INTERFACE)
+add_library(REPS2::Runtime ALIAS reps2_runtime)
+target_include_directories(reps2_runtime INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/runtime/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_compile_features(reps2_runtime INTERFACE cxx_std_20)
+
 include(CTest)
 if(BUILD_TESTING)
     add_test(
@@ -51,6 +63,52 @@ if(BUILD_TESTING)
             --locked
             --manifest-path "${REPS2_RUST_MANIFEST}"
     )
+
+    set(REPS2_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    set(REPS2_GENERATED_CPP "${REPS2_GENERATED_DIR}/synthetic_program.cpp")
+
+    add_custom_command(
+        OUTPUT "${REPS2_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_GENERATED_CPP}"
+            0x00100000
+            0x24080005
+            0x24090007
+            0x01095021
+            0x3C0B8000
+            0x340C1234
+            0x398DFFFF
+            0x31AE00FF
+            0x00087880
+            0x000F8042
+            0x000B8FC3
+            0x26920001
+            0x22B60001
+        DEPENDS reps2
+        COMMENT "AOT-compiling the synthetic EE block to C++"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+
+    add_custom_target(reps2_codegen_fixture DEPENDS "${REPS2_GENERATED_CPP}")
+    add_executable(reps2_codegen_smoke
+        "${REPS2_GENERATED_CPP}"
+        tests/generated_smoke.cpp
+    )
+    add_dependencies(reps2_codegen_smoke reps2_codegen_fixture)
+    target_link_libraries(reps2_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+
+    add_test(NAME reps2_codegen_smoke COMMAND reps2_codegen_smoke)
 endif()
 
 install(PROGRAMS "${REPS2_FRONTEND_EXECUTABLE}" DESTINATION bin)
+install(DIRECTORY runtime/include/ DESTINATION include)
