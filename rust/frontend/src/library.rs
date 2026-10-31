@@ -651,4 +651,185 @@ mod tests {
     fn json_strings_escape_control_characters_and_quotes() {
         assert_eq!(json_string("a\"b\\c\n"), "\"a\\\"b\\\\c\\n\"");
     }
+    fn put_iso_u16(bytes: &mut [u8], offset: usize, value: u16) {
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        bytes[offset + 2..offset + 4].copy_from_slice(&value.to_be_bytes());
+    }
+
+    fn put_iso_u32(bytes: &mut [u8], offset: usize, value: u32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        bytes[offset + 4..offset + 8].copy_from_slice(&value.to_be_bytes());
+    }
+
+    fn put_elf_u16(bytes: &mut [u8], offset: usize, value: u16) {
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_elf_u32(bytes: &mut [u8], offset: usize, value: u32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn synthetic_boot_elf() -> Vec<u8> {
+        let mut bytes = vec![0u8; 112];
+        bytes[0..4].copy_from_slice(b"\\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_elf_u16(&mut bytes, 16, elf::ET_EXEC);
+        put_elf_u16(&mut bytes, 18, elf::EM_MIPS);
+        put_elf_u32(&mut bytes, 20, 1);
+        put_elf_u32(&mut bytes, 24, 0x0010_0000);
+        put_elf_u32(&mut bytes, 28, 52);
+        put_elf_u16(&mut bytes, 40, 52);
+        put_elf_u16(&mut bytes, 42, 32);
+        put_elf_u16(&mut bytes, 44, 1);
+        put_elf_u16(&mut bytes, 46, 40);
+        put_elf_u32(&mut bytes, 52, elf::PT_LOAD);
+        put_elf_u32(&mut bytes, 56, 96);
+        put_elf_u32(&mut bytes, 60, 0x0010_0000);
+        put_elf_u32(&mut bytes, 64, 0x0010_0000);
+        put_elf_u32(&mut bytes, 68, 8);
+        put_elf_u32(&mut bytes, 72, 16);
+        put_elf_u32(&mut bytes, 76, 5);
+        put_elf_u32(&mut bytes, 80, 1);
+        // Two EE NOPs, deliberately only a synthetic parser/compiler fixture.
+        bytes[96..104].copy_from_slice(&[0; 8]);
+        bytes
+    }
+
+    fn synthetic_iso_record(extent: u32, size: u32, flags: u8, identifier: &[u8]) -> Vec<u8> {
+        let padding = usize::from(identifier.len().is_multiple_of(2));
+        let record_length = 33 + identifier.len() + padding;
+        let mut record = vec![0u8; record_length];
+        record[0] = record_length as u8;
+        put_iso_u32(&mut record, 2, extent);
+        put_iso_u32(&mut record, 10, size);
+        record[25] = flags;
+        put_iso_u16(&mut record, 28, 1);
+        record[32] = identifier.len() as u8;
+        record[33..33 + identifier.len()].copy_from_slice(identifier);
+        record
+    }
+
+    fn synthetic_ps2_iso() -> Vec<u8> {
+        const BLOCK: usize = 2048;
+        const ROOT_LBA: usize = 20;
+        const SYSTEM_LBA: usize = 21;
+        const ELF_LBA: usize = 22;
+        const BLOCKS: usize = 32;
+
+        let mut image = vec![0u8; BLOCK * BLOCKS];
+        let pvd_offset = 16 * BLOCK;
+        let pvd = &mut image[pvd_offset..pvd_offset + BLOCK];
+        pvd[0] = 1;
+        pvd[1..6].copy_from_slice(b"CD001");
+        pvd[6] = 1;
+        pvd[40..50].copy_from_slice(b"REPS2 TEST");
+        put_iso_u32(pvd, 80, BLOCKS as u32);
+        put_iso_u16(pvd, 120, 1);
+        put_iso_u16(pvd, 124, 1);
+        put_iso_u16(pvd, 128, BLOCK as u16);
+        let root = synthetic_iso_record(ROOT_LBA as u32, BLOCK as u32, 0x02, &[0]);
+        pvd[156..156 + root.len()].copy_from_slice(&root);
+
+        let terminator = &mut image[17 * BLOCK..18 * BLOCK];
+        terminator[0] = 255;
+        terminator[1..6].copy_from_slice(b"CD001");
+        terminator[6] = 1;
+
+        let system_cnf = b"BOOT2 = cdrom0:\\\\GAME.ELF;1\\nVER = 1.00\\nVMODE = NTSC\\n";
+        let boot_elf = synthetic_boot_elf();
+        let mut cursor = ROOT_LBA * BLOCK;
+        for record in [
+            synthetic_iso_record(ROOT_LBA as u32, BLOCK as u32, 0x02, &[0]),
+            synthetic_iso_record(ROOT_LBA as u32, BLOCK as u32, 0x02, &[1]),
+            synthetic_iso_record(SYSTEM_LBA as u32, system_cnf.len() as u32, 0, b"SYSTEM.CNF;1"),
+            synthetic_iso_record(ELF_LBA as u32, boot_elf.len() as u32, 0, b"GAME.ELF;1"),
+        ] {
+            image[cursor..cursor + record.len()].copy_from_slice(&record);
+            cursor += record.len();
+        }
+        let system_offset = SYSTEM_LBA * BLOCK;
+        image[system_offset..system_offset + system_cnf.len()].copy_from_slice(system_cnf);
+        let elf_offset = ELF_LBA * BLOCK;
+        image[elf_offset..elf_offset + boot_elf.len()].copy_from_slice(&boot_elf);
+        image
+    }
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new(label: &str) -> Self {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "reps2-library-{label}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).expect("create isolated test directory");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn imports_one_iso_into_a_content_addressed_library_and_reimport_is_idempotent() {
+        let temp = TestDirectory::new("import");
+        let iso_path = temp.path().join("owned-game.iso");
+        let library_path = temp.path().join("library");
+        let original_iso = synthetic_ps2_iso();
+        fs::write(&iso_path, &original_iso).expect("write synthetic ISO fixture");
+
+        let first = import_disc(&iso_path, &library_path).expect("first ISO import");
+        assert!(!first.already_imported);
+        assert!(first.game_directory.join("game.json").is_file());
+        assert!(first.game_directory.join("boot.elf").is_file());
+        assert_eq!(
+            fs::read(first.game_directory.join("boot.elf")).expect("read extracted boot ELF"),
+            synthetic_boot_elf()
+        );
+        assert_eq!(fs::read(&iso_path).expect("source ISO remains present"), original_iso);
+
+        let manifest = fs::read_to_string(first.game_directory.join("game.json"))
+            .expect("read game manifest");
+        assert!(manifest.contains("\\"schema_version\\": 1"));
+        assert!(manifest.contains("\\"playable\\": false"));
+        assert!(manifest.contains("\\"playability_status\\": \\"blocked_runtime_incomplete\\""));
+        assert!(manifest.contains("\\"copied_into_library\\": false"));
+        assert!(manifest.contains("\\"sha256\\":"));
+        
+        let second = import_disc(&iso_path, &library_path).expect("idempotent re-import");
+        assert!(second.already_imported);
+        assert_eq!(second.game_id, first.game_id);
+        assert_eq!(second.game_directory, first.game_directory);
+
+        // Re-import must not trust a damaged cached boot executable just
+        // because the manifest still contains the expected digest string.
+        fs::write(first.game_directory.join("boot.elf"), b"tampered")
+            .expect("tamper cached boot ELF");
+        let error = import_disc(&iso_path, &library_path)
+            .expect_err("tampered cached boot executable must be rejected");
+        assert!(error.contains("integrity check"));
+    }
+
+    #[test]
+    fn rejects_invalid_iso_without_publishing_a_partial_game_entry() {
+        let temp = TestDirectory::new("invalid");
+        let iso_path = temp.path().join("not-a-disc.iso");
+        fs::write(&iso_path, b"not an ISO").expect("write invalid fixture");
+        let library_path = temp.path().join("library");
+        assert!(import_disc(&iso_path, &library_path).is_err());
+        assert!(!library_path.join("games").exists());
+    }
+
 }
