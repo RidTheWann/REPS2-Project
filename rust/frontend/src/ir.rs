@@ -515,6 +515,52 @@ mod tests {
     }
 
     #[test]
+    fn lifts_register_variable_word_and_doubleword_shifts() {
+        let words = [
+            (4 << 21) | (5 << 16) | (6 << 11) | 0x04,
+            (4 << 21) | (5 << 16) | (7 << 11) | 0x06,
+            (4 << 21) | (5 << 16) | (8 << 11) | 0x07,
+            (4 << 21) | (5 << 16) | (30 << 11) | 0x14,
+            (4 << 21) | (5 << 16) | (31 << 11) | 0x16,
+            (4 << 21) | (5 << 16) | (22 << 11) | 0x17,
+        ];
+        let decoded = words.iter().enumerate()
+            .map(|(index, word)| decoded(*word, 0x7000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded).expect("variable shifts lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ShiftLeftWordVariable { dst, src, amount }
+                if dst.index() == 6 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ShiftRightLogicalWordVariable { dst, src, amount }
+                if dst.index() == 7 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::ShiftRightArithmeticWordVariable { dst, src, amount }
+                if dst.index() == 8 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::ShiftLeftDoublewordVariable { dst, src, amount }
+                if dst.index() == 30 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[4].operation,
+            Operation::ShiftRightLogicalDoublewordVariable { dst, src, amount }
+                if dst.index() == 31 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[5].operation,
+            Operation::ShiftRightArithmeticDoublewordVariable { dst, src, amount }
+                if dst.index() == 22 && src.index() == 5 && amount.index() == 4
+        ));
+    }
+
+    #[test]
     fn verifier_rejects_doubleword_shift_amount_outside_sixty_four_bit_range() {
         let invalid = Instruction {
             guest_pc: 0x1000,
