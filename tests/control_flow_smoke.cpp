@@ -120,9 +120,9 @@ int main() {
     // though that GPR is overwritten with the link address.
     EeState jalr_alias{};
     jalr_alias.pc = 0x4000;
-    jalr_alias.gpr[8].low = 0x5000;
+    jalr_alias.gpr[8].low = 0x6000;
     const auto jalr_status = reps2::generated::execute_cfg(jalr_alias, 64);
-    if (jalr_status != Status::external_control_flow || jalr_alias.pc != 0x5000) {
+    if (jalr_status != Status::external_control_flow || jalr_alias.pc != 0x6000) {
         return fail(18);
     }
     if (jalr_alias.gpr[8].low != 0x4008 || jalr_alias.gpr[9].low != 31) {
