@@ -8,6 +8,8 @@ The frontend is written in Rust: executable inspection, instruction decoding, an
 
 ## Current capabilities
 
+- Add one owned PS2 ISO directly to a managed multi-game library with `reps2 add-game`; identify the disc by streaming SHA-256, resolve SYSTEM.CNF BOOT2/BOOT, extract and validate the boot ELF internally, and write a versioned per-game JSON manifest plus any currently available analysis/code-generation artifacts. The original ISO remains at its source path and is not copied. Imported records are explicitly marked non-playable until the native PS2 runtime and title-stage validation exist.
+
 - Inspect raw 2048-byte-sector ISO 9660 images without loading the entire disc; validate the descriptor sequence and single-volume PVD, list root entries, resolve nested paths, and parse SYSTEM.CNF with BOOT2 preferred over BOOT.
 - Extract the SYSTEM.CNF boot target only after validating it as a MIPS ET_EXEC ELF; use create-new output semantics so an existing file or source image is never overwritten.
 - Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries.
@@ -65,6 +67,7 @@ For Rust-only work:
 
     reps2 version
     reps2 disc-info <disc-image.iso>
+    reps2 add-game <disc-image.iso> <library-directory>
     reps2 extract-boot-elf <disc-image.iso> <output.elf>
     reps2 elf-info <elf-file>
     reps2 analyze-elf <elf-file>
@@ -78,6 +81,8 @@ Example:
     reps2 recompile-elf "D:\List Games\some-owned-game\SLUS_123.45" build\game.cpp
     reps2 decode 0x2485FFFC 0x00100000
     reps2 compile-words output.cpp 0x00100000 0x24080005 0x24090007 0x01095021
+
+add-game accepts one raw 2048-byte-sector ISO 9660 image and stores a content-addressed record below `<library-directory>/games/<sha256>/`. The generated `game.json` is the launcher-facing metadata contract; `boot.elf`, `recompiled.cpp`, and `ee-main-ram.bin` are stored only when the relevant stage succeeds. The original ISO is referenced by canonical path rather than copied, and duplicate imports are detected by content hash. The command is a managed import pipeline, not a claim that the imported title is playable.
 
 disc-info and extract-boot-elf accept raw 2048-byte-sector ISO 9660 images. The reader uses seeking and bounded directory/file reads, so a multi-gigabyte disc is not loaded into memory as a whole. extract-boot-elf resolves SYSTEM.CNF BOOT2 first and BOOT second, validates the target as an ELF32 little-endian EM_MIPS ET_EXEC, and creates a new output file without overwriting existing paths. Raw 2352-byte BIN/CUE tracks, CHD, UDF, Joliet/Rock Ridge names, multi-volume sets, multi-extent files, interleaved files, HDD PFS targets, and full PS2 optical drive emulation are not supported. The ISO is opened read-only; extraction writes only the separate output ELF.
 
