@@ -342,7 +342,7 @@ pub fn import_disc(iso_path: &Path, library_root: &Path) -> Result<ImportSummary
 
     fs::rename(&staging_directory, &final_directory)
         .map_err(|error| format!("cannot publish imported game directory {}: {error}", final_directory.display()))?;
-    std::mem::forget(staging_guard);
+    drop(staging_guard);
 
     Ok(ImportSummary {
         game_id,
