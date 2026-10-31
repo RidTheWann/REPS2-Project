@@ -29,6 +29,9 @@ struct EeState {
     std::uint64_t lo{};
     std::uint64_t hi1{};
     std::uint64_t lo1{};
+    // MMI SA holds a bit count consumed by QFSRV. MTSA transfers the full
+    // 64-bit source lane, so the model keeps 64 bits rather than a byte.
+    std::uint64_t sa{};
     EeMemory memory{};
 };
 
@@ -104,6 +107,7 @@ enum class Status : std::uint8_t {
     state.lo = 0;
     state.hi1 = 0;
     state.lo1 = 0;
+    state.sa = 0;
     state.pc = entry_pc;
     return Status::ok;
 }
@@ -469,6 +473,42 @@ enum class Status : std::uint8_t {
     return Gpr128{
         static_cast<std::uint64_t>(lane0) | (static_cast<std::uint64_t>(lane1) << 32U),
         static_cast<std::uint64_t>(lane2) | (static_cast<std::uint64_t>(lane3) << 32U),
+    };
+}
+
+// QFSRV shifts the 256-bit funnel formed by GPR[rs]:GPR[rt] right by the SA
+// bit count and keeps the low 128 bits, so result bit i is funnel bit i + sa.
+// Counts above 127 therefore still draw bits from the rs operand.
+[[nodiscard]] constexpr std::uint64_t funnel_shift_word(
+    std::array<std::uint64_t, 4> funnel,
+    std::size_t index,
+    std::size_t word_shift,
+    unsigned bit_shift
+) noexcept {
+    const auto at = [&](std::size_t position) noexcept {
+        return position < funnel.size() ? funnel[position] : 0ULL;
+    };
+    const auto low_part = at(index + word_shift) >> bit_shift;
+    const auto high_part = bit_shift == 0U
+        ? 0U
+        : at(index + word_shift + 1U) << (64U - bit_shift);
+    return low_part | high_part;
+}
+
+[[nodiscard]] constexpr Gpr128 funnel_shift_right_vec(
+    const Gpr128& upper,
+    const Gpr128& lower,
+    std::uint64_t sa
+) noexcept {
+    if (sa >= 256U) {
+        return Gpr128{};
+    }
+    const std::array<std::uint64_t, 4> funnel{lower.low, lower.high, upper.low, upper.high};
+    const auto word_shift = static_cast<std::size_t>(sa / 64U);
+    const auto bit_shift = static_cast<unsigned>(sa % 64U);
+    return Gpr128{
+        funnel_shift_word(funnel, 0U, word_shift, bit_shift),
+        funnel_shift_word(funnel, 1U, word_shift, bit_shift),
     };
 }
 

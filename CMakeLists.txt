@@ -257,6 +257,45 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_hilo_codegen_smoke COMMAND reps2_hilo_codegen_smoke)
 
+    set(REPS2_SA_GENERATED_CPP "${REPS2_GENERATED_DIR}/sa_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_SA_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_SA_GENERATED_CPP}"
+            0x0000C000
+            0x00200029  # mtsa   $1        SA <- GPR[1][63:0]
+            0x00001028  # mfsa   $2        GPR[2][63:0] <- SA
+            0x0478000F  # mtsab  $3, 0x0F  SA <- (GPR[3][3:0] ^ 0xF) * 8
+            0x70A736E8  # qfsrv  $6, $5, $7 funnel shift by SA = 88
+            0x00004828  # mfsa   $9        SA is read, not consumed
+            0x05190007  # mtsah  $8, 0x07  SA <- (GPR[8][2:0] ^ 0x7) * 16
+            0x70A756E8  # qfsrv  $10, $5, $7 funnel shift by SA = 64
+            0x05780005  # mtsab  $11, 0x05 SA <- (0x5 ^ 0x5) * 8 = 0
+            0x70A766E8  # qfsrv  $12, $5, $7 funnel shift by SA = 0
+            0x00000028  # mfsa   $0        hard-wired zero destination
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the synthetic R5900 MMI SA and QFSRV block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_SA_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_sa_codegen_fixture DEPENDS "${REPS2_SA_GENERATED_CPP}")
+    add_executable(reps2_sa_codegen_smoke
+        "${REPS2_SA_GENERATED_CPP}"
+        tests/sa_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_sa_codegen_smoke reps2_sa_codegen_fixture)
+    target_link_libraries(reps2_sa_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_sa_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_sa_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_sa_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_sa_codegen_smoke COMMAND reps2_sa_codegen_smoke)
+
     set(REPS2_CFG_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow.cpp")
     add_custom_command(
         OUTPUT "${REPS2_CFG_GENERATED_CPP}"

@@ -22,6 +22,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::sign_extend_word;\n\
              using reps2::runtime::sign_extend_word_signed;\n\
              using reps2::runtime::parallel_add_u32;\n\
+             using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::load_u8;\n\
              using reps2::runtime::load_u16;\n\
              using reps2::runtime::load_u32;\n\
@@ -66,6 +67,38 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::MoveFromLo1 { dst } => emit_move_from_hilo(output, dst, "lo1"),
         Operation::MoveToHi1 { src } => emit_move_to_hilo(output, src, "hi1"),
         Operation::MoveToLo1 { src } => emit_move_to_hilo(output, src, "lo1"),
+        Operation::MoveFromSa { dst } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    if ({d} != 0) state.gpr[{d}].low = state.sa;\n"
+            ));
+        }
+        Operation::MoveToSa { src } => {
+            let s = src.index();
+            output.push_str(&format!("    state.sa = state.gpr[{s}].low;\n"));
+        }
+        Operation::MoveToSaByte { src, immediate } => {
+            let s = src.index();
+            let imm = immediate & 0x0F;
+            output.push_str(&format!(
+                "    state.sa = ((state.gpr[{s}].low & 0x0FU) ^ {imm:#04X}U) * 8U;\n"
+            ));
+        }
+        Operation::MoveToSaHalfword { src, immediate } => {
+            let s = src.index();
+            let imm = immediate & 0x07;
+            output.push_str(&format!(
+                "    state.sa = ((state.gpr[{s}].low & 0x07U) ^ {imm:#04X}U) * 16U;\n"
+            ));
+        }
+        Operation::FunnelShiftRightVec { dst, lhs, rhs } => {
+            let d = dst.index();
+            let a = lhs.index();
+            let b = rhs.index();
+            output.push_str(&format!(
+                "    if ({d} != 0) state.gpr[{d}] = funnel_shift_right_vec(state.gpr[{a}], state.gpr[{b}], state.sa);\n"
+            ));
+        }
         Operation::MultiplyWordSigned { dst, lhs, rhs } => {
             emit_multiply_word(output, index, dst, lhs, rhs, true)
         }
@@ -1114,5 +1147,50 @@ mod tests {
             )
         );
         assert!(!cpp.contains("state.gpr[3].low = parallel_add_u32"));
+    }
+
+    #[test]
+    fn emits_r5900_sa_instructions_with_upper_lane_preservation() {
+        let words = [
+            0x0080_0029,                                      // mtsa $4
+            (0x01 << 26) | (4 << 21) | (0x18 << 16) | 0x000F, // mtsab $4, 0xF
+            (0x01 << 26) | (4 << 21) | (0x19 << 16) | 0x0007, // mtsah $4, 0x7
+            0x0000_2828,                                      // mfsa $5
+            0x0000_0028,                                      // mfsa $0
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xE000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("SA IR");
+        let cpp = emit_cpp(&program).expect("SA C++");
+
+        // MTSA/MFSA transfer the whole 64-bit low lane; SA is not a byte field.
+        assert!(cpp.contains("state.sa = state.gpr[4].low;"));
+        assert!(cpp.contains("if (5 != 0) state.gpr[5].low = state.sa;"));
+        assert!(cpp.contains("if (0 != 0) state.gpr[0].low = state.sa;"));
+        assert!(!cpp.contains("state.gpr[5] = state.sa;"));
+
+        // MTSAB/MTSAH scale the XOR result into a bit count (x8 / x16).
+        assert!(cpp.contains("state.sa = ((state.gpr[4].low & 0x0FU) ^ 0x0FU) * 8U;"));
+        assert!(cpp.contains("state.sa = ((state.gpr[4].low & 0x07U) ^ 0x07U) * 16U;"));
+    }
+
+    #[test]
+    fn emits_mmi1_qfsrv_funnel_shift() {
+        let decoded = [crate::mips::decode(0x7085_36E8, 0xF000)];
+        let program = ir::lift(&decoded).expect("QFSRV IR");
+        let cpp = emit_cpp(&program).expect("QFSRV C++");
+
+        assert!(cpp.contains(
+            "if (6 != 0) state.gpr[6] = funnel_shift_right_vec(state.gpr[4], state.gpr[5], state.sa);"
+        ));
+        assert!(cpp.contains("using reps2::runtime::funnel_shift_right_vec;"));
+
+        let zero_destination = [crate::mips::decode(0x7080_06E8, 0xF004)];
+        let program = ir::lift(&zero_destination).expect("QFSRV $0 IR");
+        let cpp = emit_cpp(&program).expect("QFSRV $0 C++");
+        assert!(cpp.contains("if (0 != 0) state.gpr[0] = funnel_shift_right_vec("));
     }
 }

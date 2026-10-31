@@ -75,6 +75,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Expose conservative GPR/HI-LO, memory, control-flow, and possible-exception metadata for currently decoded opcodes; unknown encodings remain opaque.
 - [x] Decode R5900 three-operand MULT/MULTU with optional `rd`, plus base EE MTHI/MTLO/MFHI/MFLO; division, MMI pipeline-1, and full instruction-family coverage remain separate work.
 - [x] Decode, lift, and AOT-lower the MMI1-group PADDUW operation with independent unsigned 32-bit lane addition and lane-local saturation; other MMI operations and MMI pipeline-1 state remain separate work.
+- [x] Decode and lift the MMI shift-amount movers MFSA/MTSA/MTSAB/MTSAH with their documented reserved-field masks, and lower MMI1 QFSRV so SA is consumed as a 64-bit bit count; branch-likely and three-cycle SA hazards remain unmodeled.
 - [x] Decode and lift NOR, SLT, SLTU, SLTI and SLTIU into typed scalar IR; SLTIU's immediate is sign-extended before unsigned comparison.
 - [x] Decode, lift and AOT-lower trapping 64-bit DADD/DSUB/DADDI separately from DADDU/DSUBU/DADDIU; detect signed overflow without host-language signed-overflow UB and test GPR[0] exception behavior.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
@@ -95,6 +96,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] AOT-lower and execute MTHI/MTLO/MFHI/MFLO and signed/unsigned R5900 MULT/MULTU in a dedicated native smoke test on Windows/MSVC and Linux/GCC, including HI/LO and `rd` results.
 - [x] AOT-lower and execute NOR/SLT/SLTU/SLTI/SLTIU with signed 64-bit boundary, unsigned ordering, negative immediate, GPR[0], and upper-lane preservation tests on Windows/MSVC and Linux/GCC.
 - [x] AOT-lower and execute PADDUW across all four 128-bit lanes in a native smoke test, including lane-local unsigned saturation, a non-zero destination, and GPR[0] suppression.
+- [x] AOT-lower and execute MFSA/MTSA/MTSAB/MTSAH with QFSRV in one native smoke test, covering the 64-bit SA round-trip, the `*8`/`*16` bit-count scaling, funnel shifts at SA = 88/64/0, SA staying unread-consumed by QFSRV, full 128-bit destination writes, and GPR[0] suppression.
 - [x] Execute DADD/DSUB/DADDI success and overflow paths in generated native C++ on Windows/MSVC and Linux/GCC, including no-write-on-trap and overflow when `rd = 0`.
 - [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
 - [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
