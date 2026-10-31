@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "reps2/runtime/ee_state.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 namespace reps2::generated {
 [[nodiscard]] reps2::runtime::Status execute_cfg(
     reps2::runtime::EeState& state,
@@ -115,6 +121,113 @@ int main() {
     }
     if (jalr_alias.gpr[8].low != 0x4008 || jalr_alias.gpr[9].low != 31) {
         return 19;
+    }
+
+    // Load/store operations execute against caller-owned 32 MiB EE RAM.
+    // All documented main-RAM aliases must refer to the same backing bytes.
+    std::vector<std::uint8_t> main_ram(reps2::runtime::kEeMainRamSize);
+    const std::array<std::uint32_t, 5> virtual_bases{
+        0x00001000U, // cached kuseg
+        0x20001000U, // uncached alias
+        0x80001000U, // KSEG0 direct map
+        0xA0001000U, // KSEG1 direct map
+        0x30101000U, // accelerated alias of physical 0x00101000
+    };
+    const std::array<std::size_t, 5> physical_offsets{
+        0x1000U, 0x1000U, 0x1000U, 0x1000U, 0x101000U
+    };
+    for (std::size_t index = 0; index < virtual_bases.size(); ++index) {
+        const auto physical = physical_offsets[index];
+        std::fill(main_ram.begin() + static_cast<std::ptrdiff_t>(physical),
+                  main_ram.begin() + static_cast<std::ptrdiff_t>(physical + 12U), std::uint8_t{0});
+
+        EeState memory_state{};
+        memory_state.pc = 0x5000U;
+        memory_state.memory.main_ram = main_ram;
+        memory_state.gpr[8].low = virtual_bases[index] + 4U;
+        memory_state.gpr[9].low = 0xFFFFFFFF80FF8001ULL;
+        memory_state.gpr[10].high = 0xAAAAAAAAAAAAAAAAULL;
+        memory_state.gpr[12].high = 0xBBBBBBBBBBBBBBBBULL;
+        memory_state.gpr[31].low = 0x9000U;
+
+        const auto memory_status = reps2::generated::execute_cfg(memory_state, 64U);
+        if (memory_status != Status::external_control_flow || memory_state.pc != 0x9000U) {
+            return 20;
+        }
+        if (memory_state.gpr[10].low != 1U || memory_state.gpr[11].low != 1U) {
+            return 21;
+        }
+        if (memory_state.gpr[12].low != 0xFFFFFFFFFFFF80FFULL
+            || memory_state.gpr[13].low != 0x80FFULL) {
+            return 22;
+        }
+        if (memory_state.gpr[14].low != 0xFFFFFFFF80FF8001ULL
+            || memory_state.gpr[15].low != 0x80FF8001ULL) {
+            return 23;
+        }
+        if (memory_state.gpr[10].high != 0xAAAAAAAAAAAAAAAAULL
+            || memory_state.gpr[12].high != 0xBBBBBBBBBBBBBBBBULL) {
+            return 24;
+        }
+        if (main_ram[physical] != 0x01U || main_ram[physical + 1U] != 0x80U
+            || main_ram[physical + 2U] != 0xFFU || main_ram[physical + 3U] != 0x80U) {
+            return 25;
+        }
+        if (main_ram[physical + 4U] != 0x01U || main_ram[physical + 6U] != 0x01U
+            || main_ram[physical + 7U] != 0x80U || main_ram[physical + 8U] != 0x01U
+            || main_ram[physical + 11U] != 0x80U) {
+            return 26;
+        }
+    }
+
+    // Halfword/word alignment faults must preserve the destination register
+    // and report the exact guest instruction PC.
+    EeState unaligned{};
+    unaligned.pc = 0x5100U;
+    unaligned.memory.main_ram = main_ram;
+    unaligned.gpr[8].low = 0x1001U;
+    unaligned.gpr[14].low = 0x123456789ABCDEF0ULL;
+    unaligned.gpr[14].high = 0x0BADF00D0BADF00DULL;
+    const auto alignment_status = reps2::generated::execute_cfg(unaligned, 8U);
+    if (alignment_status != Status::address_error || unaligned.pc != 0x5100U) {
+        return 27;
+    }
+    if (unaligned.gpr[14].low != 0x123456789ABCDEF0ULL
+        || unaligned.gpr[14].high != 0x0BADF00D0BADF00DULL) {
+        return 28;
+    }
+
+    // MMIO and hardware regions are not silently modelled as RAM.
+    EeState mmio{};
+    mmio.pc = 0x5000U;
+    mmio.memory.main_ram = main_ram;
+    mmio.gpr[8].low = 0x10000004U;
+    mmio.gpr[9].low = 0xDEADBEEFULL;
+    const auto mmio_status = reps2::generated::execute_cfg(mmio, 64U);
+    if (mmio_status != Status::unsupported_memory_access || mmio.pc != 0x5000U) {
+        return 29;
+    }
+
+    // Unmapped physical gaps fail distinctly from known-but-unimplemented devices.
+    EeState unmapped{};
+    unmapped.pc = 0x5000U;
+    unmapped.memory.main_ram = main_ram;
+    unmapped.gpr[8].low = 0x02000004U;
+    const auto unmapped_status = reps2::generated::execute_cfg(unmapped, 64U);
+    if (unmapped_status != Status::unmapped_memory || unmapped.pc != 0x5000U) {
+        return 30;
+    }
+
+    // The backing span is authoritative: an otherwise valid RAM address
+    // outside a caller-supplied short span is still rejected safely.
+    std::array<std::uint8_t, 16> short_ram{};
+    EeState short_backing{};
+    short_backing.pc = 0x5000U;
+    short_backing.memory.main_ram = short_ram;
+    short_backing.gpr[8].low = 0x1000U;
+    const auto short_backing_status = reps2::generated::execute_cfg(short_backing, 64U);
+    if (short_backing_status != Status::unmapped_memory || short_backing.pc != 0x5000U) {
+        return 31;
     }
 
     return 0;

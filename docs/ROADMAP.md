@@ -45,7 +45,10 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] Deterministic C++20 source generation for the implemented IR operations.
 - [x] Synthetic generated C++ compiled and executed against the minimal EE state ABI on Windows and Linux CI.
 - [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
-- [ ] Memory-operation IR with alignment, address-space and exception outcomes.
+- [x] Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed effective-address offsets.
+- [x] Main-RAM backing span, documented aliases, endian-safe accessors, natural-alignment checks and explicit MMIO/unmapped statuses.
+- [x] Generated memory code compiled/executed on Windows/MSVC and Linux/GCC for load extension, store width, aliasing, alignment and bounds.
+- [ ] Full EE virtual-memory/TLB mapping, exception delivery, cache semantics and memory-mapped device models.
 - [ ] Build manifest with input hash, compiler options, and generated function metadata.
 - [x] CFG-aware C++20 dispatcher for the implemented direct and register-indirect control-flow subset.
 - [x] Synthetic generated control-flow code compiled and executed on Windows/MSVC and Linux/GCC, including branch-taken, branch-not-taken, delay slots, JAL/JR return, and instruction-budget behaviour.
@@ -66,7 +69,8 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 
 ## M5 — Runtime subsystem expansion
 
-- [ ] EE memory, exceptions, interrupts, timers, and DMA.
+- [ ] EE exception/interrupt delivery, COP0/TLB translation and cache semantics.
+- [ ] EE timer, DMA, SIF and other memory-mapped register models.
 - [ ] VU0 macro-mode and VU1 microprogram compilation/execution.
 - [ ] IOP/IRX execution and kernel service surface.
 - [ ] GS submission, rendering, frame presentation, and synchronization.

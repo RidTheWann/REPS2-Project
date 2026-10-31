@@ -98,6 +98,10 @@ The first CFG backend emits a PC-based dispatcher over translated basic blocks. 
 
 Runtime interfaces are versioned and narrow. Every unimplemented system service returns a structured unsupported result or controlled guest-visible failure; it must not return fake success.
 
+The first EE memory slice uses a caller-owned `std::span<std::uint8_t>` for 32 MiB of main RAM. It supports the documented base, uncached, accelerated, KSEG0 and KSEG1 aliases, all resolving to one backing store. Byte/halfword/word helpers assemble little-endian values explicitly, validate bounds and natural alignment, and never use unaligned typed pointer dereferences. LB/LH/LW sign-extend into the low 64-bit GPR lane; LBU/LHU/LWU zero-extend; SB/SH/SW write only their respective low bits. Memory helper failures are distinct: address_error, unmapped_memory, and unsupported_memory_access.
+
+This is not a full virtual-memory implementation. COP0/TLB mappings, cache behavior, exceptions/EXL state, bus error delivery, scratchpad storage, BIOS reads, IOP RAM, VU memories, GS/IPU/timers/DMA/SIF registers and all other MMIO are not implemented. Known device/reserved regions are blocked explicitly rather than aliased to main RAM. The host must attach a valid main-RAM span before executing generated code that uses these instructions.
+
 ### Validation
 
 Synthetic Rust tests, generated-code compilation/execution, instruction semantic tests, differential checks, and game-stage regression are separate layers. Parsing a real ELF or compiling a generated translation unit is not evidence that a game boots or is playable.
@@ -112,6 +116,9 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 - Typed linear IR for a bounded scalar instruction subset.
 - Deterministic scalar C++20 emitter and CFG-aware C++20 dispatcher with a guest PC and structured stop statuses.
 - Synthetic generated control-flow code compiled and executed against the C++20 runtime on Windows/MSVC and Linux/GCC.
+- Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed-offset effective-address generation.
+- Checked little-endian EE main-RAM accesses over a caller-owned 32 MiB backing span with documented aliases and explicit MMIO/unmapped failures.
+- Generated memory code executed in CI for signed/unsigned extension, write widths, all implemented RAM aliases, address alignment, unsupported devices and backing-span bounds.
 - CMake-generated C++ smoke test executed on Windows and Linux CI.
 
 No complete R5900 semantic engine, full game ELF AOT translation, memory-operation lowering, or PS2 runtime is claimed yet.

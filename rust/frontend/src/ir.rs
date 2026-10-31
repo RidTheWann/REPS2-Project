@@ -53,6 +53,15 @@ pub enum Operation {
     ShiftLeftWord { dst: Gpr, src: Gpr, amount: u8 },
     ShiftRightLogicalWord { dst: Gpr, src: Gpr, amount: u8 },
     ShiftRightArithmeticWord { dst: Gpr, src: Gpr, amount: u8 },
+    LoadByteSigned { dst: Gpr, base: Gpr, offset: u16 },
+    LoadByteUnsigned { dst: Gpr, base: Gpr, offset: u16 },
+    LoadHalfSigned { dst: Gpr, base: Gpr, offset: u16 },
+    LoadHalfUnsigned { dst: Gpr, base: Gpr, offset: u16 },
+    LoadWordSigned { dst: Gpr, base: Gpr, offset: u16 },
+    LoadWordUnsigned { dst: Gpr, base: Gpr, offset: u16 },
+    StoreByte { src: Gpr, base: Gpr, offset: u16 },
+    StoreHalf { src: Gpr, base: Gpr, offset: u16 },
+    StoreWord { src: Gpr, base: Gpr, offset: u16 },
 }
 
 /// One IR operation with its original guest instruction address.
@@ -231,6 +240,33 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             Opcode::Sra => Operation::ShiftRightArithmeticWord {
                 dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount,
             },
+            Opcode::Lb => Operation::LoadByteSigned {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Lbu => Operation::LoadByteUnsigned {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Lh => Operation::LoadHalfSigned {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Lhu => Operation::LoadHalfUnsigned {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Lw => Operation::LoadWordSigned {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Lwu => Operation::LoadWordUnsigned {
+                dst: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Sb => Operation::StoreByte {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Sh => Operation::StoreHalf {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
+            Opcode::Sw => Operation::StoreWord {
+                src: gpr(instruction.rt), base: gpr(instruction.rs), offset: instruction.immediate,
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -275,6 +311,45 @@ mod tests {
             error,
             LiftError::UnsupportedOpcode { pc: 0x2000, mnemonic: "beq" }
         );
+    }
+
+    #[test]
+    fn lifts_load_store_family_with_signed_offsets() {
+        let words = [
+            (0x20 << 26) | (4 << 21) | (5 << 16) | 0xFFFC,
+            (0x24 << 26) | (4 << 21) | (6 << 16) | 1,
+            (0x21 << 26) | (4 << 21) | (7 << 16) | 2,
+            (0x25 << 26) | (4 << 21) | (8 << 16) | 4,
+            (0x23 << 26) | (4 << 21) | (9 << 16) | 8,
+            (0x27 << 26) | (4 << 21) | (10 << 16) | 12,
+            (0x28 << 26) | (4 << 21) | (5 << 16) | 1,
+            (0x29 << 26) | (4 << 21) | (6 << 16) | 2,
+            (0x2B << 26) | (4 << 21) | (7 << 16) | 4,
+        ];
+        let stream = words.iter().enumerate()
+            .map(|(index, word)| decoded(*word, 0x2000 + (index as u32 * 4)))
+            .collect::<Vec<_>>();
+        let program = lift(&stream).expect("load/store scalar IR");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::LoadByteSigned { dst, base, offset: 0xFFFC }
+                if dst.index() == 5 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[4].operation,
+            Operation::LoadWordSigned { dst, base, offset: 8 }
+                if dst.index() == 9 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[5].operation,
+            Operation::LoadWordUnsigned { dst, base, offset: 12 }
+                if dst.index() == 10 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[8].operation,
+            Operation::StoreWord { src, base, offset: 4 }
+                if src.index() == 7 && base.index() == 4
+        ));
     }
 
     #[test]

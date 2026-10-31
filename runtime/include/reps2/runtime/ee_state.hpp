@@ -2,8 +2,10 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <bit>
 #include <cstdint>
+#include <span>
 
 namespace reps2::runtime {
 
@@ -12,9 +14,16 @@ struct Gpr128 {
     std::uint64_t high{};
 };
 
+inline constexpr std::uint32_t kEeMainRamSize = 32U * 1024U * 1024U;
+
+struct EeMemory {
+    std::span<std::uint8_t> main_ram{};
+};
+
 struct EeState {
     std::uint32_t pc{};
     std::array<Gpr128, 32> gpr{};
+    EeMemory memory{};
 };
 
 enum class Status : std::uint8_t {
@@ -24,7 +33,160 @@ enum class Status : std::uint8_t {
     instruction_budget_exhausted,
     external_control_flow,
     unsupported_instruction,
+    address_error,
+    unmapped_memory,
+    unsupported_memory_access,
 };
+
+[[nodiscard]] constexpr bool is_unsupported_physical_region(std::uint32_t address) noexcept {
+    // The physical 0x10000000..0x1FFFFFFF window contains EE registers,
+    // reserved areas, IOP memory and BIOS; none is backed by main RAM here.
+    return (address >= 0x10000000U && address < 0x20000000U)
+        || (address >= 0x70000000U && address < 0x70004000U);
+}
+
+[[nodiscard]] constexpr bool resolve_ee_main_ram_address(
+    std::uint32_t virtual_address,
+    std::uint32_t& physical_address
+) noexcept {
+    if (virtual_address < kEeMainRamSize) {
+        physical_address = virtual_address;
+        return true;
+    }
+    if (virtual_address >= 0x20000000U && virtual_address < 0x22000000U) {
+        physical_address = virtual_address - 0x20000000U;
+        return true;
+    }
+    if (virtual_address >= 0x30100000U && virtual_address < 0x32000000U) {
+        physical_address = virtual_address - 0x30000000U;
+        return true;
+    }
+
+    // Direct-mapped KSEG0/KSEG1 addresses translate through the low 29 bits.
+    if ((virtual_address >= 0x80000000U && virtual_address < 0xA0000000U)
+        || (virtual_address >= 0xA0000000U && virtual_address < 0xC0000000U)) {
+        const auto physical = virtual_address & 0x1FFFFFFFU;
+        if (physical < kEeMainRamSize) {
+            physical_address = physical;
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] inline Status resolve_ee_memory_access(
+    const EeMemory& memory,
+    std::uint32_t virtual_address,
+    std::size_t width,
+    std::size_t alignment,
+    std::uint32_t& physical_address
+) noexcept {
+    if (alignment > 1U && (virtual_address % alignment) != 0U) {
+        return Status::address_error;
+    }
+
+    if (!resolve_ee_main_ram_address(virtual_address, physical_address)) {
+        std::uint32_t translated = virtual_address;
+        if ((virtual_address >= 0x80000000U && virtual_address < 0xC0000000U)) {
+            translated = virtual_address & 0x1FFFFFFFU;
+        }
+        return is_unsupported_physical_region(translated)
+            ? Status::unsupported_memory_access
+            : Status::unmapped_memory;
+    }
+
+    const auto offset = static_cast<std::size_t>(physical_address);
+    if (offset > memory.main_ram.size() || width > memory.main_ram.size() - offset) {
+        return Status::unmapped_memory;
+    }
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status load_u8(
+    const EeMemory& memory,
+    std::uint32_t address,
+    std::uint8_t& value
+) noexcept {
+    std::uint32_t physical{};
+    const auto status = resolve_ee_memory_access(memory, address, 1U, 1U, physical);
+    if (status != Status::ok) return status;
+    value = memory.main_ram[static_cast<std::size_t>(physical)];
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status load_u16(
+    const EeMemory& memory,
+    std::uint32_t address,
+    std::uint16_t& value
+) noexcept {
+    std::uint32_t physical{};
+    const auto status = resolve_ee_memory_access(memory, address, 2U, 2U, physical);
+    if (status != Status::ok) return status;
+    const auto offset = static_cast<std::size_t>(physical);
+    value = static_cast<std::uint16_t>(
+        static_cast<std::uint32_t>(memory.main_ram[offset])
+        | (static_cast<std::uint32_t>(memory.main_ram[offset + 1U]) << 8U)
+    );
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status load_u32(
+    const EeMemory& memory,
+    std::uint32_t address,
+    std::uint32_t& value
+) noexcept {
+    std::uint32_t physical{};
+    const auto status = resolve_ee_memory_access(memory, address, 4U, 4U, physical);
+    if (status != Status::ok) return status;
+    const auto offset = static_cast<std::size_t>(physical);
+    value = static_cast<std::uint32_t>(memory.main_ram[offset])
+        | (static_cast<std::uint32_t>(memory.main_ram[offset + 1U]) << 8U)
+        | (static_cast<std::uint32_t>(memory.main_ram[offset + 2U]) << 16U)
+        | (static_cast<std::uint32_t>(memory.main_ram[offset + 3U]) << 24U);
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status store_u8(
+    EeMemory& memory,
+    std::uint32_t address,
+    std::uint8_t value
+) noexcept {
+    std::uint32_t physical{};
+    const auto status = resolve_ee_memory_access(memory, address, 1U, 1U, physical);
+    if (status != Status::ok) return status;
+    memory.main_ram[static_cast<std::size_t>(physical)] = value;
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status store_u16(
+    EeMemory& memory,
+    std::uint32_t address,
+    std::uint16_t value
+) noexcept {
+    std::uint32_t physical{};
+    const auto status = resolve_ee_memory_access(memory, address, 2U, 2U, physical);
+    if (status != Status::ok) return status;
+    const auto offset = static_cast<std::size_t>(physical);
+    memory.main_ram[offset] = static_cast<std::uint8_t>(value);
+    memory.main_ram[offset + 1U] = static_cast<std::uint8_t>(value >> 8U);
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status store_u32(
+    EeMemory& memory,
+    std::uint32_t address,
+    std::uint32_t value
+) noexcept {
+    std::uint32_t physical{};
+    const auto status = resolve_ee_memory_access(memory, address, 4U, 4U, physical);
+    if (status != Status::ok) return status;
+    const auto offset = static_cast<std::size_t>(physical);
+    memory.main_ram[offset] = static_cast<std::uint8_t>(value);
+    memory.main_ram[offset + 1U] = static_cast<std::uint8_t>(value >> 8U);
+    memory.main_ram[offset + 2U] = static_cast<std::uint8_t>(value >> 16U);
+    memory.main_ram[offset + 3U] = static_cast<std::uint8_t>(value >> 24U);
+    return Status::ok;
+}
 
 [[nodiscard]] constexpr std::uint64_t sign_extend_word(std::uint32_t value) noexcept {
     return (value & 0x80000000U) != 0

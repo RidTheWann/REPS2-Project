@@ -4,7 +4,7 @@
 
 The frontend is written in Rust: executable inspection, instruction decoding, analysis, typed IR, verification, and AOT C++ source generation. Generated C++ is compiled by the host compiler and linked against the independently implemented C++20 runtime.
 
-> **Status: experimental AOT foundation (v0.5.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed scalar IR, a reachability-guided CFG, a CFG-aware control IR, and deterministic C++20 lowering for a documented scalar/control-flow subset. CMake builds synthetic scalar and branch/call programs, compiles the generated C++, and executes both in CI on Windows and Linux. The ELF-to-C++ command is usable for owned ELF files, but full R5900 coverage, memory semantics, system services, native module linking, and game compatibility are not complete.
+> **Status: experimental AOT foundation (v0.6.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed scalar IR, a reachability-guided CFG, a CFG-aware control IR, deterministic C++20 lowering for a documented scalar/control-flow subset, and byte/halfword/word EE main-RAM loads and stores. CMake builds synthetic scalar, control-flow, and memory programs, compiles the generated C++, and executes them in CI on Windows and Linux. The ELF-to-C++ command is usable for owned ELF files, but full R5900 coverage, TLB/exception semantics, MMIO devices, system services, native module linking, and game compatibility are not complete.
 
 ## Current capabilities
 
@@ -18,11 +18,14 @@ The frontend is written in Rust: executable inspection, instruction decoding, an
 - Lift discovered blocks into a CFG-aware typed IR with explicit fallthroughs, branch conditions, direct/indirect jumps, returns, and delay-slot operations.
 - Lower the supported CFG subset to a C++20 PC dispatcher; preserve branch/link/delay-slot ordering and stop explicitly at unsupported operations or unmapped control flow.
 - Bound generated execution by a guest-instruction budget, admitting each basic block atomically and preserving its starting PC when the budget is insufficient.
+- Decode and lift LB/LBU/LH/LHU/LW/LWU and SB/SH/SW into typed memory IR with sign/zero extension and signed 16-bit offsets.
+- Provide caller-owned 32 MiB little-endian EE main RAM with the documented direct, uncached, accelerated, KSEG0 and KSEG1 aliases.
+- Perform checked byte/halfword/word accesses without unaligned pointer casts; report address errors, unmapped ranges, and unimplemented device/MMIO accesses as distinct statuses.
 - Lift a supported straight-line instruction subset into typed Rust IR with guest-PC provenance and verification.
 - Emit deterministic C++20 for supported scalar operations: NOP, ADD/ADDI/ADDU/ADDIU, SUB/SUBU, AND/OR/XOR, immediate logical operations, LUI, and word shifts.
 - Keep a 128-bit EE GPR state shape in the runtime ABI; scalar instructions update only the low 64-bit lane and preserve the high lane.
 - Compile and execute a generated synthetic translation unit as part of CMake/CTest on Windows/MSVC and Linux/GCC.
-- Report unsupported control-flow, memory, and hardware behavior explicitly; do not silently replace it with NOPs.
+- Report unsupported control-flow, MMIO, TLB, exception, and hardware behavior explicitly; do not silently replace it with NOPs or backing RAM.
 
 ## Requirements
 
@@ -71,7 +74,7 @@ analyze-elf is a read-only, reachability-guided analysis command. It starts from
 
 recompile-elf performs ELF-to-CFG-IR-to-C++ lowering for the currently supported scalar and control-flow subset. The output exports reps2::generated::execute_cfg(EeState&, instruction_budget); the caller supplies the initial guest PC and EE state. Direct branches, J/JAL, JR/JALR, and the supported REGIMM branches are represented with explicit delay slots. Unsupported instructions and control transfers outside the translated graph return a structured status instead of being guessed. This is a compiler vertical slice, not a complete game recompiler or runnable PS2 module.
 
-compile-words remains a narrow straight-line development command. compile-cfg-fixture is an internal synthetic fixture generator used by CTest. Neither command consumes or distributes game data.
+compile-words remains a narrow straight-line development command. compile-cfg-fixture is an internal synthetic fixture generator used by CTest. Neither command consumes or distributes game data. `EeState::memory.main_ram` must be supplied by the host as a 32 MiB writable byte span before executing generated code that performs memory operations; the generated module does not allocate or own the console's RAM.
 
 
 ## Architecture
@@ -99,6 +102,9 @@ See docs/ARCHITECTURE.md, docs/ROADMAP.md, and docs/decisions/.
 - Branch-and-link variants write the PC+8 return address regardless of whether the branch predicate is true. The link is written before the delay-slot instruction executes.
 - JALR captures its dynamic destination before writing the link register, preserving correct behavior when source and destination registers alias.
 - The CFG AOT dispatcher executes the branch/jump delay slot before committing the selected next PC. Branch-likely/annul semantics are not included in the supported subset.
+- EE load/store effective addresses use the low 32-bit base register plus a sign-extended 16-bit offset, wrapping as a 32-bit address. LB/LH/LW sign-extend into GPR[63:0]; LBU/LHU/LWU zero-extend into GPR[63:0]; stores write the low 8/16/32 bits and preserve the upper GPR lane.
+- Main-RAM reads/writes are little-endian and support the documented 32 MiB aliases. Halfword and word accesses require natural alignment; a faulting load does not modify its destination register.
+- MMIO, VU memory, IOP RAM, BIOS, scratchpad, reserved ranges, TLB remapping, cache effects and bus/exception delivery are not emulated by this memory slice. Recognized device/reserved regions return `unsupported_memory_access`; out-of-range or absent backing RAM returns `unmapped_memory`.
 
 ## Engineering and legal boundaries
 
