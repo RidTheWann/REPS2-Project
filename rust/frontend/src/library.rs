@@ -671,7 +671,7 @@ mod tests {
 
     fn synthetic_boot_elf() -> Vec<u8> {
         let mut bytes = vec![0u8; 112];
-        bytes[0..4].copy_from_slice(b"\\x7FELF");
+        bytes[0..4].copy_from_slice(b"\x7FELF");
         bytes[4] = 1;
         bytes[5] = 1;
         bytes[6] = 1;
@@ -737,7 +737,7 @@ mod tests {
         terminator[1..6].copy_from_slice(b"CD001");
         terminator[6] = 1;
 
-        let system_cnf = b"BOOT2 = cdrom0:\\\\GAME.ELF;1\\nVER = 1.00\\nVMODE = NTSC\\n";
+        let system_cnf = b"BOOT2 = cdrom0:\\GAME.ELF;1\nVER = 1.00\nVMODE = NTSC\n";
         let boot_elf = synthetic_boot_elf();
         let mut cursor = ROOT_LBA * BLOCK;
         for record in [
@@ -802,11 +802,11 @@ mod tests {
 
         let manifest = fs::read_to_string(first.game_directory.join("game.json"))
             .expect("read game manifest");
-        assert!(manifest.contains("\\"schema_version\\": 1"));
-        assert!(manifest.contains("\\"playable\\": false"));
-        assert!(manifest.contains("\\"playability_status\\": \\"blocked_runtime_incomplete\\""));
-        assert!(manifest.contains("\\"copied_into_library\\": false"));
-        assert!(manifest.contains("\\"sha256\\":"));
+        assert!(manifest.contains("\"schema_version\": 1"));
+        assert!(manifest.contains("\"playable\": false"));
+        assert!(manifest.contains("\"playability_status\": \"blocked_runtime_incomplete\""));
+        assert!(manifest.contains("\"copied_into_library\": false"));
+        assert!(manifest.contains("\"sha256\":);
         
         let second = import_disc(&iso_path, &library_path).expect("idempotent re-import");
         assert!(second.already_imported);
