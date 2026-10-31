@@ -122,6 +122,50 @@ if(BUILD_TESTING)
 
     add_test(NAME reps2_codegen_smoke COMMAND reps2_codegen_smoke)
 
+    set(REPS2_COMPARE_GENERATED_CPP "${REPS2_GENERATED_DIR}/compare_nor_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_COMPARE_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_COMPARE_GENERATED_CPP}"
+            0x0000A000
+            0x00856027
+            0x0022302A
+            0x0022382B
+            0x28280001
+            0x2849FFFF
+            0x2C0AFFFF
+            0x2C6BFFFF
+            0x0041682A
+            0x0041702B
+            0x0022002A
+            0x2C30FFFF
+            0x2C710000
+            0x2832FFFF
+            0x28538000
+            0x2C748000
+        DEPENDS reps2
+        COMMENT "AOT-compiling the synthetic R5900 compare/NOR block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_COMPARE_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_compare_codegen_fixture DEPENDS "${REPS2_COMPARE_GENERATED_CPP}")
+    add_executable(reps2_compare_codegen_smoke
+        "${REPS2_COMPARE_GENERATED_CPP}"
+        tests/compare_nor_smoke.cpp
+    )
+    add_dependencies(reps2_compare_codegen_smoke reps2_compare_codegen_fixture)
+    target_link_libraries(reps2_compare_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_compare_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_compare_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_compare_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_compare_codegen_smoke COMMAND reps2_compare_codegen_smoke)
+
     set(REPS2_HILO_GENERATED_CPP "${REPS2_GENERATED_DIR}/hilo_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_HILO_GENERATED_CPP}"

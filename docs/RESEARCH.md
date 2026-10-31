@@ -59,6 +59,13 @@ These projects have different goals and different completion levels. Their demos
 - The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 (2014), §§5.1.2–5.1.3 remains the general ISA reference; R5900 GPR lane behaviour is cross-checked independently and is not inferred solely from the generic MIPS64 description.
 - These operations remain scoped to the current direct/uncached/accelerated/KSEG main-RAM aliases. No COP0/TLB remapping, cache/coherency, MMIO, bus exception delivery, or complete hardware compatibility is claimed.
 
+## R5900 64-bit compare and NOR cross-checks
+
+- PCSX2's R5900 interpreter compares the full low 64-bit GPR lane for `SLT` and `SLTU`, returning exactly 0 or 1 in that lane. `SLTI` compares the signed low 64-bit GPR against the sign-extended 16-bit immediate; `SLTIU` sign-extends the same immediate and then compares the bit pattern as unsigned 64-bit. `NOR` complements the 64-bit OR result. Reference: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/R5900OpcodeImpl.cpp (SLTI/SLTIU around lines 2662–2663; NOR/SLT/SLTU around lines 2744–2748).
+- The same implementation stores the result into GPR low lane only. REPS2 mirrors this register-lane boundary and does not modify GPR[127:64].
+- Signed comparisons are lowered using C++20 `std::bit_cast<std::int64_t>` from the raw low-lane bits. This avoids relying on implementation-defined conversion of out-of-range unsigned values to signed integers. Unsigned comparisons remain `std::uint64_t` comparisons.
+- The synthetic native fixture tests `INT64_MIN/MAX`, the signed/unsigned ordering reversal around bit 63, `SLTIU` with -1 and -32768, GPR[0] suppression, NOR's exact 64-bit result, and high-lane preservation. This establishes the tested subset only; it does not establish full R5900 compatibility.
+
 ## EE HI/LO and R5900 multiply cross-checks
 
 - QEMU's R5900-specific implementation description defines `MULT[U] rd, rs, rt` and its state transfer as `(rd, LO, HI) <- rs * rt`: the low 32-bit result is written to both `rd` and LO, and the high 32-bit result is written to HI. Omitting `rd` means register zero, but HI/LO still update. The implementation captures both sources before writing any destination: [QEMU R5900 three-operand MULT/MULTU patch](https://patchew.org/QEMU/cover.1540134918.git.noring@nocrew.org/ff1edd3989b06e9cae67c962cec79081e4d7af0a.1540134918.git.noring@nocrew.org/).
