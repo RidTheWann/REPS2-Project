@@ -98,7 +98,7 @@ if(BUILD_TESTING)
             0x0085F014
             0x0085F816
             0x00859817
-        DEPENDS reps2
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic EE block to C++"
         VERBATIM
     )
@@ -144,7 +144,7 @@ if(BUILD_TESTING)
             0x2832FFFF
             0x28538000
             0x2C748000
-        DEPENDS reps2
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 compare/NOR block"
         VERBATIM
     )
@@ -178,7 +178,7 @@ if(BUILD_TESTING)
             0x61EEFFFE
             0x0211002C
             0x0253902C
-        DEPENDS reps2
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 trapping doubleword arithmetic block"
         VERBATIM
     )
@@ -229,7 +229,7 @@ if(BUILD_TESTING)
             0x00009812
             0x00621819
             0x00220818
-        DEPENDS reps2
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 HI/LO and multiply block"
         VERBATIM
     )
@@ -257,7 +257,7 @@ if(BUILD_TESTING)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
         COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-cfg-fixture
             "${REPS2_CFG_GENERATED_CPP}"
-        DEPENDS reps2
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "Generating and lowering the synthetic EE control-flow graph"
         VERBATIM
     )
