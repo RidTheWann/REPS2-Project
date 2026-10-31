@@ -192,7 +192,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                     _ => Opcode::Unknown,
                 };
                 if opcode != Opcode::Unknown {
-                    instruction.jump_target = pc.wrapping_add(4)
+                    instruction.target = pc.wrapping_add(4)
                         .wrapping_add(((immediate as i16 as i32).wrapping_mul(4)) as u32);
                     instruction.has_delay_slot = true;
                 }
