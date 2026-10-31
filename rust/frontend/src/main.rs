@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use std::env;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -10,6 +11,7 @@ use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
+use reps2_frontend::iso9660::{self, Iso9660};
 use reps2_frontend::mips;
 
 const MAX_INPUT_SIZE: u64 = 512 * 1024 * 1024;
@@ -131,6 +133,92 @@ fn analyze_elf(path: &Path) -> Result<(), String> {
         println!("    ... {} more block(s)", graph.blocks.len() - 64);
     }
 
+    Ok(())
+}
+
+fn open_iso(path: &Path) -> Result<Iso9660<File>, String> {
+    let file = File::open(path)
+        .map_err(|error| format!("cannot open read-only disc image {}: {error}", path.display()))?;
+    Iso9660::open(file).map_err(|error| error.to_string())
+}
+
+fn disc_info(path: &Path) -> Result<(), String> {
+    let mut iso = open_iso(path)?;
+    let info = iso.volume_info().clone();
+
+    println!("REPS2 read-only ISO 9660 inspection");
+    println!("  Image: {}", path.display());
+    println!("  Volume identifier: {}", info.volume_identifier);
+    println!("  Logical block size: {} bytes", info.logical_block_size);
+    println!("  Declared volume: {} blocks ({} bytes)", info.volume_space_blocks, info.volume_bytes);
+    println!("  Image size: {} bytes", info.image_bytes);
+    println!("  Root directory:");
+
+    let entries = iso.root_entries().map_err(|error| error.to_string())?;
+    for entry in entries.iter().take(128) {
+        let kind = if entry.is_directory() { "DIR " } else { "FILE" };
+        println!("    [{kind}] {:<24} {} byte(s)", entry.name, entry.size_bytes);
+    }
+    if entries.len() > 128 {
+        println!("    ... {} additional root entr(y/ies)", entries.len() - 128);
+    }
+
+    match iso.boot_executable_path().map_err(|error| error.to_string())? {
+        Some(boot_path) => println!("  SYSTEM.CNF boot executable: {boot_path}"),
+        None => println!("  SYSTEM.CNF: not present in the ISO root"),
+    }
+
+    println!("  Mode: read-only; no disc sectors are modified");
+    Ok(())
+}
+
+fn extract_boot_elf(input: &Path, output: &Path) -> Result<(), String> {
+    if output.exists() {
+        let input_canonical = input.canonicalize()
+            .map_err(|error| format!("cannot resolve disc image path: {error}"))?;
+        let output_canonical = output.canonicalize()
+            .map_err(|error| format!("cannot resolve existing output path: {error}"))?;
+        if input_canonical == output_canonical {
+            return Err("output path resolves to the input ISO; refusing to overwrite the disc image".to_owned());
+        }
+        return Err(format!("output already exists; refusing to overwrite: {}", output.display()));
+    }
+
+    let mut iso = open_iso(input)?;
+    let boot_path = iso.boot_executable_path()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "ISO root does not contain SYSTEM.CNF with a BOOT2 or BOOT entry".to_owned())?;
+
+    let executable = iso.read_file(&boot_path, iso9660::MAX_BOOT_EXECUTABLE_BYTES)
+        .map_err(|error| format!("cannot extract SYSTEM.CNF boot target {boot_path}: {error}"))?;
+    let image = elf::parse(&executable, ParseLimits::default())
+        .map_err(|error| format!("SYSTEM.CNF target {boot_path} is not a valid supported ELF32 image: {error}"))?;
+    if !image.is_mips() {
+        return Err(format!("SYSTEM.CNF target {boot_path} is not EM_MIPS; refusing extraction as a PS2 EE boot ELF"));
+    }
+    if !image.is_executable() {
+        return Err(format!("SYSTEM.CNF target {boot_path} is not ET_EXEC; only static executable boot images are supported"));
+    }
+
+    let mut destination = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)
+        .map_err(|error| format!("cannot create new output file {}: {error}", output.display()))?;
+    if let Err(error) = destination.write_all(&executable).and_then(|()| destination.sync_all()) {
+        drop(destination);
+        let _ = fs::remove_file(output);
+        return Err(format!("cannot write extracted ELF to {}: {error}", output.display()));
+    }
+
+    println!("Extracted PS2 boot executable");
+    println!("  Disc image: {}", input.display());
+    println!("  SYSTEM.CNF target: {boot_path}");
+    println!("  ELF output: {}", output.display());
+    println!("  Extracted bytes: {}", executable.len());
+    println!("  ELF entry point: 0x{:08X}", image.entry_point);
+    println!("  ELF PT_LOAD segments: {}", image.loadable_segment_count());
+    println!("  Source image was opened read-only and was not modified");
     Ok(())
 }
 
@@ -368,6 +456,8 @@ fn usage() {
     println!();
     println!("Usage:");
     println!("  reps2 version");
+    println!("  reps2 disc-info <disc-image.iso>");
+    println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
     println!("  reps2 elf-info <elf-file>");
     println!("  reps2 analyze-elf <elf-file>");
     println!("  reps2 recompile-elf <input-elf> <output.cpp>");
@@ -375,6 +465,8 @@ fn usage() {
     println!("  reps2 compile-cfg-fixture <output.cpp>");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
+    println!("disc-info and extract-boot-elf read raw 2048-byte-sector ISO 9660 images without loading the whole disc into memory.");
+    println!("extract-boot-elf resolves SYSTEM.CNF BOOT2 (preferred) or BOOT and accepts only MIPS ET_EXEC images.");
     println!("recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images.");
     println!("Allocated relocations, non-main-RAM PT_LOAD segments, branch-likely and PS2 hardware services remain unsupported.");
 }
@@ -385,6 +477,10 @@ fn run() -> Result<(), String> {
         Some("version") if arguments.len() == 2 => {
             println!("REPS2 {} (Rust frontend, experimental)", reps2_frontend::VERSION);
             Ok(())
+        }
+        Some("disc-info") if arguments.len() == 3 => disc_info(Path::new(&arguments[2])),
+        Some("extract-boot-elf") if arguments.len() == 4 => {
+            extract_boot_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
         }
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
         Some("analyze-elf") if arguments.len() == 3 => analyze_elf(Path::new(&arguments[2])),

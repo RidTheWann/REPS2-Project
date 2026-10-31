@@ -20,7 +20,7 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] Default EE main-RAM physical mapping for supported direct, uncached, accelerated and KSEG PT_LOAD aliases.
 - [x] PT_LOAD-to-32 MiB initial RAM image construction with BSS zeroing and physical alias overlap checks.
 - [ ] Full address-space permissions and COP0/TLB mapping.
-- [ ] PS2 optical filesystem inspection and executable extraction, read-only.
+- [x] Read-only ISO 9660 inspection and SYSTEM.CNF BOOT2/BOOT ELF extraction for raw 2048-byte-sector images; reject unsupported containers and directory features explicitly.
 - [ ] Real local ELF inventory manifest with no binaries committed.
 - [x] Discover ELF entry points and executable STT_FUNC symbol roots.
 - [x] Reachability-guided CFG for the implemented branch/jump subset; keep indirect targets unresolved.

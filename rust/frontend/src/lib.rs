@@ -10,6 +10,7 @@ pub mod control_codegen;
 pub mod control_ir;
 pub mod elf;
 pub mod ir;
+pub mod iso9660;
 pub mod mips;
 
 /// Frontend version reported by the command-line tool.

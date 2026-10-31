@@ -72,6 +72,10 @@ CMake orchestrates the build, Cargo builds/tests the Rust frontend, and CMake's 
 
 Validate every offset, size, table count, cross-table index, and arithmetic operation before access or allocation. Distinguish file size from memory size and zero-fill BSS tails. Extended ELF numbering and uncommon PS2-specific ABI cases must remain explicit until supported and tested.
 
+The optical-disc reader is a generic `Read + Seek` consumer and never buffers the whole image. Its current supported container is a raw ISO 9660 image with 2048-byte logical sectors. It scans the descriptor sequence from logical sector 16, validates `CD001`/version fields and the terminator, requires one single-volume Primary Volume Descriptor, and bounds every extent against both the declared volume and actual image length. Directory parsing honors logical-block padding and record boundaries, limits directory size/count/path depth, rejects parent traversal, and refuses unsupported secondary-volume, multi-extent, interleaved, or reserved descriptor cases when encountered. File reads are separately capped. SYSTEM.CNF parsing resolves `BOOT2` first and `BOOT` as a compatibility fallback; only `cdrom0:`/`cdrom:` paths are accepted for this optical-image workflow. Boot extraction validates the target as little-endian ELF32 EM_MIPS ET_EXEC and creates a new output file without opening the source image for writing.
+
+The reader deliberately does not claim BIN/CUE raw-track sector deinterleaving, CHD, UDF, Joliet, Rock Ridge, path-table acceleration, multi-volume spanning, multi-extent concatenation, interleaved file sections, HDD/PFS boot targets, CDVD subchannel handling, or optical-drive timing/command emulation.
+
 ### EE decoder and analysis
 
 Decoding is pure and deterministic. Every input word produces a classified instruction or an explicit unsupported result. Static analysis must not assume every byte in an executable segment is code.
@@ -110,6 +114,7 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 
 ## Current implementation
 
+- Rust read-only ISO 9660 reader for raw 2048-byte-sector images with SYSTEM.CNF boot-target resolution and bounded file extraction.
 - Rust ELF32 little-endian parser with section names, symbol tables, and REL/RELA metadata.
 - Bounded PT_LOAD materialization with zero-filled tails and overlap detection.
 - Initial base-MIPS decoder subset, including selected REGIMM branches.
