@@ -231,6 +231,10 @@ if(BUILD_TESTING)
             0x00009812
             0x00621819
             0x00220818
+            0x73800011
+            0x73A00013
+            0x7000F010
+            0x7000F812
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 HI/LO and multiply block"
         VERBATIM
