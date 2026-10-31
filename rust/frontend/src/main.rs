@@ -12,6 +12,7 @@ use reps2_frontend::control_ir;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
 use reps2_frontend::iso9660::{self, Iso9660};
+use reps2_frontend::library;
 use reps2_frontend::mips;
 
 const MAX_INPUT_SIZE: u64 = 512 * 1024 * 1024;
@@ -260,6 +261,23 @@ fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn add_game(input: &Path, library_root: &Path) -> Result<(), String> {
+    let result = library::import_disc(input, library_root)?;
+    if result.already_imported {
+        println!("Game is already present in the REPS2 library");
+    } else {
+        println!("Imported one PS2 game into the REPS2 library");
+    }
+    println!("  Title: {}", result.title);
+    println!("  Game ID: {}", result.game_id);
+    println!("  Game directory: {}", result.game_directory.display());
+    println!("  Boot ELF: {}", result.game_directory.join("boot.elf").display());
+    println!("  Generated C++: {}", if result.generated_cpp { "yes (experimental/partial)" } else { "not yet" });
+    println!("  Initial EE RAM image: {}", if result.generated_ram_image { "yes" } else { "not yet" });
+    println!("  Playable: no — the PS2 runtime and title-stage validation are not complete");
+    Ok(())
+}
+
 fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
     use reps2_frontend::analysis::{self, AnalysisLimits, EntryPoint};
     use reps2_frontend::elf::LoadedSegment;
@@ -457,6 +475,7 @@ fn usage() {
     println!("Usage:");
     println!("  reps2 version");
     println!("  reps2 disc-info <disc-image.iso>");
+    println!("  reps2 add-game <disc-image.iso> <library-directory>");
     println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
     println!("  reps2 elf-info <elf-file>");
     println!("  reps2 analyze-elf <elf-file>");
@@ -465,6 +484,8 @@ fn usage() {
     println!("  reps2 compile-cfg-fixture <output.cpp>");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
+    println!("add-game imports one ISO into a content-addressed library entry and creates a versioned game.json manifest.");
+    println!("The original ISO remains at its source path; generated artifacts are experimental and do not imply playability.");
     println!("disc-info and extract-boot-elf read raw 2048-byte-sector ISO 9660 images without loading the whole disc into memory.");
     println!("extract-boot-elf resolves SYSTEM.CNF BOOT2 (preferred) or BOOT and accepts only MIPS ET_EXEC images.");
     println!("recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images.");
@@ -479,6 +500,9 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Some("disc-info") if arguments.len() == 3 => disc_info(Path::new(&arguments[2])),
+        Some("add-game") if arguments.len() == 4 => {
+            add_game(Path::new(&arguments[2]), Path::new(&arguments[3]))
+        },
         Some("extract-boot-elf") if arguments.len() == 4 => {
             extract_boot_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
         }
