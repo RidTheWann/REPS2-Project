@@ -442,7 +442,7 @@ fn emit_doubleword_immediate_add(output: &mut String, dst: Gpr, src: Gpr, immedi
     let s = src.index();
     let signed_immediate = immediate as i16 as i64;
     output.push_str(&format!(
-        "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low + static_cast<std::uint64_t>({signed_immediate}LL);\\n"
+        "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low + static_cast<std::uint64_t>({signed_immediate}LL);\n"
     ));
 }
 
@@ -458,11 +458,11 @@ fn emit_doubleword_shift(
     let s = src.index();
     if arithmetic {
         output.push_str(&format!(
-            "    if ({d} != 0) state.gpr[{d}].low = arithmetic_shift_right_doubleword(state.gpr[{s}].low, {amount}U);\\n"
+            "    if ({d} != 0) state.gpr[{d}].low = arithmetic_shift_right_doubleword(state.gpr[{s}].low, {amount}U);\n"
         ));
     } else {
         output.push_str(&format!(
-            "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low {operator} {amount}U;\\n"
+            "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low {operator} {amount}U;\n"
         ));
     }
 }
