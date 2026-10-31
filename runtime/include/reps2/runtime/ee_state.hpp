@@ -282,7 +282,8 @@ enum class Status : std::uint8_t {
     const auto preserve_mask = 0x00FFFFFFU >> (byte_offset * 8U);
     const auto merged = (static_cast<std::uint32_t>(previous) & preserve_mask)
         | (loaded << shift);
-    value = sign_extend_word(merged);
+    value = static_cast<std::uint64_t>(merged)
+        | ((merged & 0x80000000U) != 0U ? 0xFFFFFFFF00000000ULL : 0ULL);
     return Status::ok;
 }
 
@@ -301,7 +302,8 @@ enum class Status : std::uint8_t {
     const auto merged = (static_cast<std::uint32_t>(previous) & preserve_mask)
         | (loaded >> shift);
     value = byte_offset == 0U
-        ? sign_extend_word(merged)
+        ? (static_cast<std::uint64_t>(merged)
+            | ((merged & 0x80000000U) != 0U ? 0xFFFFFFFF00000000ULL : 0ULL))
         : ((previous & 0xFFFFFFFF00000000ULL) | static_cast<std::uint64_t>(merged));
     return Status::ok;
 }
