@@ -546,7 +546,7 @@ mod tests {
         assert!(matches!(block.instructions[2].operation,
             ir::Operation::MultiplyWordSigned { dst, lhs, rhs }
                 if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2));
-        assert!(matches!(block.terminator, ControlTerminator::IndirectJump { .. }));
+        assert!(matches!(block.terminator, ControlTerminator::Return { .. }));
         assert_eq!(program.unsupported_count(), 0);
     }
 }
