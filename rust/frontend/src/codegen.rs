@@ -16,6 +16,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::Status;\n\
              using reps2::runtime::is_word_value;\n\
              using reps2::runtime::arithmetic_shift_right_word;\n\
+             using reps2::runtime::arithmetic_shift_right_doubleword;\n\
              using reps2::runtime::sign_extend_immediate;\n\
              using reps2::runtime::sign_extend_word;\n\
              using reps2::runtime::sign_extend_word_signed;\n\
@@ -73,6 +74,20 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         Operation::SubUnsignedWord { dst, lhs, rhs } => emit_word_sub(
             output, index, dst, lhs, rhs, false
         ),
+        Operation::AddDoublewordUnsigned { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "+"),
+        Operation::SubDoublewordUnsigned { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "-"),
+        Operation::AddImmediateDoublewordUnsigned { dst, src, immediate } => {
+            emit_doubleword_immediate_add(output, dst, src, immediate);
+        }
+        Operation::ShiftLeftDoubleword { dst, src, amount } => {
+            emit_doubleword_shift(output, dst, src, amount, "<<", false);
+        }
+        Operation::ShiftRightLogicalDoubleword { dst, src, amount } => {
+            emit_doubleword_shift(output, dst, src, amount, ">>", false);
+        }
+        Operation::ShiftRightArithmeticDoubleword { dst, src, amount } => {
+            emit_doubleword_shift(output, dst, src, amount, "arithmetic", true);
+        }
         Operation::And64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "&"),
         Operation::Or64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "|"),
         Operation::Xor64 { dst, lhs, rhs } => emit_binary64(output, dst, lhs, rhs, "^"),
@@ -422,6 +437,36 @@ fn emit_immediate64(output: &mut String, dst: Gpr, src: Gpr, immediate: u16, ope
     ));
 }
 
+fn emit_doubleword_immediate_add(output: &mut String, dst: Gpr, src: Gpr, immediate: u16) {
+    let d = dst.index();
+    let s = src.index();
+    let signed_immediate = immediate as i16 as i64;
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low + static_cast<std::uint64_t>({signed_immediate}LL);\\n"
+    ));
+}
+
+fn emit_doubleword_shift(
+    output: &mut String,
+    dst: Gpr,
+    src: Gpr,
+    amount: u8,
+    operator: &str,
+    arithmetic: bool,
+) {
+    let d = dst.index();
+    let s = src.index();
+    if arithmetic {
+        output.push_str(&format!(
+            "    if ({d} != 0) state.gpr[{d}].low = arithmetic_shift_right_doubleword(state.gpr[{s}].low, {amount}U);\\n"
+        ));
+    } else {
+        output.push_str(&format!(
+            "    if ({d} != 0) state.gpr[{d}].low = state.gpr[{s}].low {operator} {amount}U;\\n"
+        ));
+    }
+}
+
 fn emit_shift(output: &mut String, dst: Gpr, src: Gpr, amount: u8, operator: &str, arithmetic: bool) {
     let d = dst.index();
     let s = src.index();
@@ -492,6 +537,30 @@ mod tests {
         assert!(cpp.contains("sign_extend_word(memory_value_0003)"));
         assert!(!cpp.contains("Status::address_error"));
         assert!(cpp.contains("memory_status_0000 != Status::ok"));
+    }
+
+    #[test]
+    fn emits_doubleword_arithmetic_and_shifts_without_touching_upper_gpr_lane() {
+        let words = [
+            (8 << 21) | (9 << 16) | (10 << 11) | 0x2D,
+            (8 << 21) | (9 << 16) | (11 << 11) | 0x2F,
+            (0x19 << 26) | (8 << 21) | (12 << 16) | 0xFFF0,
+            (9 << 16) | (13 << 11) | (7 << 6) | 0x38,
+            (9 << 16) | (14 << 11) | (7 << 6) | 0x3E,
+            (9 << 16) | (15 << 11) | (7 << 6) | 0x3F,
+        ];
+        let decoded = words.iter().enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x5000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("doubleword operations lift");
+        let cpp = emit_cpp(&program).expect("doubleword C++");
+        assert!(cpp.contains("state.gpr[10].low = state.gpr[8].low + state.gpr[9].low"));
+        assert!(cpp.contains("state.gpr[11].low = state.gpr[8].low - state.gpr[9].low"));
+        assert!(cpp.contains("static_cast<std::uint64_t>(-16LL)"));
+        assert!(cpp.contains("state.gpr[13].low << 7U"));
+        assert!(cpp.contains("state.gpr[14].low >> 39U"));
+        assert!(cpp.contains("arithmetic_shift_right_doubleword(state.gpr[9].low, 39U)"));
+        assert!(!cpp.contains("state.gpr[10] ="));
     }
 
     #[test]
