@@ -49,6 +49,12 @@ pub enum Operation {
     ShiftLeftDoubleword { dst: Gpr, src: Gpr, amount: u8 },
     ShiftRightLogicalDoubleword { dst: Gpr, src: Gpr, amount: u8 },
     ShiftRightArithmeticDoubleword { dst: Gpr, src: Gpr, amount: u8 },
+    ShiftLeftWordVariable { dst: Gpr, src: Gpr, amount: Gpr },
+    ShiftRightLogicalWordVariable { dst: Gpr, src: Gpr, amount: Gpr },
+    ShiftRightArithmeticWordVariable { dst: Gpr, src: Gpr, amount: Gpr },
+    ShiftLeftDoublewordVariable { dst: Gpr, src: Gpr, amount: Gpr },
+    ShiftRightLogicalDoublewordVariable { dst: Gpr, src: Gpr, amount: Gpr },
+    ShiftRightArithmeticDoublewordVariable { dst: Gpr, src: Gpr, amount: Gpr },
     And64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Or64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Xor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -251,6 +257,24 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             },
             Opcode::Dsra32 => Operation::ShiftRightArithmeticDoubleword {
                 dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: instruction.shift_amount + 32,
+            },
+            Opcode::Sllv => Operation::ShiftLeftWordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Srlv => Operation::ShiftRightLogicalWordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Srav => Operation::ShiftRightArithmeticWordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Dsllv => Operation::ShiftLeftDoublewordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Dsrlv => Operation::ShiftRightLogicalDoublewordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
+            },
+            Opcode::Dsrav => Operation::ShiftRightArithmeticDoublewordVariable {
+                dst: gpr(instruction.rd), src: gpr(instruction.rt), amount: gpr(instruction.rs),
             },
             Opcode::And => Operation::And64 {
                 dst: gpr(instruction.rd), lhs: gpr(instruction.rs), rhs: gpr(instruction.rt),
@@ -487,6 +511,52 @@ mod tests {
         assert!(matches!(
             program.instructions()[5].operation,
             Operation::ShiftRightArithmeticDoubleword { amount: 39, .. }
+        ));
+    }
+
+    #[test]
+    fn lifts_register_variable_word_and_doubleword_shifts() {
+        let words = [
+            (4 << 21) | (5 << 16) | (6 << 11) | 0x04,
+            (4 << 21) | (5 << 16) | (7 << 11) | 0x06,
+            (4 << 21) | (5 << 16) | (8 << 11) | 0x07,
+            (4 << 21) | (5 << 16) | (30 << 11) | 0x14,
+            (4 << 21) | (5 << 16) | (31 << 11) | 0x16,
+            (4 << 21) | (5 << 16) | (22 << 11) | 0x17,
+        ];
+        let decoded = words.iter().enumerate()
+            .map(|(index, word)| decoded(*word, 0x7000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded).expect("variable shifts lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ShiftLeftWordVariable { dst, src, amount }
+                if dst.index() == 6 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ShiftRightLogicalWordVariable { dst, src, amount }
+                if dst.index() == 7 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::ShiftRightArithmeticWordVariable { dst, src, amount }
+                if dst.index() == 8 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::ShiftLeftDoublewordVariable { dst, src, amount }
+                if dst.index() == 30 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[4].operation,
+            Operation::ShiftRightLogicalDoublewordVariable { dst, src, amount }
+                if dst.index() == 31 && src.index() == 5 && amount.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[5].operation,
+            Operation::ShiftRightArithmeticDoublewordVariable { dst, src, amount }
+                if dst.index() == 22 && src.index() == 5 && amount.index() == 4
         ));
     }
 
