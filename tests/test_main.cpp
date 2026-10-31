@@ -100,6 +100,10 @@ void test_elf_parser() {
     put_u32(truncated_table, 28U, 0xFFFFFFF0U);
     expect_parse_error([&] { (void)reps2::elf::parse(truncated_table); }, "Reject out-of-range program-header table");
 
+    auto header_overlap = bytes;
+    put_u32(header_overlap, 28U, 16U);
+    expect_parse_error([&] { (void)reps2::elf::parse(header_overlap); }, "Reject program-header table overlapping ELF header");
+
     auto invalid_segment = bytes;
     put_u32(invalid_segment, 68U, 20U);
     put_u32(invalid_segment, 72U, 16U);

@@ -135,11 +135,31 @@ Image parse(std::span<const std::byte> bytes) {
         && section_name_index >= section_count) {
         throw ParseError("ELF section-name string-table index is out of range");
     }
+    if (program_count != 0U && program_offset < header_size) {
+        throw ParseError("ELF program-header table overlaps the ELF header");
+    }
+    if (section_count != 0U && section_offset < header_size) {
+        throw ParseError("ELF section-header table overlaps the ELF header");
+    }
 
     validate_table(program_offset, program_entry_size, program_count,
                    program_header_size, bytes.size(), "program-header");
     validate_table(section_offset, section_entry_size, section_count,
                    section_header_size, bytes.size(), "section-header");
+
+    if (program_count != 0U && section_count != 0U) {
+        const auto program_table_end = static_cast<std::uint64_t>(program_offset)
+                                       + static_cast<std::uint64_t>(program_entry_size)
+                                             * static_cast<std::uint64_t>(program_count);
+        const auto section_table_end = static_cast<std::uint64_t>(section_offset)
+                                       + static_cast<std::uint64_t>(section_entry_size)
+                                             * static_cast<std::uint64_t>(section_count);
+        const bool tables_overlap = static_cast<std::uint64_t>(program_offset) < section_table_end
+                                    && static_cast<std::uint64_t>(section_offset) < program_table_end;
+        if (tables_overlap) {
+            throw ParseError("ELF program-header and section-header tables overlap");
+        }
+    }
 
     image.program_headers.reserve(program_count);
     for (std::uint16_t index = 0; index < program_count; ++index) {
