@@ -451,7 +451,7 @@ fn parse_directory_record(bytes: &[u8], volume_bytes: u64) -> Result<DirectoryEn
 fn decode_identifier(bytes: &[u8]) -> Result<String, Error> {
     let value = std::str::from_utf8(bytes)
         .map_err(|_| Error::new("ISO primary-volume filename is not ASCII/UTF-8"))?;
-    if value.bytes().any(|byte| byte < 0x20 || byte > 0x7E)
+    if value.bytes().any(|byte| !(0x20..=0x7E).contains(&byte))
         || value.contains('/') || value.contains('\\') || value.contains(':')
     {
         return Err(Error::new("ISO primary-volume filename contains unsupported characters"));
@@ -576,7 +576,7 @@ mod tests {
     }
 
     fn directory_record(extent: u32, size: u32, flags: u8, identifier: &[u8]) -> Vec<u8> {
-        let padding = if identifier.len() % 2 == 0 { 1 } else { 0 };
+        let padding = usize::from(identifier.len().is_multiple_of(2));
         let record_length = 33 + identifier.len() + padding;
         let mut record = vec![0u8; record_length];
         record[0] = record_length as u8;
