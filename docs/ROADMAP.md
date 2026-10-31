@@ -1,79 +1,77 @@
 # REPS2 roadmap
 
-The roadmap is capability-based. Dates are deliberately not used as acceptance criteria; each milestone has executable evidence.
+Milestones are capability gates, not calendar promises. Reverse engineering and implementation proceed together; research is prioritized by the next executable vertical slice.
 
-## M0 — Reproducible foundation (in progress)
+## M0 — Reproducible hybrid foundation
 
-- [x] C++20 / CMake project structure.
-- [x] ELF32 little-endian header and table validation.
-- [x] Initial base-MIPS decoder subset.
-- [x] Explicit delay-slot and direct-target metadata.
-- [x] Synthetic tests and Windows/Linux CI workflow.
-- [ ] Confirm first GitHub Actions run on the repository.
+- [x] Clean repository and GPL-3.0-or-later licensing.
+- [x] Rust workspace and dependency lock.
+- [x] Defensive ELF32 little-endian metadata parsing.
+- [x] Initial symbol/REL relocation parsing.
+- [x] PT_LOAD materialization with zero-filled tails and overlap checks.
+- [x] Explicitly partial base-MIPS decoder and delay-slot metadata.
+- [x] CMake/Cargo build orchestration and Windows/Linux CI.
+- [ ] Confirm Rust/Windows/Linux CI for the Rust migration.
 
-**Exit gate:** clean build and passing tests on MSVC and GCC; malformed ELF input is rejected deterministically.
+**Exit gate:** Rust frontend builds on Windows and Linux; malformed ELF inputs are rejected deterministically.
 
-## M1 — ELF and executable intelligence
+## M1 — Executable intelligence
 
-- [ ] PT_LOAD mapping model and zero-filled memory tails.
-- [ ] ELF section names, symbol tables, string tables, and relocation parsing.
-- [ ] PS2-specific ELF metadata/ABI notes and unsupported-variant diagnostics.
-- [ ] Address-space model with explicit guest/host separation.
-- [ ] A synthetic ELF fixture containing code, data, symbols, and relocations.
+- [ ] Complete ELF string/symbol/relocation validation, PS2 ABI metadata, and supported ELF variant diagnostics.
+- [ ] PT_LOAD address-space model, permissions, and unmapped-range behavior.
+- [ ] PS2 optical filesystem inspection and executable extraction, read-only.
+- [ ] Real local ELF inventory manifest with no binaries committed.
+- [ ] Entry point, function symbol, and executable-region discovery.
 
-**Exit gate:** inspect a legally owned PS2 ELF locally and produce a stable machine-readable manifest without storing the ELF in Git.
+**Exit gate:** inspect a lawfully owned PS2 ELF and produce a stable JSON manifest plus a map of loadable code/data ranges.
 
-## M2 — R5900 semantics and code discovery
+## M2 — R5900 decoder and analysis
 
-- [ ] Expand decoder coverage from the official R5900 instruction set.
-- [ ] MMI0–MMI3 and 64-bit integer operations.
-- [ ] COP0 and FPU instruction models.
-- [ ] Branch-likely/exception/unaligned-access cases as applicable to the R5900.
-- [ ] Function/CFG discovery with explicit unresolved indirect edges.
-- [ ] Independent instruction semantic tests and differential corpus.
+- [ ] Cover the documented R5900 integer, 64-bit, MMI0–MMI3, COP0, and FPU instruction families.
+- [ ] Encode instruction operand/side-effect/exception metadata.
+- [ ] Delay-slot-aware basic block and CFG construction.
+- [ ] Direct call/branch recovery and unresolved indirect-edge tracking.
+- [ ] Function discovery from symbols, entry points, and call graph.
+- [ ] Differential instruction corpus against documented behavior and an external oracle.
 
-**Exit gate:** supported instructions have reference-backed semantic tests; unknown instruction coverage is quantified.
+**Exit gate:** instruction coverage report, semantic test suite, and CFG output for real ELF code regions.
 
 ## M3 — IR and generated-code vertical slice
 
-- [ ] Typed guest IR and basic-block representation.
-- [ ] Delay-slot-safe CFG construction.
-- [ ] Verifier for IR invariants and control-flow termination.
-- [ ] C++20 lowering for a documented instruction subset.
-- [ ] Compile and execute generated code against a synthetic EE-state harness.
+- [ ] Typed Rust IR and architectural-state model.
+- [ ] IR verifier for type, control-flow, and side-effect invariants.
+- [ ] Delay-slot-safe code lowering.
+- [ ] Deterministic C++20 source and build-manifest generation.
+- [ ] Synthetic generated C++ compiled and executed against a test runtime.
 
-**Exit gate:** a synthetic ELF code region can be decoded, lowered, compiled, and produce the expected guest state transitions.
+**Exit gate:** a synthetic ELF code region can be decoded, lowered, compiled, and produce the expected guest-state transitions.
 
 ## M4 — First real executable slice
 
-- [ ] Build an owner-supplied ELF manifest and code map locally.
-- [ ] Resolve entry points and internal calls for one selected title.
-- [ ] Implement the minimum required EE runtime services.
-- [ ] Produce a game-specific native module.
-- [ ] Record the exact boot stage and every unresolved service.
+- [ ] Analyze a developer-supplied local ELF, kept outside Git.
+- [ ] Discover and translate a real code region and direct callees.
+- [ ] Implement only the EE runtime services required by that path.
+- [ ] Produce a game-specific native module with unresolved services listed.
+- [ ] Record an exact repeatable boot/entry stage.
 
-**Exit gate:** native execution reaches a repeatable, evidenced stage in a real title. This is not yet a playable-game claim.
+**Exit gate:** native execution reaches an evidenced stage in one real title. This is not yet a playable-game claim.
 
 ## M5 — Runtime subsystem expansion
 
-- [ ] EE memory, exceptions, interrupts, timers, and DMA behavior.
-- [ ] VU0 macro-mode support and VU1 microprogram pipeline.
-- [ ] IOP/IRX execution and kernel/HLE service surface.
-- [ ] GS submission and rendering path.
+- [ ] EE memory, exceptions, interrupts, timers, and DMA.
+- [ ] VU0 macro-mode and VU1 microprogram compilation/execution.
+- [ ] IOP/IRX execution and kernel service surface.
+- [ ] GS submission, rendering, frame presentation, and synchronization.
 - [ ] Audio, controller, optical media, and memory-card services.
 
-**Exit gate:** subsystem suites pass and a game-specific stage advances without unexplained fallbacks.
+**Exit gate:** a target stage advances without unexplained fallbacks.
 
 ## M6 — Compatibility, performance, and release engineering
 
-- [ ] Multi-game regression catalog keyed by title/serial/version, with no copyrighted binaries.
-- [ ] Differential tests for all implemented hardware-visible behavior.
-- [ ] Native performance profiling and code-generation optimization.
-- [ ] Installer/package, crash diagnostics, settings, and user documentation.
-- [ ] Release compatibility claims backed by reproducible test reports.
+- [ ] Multi-game compatibility catalog keyed by title/serial/revision, with no copyrighted binaries.
+- [ ] Differential tests for implemented hardware-visible behavior.
+- [ ] Native profiling and code-generation optimization.
+- [ ] Packaging, crash diagnostics, settings, and user documentation.
+- [ ] Releases with explicit compatibility evidence and reproducible builds.
 
-**Exit gate:** a release candidate has defined supported titles, known limitations, clean-room provenance, and reproducible CI.
-
-## Prioritization policy
-
-Prioritize work that unblocks the next vertical slice. Do not spend weeks reverse-engineering a subsystem that the current target does not exercise. Prefer public manuals and independently authored specifications; investigate only ambiguities that materially affect implementation or test results.
+**Exit gate:** release candidate has a defined tested-title list, known limitations, provenance, and reproducible CI.

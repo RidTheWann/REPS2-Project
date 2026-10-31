@@ -1,34 +1,46 @@
 # REPS2
 
-**REPS2** is an independent research project to build a native Windows x64 PlayStation 2 static recompilation toolchain.
+**REPS2** is an independent PlayStation 2 static recompilation toolchain targeting native Windows x64 execution.
 
-The long-term goal is to translate supported Emotion Engine (EE) machine code ahead of time into C++ that can be compiled for the host, then execute it against an independently implemented PS2 runtime. The project is developed from public technical specifications, controlled experiments, synthetic tests, and differential behavior checks. It does not reuse another emulator or recompiler's implementation code.
+The architecture uses a Rust frontend for executable inspection, instruction decoding, analysis, typed IR, optimization, and AOT source generation. Generated C++ is compiled by the platform host compiler and linked against an independently implemented C++20 PS2 runtime as runtime subsystems are added.
 
-> **Status: experimental foundation (v0.1.0).** This repository currently contains a defensive ELF32 little-endian metadata parser, a deliberately partial base-MIPS instruction decoder, a small CLI, synthetic unit tests, and Windows/Linux CI. It does not yet recompile a complete ELF, boot a game, or emulate PS2 hardware.
+> **Status: experimental foundation (v0.2.0).** The repository currently provides a defensive ELF32 little-endian metadata parser, initial symbol/REL relocation handling, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a CLI, synthetic tests, and Windows/Linux CI. It does not yet build a complete AOT translation unit, run a game, or implement the PS2 hardware runtime.
 
-## Current capabilities
+## Current frontend capabilities
 
-- Inspect ELF32 little-endian headers, program headers, loadable segments, and section headers.
-- Validate file-backed ranges and reject malformed table/segment bounds before exposing metadata.
-- Decode an explicitly scoped subset of base MIPS integer instructions.
-- Identify branch/jump delay slots and calculate direct control-flow targets for supported instructions.
-- Build with C++20 and CMake on Windows/MSVC and Linux/GCC.
-- Run synthetic tests without distributing or requiring copyrighted game images, BIOS files, or proprietary SDK content.
+- Parse ELF32 little-endian headers, program headers, section headers, section names, symbol tables, and REL/RELA entries.
+- Validate file-backed ranges, table bounds, cross-table references, entry sizes, address overflow, and parser resource limits.
+- Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges.
+- Decode an explicitly scoped base-MIPS integer subset with delay-slot metadata and direct branch/jump targets.
+- Report unsupported instruction encodings explicitly rather than replacing them with NOPs.
+- Build the Rust frontend through Cargo, with CMake as the top-level build orchestrator.
+- Run synthetic tests without game ISOs, BIOS files, proprietary SDK content, or copyrighted fixtures.
+
+## Requirements
+
+- Stable Rust toolchain (edition 2024).
+- CMake 3.25 or newer.
+- Git (for source checkout).
+
+The C++20 runtime is a separate future build component. C++ compiler requirements will be added to the build when runtime implementation lands.
 
 ## Build
 
-Requirements:
+From the repository root:
 
-- CMake 3.25 or newer.
-- A C++20 compiler (Visual Studio 2022 17.4+, Visual Studio 2026, GCC 12+, or Clang 15+).
-
-PowerShell (Visual Studio Developer PowerShell/Command Prompt for MSVC):
-
-    cmake -S . -B build -DREPS2_BUILD_TESTS=ON
-    cmake --build build --config Release
+    cmake -S . -B build -DBUILD_TESTING=ON
+    cmake --build build --config Release --parallel
     ctest --test-dir build -C Release --output-on-failure
 
-A generator can be selected explicitly, for example -G Ninja when Ninja is installed.
+The frontend executable is produced at:
+
+- Windows: build/cargo-target/release/reps2.exe
+- Linux: build/cargo-target/release/reps2
+
+Alternatively, work directly with Cargo:
+
+    cargo test --manifest-path rust/Cargo.toml --workspace --locked
+    cargo build --manifest-path rust/Cargo.toml --release --locked
 
 ## CLI
 
@@ -36,35 +48,35 @@ A generator can be selected explicitly, for example -G Ninja when Ninja is insta
     reps2 elf-info <elf-file>
     reps2 decode <instruction-word-hex> [pc-hex]
 
-Examples:
+Example:
 
     reps2 elf-info "D:\List Games\some-owned-game\SLUS_123.45"
     reps2 decode 0x2485FFFC 0x00100000
 
-The decode command accepts one 32-bit instruction word in hexadecimal. It is a decoder diagnostic, not a full disassembler or ELF recompilation command.
+The decode command is a single-word diagnostic, not a complete disassembler or executable recompiler.
 
-## Architecture direction
+## Architecture
 
 The intended pipeline is:
 
-1. Disc/ELF inspection and executable extraction.
-2. ELF loading, segment mapping, symbols, relocations, and entry-point discovery.
-3. R5900 decoding and control-flow/function discovery.
-4. A typed, host-independent intermediate representation (IR).
-5. AOT C++ lowering with explicit PS2 integer, floating-point, delay-slot, and memory semantics.
-6. Native host compilation and linking.
-7. A modular runtime for EE services and the PS2 subsystems required by each target.
-8. Differential testing and compatibility regression against documented behavior and trusted external references.
+1. Disc/filesystem inspection and executable extraction.
+2. ELF loading, symbols, relocations, and guest memory map.
+3. R5900 decoding, function discovery, and control-flow graph construction.
+4. Typed, host-independent IR with verifiable control-flow and side-effect invariants.
+5. IR optimization and deterministic C++20 source generation.
+6. Host compilation/linking of generated code and the C++20 runtime.
+7. Modular runtime services for EE, VU, GS, IOP, DMA, audio, input, and storage.
+8. Differential testing and game-stage regression.
 
-See docs/ARCHITECTURE.md, docs/ROADMAP.md, and docs/RESEARCH.md.
+See docs/ARCHITECTURE.md, docs/ROADMAP.md, and docs/decisions/0001-rust-frontend-cpp-runtime.md.
 
 ## Engineering and legal boundaries
 
 - REPS2 is an independent implementation. External projects may be studied for architecture and observable behavior, but their source code is not copied or incorporated.
-- Test fixtures are synthetic and generated in tests. Do not commit game ISOs, BIOS dumps, proprietary SDKs, copyrighted game assets, or user-specific binaries.
-- Game data, when used by a developer for local validation, must be lawfully obtained and remain outside this repository.
-- Unsupported instructions and hardware behaviors must fail explicitly; silent approximations are not acceptable as correctness claims.
-- Every behavior-changing implementation should include tests and, where possible, a differential test case.
+- Synthetic fixtures only. Do not commit game ISOs, BIOS dumps, proprietary SDKs, copyrighted game assets, or user-specific binaries.
+- Game data used for local validation must be lawfully obtained and remain outside this repository and CI.
+- Unsupported instructions and hardware behaviors must fail explicitly; silent approximations are not correctness claims.
+- Every behavior-changing implementation requires tests and, where possible, a differential test case.
 
 ## License
 
