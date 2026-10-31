@@ -106,6 +106,14 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
             | mips::Opcode::Bgez
             | mips::Opcode::Bltzal
             | mips::Opcode::Bgezal
+            | mips::Opcode::Beql
+            | mips::Opcode::Bnel
+            | mips::Opcode::Blezl
+            | mips::Opcode::Bgtzl
+            | mips::Opcode::Bltzl
+            | mips::Opcode::Bgezl
+            | mips::Opcode::Bltzall
+            | mips::Opcode::Bgezall
     ) {
         print!("  target=0x{:08X}", instruction.target);
     }
@@ -513,6 +521,30 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         0x0000_000C,                                 // syscall on not-taken path
         0x0000_000C,                                 // syscall on taken path
     ];
+    let branch_likely = [
+        (0x14 << 26) | (8 << 21) | 4, // beql t0, zero, 0x3114
+        0x2409_0007,                  // delay slot: t1 = 7 (taken only)
+        0x240A_0005,                  // not-taken path: t2 = 5
+        0x0800_0C48,                  // j 0x3120
+        0x240F_0009,                  // jump delay slot: t7 = 9
+        0x240B_000B,                  // taken path: t3 = 11
+        0x0800_0C48,                  // j 0x3120
+        0x0000_0000,                  // jump delay slot
+        0x03E0_0008,                  // common return
+        0x240D_000D,                  // return delay slot: t5 = 13
+    ];
+    let branch_likely_link = [
+        (0x01 << 26) | (8 << 21) | (0x12 << 16) | 4, // bltzall t0, 0x3214
+        0x2409_0007,                                 // delay slot: t1 = 7 (taken only)
+        0x240A_0005,                                 // not-taken path: t2 = 5
+        0x0800_0C88,                                 // j 0x3220
+        0x240F_0009,                                 // jump delay slot: t7 = 9
+        0x240B_000B,                                 // taken path: t3 = 11
+        0x0800_0C88,                                 // j 0x3220
+        0x0000_0000,                                 // jump delay slot
+        0x03C0_0008,                                 // common return via fp
+        0x240D_000D,                                 // return delay slot: t5 = 13
+    ];
     let jalr_alias = [
         (8 << 21) | (8 << 11) | 0x09, // jalr t0, t0
         0x2409_001F,                  // delay slot: t1 = 31
@@ -587,6 +619,8 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
         segment(0x3000, &branch_and_link),
+        segment(0x3100, &branch_likely),
+        segment(0x3200, &branch_likely_link),
         segment(0x4000, &jalr_alias),
         segment(0x5000, &memory_ops),
         segment(0x5100, &unaligned_load),
@@ -598,6 +632,8 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         entry(0x1000, "branch-fixture"),
         entry(0x2000, "call-fixture"),
         entry(0x3000, "branch-link-fixture"),
+        entry(0x3100, "branch-likely-fixture"),
+        entry(0x3200, "branch-likely-link-fixture"),
         entry(0x4000, "jalr-alias-fixture"),
         entry(0x5000, "ee-memory-fixture"),
         entry(0x5100, "unaligned-load-fixture"),
@@ -606,7 +642,7 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         entry(0x5400, "unaligned-doubleword-merge-fixture"),
     ];
     let roots = [
-        0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
+        0x1000, 0x2000, 0x3000, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
@@ -688,7 +724,7 @@ fn usage() {
         "recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images."
     );
     println!(
-        "Allocated relocations, non-main-RAM PT_LOAD segments, branch-likely and PS2 hardware services remain unsupported."
+        "Allocated relocations, non-main-RAM PT_LOAD segments, and PS2 hardware services remain unsupported."
     );
 }
 

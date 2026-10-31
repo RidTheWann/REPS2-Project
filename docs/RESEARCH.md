@@ -32,8 +32,9 @@ These projects have different goals and different completion levels. Their demos
 
 - MIPS delayed-control-transfer references describe the single instruction delay slot and PC+8 link value for link branches. The generic ISA is a baseline, not a claim of complete R5900 coverage.
 - The PCSX2 R5900 dynamic-recompiler branch implementation is used only as an independent behavioural cross-check: BLTZAL/BGEZAL write the link before selecting the taken/fallthrough path, and the delay instruction is processed in either path for these non-likely variants. REPS2's code and tests are independently written.
+- The R5900 branch-likely family evaluates its predicate first. A taken branch executes the delay-slot instruction before transferring to the target; a not-taken branch annuls the delay slot and continues at PC+8. BLTZALL/BGEZALL write the PC+8 link address to GPR[31] independently of the predicate. The decoder recognizes BEQL, BNEL, BLEZL, BGTZL, BLTZL, BGEZL, BLTZALL, and BGEZALL, and the CFG/IR/codegen path carries the annulment policy explicitly as `AnnulWhenNotTaken`.
 - The CFG AOT dispatcher captures JALR's source target before the link write, then executes its delay slot before committing the next PC. This ordering is covered by synthetic tests and must remain explicit in future optimizations.
-- Branch-likely/annul instructions are intentionally outside this first control-flow AOT subset; they must receive separate IR semantics and tests before decoding/lowering them as executable.
+- Native smoke tests exercise taken and not-taken branch-likely paths, including absence of delay-slot side effects after annulment and the unconditional link value for BLTZALL. These establish the implemented subset only; hardware differential testing remains future work.
 
 ## ISO 9660 and PS2 boot-file discovery
 

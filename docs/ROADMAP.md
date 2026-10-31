@@ -76,6 +76,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Decode and lift NOR, SLT, SLTU, SLTI and SLTIU into typed scalar IR; SLTIU's immediate is sign-extended before unsigned comparison.
 - [x] Decode, lift and AOT-lower trapping 64-bit DADD/DSUB/DADDI separately from DADDU/DSUBU/DADDIU; detect signed overflow without host-language signed-overflow UB and test GPR[0] exception behavior.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
+- [x] Decode, lift and AOT-lower R5900 branch-likely BEQL/BNEL/BLEZL/BGTZL and BLTZL/BGEZL/BLTZALL/BGEZALL with not-taken delay-slot annulment; verify taken/not-taken side effects and unconditional PC+8 link writes in generated native code.
 - [x] Direct branch/call recovery and unresolved indirect-edge tracking.
 - [x] Entry/function root discovery from ELF entry and STT_FUNC symbols (indirect function discovery remains unresolved).
 - [ ] Full documented R5900 branch, branch-likely, and control-transfer coverage.
