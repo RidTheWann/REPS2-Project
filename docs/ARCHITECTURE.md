@@ -149,6 +149,8 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 - Synthetic generated control-flow code compiled and executed against the C++20 runtime on Windows/MSVC and Linux/GCC.
 - Typed LB/LBU/LH/LHU/LW/LWU and SB/SH/SW IR with signed-offset effective-address generation.
 - Typed LWL/LWR/SWL/SWR and LDL/LDR/SDL/SDR IR with checked aligned-unit merge helpers and preserved unaffected GPR lanes.
+- Typed DADDU/DSUBU/DADDIU and immediate DSLL/DSRL/DSRA plus DSLL32/DSRL32/DSRA32 lowering into the low 64-bit EE GPR lane; arithmetic right shift uses an explicit sign-fill helper.
+
 - Checked little-endian EE main-RAM accesses over a caller-owned 32 MiB backing span with documented aliases and explicit MMIO/unmapped failures.
 - Default-map ET_EXEC PT_LOAD image construction with BSS zeroing, physical alias overlap rejection, and allocated-relocation refusal.
 - Generated ELF-entry RAM initializer, validated against synthetic 32 MiB image snapshots on Windows/MSVC and Linux/GCC.
