@@ -806,7 +806,7 @@ mod tests {
         assert!(manifest.contains("\"playable\": false"));
         assert!(manifest.contains("\"playability_status\": \"blocked_runtime_incomplete\""));
         assert!(manifest.contains("\"copied_into_library\": false"));
-        assert!(manifest.contains("\"sha256\":);
+        assert!(manifest.contains("\"sha256\":"));
         
         let second = import_disc(&iso_path, &library_path).expect("idempotent re-import");
         assert!(second.already_imported);
