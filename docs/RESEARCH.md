@@ -59,6 +59,13 @@ These projects have different goals and different completion levels. Their demos
 - The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 (2014), §§5.1.2–5.1.3 remains the general ISA reference; R5900 GPR lane behaviour is cross-checked independently and is not inferred solely from the generic MIPS64 description.
 - These operations remain scoped to the current direct/uncached/accelerated/KSEG main-RAM aliases. No COP0/TLB remapping, cache/coherency, MMIO, bus exception delivery, or complete hardware compatibility is claimed.
 
+## EE HI/LO and R5900 multiply cross-checks
+
+- The Toshiba TX79 translation patch discussion on QEMU's development list explicitly describes the R5900/TX79 three-operand `MULT[U][1] rd, rs, rt` form: the low 32-bit product is written to both GPR `rd` and LO, while the high 32-bit product is written to HI. An omitted destination is register zero. This is used as a documented architectural cross-check, not as code to copy: https://lists.gnu.org/archive/html/qemu-devel/2020-11/msg05888.html
+- PCSX2's R5900 interpreter independently shows `MULT` multiplying the low 32-bit signed operands and `MULTU` multiplying the low 32-bit unsigned operands; both sign-extend each 32-bit result lane into the 64-bit HI/LO representation and copy LO into non-zero `rd`. It also documents base `MFHI/MFLO/MTHI/MTLO` transfers: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/R5900OpcodeImpl.cpp. This is a non-normative behavioral reference, not a hardware specification.
+- REPS2 stores only base EE HI/LO in the current runtime ABI. `MFHI/MFLO` write GPR[63:0] while preserving GPR[127:64]; `MTHI/MTLO` read GPR[63:0]. Signed and unsigned multiplication use the low 32 bits of the input GPRs; the 32-bit high/low product lanes are sign-extended into their 64-bit destinations as cross-checked above.
+- This increment does not model multiply pipeline latency, HI1/LO1, MMI pipeline-1 operations, MADD/MADDU, MULT1/MULTU1, DIV/DIVU semantics, or exception timing. The public implementation references note disagreements over DIVU sign-extension and special division cases; those operations stay out of the executable IR until separately researched and differential-tested.
+
 ## ELF load-image policy
 
 - REPS2 currently constructs an initial memory image only for little-endian MIPS ET_EXEC files whose PT_LOAD virtual addresses can be translated using the documented default 32 MiB EE main-RAM aliases.
