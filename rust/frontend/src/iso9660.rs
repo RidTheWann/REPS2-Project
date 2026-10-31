@@ -118,10 +118,14 @@ impl<R: Read + Seek> Iso9660<R> {
                     found_terminator = true;
                     break;
                 }
-                _ => {
-                    // Boot records and supplementary descriptors are valid
-                    // members of a descriptor set. This reader only consumes
-                    // the Primary Volume Descriptor.
+                0 | 2 | 3 => {
+                    // Boot records, supplementary descriptors, and volume
+                    // partition descriptors are recognized but not consumed.
+                }
+                descriptor_type => {
+                    return Err(Error::new(format!(
+                        "unsupported ISO 9660 descriptor type {descriptor_type} at sector {lba}"
+                    )));
                 }
             }
         }
@@ -669,6 +673,41 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|entry| entry.name == "SYSTEM.CNF;1"));
         assert!(entries.iter().any(|entry| normalize_identifier(&entry.name) == "GAME.ELF"));
+    }
+
+    #[test]
+    fn rejects_reserved_volume_descriptor_types() {
+        let mut image = valid_image();
+        let reserved_offset = 17 * LOGICAL_BLOCK_SIZE as usize;
+        image[reserved_offset] = 4;
+        image[reserved_offset + 1..reserved_offset + 6].copy_from_slice(b"CD001");
+        image[reserved_offset + 6] = 1;
+
+        let terminator_offset = 18 * LOGICAL_BLOCK_SIZE as usize;
+        image[terminator_offset] = 255;
+        image[terminator_offset + 1..terminator_offset + 6].copy_from_slice(b"CD001");
+        image[terminator_offset + 6] = 1;
+
+        let error = Iso9660::open(Cursor::new(image)).expect_err("reserved descriptor type");
+        assert!(error.to_string().contains("unsupported ISO 9660 descriptor type 4"));
+    }
+
+    #[test]
+    fn missing_system_cnf_is_not_mistaken_for_a_boot_target() {
+        let mut image = valid_image();
+        let root_offset = ROOT_LBA * LOGICAL_BLOCK_SIZE as usize;
+        let mut cursor = root_offset;
+        for _ in 0..2 {
+            cursor += usize::from(image[cursor]);
+        }
+        let record_length = usize::from(image[cursor]);
+        let identifier_length = usize::from(image[cursor + 32]);
+        assert_eq!(identifier_length, b"README.TXT;1".len());
+        image[cursor + 33..cursor + 33 + identifier_length]
+            .copy_from_slice(b"README.TXT;1");
+        let mut iso = Iso9660::open(Cursor::new(image)).expect("ISO without SYSTEM.CNF");
+        assert_eq!(iso.boot_executable_path().expect("missing config"), None);
+        let _ = record_length;
     }
 
     #[test]
