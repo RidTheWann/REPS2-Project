@@ -433,10 +433,6 @@ fn hex_digest(digest: &[u8; 32]) -> String {
     output
 }
 
-fn sha256_file(reader: &mut File) -> Result<[u8; 32], String> {
-    sha256_reader(reader)
-}
-
 fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
