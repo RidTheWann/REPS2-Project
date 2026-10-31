@@ -132,6 +132,11 @@ impl<R: Read + Seek> Iso9660<R> {
 
         let descriptor = primary_descriptor
             .ok_or_else(|| Error::new("ISO has no Primary Volume Descriptor"))?;
+        let volume_set_size = read_both_u16(&descriptor, 120, "volume set size")?;
+        let volume_sequence_number = read_both_u16(&descriptor, 124, "volume sequence number")?;
+        if volume_set_size != 1 || volume_sequence_number != 1 {
+            return Err(Error::new("multi-volume ISO sets are not supported; expected a single volume"));
+        }
         let volume_space_blocks = read_both_u32(&descriptor, 80, "volume space size")?;
         if volume_space_blocks <= VOLUME_DESCRIPTOR_START_LBA as u32 {
             return Err(Error::new("ISO volume space size is too small"));
@@ -414,7 +419,10 @@ fn parse_directory_record(bytes: &[u8], volume_bytes: u64) -> Result<DirectoryEn
     let flags = bytes[25];
     let file_unit_size = bytes[26];
     let interleave_gap_size = bytes[27];
-    let _volume_sequence = read_both_u16(bytes, 28, "volume sequence number")?;
+    let volume_sequence = read_both_u16(bytes, 28, "volume sequence number")?;
+    if volume_sequence != 1 {
+        return Err(Error::new("directory entry references an unsupported secondary ISO volume"));
+    }
     let identifier_length = usize::from(bytes[32]);
     let identifier_end = 33usize.checked_add(identifier_length)
         .ok_or_else(|| Error::new("ISO file identifier length overflows"))?;
@@ -668,6 +676,26 @@ mod tests {
         let image = vec![0u8; 17 * LOGICAL_BLOCK_SIZE as usize + 1];
         let error = Iso9660::open(Cursor::new(image)).expect_err("sector size mismatch");
         assert!(error.to_string().contains("2048-byte-sector"));
+    }
+
+    #[test]
+    fn rejects_multi_volume_sets_and_secondary_volume_entries() {
+        let mut image = valid_image();
+        let pvd_offset = 16 * LOGICAL_BLOCK_SIZE as usize;
+        put_both_u16(&mut image[pvd_offset..pvd_offset + LOGICAL_BLOCK_SIZE as usize], 120, 2);
+        let error = Iso9660::open(Cursor::new(image)).expect_err("multi-volume set");
+        assert!(error.to_string().contains("multi-volume ISO sets"));
+
+        let mut image = valid_image();
+        let root_offset = ROOT_LBA * LOGICAL_BLOCK_SIZE as usize;
+        let mut cursor = root_offset;
+        for _ in 0..2 {
+            cursor += usize::from(image[cursor]);
+        }
+        put_both_u16(&mut image[cursor..cursor + usize::from(image[cursor])], 28, 2);
+        let mut iso = Iso9660::open(Cursor::new(image)).expect("single-volume PVD");
+        assert!(iso.root_entries().expect_err("secondary volume entry").to_string()
+            .contains("secondary ISO volume"));
     }
 
     #[test]
