@@ -3,27 +3,34 @@
 ## Development workflow
 
 1. Create a focused branch from main.
-2. Keep each change narrowly scoped and add tests for observable behavior.
-3. Build with CMake and run CTest before opening a pull request.
-4. Explain the guest-visible behavior, source references, known limitations, and test evidence in the PR.
-5. Do not merge changes that silently approximate unsupported instructions or hardware behavior.
+2. Keep changes small enough to review and test.
+3. Run Cargo formatting, Clippy, and unit tests for Rust changes.
+4. Run CMake build and CTest for integrated changes.
+5. Explain observable behavior, source references, unsupported cases, and test evidence in the pull request.
 
-## Code expectations
+## Rust frontend expectations
 
-- C++20, explicit-width integer types, RAII, and clear ownership.
-- No undefined behavior to emulate guest overflow, alignment, or aliasing.
-- Validate untrusted file sizes, offsets, counts, and arithmetic before reading or allocating.
-- Keep decoders pure and deterministic where possible.
-- Preserve guest PC and source provenance through analysis and IR.
-- Every unsupported operation must remain visible in diagnostics.
+- Use safe Rust by default; unsafe code requires a dedicated design review.
+- Propagate input and semantic errors with Result; avoid panic-based control flow.
+- Represent unsupported guest operations explicitly.
+- Preserve source guest PC and provenance through analysis and IR.
+- Keep decoder functions deterministic and side-effect free.
+- Keep resource limits on all untrusted sizes, counts, and allocations.
+
+## C++20 runtime expectations
+
+- Use fixed-width guest types, RAII, and clear ownership.
+- Do not use host signed-overflow behavior or undefined behavior to emulate guest semantics.
+- Keep guest addresses separate from host pointers.
+- Make unsupported services visible; never fake success.
 
 ## Test data and legal boundaries
 
-- Use synthetic instruction streams, ELF images, memory maps, and device responses.
-- Do not commit game images, BIOS files, proprietary SDK content, extracted retail code, or copyrighted assets.
+- Use synthetic instruction streams, ELF files, memory maps, and device responses.
+- Do not commit game images, BIOS files, proprietary SDK material, extracted retail code, or copyrighted assets.
 - Local tests against lawfully obtained game data must keep that data outside the repository and CI.
-- Never add a third-party emulator/recompiler source tree as a dependency or vendor its implementation code.
+- Do not vendor third-party emulator or recompiler source code.
 
 ## Pull-request evidence
 
-A good PR includes build output or CI links, test cases, the specification or observation supporting changed semantics, and a concise statement of what is still unsupported.
+Include the commands and results used for testing, references supporting semantic changes, and an explicit list of remaining limitations.

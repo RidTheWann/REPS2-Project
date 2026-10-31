@@ -2,11 +2,43 @@
 
 ## Design objective
 
-REPS2 is a game-independent static recompilation toolchain, not a claim that every PS2 subsystem must be fully reproduced before the first executable can be translated. The implementation should grow through vertical slices: select a real executable, identify the exact CPU/runtime behaviors it needs, implement those behaviors behind stable interfaces, then expand coverage.
+REPS2 is a game-independent static recompilation toolchain. It must not require complete reverse engineering of all PS2 hardware before the first real executable can be translated. Development proceeds through vertical slices: choose an executable, discover the exact code and runtime behaviors it needs, implement those behaviors behind stable interfaces, then expand coverage.
 
-The implementation must remain independent of PCSX2 and other recompiler projects. Public specifications, test observations, and differential results may inform behavior; upstream implementation code must not be copied.
+## Language boundaries
 
-## Planned pipeline
+### Rust frontend
+
+Rust owns:
+- Disc and ELF parsing.
+- Program/section mapping, symbols, relocations, and executable metadata.
+- EE instruction decoding and control-flow discovery.
+- Function/basic-block construction and typed IR.
+- IR verification and optimization.
+- Deterministic C++20 source and build-manifest generation.
+- CLI orchestration, diagnostics, and frontend tests.
+
+This is the correctness-critical input and transformation pipeline. Rust's checked indexing, explicit Result propagation, enums, and exhaustive pattern matching are used to make invalid input and unsupported operations explicit.
+
+### C++20 runtime
+
+C++20 owns the native runtime and platform-facing subsystem implementations:
+- Guest memory and EE runtime services.
+- VU0/VU1 execution interfaces.
+- GS submission and rendering integration.
+- IOP, DMA, SPU2/audio, controller, optical media, and memory-card services.
+- Generated-code helper ABI and host integration.
+
+The runtime remains modular. A target game needs only the runtime profile required to advance its current vertical slice, but every fallback is observable and logged.
+
+### Boundary
+
+The primary boundary is generated source plus a machine-readable manifest, not per-instruction FFI calls. The Rust frontend emits C++ and metadata; the host C++ compiler compiles that output and links it with the C++ runtime. This keeps complex Rust IR ownership inside Rust and avoids passing IR graphs or vectors across a language ABI.
+
+A narrow C ABI or CXX bridge may be introduced later only when a measured use case requires in-process calls. Such a bridge must use coarse-grained operations and stable POD/opaque handles; it must not cross the boundary for every guest instruction.
+
+CMake orchestrates the build, Cargo builds/tests the Rust frontend, and the host C++ toolchain is added to the build as soon as runtime source is introduced. Corrosion is available for importing Rust executables or libraries into CMake; it is not required merely to invoke a standalone Rust frontend.
+
+## Pipeline
 
     Owned disc image (local only)
             |
@@ -14,76 +46,58 @@ The implementation must remain independent of PCSX2 and other recompiler project
     Disc / filesystem inspection
             |
             v
-    ELF loader ----> symbols / relocations / load map
+    ELF loader ----> sections / symbols / relocations / load map
             |
             v
-    EE code discovery <---- targeted dynamic exploration
+    R5900 decoder ----> function discovery / CFG / delay slots
             |
             v
-    R5900 decoder ----> instruction semantics + delay slots
+    Typed IR ----> verifier ----> optimization
             |
             v
-    Typed IR / basic blocks / CFG
+    C++20 AOT backend ----> generated C++ + build manifest
             |
             v
-    IR validation + optimization
+    Host C++ compiler / linker
             |
             v
-    C++ AOT backend ----> host C++ compiler / linker
+    Native game module + REPS2 C++20 runtime
             |
             v
-    Native game module
-            |
-            v
-    REPS2 runtime interfaces (EE, VU, GS, IOP, DMA, audio, input, storage)
+    Runtime profiles: EE / VU / GS / IOP / DMA / audio / input / storage
 
-## Module boundaries
+## Module invariants
 
-### disc
+### ELF and disc readers
 
-Read-only inspection of supported optical-disc filesystem structures. It must not modify user images. Multi-extent and unusual layout handling must be explicit and tested.
+Validate every offset, size, table count, cross-table index, and arithmetic operation before access or allocation. Distinguish file size from memory size and zero-fill BSS tails. Extended ELF numbering and uncommon PS2-specific ABI cases must remain explicit until supported and tested.
 
-### elf
+### EE decoder and analysis
 
-Parse ELF32 little-endian headers, program headers, section headers, symbols, and relocations. Validate every file-backed range and every size calculation before access. Preserve virtual addresses and distinguish file size from memory size (including zero-filled tails).
+Decoding is pure and deterministic. Every input word produces a classified instruction or an explicit unsupported result. Static analysis must not assume every byte in an executable segment is code. Indirect control-flow targets remain unresolved until evidence is available.
 
-### analysis
+### IR
 
-Discover executable regions, known entry points, direct branch/jump targets, function boundaries, and unresolved control-flow edges. Static analysis must not assume every byte in an executable segment is code. Unknown or indirect targets remain recorded as unresolved until evidence is available.
+IR nodes retain guest PC and side-effect information. Delay-slot behavior, guest register width, exception behavior, and architectural ordering must be represented explicitly. An IR verifier rejects operations with no defined semantics or backend lowering.
 
-### ee
+### AOT backend
 
-Model R5900 architectural state and instruction semantics. GPR width behavior, HI/LO, COP0, FPU, MMI, exceptions, alignment, and delay-slot execution need explicit specifications and tests. Host C++ undefined behavior must never be used to approximate guest wraparound or overflow semantics.
+Generated code uses explicit-width types and helper functions for guest arithmetic, memory, and architectural behavior. It must not rely on host signed-overflow behavior, pointer punning, or undefined behavior. Code generation is deterministic for the same input and options.
 
-### ir
+### Runtime
 
-Represent guest operations independently of the host backend. IR nodes carry source guest PC and side-effect/exception information. Control-flow blocks must preserve delay-slot semantics and observable ordering.
+Runtime interfaces are versioned and narrow. Every unimplemented system service returns a structured unsupported result or controlled guest-visible failure; it must not return fake success.
 
-### backend-cpp
+### Validation
 
-Lower validated IR into deterministic C++20. Generated code should use explicit-width types and helper operations for guest semantics. No host pointer punning or signed-overflow assumptions.
+Synthetic tests, instruction semantics, generated-code tests, differential checks, and game-stage regression are separate layers. Parsing a real ELF or compiling a generated translation unit is not evidence that a game boots or is playable.
 
-### runtime
+## Current implementation
 
-Expose versioned interfaces for memory, syscalls, interrupts, DMA, timers, VU dispatch, GS submissions, IOP services, audio, input, and save devices. A target may begin with a narrow service profile, but every stub/fallback must be logged and measurable.
+- Rust ELF32 little-endian parser with section names, symbol tables, and REL/RELA metadata.
+- Bounded PT_LOAD materialization with zero-filled tails and overlap detection.
+- Initial base-MIPS decoder subset with delay-slot metadata.
+- CLI diagnostics for ELF metadata and instruction words.
+- Synthetic tests and Windows/Linux CI.
 
-### validation
-
-Keep synthetic unit tests, instruction semantic tests, generated-code tests, ELF corpus metadata (not binaries), differential tests, and game-stage regression separate. Never call a game playable based only on successful ELF parsing or generated-code compilation.
-
-## Initial implementation in v0.1.0
-
-- Defensive ELF32 little-endian header and table parser.
-- Base-MIPS decoder subset with explicit unsupported-instruction reporting.
-- Delay-slot metadata and direct branch/jump target calculation for the supported subset.
-- reps2 elf-info, reps2 decode, and reps2 version commands.
-- Synthetic tests plus Windows/Linux CI.
-
-## Correctness invariants
-
-1. Guest arithmetic width and signedness are explicit.
-2. All guest addresses remain fixed-width guest addresses until mapped by a runtime abstraction.
-3. A branch's delay-slot instruction is preserved and executed according to the guest ISA; it must not be treated as an ordinary fall-through instruction without CFG evidence.
-4. An unsupported opcode never silently becomes a NOP.
-5. ELF and ISO parsers reject malformed ranges and integer-overflow cases.
-6. Reproducible builds never depend on a developer's local game or BIOS files.
+No complete R5900 semantic engine, CFG, IR, C++ AOT emitter, or PS2 runtime is claimed yet.

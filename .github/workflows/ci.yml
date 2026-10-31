@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "work/**", "feature/**", "fix/**"]
+    branches: [main, "feature/**", "fix/**", "work/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
-    name: Build and test (${{ matrix.os }})
+  rust:
+    name: Rust frontend (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -20,13 +20,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Configure
-        run: cmake -S . -B build -DREPS2_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
-      - name: Build
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Unit tests
+        working-directory: rust
+        run: cargo test --workspace --locked
+
+      - name: CMake configure
+        run: cmake -S . -B build -DBUILD_TESTING=ON
+
+      - name: CMake build
         run: cmake --build build --config Release --parallel
 
-      - name: Test
+      - name: CTest
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: CLI smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\build\cargo-target\release\reps2.exe version
+
+      - name: CLI smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: ./build/cargo-target/release/reps2 version
