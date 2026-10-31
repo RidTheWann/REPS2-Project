@@ -4,10 +4,12 @@
 
 The frontend is written in Rust: executable inspection, instruction decoding, analysis, typed IR, verification, and AOT C++ source generation. Generated C++ is compiled by the host compiler and linked against the independently implemented C++20 runtime.
 
-> **Status: experimental AOT foundation (v0.7.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed scalar IR, a reachability-guided CFG, a CFG-aware control IR, deterministic C++20 lowering for a documented scalar/control-flow subset, byte/halfword/word/doubleword/quadword EE main-RAM loads and stores, including the R5900 left/right partial word and doubleword merge family, plus PT_LOAD-to-main-RAM image construction and a generated ELF-entry initializer. CMake builds synthetic scalar, control-flow, memory and initialization programs, compiles the generated C++, and executes them in CI on Windows and Linux. The ELF-to-C++ command now emits a C++ translation and a companion 32 MiB initial RAM image for eligible static ELFs; full R5900 coverage, relocations, TLB/exception semantics, MMIO devices, system services, native module linking, and game compatibility are not complete.
+> **Status: experimental AOT foundation (v0.7.0).** REPS2 now has a bounded read-only ISO 9660 reader for raw 2048-byte-sector images with SYSTEM.CNF BOOT2/BOOT executable discovery, a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, a deliberately partial base-MIPS decoder, a typed scalar IR, a reachability-guided CFG, a CFG-aware control IR, deterministic C++20 lowering for a documented scalar/control-flow subset, byte/halfword/word/doubleword/quadword EE main-RAM loads and stores, including the R5900 left/right partial word and doubleword merge family, plus PT_LOAD-to-main-RAM image construction and a generated ELF-entry initializer. CMake builds synthetic scalar, control-flow, memory and initialization programs, compiles the generated C++, and executes them in CI on Windows and Linux. The ELF-to-C++ command now emits a C++ translation and a companion 32 MiB initial RAM image for eligible static ELFs; full R5900 coverage, relocations, TLB/exception semantics, MMIO devices, system services, native module linking, and game compatibility are not complete.
 
 ## Current capabilities
 
+- Inspect raw 2048-byte-sector ISO 9660 images without loading the entire disc; validate the descriptor sequence and single-volume PVD, list root entries, resolve nested paths, and parse SYSTEM.CNF with BOOT2 preferred over BOOT.
+- Extract the SYSTEM.CNF boot target only after validating it as a MIPS ET_EXEC ELF; use create-new output semantics so an existing file or source image is never overwritten.
 - Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries.
 - Validate file-backed ranges, table bounds, cross-table references, entry sizes, address overflow, and parser resource limits.
 - Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges.
@@ -62,6 +64,8 @@ For Rust-only work:
 ## CLI
 
     reps2 version
+    reps2 disc-info <disc-image.iso>
+    reps2 extract-boot-elf <disc-image.iso> <output.elf>
     reps2 elf-info <elf-file>
     reps2 analyze-elf <elf-file>
     reps2 recompile-elf <input-elf> <output.cpp>
@@ -74,6 +78,8 @@ Example:
     reps2 recompile-elf "D:\List Games\some-owned-game\SLUS_123.45" build\game.cpp
     reps2 decode 0x2485FFFC 0x00100000
     reps2 compile-words output.cpp 0x00100000 0x24080005 0x24090007 0x01095021
+
+disc-info and extract-boot-elf accept raw 2048-byte-sector ISO 9660 images. The reader uses seeking and bounded directory/file reads, so a multi-gigabyte disc is not loaded into memory as a whole. extract-boot-elf resolves SYSTEM.CNF BOOT2 first and BOOT second, validates the target as an ELF32 little-endian EM_MIPS ET_EXEC, and creates a new output file without overwriting existing paths. Raw 2352-byte BIN/CUE tracks, CHD, UDF, Joliet/Rock Ridge names, multi-volume sets, multi-extent files, interleaved files, HDD PFS targets, and full PS2 optical drive emulation are not supported. The ISO is opened read-only; extraction writes only the separate output ELF.
 
 analyze-elf is a read-only, reachability-guided analysis command. It starts from the ELF entry point and executable STT_FUNC symbols, reports basic blocks and static edges, and explicitly lists indirect targets that cannot be resolved. It deliberately does not decode zero-filled BSS bytes.
 
