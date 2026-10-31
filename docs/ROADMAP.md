@@ -71,7 +71,7 @@ The library must distinguish these states; no state implies a later one:
 - [ ] Cover the documented R5900 integer, 64-bit, MMI0–MMI3, COP0, and FPU instruction families.
 - [x] Decode, lift, and AOT-lower the non-trapping 64-bit scalar subset (DADDU, DSUBU, DADDIU, DSLL/DSRL/DSRA and their 32-shift variants); test modulo arithmetic, sign-extended immediates, shift boundaries, and upper GPR-lane preservation.
 - [x] Decode, lift, and AOT-lower register-variable SLLV/SRLV/SRAV and DSLLV/DSRLV/DSRAV; test 5-bit/6-bit shift-count masking, word sign extension, arithmetic sign fill, and GPR upper-lane preservation through compiled native code.
-- [ ] Encode instruction operand/side-effect/exception metadata.
+- [x] Expose conservative GPR/HI-LO, memory, control-flow, and possible-exception metadata for currently decoded opcodes; unknown encodings remain opaque.
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
 - [x] Direct branch/call recovery and unresolved indirect-edge tracking.
 - [x] Entry/function root discovery from ELF entry and STT_FUNC symbols (indirect function discovery remains unresolved).
