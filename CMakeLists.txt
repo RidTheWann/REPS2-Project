@@ -298,6 +298,52 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_sa_codegen_smoke COMMAND reps2_sa_codegen_smoke)
 
+    set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_COP1_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_COP1_GENERATED_CPP}"
+            0x0000E000
+            0x44813000  # mtc1   $1, $f6   FPR[6] <- GPR[1][31:0]
+            0x44033000  # mfc1   $3, $f6   sign-extended, upper lane kept
+            0x44003000  # mfc1   $0, $f6   FPR[6] is non-zero here, so a
+                         # missing zero-guard is observable
+            0xE5060040  # swc1   $f6, 0x40($8)
+            0xC5000040  # lwc1   $f0, 0x40($8)  FPR[0] is a real register
+            0x44040000  # mfc1   $4, $f0   read FPR[0] back
+            0x44820000  # mtc1   $2, $f0   MTC1 must write FPR[0], not skip it
+            0x440A0000  # mfc1   $10, $f0
+            0x44800000  # mtc1   $zero, $f0 the first unsupported word found
+                         # in every retail entry scan so far
+            0x440B0000  # mfc1   $11, $f0
+            0xC527FFFC  # lwc1   $f7, -4($9)  signed offset to the same word
+            0x44073800  # mfc1   $7, $f7
+            0x44450000  # cfc1   $5, $0    FIR is a read-only constant
+            0x44C2F800  # ctc1   $2, $31   FCSR <- GPR[2][31:0] with bits 1..0 forced
+            0x4446F800  # cfc1   $6, $31   read FCSR back
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the synthetic R5900 COP1 data-movement block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_COP1_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_cop1_codegen_fixture DEPENDS "${REPS2_COP1_GENERATED_CPP}")
+    add_executable(reps2_cop1_codegen_smoke
+        "${REPS2_COP1_GENERATED_CPP}"
+        tests/cop1_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_cop1_codegen_smoke reps2_cop1_codegen_fixture)
+    target_link_libraries(reps2_cop1_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cop1_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cop1_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cop1_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_cop1_codegen_smoke COMMAND reps2_cop1_codegen_smoke)
+
     set(REPS2_CFG_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow.cpp")
     add_custom_command(
         OUTPUT "${REPS2_CFG_GENERATED_CPP}"
