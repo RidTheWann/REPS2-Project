@@ -27,6 +27,13 @@ These projects have different goals and different completion levels. Their demos
 - REPS2's initial CFG keeps the branch instruction and delay slot separate from block-body instructions. This is a representation decision that prevents a linear scalar IR from accidentally treating a delay slot as ordinary fallthrough.
 - Indirect jump targets are unresolved unless statically proven; no target is guessed from a register name or common ABI convention.
 
+## Control-flow semantic cross-checks
+
+- MIPS delayed-control-transfer references describe the single instruction delay slot and PC+8 link value for link branches. The generic ISA is a baseline, not a claim of complete R5900 coverage.
+- The PCSX2 R5900 dynamic-recompiler branch implementation is used only as an independent behavioural cross-check: BLTZAL/BGEZAL write the link before selecting the taken/fallthrough path, and the delay instruction is processed in either path for these non-likely variants. REPS2's code and tests are independently written.
+- The CFG AOT dispatcher captures JALR's source target before the link write, then executes its delay slot before committing the next PC. This ordering is covered by synthetic tests and must remain explicit in future optimizations.
+- Branch-likely/annul instructions are intentionally outside this first control-flow AOT subset; they must receive separate IR semantics and tests before decoding/lowering them as executable.
+
 ## Provenance rules
 
 1. REPS2 source is independently authored.

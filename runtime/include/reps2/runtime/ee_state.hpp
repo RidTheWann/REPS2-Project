@@ -13,6 +13,7 @@ struct Gpr128 {
 };
 
 struct EeState {
+    std::uint32_t pc{};
     std::array<Gpr128, 32> gpr{};
 };
 
@@ -20,6 +21,9 @@ enum class Status : std::uint8_t {
     ok,
     undefined_word_operand,
     integer_overflow,
+    instruction_budget_exhausted,
+    external_control_flow,
+    unsupported_instruction,
 };
 
 [[nodiscard]] constexpr std::uint64_t sign_extend_word(std::uint32_t value) noexcept {

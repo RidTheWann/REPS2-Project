@@ -44,10 +44,13 @@ Milestones are capability gates, not calendar promises. Reverse engineering and 
 - [x] IR verifier for register, PC alignment/sequencing, and word-shift invariants.
 - [x] Deterministic C++20 source generation for the implemented IR operations.
 - [x] Synthetic generated C++ compiled and executed against the minimal EE state ABI on Windows and Linux CI.
-- [ ] Delay-slot-safe CFG and branch IR.
+- [x] CFG-aware typed IR for supported branch/jump terminators, with explicit scalar delay-slot operations.
 - [ ] Memory-operation IR with alignment, address-space and exception outcomes.
 - [ ] Build manifest with input hash, compiler options, and generated function metadata.
-- [ ] ELF-to-IR-to-C++ compilation path for a real executable code region.
+- [x] CFG-aware C++20 dispatcher for the implemented direct and register-indirect control-flow subset.
+- [x] Synthetic generated control-flow code compiled and executed on Windows/MSVC and Linux/GCC, including branch-taken, branch-not-taken, delay slots, JAL/JR return, and instruction-budget behaviour.
+- [x] ELF-to-CFG-IR-to-C++ command path for the currently supported subset.
+- [ ] Validate recompile-elf against a lawfully owned PS2 ELF and document translated coverage/unsupported stops.
 
 **Exit gate:** a synthetic instruction block can be lifted, verified, lowered, compiled, and produce the expected guest-state transitions.
 

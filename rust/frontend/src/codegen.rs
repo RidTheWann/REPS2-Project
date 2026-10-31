@@ -30,7 +30,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
     Ok(output)
 }
 
-fn emit_instruction(output: &mut String, index: usize, instruction: Instruction) {
+pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: Instruction) {
     let pc = instruction.guest_pc;
     let prefix = format!("    // guest PC 0x{pc:08X}\n");
     output.push_str(&prefix);

@@ -4,7 +4,7 @@
 
 The frontend is written in Rust: executable inspection, instruction decoding, analysis, typed IR, verification, and AOT C++ source generation. Generated C++ is compiled by the host compiler and linked against the independently implemented C++20 runtime.
 
-> **Status: experimental foundation (v0.4.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed straight-line IR, and a deterministic C++20 emitter for a documented scalar subset. CMake builds a synthetic program through Rust-to-C++ lowering, compiles it with the host compiler, and executes it in CI on Windows and Linux. This does not yet recompile a PS2 ELF, build a complete game module, boot a title, or implement the PS2 hardware runtime.
+> **Status: experimental AOT foundation (v0.5.0).** REPS2 now has a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, PT_LOAD materialization, a deliberately partial base-MIPS decoder, a typed scalar IR, a reachability-guided CFG, a CFG-aware control IR, and deterministic C++20 lowering for a documented scalar/control-flow subset. CMake builds synthetic scalar and branch/call programs, compiles the generated C++, and executes both in CI on Windows and Linux. The ELF-to-C++ command is usable for owned ELF files, but full R5900 coverage, memory semantics, system services, native module linking, and game compatibility are not complete.
 
 ## Current capabilities
 
@@ -15,6 +15,9 @@ The frontend is written in Rust: executable inspection, instruction decoding, an
 - Discover entry points and STT_FUNC roots, then build a reachability-guided CFG for the currently supported control-transfer subset.
 - Preserve control instructions and delay slots as explicit terminators; record direct taken/fallthrough/call/return-continuation edges and unresolved indirect targets.
 - Read executable instructions only from file-backed PT_LOAD bytes; zero-filled BSS is never misinterpreted as code.
+- Lift discovered blocks into a CFG-aware typed IR with explicit fallthroughs, branch conditions, direct/indirect jumps, returns, and delay-slot operations.
+- Lower the supported CFG subset to a C++20 PC dispatcher; preserve branch/link/delay-slot ordering and stop explicitly at unsupported operations or unmapped control flow.
+- Bound generated execution by a guest-instruction budget, admitting each basic block atomically and preserving its starting PC when the budget is insufficient.
 - Lift a supported straight-line instruction subset into typed Rust IR with guest-PC provenance and verification.
 - Emit deterministic C++20 for supported scalar operations: NOP, ADD/ADDI/ADDU/ADDIU, SUB/SUBU, AND/OR/XOR, immediate logical operations, LUI, and word shifts.
 - Keep a 128-bit EE GPR state shape in the runtime ABI; scalar instructions update only the low 64-bit lane and preserve the high lane.
@@ -41,7 +44,7 @@ The frontend executable is produced at:
 - Windows: build/cargo-target/release/reps2.exe
 - Linux: build/cargo-target/release/reps2
 
-The CMake build also generates build/generated/synthetic_program.cpp, compiles it with the host C++20 compiler, and runs reps2_codegen_smoke.
+The CMake build generates build/generated/synthetic_program.cpp and build/generated/control_flow.cpp, compiles both with the host C++20 compiler, and runs reps2_codegen_smoke plus reps2_cfg_codegen_smoke.
 
 For Rust-only work:
 
@@ -54,6 +57,7 @@ For Rust-only work:
     reps2 version
     reps2 elf-info <elf-file>
     reps2 analyze-elf <elf-file>
+    reps2 recompile-elf <input-elf> <output.cpp>
     reps2 decode <instruction-word-hex> [pc-hex]
     reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...
 
@@ -63,9 +67,12 @@ Example:
     reps2 decode 0x2485FFFC 0x00100000
     reps2 compile-words output.cpp 0x00100000 0x24080005 0x24090007 0x01095021
 
-analyze-elf is a read-only, reachability-guided analysis command. It starts from the ELF entry point and executable STT_FUNC symbols, reports basic blocks and static edges, and explicitly lists indirect targets that cannot be resolved. It does not yet emit or execute branch CFGs. The CFG supports a bounded set of direct and register-indirect control transfers; unsupported instructions terminate analysis blocks with diagnostics. It deliberately does not decode zero-filled BSS bytes.
+analyze-elf is a read-only, reachability-guided analysis command. It starts from the ELF entry point and executable STT_FUNC symbols, reports basic blocks and static edges, and explicitly lists indirect targets that cannot be resolved. It deliberately does not decode zero-filled BSS bytes.
 
-compile-words remains a narrow linear-block development command. It accepts raw instruction words, lifts only the supported scalar subset, and writes a C++ translation unit. REPS2 is not yet an ELF-to-game recompiler: branch/delay-slot AOT lowering, memory-operation IR, complete R5900 semantics, and runtime service integration remain future work.
+recompile-elf performs ELF-to-CFG-IR-to-C++ lowering for the currently supported scalar and control-flow subset. The output exports reps2::generated::execute_cfg(EeState&, instruction_budget); the caller supplies the initial guest PC and EE state. Direct branches, J/JAL, JR/JALR, and the supported REGIMM branches are represented with explicit delay slots. Unsupported instructions and control transfers outside the translated graph return a structured status instead of being guessed. This is a compiler vertical slice, not a complete game recompiler or runnable PS2 module.
+
+compile-words remains a narrow straight-line development command. compile-cfg-fixture is an internal synthetic fixture generator used by CTest. Neither command consumes or distributes game data.
+
 
 ## Architecture
 
@@ -88,6 +95,10 @@ See docs/ARCHITECTURE.md, docs/ROADMAP.md, and docs/decisions/.
 - Status::integer_overflow reports an overflow outcome for ADD/ADDI; the full EE exception vector/CP0 path is not implemented yet.
 - Status::undefined_word_operand is an explicit REPS2 diagnostic guard for an operand outside the documented word-value restriction; it is not presented as a distinct hardware exception.
 - ORI follows the MIPS zero-extended-immediate definition and the observed R5900 reference behavior; the discrepancy in one publicly mirrored Sony manual text is recorded in docs/decisions/0002-scalar-ir-and-cpp-aot.md.
+- Conditional branch predicates read the low 64-bit EE GPR value; signed branches use a bit-preserving signed interpretation rather than host-dependent casts.
+- Branch-and-link variants write the PC+8 return address regardless of whether the branch predicate is true. The link is written before the delay-slot instruction executes.
+- JALR captures its dynamic destination before writing the link register, preserving correct behavior when source and destination registers alias.
+- The CFG AOT dispatcher executes the branch/jump delay slot before committing the selected next PC. Branch-likely/annul semantics are not included in the supported subset.
 
 ## Engineering and legal boundaries
 
