@@ -532,6 +532,9 @@ mod tests {
             0x0022_1818, // mult r3, r1, r2
             0x0022_302A, // slt r6, r1, r2
             0x0022_3827, // nor r7, r1, r2
+            0x0022_502C, // dadd r10, r1, r2
+            0x0043_582E, // dsub r11, r2, r3
+            0x602E_FFFE, // daddi r14, r1, -2
             0x03E0_0008, // jr ra
             0x0000_0000, // delay slot
         ];
@@ -542,7 +545,7 @@ mod tests {
         let program = ControlProgram::lift(&graph).expect("HI/LO scalar operations lift in CFG");
 
         let block = &program.blocks[&0x3000];
-        assert_eq!(block.instructions.len(), 5);
+        assert_eq!(block.instructions.len(), 8);
         assert!(matches!(block.instructions[0].operation, ir::Operation::MoveToHi { src } if src.index() == 1));
         assert!(matches!(block.instructions[1].operation, ir::Operation::MoveFromHi { dst } if dst.index() == 2));
         assert!(matches!(block.instructions[2].operation,
@@ -554,6 +557,15 @@ mod tests {
         assert!(matches!(block.instructions[4].operation,
             ir::Operation::Nor64 { dst, lhs, rhs }
                 if dst.index() == 7 && lhs.index() == 1 && rhs.index() == 2));
+        assert!(matches!(block.instructions[5].operation,
+            ir::Operation::AddDoublewordSigned { dst, lhs, rhs }
+                if dst.index() == 10 && lhs.index() == 1 && rhs.index() == 2));
+        assert!(matches!(block.instructions[6].operation,
+            ir::Operation::SubDoublewordSigned { dst, lhs, rhs }
+                if dst.index() == 11 && lhs.index() == 2 && rhs.index() == 3));
+        assert!(matches!(block.instructions[7].operation,
+            ir::Operation::AddImmediateDoublewordSigned { dst, src, immediate: 0xFFFE }
+                if dst.index() == 14 && src.index() == 1));
         assert!(matches!(&block.terminator, ControlTerminator::Return { .. }));
         assert_eq!(program.unsupported_count(), 0);
     }

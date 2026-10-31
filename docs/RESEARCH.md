@@ -59,6 +59,13 @@ These projects have different goals and different completion levels. Their demos
 - The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 (2014), §§5.1.2–5.1.3 remains the general ISA reference; R5900 GPR lane behaviour is cross-checked independently and is not inferred solely from the generic MIPS64 description.
 - These operations remain scoped to the current direct/uncached/accelerated/KSEG main-RAM aliases. No COP0/TLB remapping, cache/coherency, MMIO, bus exception delivery, or complete hardware compatibility is claimed.
 
+## R5900 trapping 64-bit addition and subtraction
+
+- PCSX2's R5900 interpreter implements `DADD`, `DSUB`, and `DADDI` as signed 64-bit operations with integer-overflow exceptions. Its handlers compute and check overflow before suppressing writes to GPR[0], so an overflowing instruction still raises the exception when the destination field is zero: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/R5900OpcodeImpl.cpp (see `_add64_Overflow`, `DADDI`, `DADD`, and `DSUB`).
+- `DADDI` sign-extends its 16-bit immediate before the 64-bit addition. `DADDU`, `DSUBU`, and `DADDIU` remain separate modulo-2^64 operations that do not raise signed-overflow exceptions.
+- REPS2 generated code computes result bits in `std::uint64_t` and uses sign-bit overflow identities for addition and subtraction. This avoids evaluating an overflowing signed C++ expression, which would invoke host-language undefined behavior. A failed operation returns `Status::integer_overflow` before committing its destination register.
+- Native tests cover normal results, `INT64_MAX + 1`, `INT64_MIN - 1`, `INT64_MIN + sign_extend(-2)`, source/destination aliasing, prior-instruction commit behavior, and overflow with `rd = 0`.
+
 ## R5900 64-bit compare and NOR cross-checks
 
 - PCSX2's R5900 interpreter compares the full low 64-bit GPR lane for `SLT` and `SLTU`, returning exactly 0 or 1 in that lane. `SLTI` compares the signed low 64-bit GPR against the sign-extended 16-bit immediate; `SLTIU` sign-extends the same immediate and then compares the bit pattern as unsigned 64-bit. `NOR` complements the 64-bit OR result. Reference: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/R5900OpcodeImpl.cpp (SLTI/SLTIU around lines 2662–2663; NOR/SLT/SLTU around lines 2744–2748).
