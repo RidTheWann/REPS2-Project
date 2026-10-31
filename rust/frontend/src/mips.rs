@@ -95,6 +95,7 @@ pub enum Opcode {
     Sd,
     Lq,
     Sq,
+    ParallelAddUnsignedWord,
     Unknown,
 }
 
@@ -271,6 +272,7 @@ impl Opcode {
             Self::Sd => "sd",
             Self::Lq => "lq",
             Self::Sq => "sq",
+            Self::ParallelAddUnsignedWord => "padduw",
             Self::Unknown => "unknown",
         }
     }
@@ -595,6 +597,10 @@ impl Instruction {
             Opcode::Lui => {
                 effects.gpr_write_mask = rt;
             }
+            Opcode::ParallelAddUnsignedWord => {
+                effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rd;
+            }
 
             Opcode::Lb
             | Opcode::Lh
@@ -800,6 +806,10 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x0F if rs == 0 => Opcode::Lui,
             0x1A => Opcode::Ldl,
             0x1B => Opcode::Ldr,
+            0x1C => match (word & 0x3F) as u8 {
+                0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
+                _ => Opcode::Unknown,
+            },
             0x20 => Opcode::Lb,
             0x21 => Opcode::Lh,
             0x22 => Opcode::Lwl,
@@ -971,6 +981,33 @@ mod tests {
         for (word, expected) in cases {
             assert_eq!(decode(word, 0x6000).opcode, expected, "word 0x{word:08X}");
         }
+    }
+
+    #[test]
+    fn decodes_r5900_mmi_parallel_add_unsigned_word_and_rejects_other_groups() {
+        let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x10 << 6) | 0x28;
+        let decoded = decode(word, 0x7000);
+        assert_eq!(decoded.opcode, Opcode::ParallelAddUnsignedWord);
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+        assert_eq!(
+            encoding_family(word),
+            EncodingFamily::Mmi1,
+            "PADDUW is an MMI1-group encoding"
+        );
+        assert!(!decoded.has_delay_slot);
+        assert!(!decoded.is_control_transfer());
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.unknown);
+
+        // The same function bits in another MMI group, and a different MMI1
+        // selector, must not be mistaken for PADDUW.
+        let mmi0 = (word & !0x3F) | 0x08;
+        assert_eq!(decode(mmi0, 0).opcode, Opcode::Unknown);
+        let other_mmi1 = (word & !(0x1F << 6)) | (0x11 << 6);
+        assert_eq!(decode(other_mmi1, 0).opcode, Opcode::Unknown);
     }
 
     #[test]

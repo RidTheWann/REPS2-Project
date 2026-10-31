@@ -432,6 +432,42 @@ enum class Status : std::uint8_t {
         : static_cast<std::uint64_t>(value);
 }
 
+[[nodiscard]] constexpr std::uint32_t saturating_add_u32(
+    std::uint32_t lhs,
+    std::uint32_t rhs
+) noexcept {
+    const auto sum = static_cast<std::uint64_t>(lhs) + static_cast<std::uint64_t>(rhs);
+    return sum > 0xFFFFFFFFULL ? 0xFFFFFFFFU : static_cast<std::uint32_t>(sum);
+}
+
+// PADDUW adds four corresponding unsigned 32-bit lanes with unsigned
+// saturation. Lanes are independent: no carry crosses a 32-bit boundary.
+[[nodiscard]] constexpr Gpr128 parallel_add_u32(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    const auto lane0 = saturating_add_u32(
+        static_cast<std::uint32_t>(lhs.low),
+        static_cast<std::uint32_t>(rhs.low)
+    );
+    const auto lane1 = saturating_add_u32(
+        static_cast<std::uint32_t>(lhs.low >> 32U),
+        static_cast<std::uint32_t>(rhs.low >> 32U)
+    );
+    const auto lane2 = saturating_add_u32(
+        static_cast<std::uint32_t>(lhs.high),
+        static_cast<std::uint32_t>(rhs.high)
+    );
+    const auto lane3 = saturating_add_u32(
+        static_cast<std::uint32_t>(lhs.high >> 32U),
+        static_cast<std::uint32_t>(rhs.high >> 32U)
+    );
+    return Gpr128{
+        static_cast<std::uint64_t>(lane0) | (static_cast<std::uint64_t>(lane1) << 32U),
+        static_cast<std::uint64_t>(lane2) | (static_cast<std::uint64_t>(lane3) << 32U),
+    };
+}
+
 [[nodiscard]] constexpr std::uint32_t sign_extend_immediate(std::uint16_t value) noexcept {
     return (value & 0x8000U) != 0
         ? (0xFFFF0000U | static_cast<std::uint32_t>(value))

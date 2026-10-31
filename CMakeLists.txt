@@ -98,6 +98,8 @@ if(BUILD_TESTING)
             0x0085F014
             0x0085F816
             0x00859817
+            0x70221C28
+            0x70220428
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic EE block to C++"
         VERBATIM

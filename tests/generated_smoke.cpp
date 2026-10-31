@@ -124,5 +124,8 @@ int main() {
         || state.gpr[30].high != 0xABCDEF0123456789ULL
         || state.gpr[31].high != 0xABCDEF0123456789ULL) return 33;
 
+    if (state.gpr[3].low != 0xFFFFFFFFFFFFFFFFULL) return 34; // PADDUW saturates lane 0.
+    if (state.gpr[3].high != 0x66668888AAAACCCCULL) return 35; // Lanes stay isolated.
+
     return 0;
 }
