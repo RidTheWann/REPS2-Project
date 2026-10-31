@@ -38,6 +38,8 @@ Decode/lift support and generated execution support are distinct gates. Only the
 
 Synthetic tests cover:
 - valid three-operand MULT/MULTU encodings with non-zero `rd`, and MULT to GPR zero;
+- signed multiply boundary cases including INT32_MIN × INT32_MAX, INT32_MIN × -INT32_MAX, and INT32_MIN × INT32_MIN;
+- source/destination aliasing for both signed MULT and unsigned MULTU;
 - reserved-field rejection for MTHI/MTLO and malformed multiply encodings;
 - GPR and HI/LO read/write effect metadata;
 - typed IR lifting for all six operations;
@@ -48,6 +50,7 @@ CI is the authoritative host-compiler check on Windows/MSVC and Linux/GCC. Passi
 
 ## References
 
-- QEMU development-list TX79/R5900 architectural discussion of the three-operand MULT/MULTU variants: https://lists.gnu.org/archive/html/qemu-devel/2020-11/msg05888.html
+- QEMU's R5900 three-operand MULT/MULTU implementation and explicit state-transfer definition: https://patchew.org/QEMU/cover.1540134918.git.noring@nocrew.org/ff1edd3989b06e9cae67c962cec79081e4d7af0a.1540134918.git.noring@nocrew.org/
+- QEMU's independent signed MULT test vectors, including INT32_MIN edge cases: https://patchew.org/QEMU/cover.1540134918.git.noring@nocrew.org/b72eb39dd9c465d110e3df2e3660c32c979d0e4d.1540134918.git.noring@nocrew.org/
 - PCSX2 R5900 interpreter behavior for MULT/MULTU, MFHI/MFLO and MTHI/MTLO: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/R5900OpcodeImpl.cpp
 - REPS2 [decoder](../../rust/frontend/src/mips.rs), [typed IR](../../rust/frontend/src/ir.rs), and [runtime ABI](../../runtime/include/reps2/runtime/ee_state.hpp).

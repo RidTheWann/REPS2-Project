@@ -136,7 +136,21 @@ if(BUILD_TESTING)
             0x0022B018
             0x0000C010
             0x0000C812
+            0x00220018
+            0x0000D010
+            0x0000D812
             0x0062B819
+            0x00853018
+            0x00006810
+            0x00007012
+            0x01095018
+            0x00007810
+            0x00008012
+            0x016C8818
+            0x00009010
+            0x00009812
+            0x00621819
+            0x00220818
         DEPENDS reps2
         COMMENT "AOT-compiling the synthetic R5900 HI/LO and multiply block"
         VERBATIM
