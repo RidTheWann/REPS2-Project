@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 namespace reps2::generated {
@@ -152,30 +153,37 @@ int main() {
 
         const auto memory_status = reps2::generated::execute_cfg(memory_state, 64U);
         if (memory_status != Status::external_control_flow || memory_state.pc != 0x9000U) {
+            std::fprintf(stderr, "memory status failure alias[%zu]: status=%u pc=0x%08X\n", index, static_cast<unsigned>(memory_status), memory_state.pc);
             return 20;
         }
         if (memory_state.gpr[10].low != 1U || memory_state.gpr[11].low != 1U) {
+            std::fprintf(stderr, "byte load mismatch alias[%zu]: lb=0x%016llX lbu=0x%016llX\n", index, static_cast<unsigned long long>(memory_state.gpr[10].low), static_cast<unsigned long long>(memory_state.gpr[11].low));
             return 21;
         }
         if (memory_state.gpr[12].low != 0xFFFFFFFFFFFF80FFULL
             || memory_state.gpr[13].low != 0x80FFULL) {
+            std::fprintf(stderr, "halfword load mismatch alias[%zu]: lh=0x%016llX lhu=0x%016llX\n", index, static_cast<unsigned long long>(memory_state.gpr[12].low), static_cast<unsigned long long>(memory_state.gpr[13].low));
             return 22;
         }
         if (memory_state.gpr[14].low != 0xFFFFFFFF80FF8001ULL
             || memory_state.gpr[15].low != 0x80FF8001ULL) {
+            std::fprintf(stderr, "word load mismatch alias[%zu]: lw=0x%016llX lwu=0x%016llX\n", index, static_cast<unsigned long long>(memory_state.gpr[14].low), static_cast<unsigned long long>(memory_state.gpr[15].low));
             return 23;
         }
         if (memory_state.gpr[10].high != 0xAAAAAAAAAAAAAAAAULL
             || memory_state.gpr[12].high != 0xBBBBBBBBBBBBBBBBULL) {
+            std::fprintf(stderr, "GPR high-lane preservation failure alias[%zu]\n", index);
             return 24;
         }
         if (main_ram[physical] != 0x01U || main_ram[physical + 1U] != 0x80U
             || main_ram[physical + 2U] != 0xFFU || main_ram[physical + 3U] != 0x80U) {
+            std::fprintf(stderr, "initial SW bytes mismatch alias[%zu]: %02X %02X %02X %02X\n", index, main_ram[physical], main_ram[physical + 1U], main_ram[physical + 2U], main_ram[physical + 3U]);
             return 25;
         }
         if (main_ram[physical + 4U] != 0x01U || main_ram[physical + 6U] != 0x01U
             || main_ram[physical + 7U] != 0x80U || main_ram[physical + 8U] != 0x01U
             || main_ram[physical + 11U] != 0x80U) {
+            std::fprintf(stderr, "SB/SH/SW bytes mismatch alias[%zu]: %02X %02X %02X %02X %02X\n", index, main_ram[physical + 4U], main_ram[physical + 6U], main_ram[physical + 7U], main_ram[physical + 8U], main_ram[physical + 11U]);
             return 26;
         }
     }
@@ -190,10 +198,12 @@ int main() {
     unaligned.gpr[14].high = 0x0BADF00D0BADF00DULL;
     const auto alignment_status = reps2::generated::execute_cfg(unaligned, 8U);
     if (alignment_status != Status::address_error || unaligned.pc != 0x5100U) {
+        std::fprintf(stderr, "alignment status mismatch: status=%u pc=0x%08X\n", static_cast<unsigned>(alignment_status), unaligned.pc);
         return 27;
     }
     if (unaligned.gpr[14].low != 0x123456789ABCDEF0ULL
         || unaligned.gpr[14].high != 0x0BADF00D0BADF00DULL) {
+        std::fprintf(stderr, "alignment fault modified LW destination\n");
         return 28;
     }
 
@@ -205,6 +215,7 @@ int main() {
     mmio.gpr[9].low = 0xDEADBEEFULL;
     const auto mmio_status = reps2::generated::execute_cfg(mmio, 64U);
     if (mmio_status != Status::unsupported_memory_access || mmio.pc != 0x5000U) {
+        std::fprintf(stderr, "MMIO status mismatch: status=%u pc=0x%08X\n", static_cast<unsigned>(mmio_status), mmio.pc);
         return 29;
     }
 
@@ -215,6 +226,7 @@ int main() {
     unmapped.gpr[8].low = 0x02000004U;
     const auto unmapped_status = reps2::generated::execute_cfg(unmapped, 64U);
     if (unmapped_status != Status::unmapped_memory || unmapped.pc != 0x5000U) {
+        std::fprintf(stderr, "unmapped status mismatch: status=%u pc=0x%08X\n", static_cast<unsigned>(unmapped_status), unmapped.pc);
         return 30;
     }
 
@@ -227,6 +239,7 @@ int main() {
     short_backing.gpr[8].low = 0x1000U;
     const auto short_backing_status = reps2::generated::execute_cfg(short_backing, 64U);
     if (short_backing_status != Status::unmapped_memory || short_backing.pc != 0x5000U) {
+        std::fprintf(stderr, "short-backing status mismatch: status=%u pc=0x%08X\n", static_cast<unsigned>(short_backing_status), short_backing.pc);
         return 31;
     }
 
