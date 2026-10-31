@@ -6,7 +6,7 @@
 //! BIN/CUE tracks, CHD, UDF, Joliet names, Rock Ridge, and multi-extent files
 //! are detected or rejected explicitly rather than guessed.
 
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 
 pub const LOGICAL_BLOCK_SIZE: u64 = 2048;
 const VOLUME_DESCRIPTOR_START_LBA: u64 = 16;
@@ -533,7 +533,7 @@ mod tests {
     }
 
     fn directory_record(extent: u32, size: u32, flags: u8, identifier: &[u8]) -> Vec<u8> {
-        let padding = usize::from(identifier.len() % 2 == 0);
+        let padding = if identifier.len() % 2 == 0 { 1 } else { 0 };
         let record_length = 33 + identifier.len() + padding;
         let mut record = vec![0u8; record_length];
         record[0] = record_length as u8;
