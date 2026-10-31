@@ -355,7 +355,7 @@ int main() {
     }
     const auto word_merge_status = reps2::generated::execute_cfg(unaligned_words, 64U);
     if (word_merge_status != Status::external_control_flow || unaligned_words.pc != 0x9000U) {
-        std::fprintf(stderr, "generated word-merge fixture failed: status=%u pc=0x%08X\\n",
+        std::fprintf(stderr, "generated word-merge fixture failed: status=%u pc=0x%08X\n",
             static_cast<unsigned>(word_merge_status), unaligned_words.pc);
         return fail(46);
     }
@@ -376,7 +376,7 @@ int main() {
             || unaligned_words.gpr[14U + lane].low != expected_right
             || unaligned_words.gpr[10U + lane].high != 0xAABBCCDD00000000ULL + lane
             || unaligned_words.gpr[14U + lane].high != 0xBBCCDDEE00000000ULL + lane) {
-            std::fprintf(stderr, "LWL/LWR lane mismatch at byte offset %u\\n", lane);
+            std::fprintf(stderr, "LWL/LWR lane mismatch at byte offset %u\n", lane);
             return fail(47);
         }
         const auto swl_shift = (3U - lane) * 8U;
@@ -389,7 +389,7 @@ int main() {
         if (reps2::runtime::load_u32(unaligned_words.memory, 0x6020U + lane * 4U, observed_swl) != Status::ok
             || reps2::runtime::load_u32(unaligned_words.memory, 0x6030U + lane * 4U, observed_swr) != Status::ok
             || observed_swl != expected_swl || observed_swr != expected_swr) {
-            std::fprintf(stderr, "SWL/SWR lane mismatch at byte offset %u\\n", lane);
+            std::fprintf(stderr, "SWL/SWR lane mismatch at byte offset %u\n", lane);
             return fail(48);
         }
     }
@@ -419,7 +419,7 @@ int main() {
     }
     const auto doubleword_merge_status = reps2::generated::execute_cfg(unaligned_doublewords, 64U);
     if (doubleword_merge_status != Status::external_control_flow || unaligned_doublewords.pc != 0x9000U) {
-        std::fprintf(stderr, "generated doubleword-merge fixture failed: status=%u pc=0x%08X\\n",
+        std::fprintf(stderr, "generated doubleword-merge fixture failed: status=%u pc=0x%08X\n",
             static_cast<unsigned>(doubleword_merge_status), unaligned_doublewords.pc);
         return fail(50);
     }
@@ -434,7 +434,7 @@ int main() {
             || unaligned_doublewords.gpr[18U + lane].low != expected_right
             || unaligned_doublewords.gpr[10U + lane].high != 0xC000000000000000ULL + lane
             || unaligned_doublewords.gpr[18U + lane].high != 0xD000000000000000ULL + lane) {
-            std::fprintf(stderr, "LDL/LDR lane mismatch at byte offset %u\\n", lane);
+            std::fprintf(stderr, "LDL/LDR lane mismatch at byte offset %u\n", lane);
             return fail(51);
         }
         const auto sdl_shift = (7U - lane) * 8U;
@@ -447,7 +447,7 @@ int main() {
         if (reps2::runtime::load_u64(unaligned_doublewords.memory, 0x6180U + lane * 8U, observed_sdl) != Status::ok
             || reps2::runtime::load_u64(unaligned_doublewords.memory, 0x61C0U + lane * 8U, observed_sdr) != Status::ok
             || observed_sdl != expected_sdl || observed_sdr != expected_sdr) {
-            std::fprintf(stderr, "SDL/SDR lane mismatch at byte offset %u\\n", lane);
+            std::fprintf(stderr, "SDL/SDR lane mismatch at byte offset %u\n", lane);
             return fail(52);
         }
     }
@@ -462,7 +462,7 @@ int main() {
     const auto unaligned_short_status = reps2::generated::execute_cfg(unaligned_short, 64U);
     if (unaligned_short_status != Status::unmapped_memory || unaligned_short.pc != 0x5300U
         || unaligned_short.gpr[10].low != old_word_register) {
-        std::fprintf(stderr, "failed LWL backing access was not atomic\\n");
+        std::fprintf(stderr, "failed LWL backing access was not atomic\n");
         return fail(53);
     }
 
