@@ -161,7 +161,7 @@ int main() {
             std::fprintf(stderr, "memory status failure alias[%zu]: status=%u pc=0x%08X\n", index, static_cast<unsigned>(memory_status), memory_state.pc);
             return fail(20);
         }
-        if (memory_state.gpr[10].low != 1U || memory_state.gpr[11].low != 1U) {
+        if (memory_state.gpr[10].low != 0xFFFFFFFFFFFFFF80ULL || memory_state.gpr[11].low != 0xFFU) {
             std::fprintf(stderr, "byte load mismatch alias[%zu]: lb=0x%016llX lbu=0x%016llX\n", index, static_cast<unsigned long long>(memory_state.gpr[10].low), static_cast<unsigned long long>(memory_state.gpr[11].low));
             return fail(21);
         }
