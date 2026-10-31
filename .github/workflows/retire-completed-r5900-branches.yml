@@ -1,0 +1,40 @@
+name: Retire completed R5900 branches
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  retire-completed-r5900-branches:
+    if: github.repository == 'RidTheWann/REPS2-Project'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only completed or superseded R5900 feature refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          refs=(
+            "feature/r5900-instruction-effects"
+            "feature/r5900-mult-hilo"
+            "feature/r5900-compare-nor"
+            "feature/r5900-signed-alu-and-compare"
+            "feature/r5900-trapping-doubleword-alu"
+          )
+
+          for branch in "${refs[@]}"; do
+            ref="heads/${branch}"
+            if gh api "repos/${GH_REPO}/git/ref/${ref}" >/dev/null 2>&1; then
+              gh api --silent --method DELETE "repos/${GH_REPO}/git/refs/${ref}"
+              echo "::notice::Deleted stale branch ${branch}"
+            else
+              echo "::notice::Branch ${branch} is already absent; skipping"
+            fi
+          done
