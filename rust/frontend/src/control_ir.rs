@@ -58,9 +58,9 @@ pub enum ControlTerminator {
     Unsupported {
         guest_pc: u32,
         mnemonic: String,
-        /// Set when the stop is an architectural SYSCALL or BREAK trap rather
-        /// than an unrecognized or unsupported encoding. The block is still not
-        /// translated further because no HLE service layer exists yet.
+        /// Set when the terminator is an architectural SYSCALL or BREAK
+        /// exception rather than an unknown encoding. Code generation enters
+        /// the EE exception vector; it does not invoke a BIOS/HLE service.
         trap: Option<TrapKind>,
     },
     SegmentEnd {
@@ -342,11 +342,10 @@ impl ControlProgram {
             .count()
     }
 
-    /// Returns how many blocks stop on an architectural SYSCALL/BREAK trap.
+    /// Returns the number of blocks ending in a known SYSCALL/BREAK exception.
     ///
-    /// These blocks are still explicit stops (they also count toward
-    /// [`Self::unsupported_count`]) because no HLE service layer exists yet,
-    /// but the reason is a known guest trap rather than an unknown encoding.
+    /// These are explicit architectural control-flow terminators, not unknown
+    /// encodings. Their generated blocks perform a Level-1 COP0 exception entry.
     #[must_use]
     pub fn trap_count(&self) -> usize {
         self.blocks
