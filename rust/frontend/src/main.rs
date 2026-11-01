@@ -1129,13 +1129,13 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     ];
     let overflow_in_delay_slot = [
         (0x01 << 26) | (8 << 21) | (0x10 << 16) | 1, // bltzal t0, 0xD008
-        (8 << 21) | (9 << 16) | (10 << 11) | 0x2C,  // delay slot: dadd t2, t0, t1
+        (8 << 21) | (9 << 16) | (10 << 11) | 0x2C,   // delay slot: dadd t2, t0, t1
         0x0000_000C,                                 // syscall if execution reaches target
     ];
     let annulled_overflow_delay_slot = [
-        (0x14 << 26) | (8 << 21) | 1,                // beql t0, zero, 0xD108
-        (8 << 21) | (9 << 16) | (10 << 11) | 0x2C,  // annulled dadd t2, t0, t1
-        0x0000_000C,                                 // syscall proves the slot was skipped
+        (0x14 << 26) | (8 << 21) | 1,              // beql t0, zero, 0xD108
+        (8 << 21) | (9 << 16) | (10 << 11) | 0x2C, // annulled dadd t2, t0, t1
+        0x0000_000C,                               // syscall proves the slot was skipped
     ];
     let branch_likely = [
         (0x14 << 26) | (8 << 21) | 4, // beql t0, zero, 0x3114
@@ -1195,8 +1195,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     ];
     let unaligned_store = [
         (0x2B << 26) | (8 << 21) | (9 << 16), // sw t1, 0(t0)
-        0x03E0_0008,                         // jr ra
-        0x0000_0000,                         // delay slot
+        0x03E0_0008,                          // jr ra
+        0x0000_0000,                          // delay slot
     ];
     let unaligned_store_delay = [
         (0x04 << 26) | (8 << 21) | (9 << 16) | 1, // beq t0, t1, 0x5608
@@ -1350,8 +1350,9 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xF004, "eret-return-continuation-fixture"),
     ];
     let roots = [
-        0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800,
-        0x7000, 0x7100, 0x7200, 0x7300, 0x8000, 0xF000, 0xF004,
+        0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200,
+        0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
+        0xF000, 0xF004,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;

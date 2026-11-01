@@ -73,7 +73,10 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
     );
 
     for (index, instruction) in program.instructions().iter().enumerate() {
-        output.push_str(&format!("    state.pc = 0x{:08X}U;\n", instruction.guest_pc));
+        output.push_str(&format!(
+            "    state.pc = 0x{:08X}U;\n",
+            instruction.guest_pc
+        ));
         emit_instruction(&mut output, index, *instruction, false);
     }
 
@@ -177,7 +180,10 @@ pub(crate) fn emit_instruction(
                 "    std::uint32_t memory_value_{tag}{{}};\n    const auto memory_status_{tag} = load_u32(state.memory, effective_address_{tag}, memory_value_{tag});\n"
             ));
             emit_memory_status_check(output, &tag, false, in_branch_delay);
-            output.push_str(&format!("    state.fpr[{}] = memory_value_{tag};\n", dst.index()));
+            output.push_str(&format!(
+                "    state.fpr[{}] = memory_value_{tag};\n",
+                dst.index()
+            ));
         }
         Operation::StoreFpuWord { src, base, offset } => {
             let tag = format!("{index:04}");
@@ -322,7 +328,7 @@ pub(crate) fn emit_instruction(
         }
         Operation::AddWord { dst, lhs, rhs } => {
             emit_word_add(output, index, dst, lhs, rhs, true, in_branch_delay)
-        },
+        }
         Operation::AddImmediateWord {
             dst,
             src,
@@ -342,7 +348,7 @@ pub(crate) fn emit_instruction(
         }
         Operation::SubWord { dst, lhs, rhs } => {
             emit_word_sub(output, index, dst, lhs, rhs, true, in_branch_delay)
-        },
+        }
         Operation::SubUnsignedWord { dst, lhs, rhs } => {
             emit_word_sub(output, index, dst, lhs, rhs, false, in_branch_delay)
         }
@@ -361,7 +367,12 @@ pub(crate) fn emit_instruction(
             immediate,
         } => {
             emit_doubleword_signed_immediate_add(
-                output, index, dst, src, immediate, in_branch_delay,
+                output,
+                index,
+                dst,
+                src,
+                immediate,
+                in_branch_delay,
             );
         }
         Operation::AddDoublewordUnsigned { dst, lhs, rhs } => {
@@ -444,22 +455,88 @@ pub(crate) fn emit_instruction(
             emit_shift(output, dst, src, amount, "arithmetic", true);
         }
         Operation::LoadByteSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 1, signed: true }, in_branch_delay);
+            emit_memory_load(
+                output,
+                index,
+                dst,
+                base,
+                offset,
+                MemoryLoadSpec {
+                    width: 1,
+                    signed: true,
+                },
+                in_branch_delay,
+            );
         }
         Operation::LoadByteUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 1, signed: false }, in_branch_delay);
+            emit_memory_load(
+                output,
+                index,
+                dst,
+                base,
+                offset,
+                MemoryLoadSpec {
+                    width: 1,
+                    signed: false,
+                },
+                in_branch_delay,
+            );
         }
         Operation::LoadHalfSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 2, signed: true }, in_branch_delay);
+            emit_memory_load(
+                output,
+                index,
+                dst,
+                base,
+                offset,
+                MemoryLoadSpec {
+                    width: 2,
+                    signed: true,
+                },
+                in_branch_delay,
+            );
         }
         Operation::LoadHalfUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 2, signed: false }, in_branch_delay);
+            emit_memory_load(
+                output,
+                index,
+                dst,
+                base,
+                offset,
+                MemoryLoadSpec {
+                    width: 2,
+                    signed: false,
+                },
+                in_branch_delay,
+            );
         }
         Operation::LoadWordSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 4, signed: true }, in_branch_delay);
+            emit_memory_load(
+                output,
+                index,
+                dst,
+                base,
+                offset,
+                MemoryLoadSpec {
+                    width: 4,
+                    signed: true,
+                },
+                in_branch_delay,
+            );
         }
         Operation::LoadWordUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 4, signed: false }, in_branch_delay);
+            emit_memory_load(
+                output,
+                index,
+                dst,
+                base,
+                offset,
+                MemoryLoadSpec {
+                    width: 4,
+                    signed: false,
+                },
+                in_branch_delay,
+            );
         }
         Operation::StoreByte { src, base, offset } => {
             emit_memory_store(output, index, src, base, offset, 1, in_branch_delay);
@@ -527,7 +604,18 @@ pub(crate) fn emit_instruction(
             );
         }
         Operation::LoadDoubleword { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 8, signed: false }, in_branch_delay);
+            emit_memory_load(
+                output,
+                index,
+                dst,
+                base,
+                offset,
+                MemoryLoadSpec {
+                    width: 8,
+                    signed: false,
+                },
+                in_branch_delay,
+            );
         }
         Operation::StoreDoubleword { src, base, offset } => {
             emit_memory_store(output, index, src, base, offset, 8, in_branch_delay);
@@ -698,12 +786,7 @@ fn emit_memory_store(
     emit_memory_status_check(output, &tag, true, in_branch_delay);
 }
 
-fn emit_memory_status_check(
-    output: &mut String,
-    tag: &str,
-    is_store: bool,
-    in_branch_delay: bool,
-) {
+fn emit_memory_status_check(output: &mut String, tag: &str, is_store: bool, in_branch_delay: bool) {
     let code = if is_store { "Store" } else { "Load" };
     output.push_str(&format!(
         "    if (memory_status_{tag} == Status::address_error) return reps2::runtime::raise_ee_address_error(state, reps2::runtime::AddressErrorCode::{code}, effective_address_{tag}, {in_branch_delay});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n"
