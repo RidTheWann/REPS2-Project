@@ -19,7 +19,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Configure automation identity
+      - name: Configure integration commit identity
         run: |
           git config user.name "REPS2 Maintainer Bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
           git fetch origin main
           git switch -c chore/audit-batch-1 origin/main
-          git am --keep-cr --reset-author "$RUNNER_TEMP"/audit-patches/*.patch
+          git am --keep-cr "$RUNNER_TEMP"/audit-patches/*.patch
           test "$(git rev-list --count origin/main..HEAD)" -eq 6
           git log --oneline --decorate -6
 
