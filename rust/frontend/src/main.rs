@@ -1127,6 +1127,16 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x0000_000C,                                 // syscall on not-taken path
         0x0000_000C,                                 // syscall on taken path
     ];
+    let overflow_in_delay_slot = [
+        (0x01 << 26) | (8 << 21) | (0x10 << 16) | 1, // bltzal t0, 0xD008
+        (8 << 21) | (9 << 16) | (10 << 11) | 0x2C,  // delay slot: dadd t2, t0, t1
+        0x0000_000C,                                 // syscall if execution reaches target
+    ];
+    let annulled_overflow_delay_slot = [
+        (0x14 << 26) | (8 << 21) | 1,                // beql t0, zero, 0xD108
+        (8 << 21) | (9 << 16) | (10 << 11) | 0x2C,  // annulled dadd t2, t0, t1
+        0x0000_000C,                                 // syscall proves the slot was skipped
+    ];
     let branch_likely = [
         (0x14 << 26) | (8 << 21) | 4, // beql t0, zero, 0x3114
         0x2409_0007,                  // delay slot: t1 = 7 (taken only)
@@ -1272,6 +1282,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
         segment(0x3000, &branch_and_link),
+        segment(0xD000, &overflow_in_delay_slot),
+        segment(0xD100, &annulled_overflow_delay_slot),
         segment(0x3100, &branch_likely),
         segment(0x3200, &branch_likely_link),
         segment(0x4000, &jalr_alias),
@@ -1291,6 +1303,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0x1000, "branch-fixture"),
         entry(0x2000, "call-fixture"),
         entry(0x3000, "branch-link-fixture"),
+        entry(0xD000, "overflow-delay-slot-fixture"),
+        entry(0xD100, "annulled-overflow-delay-slot-fixture"),
         entry(0x3100, "branch-likely-fixture"),
         entry(0x3200, "branch-likely-link-fixture"),
         entry(0x4000, "jalr-alias-fixture"),
@@ -1308,7 +1322,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xF004, "eret-return-continuation-fixture"),
     ];
     let roots = [
-        0x1000, 0x2000, 0x3000, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
+        0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
         0x7000, 0x7100, 0x7200, 0x7300, 0x8000, 0xF000, 0xF004,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())

@@ -202,6 +202,39 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_signed_doubleword_codegen_smoke COMMAND reps2_signed_doubleword_codegen_smoke)
 
+    set(REPS2_WORD_OVERFLOW_GENERATED_CPP "${REPS2_GENERATED_DIR}/word_overflow_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_WORD_OVERFLOW_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_WORD_OVERFLOW_GENERATED_CPP}"
+            0x0000C000
+            0x01095020
+            0x018D5822
+            0x21EE0001
+            0x02110020
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the synthetic trapping word-arithmetic block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_WORD_OVERFLOW_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_word_overflow_codegen_fixture DEPENDS "${REPS2_WORD_OVERFLOW_GENERATED_CPP}")
+    add_executable(reps2_word_overflow_codegen_smoke
+        "${REPS2_WORD_OVERFLOW_GENERATED_CPP}"
+        tests/word_overflow_smoke.cpp
+    )
+    add_dependencies(reps2_word_overflow_codegen_smoke reps2_word_overflow_codegen_fixture)
+    target_link_libraries(reps2_word_overflow_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_word_overflow_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_word_overflow_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_word_overflow_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_word_overflow_codegen_smoke COMMAND reps2_word_overflow_codegen_smoke)
+
     set(REPS2_HILO_GENERATED_CPP "${REPS2_GENERATED_DIR}/hilo_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_HILO_GENERATED_CPP}"

@@ -61,15 +61,20 @@ inline constexpr std::uint32_t kCop0StatusErlMask{0x0000'0004U};
 inline constexpr std::uint32_t kCop0StatusEieMask{0x0001'0000U};
 inline constexpr std::uint32_t kCop0StatusBevMask{0x0040'0000U};
 
-// COP0 Cause fields used by synchronous Level-1 exceptions.
+// COP0 Cause fields and EE vector addresses for synchronous exceptions.
 inline constexpr std::uint32_t kCop0CauseExcCodeMask{0x0000'007CU};
 inline constexpr std::uint32_t kCop0CauseBranchDelayMask{0x8000'0000U};
-inline constexpr std::uint32_t kEeCommonExceptionVector{0x8000'0200U};
+// V_COMMON handles synchronous general exceptions (including SYSCALL, BREAK
+// and OVERFLOW); V_INTERRUPT is a distinct vector and is not used here.
+inline constexpr std::uint32_t kEeCommonExceptionVector{0x8000'0180U};
 inline constexpr std::uint32_t kEeBootstrapCommonExceptionVector{0xBFC0'0380U};
+inline constexpr std::uint32_t kEeInterruptVector{0x8000'0200U};
+inline constexpr std::uint32_t kEeBootstrapInterruptVector{0xBFC0'0400U};
 
 enum class ExceptionCode : std::uint8_t {
     SystemCall = 8,
     Breakpoint = 9,
+    Overflow = 12,
 };
 
 struct EeState {
@@ -98,6 +103,8 @@ struct EeState {
 enum class Status : std::uint8_t {
     ok,
     undefined_word_operand,
+    // Legacy diagnostic retained for ABI compatibility; current generated
+    // signed arithmetic raises ExceptionCode::Overflow instead.
     integer_overflow,
     instruction_budget_exhausted,
     external_control_flow,
@@ -122,11 +129,10 @@ enum class Status : std::uint8_t {
         || status == Status::exception_delivered;
 }
 
-// Enter the EE's general Level-1 exception vector for SYSCALL or BREAK.
-// The caller must set state.pc to the faulting instruction before calling.
-// Delay-slot traps are currently rejected by CFG analysis, but the helper
-// implements the architectural EPC/BD rule for direct runtime tests and future
-// control-flow support.
+// Enter the EE's general Level-1 exception vector for SYSCALL, BREAK or signed
+// arithmetic overflow. The caller sets state.pc to the faulting instruction.
+// For a delay-slot fault, state.pc is the delay-slot PC and BD/EPC identify the
+// owning branch. Nested exceptions preserve the first EPC/BD frame.
 [[nodiscard]] inline Status raise_ee_exception(
     EeState& state,
     ExceptionCode code,
