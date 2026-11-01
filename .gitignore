@@ -1,6 +1,7 @@
 /build/
 /out/
 __pycache__/
+*.mutate.tmp
 /cmake-build-*/
 /.vs/
 .vscode/

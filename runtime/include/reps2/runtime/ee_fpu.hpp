@@ -70,7 +70,7 @@ struct FpuResult {
     std::uint32_t set_flags{};
     /// Cause flags the operation names as cleared. The Instruction Set Manual's
     /// Ch.5 opening states that flags an instruction does not name are left
-    /// alone, so only NEG.S, MAX.S, MIN.S (O and U) and SQRT.S (D) appear.
+    /// alone, so only ABS.S, NEG.S, MAX.S, MIN.S (O and U) and SQRT.S (D) appear.
     std::uint32_t clear_flags{};
 };
 
