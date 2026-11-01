@@ -1261,6 +1261,11 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     let break_trap = [
         0x0000_004D, // break code 1: a guest trap, not an unknown encoding
     ];
+    let eret_return = [
+        0x4200_0018, // eret: restore PC from COP0.EPC and clear EXL
+        0x0120_0008, // jr t1: dynamically leave the handler-return fixture
+        0x2408_002A, // delay slot: t0 = 42
+    ];
 
     let segments = [
         segment(0x1000, &branch_and_jump),
@@ -1279,6 +1284,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0x7200, &fpu_branch_likely),
         segment(0x7300, &fpu_branch_likely_true),
         segment(0x8000, &break_trap),
+        segment(0x9000, &eret_return),
     ];
     let entries = vec![
         entry(0x1000, "branch-fixture"),
@@ -1297,10 +1303,12 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0x7200, "fpu-branch-likely-fixture"),
         entry(0x7300, "fpu-branch-likely-true-fixture"),
         entry(0x8000, "break-trap-fixture"),
+        entry(0x9000, "eret-fixture"),
+        entry(0x9004, "eret-return-continuation-fixture"),
     ];
     let roots = [
         0x1000, 0x2000, 0x3000, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
-        0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
+        0x7000, 0x7100, 0x7200, 0x7300, 0x8000, 0x9000, 0x9004,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
