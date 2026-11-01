@@ -1203,6 +1203,16 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         (0x2B << 26) | (10 << 21) | (11 << 16),   // delay slot: sw t3, 0(t2)
         0x0000_000C,                              // syscall at branch target
     ];
+    let unaligned_fpu_load = [
+        (0x31 << 26) | (8 << 21) | (6 << 16), // lwc1 f6, 0(t0)
+        0x03E0_0008,                          // jr ra
+        0x0000_0000,                          // delay slot
+    ];
+    let unaligned_fpu_store = [
+        (0x39 << 26) | (8 << 21) | (9 << 16), // swc1 f9, 0(t0)
+        0x03E0_0008,                          // jr ra
+        0x0000_0000,                          // delay slot
+    ];
     let mut unaligned_word_merge = Vec::with_capacity(18);
     for lane in 0u32..4 {
         let offset = lane * 4 + lane;
@@ -1304,6 +1314,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0x5400, &unaligned_doubleword_merge),
         segment(0x5500, &unaligned_store),
         segment(0x5600, &unaligned_store_delay),
+        segment(0x5700, &unaligned_fpu_load),
+        segment(0x5800, &unaligned_fpu_store),
         segment(0x7000, &fpu_branch),
         segment(0x7100, &fpu_branch_false),
         segment(0x7200, &fpu_branch_likely),
@@ -1327,6 +1339,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0x5400, "unaligned-doubleword-merge-fixture"),
         entry(0x5500, "unaligned-store-fixture"),
         entry(0x5600, "unaligned-store-delay-fixture"),
+        entry(0x5700, "unaligned-fpu-load-fixture"),
+        entry(0x5800, "unaligned-fpu-store-fixture"),
         entry(0x7000, "fpu-branch-fixture"),
         entry(0x7100, "fpu-branch-false-fixture"),
         entry(0x7200, "fpu-branch-likely-fixture"),
@@ -1336,7 +1350,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xF004, "eret-return-continuation-fixture"),
     ];
     let roots = [
-        0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400, 0x5500, 0x5600,
+        0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800,
         0x7000, 0x7100, 0x7200, 0x7300, 0x8000, 0xF000, 0xF004,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
