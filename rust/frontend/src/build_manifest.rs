@@ -324,6 +324,16 @@ mod tests {
     }
 
     #[test]
+    fn renders_guest_exceptions_separately_from_unsupported_stops() {
+        let mut manifest = sample();
+        manifest.program.unsupported_stop_count = 3;
+        manifest.program.guest_exception_count = 2;
+        let json = manifest.to_json();
+        assert!(json.contains("\"unsupported_stop_count\": 3"));
+        assert!(json.contains("\"guest_exception_count\": 2"));
+    }
+
+    #[test]
     fn renders_discovery_statistics_when_present() {
         let mut manifest = sample();
         manifest.discovery = Some(DiscoveryStats {
