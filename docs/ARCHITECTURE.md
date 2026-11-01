@@ -14,7 +14,7 @@ Rust owns:
 - EE instruction decoding and control-flow discovery.
 - Function/basic-block construction and typed IR.
 - IR verification and optimization.
-- Deterministic C++20 source and build-manifest generation.
+- Deterministic C++20 source, build-manifest and native build-project generation.
 - CLI orchestration, diagnostics, and frontend tests.
 
 This is the correctness-critical input and transformation pipeline. Rust's checked indexing, explicit Result propagation, enums, and exhaustive pattern matching are used to make invalid input and unsupported operations explicit.
@@ -33,6 +33,8 @@ The current runtime code is only a small EE GPR state/helper ABI used by the fir
 ### Boundary
 
 The primary boundary is generated source plus a machine-readable manifest, not per-instruction FFI calls. The Rust frontend emits C++ and metadata; the host C++ compiler compiles that output and links it with the C++ runtime. This keeps complex Rust IR ownership inside Rust and avoids passing IR graphs or vectors across a language ABI.
+
+With `--native-build`, the frontend additionally writes a deterministic `<stem>.native/` CMake project beside the translation: `CMakeLists.txt`, which compiles the dispatcher, every part and a generated `probe_main.cpp` against an explicit `REPS2_RUNTIME_INCLUDE`, and a CTest entry that runs the probe. The probe loads the companion RAM image (or accepts a path and instruction budget), calls the generated `initialize_ee_state`, performs one bounded `execute_cfg` call, and prints the entry PC, status and resulting PC. The project references its sibling translation files through `..`, so the translation directory and its native project move together, and the frontend still neither invokes nor guesses a C++ compiler. A CMake/CTest smoke test configures, builds and runs a generated project to pin this contract; recording the host compiler identity and options remains a separate capability gap.
 
 A narrow C ABI or CXX bridge may be introduced later only when a measured use case requires in-process calls. Such a bridge must use coarse-grained operations and stable POD/opaque handles; it must not cross the boundary for every guest instruction.
 
@@ -55,7 +57,7 @@ CMake orchestrates the build, Cargo builds/tests the Rust frontend, and CMake's 
     Typed IR ----> verifier ----> optimization
             |
             v
-    C++20 AOT backend ----> generated C++ + build manifest
+    C++20 AOT backend ----> generated C++ + build manifest + native project
             |
             v
     Host C++ compiler / linker
@@ -84,7 +86,7 @@ The ISO itself remains at its canonical source path to avoid duplicating multi-g
 
 The manifest separates discovery facts from execution claims. It records disc/ELF identity, loadable ranges, analysis coverage, unresolved edges, and optional generated artifacts. The current command always reports `playable: false`: parser success, a valid PT_LOAD image, and generated C++ are not evidence that the game can boot. This distinction is a required invariant for the launcher and compatibility catalog.
 
-`recompile-elf` emits a separate build manifest as the machine-readable half of the frontend/native boundary. `<stem>.manifest.json` records the manifest schema version, frontend version, exact host target, input path/size/SHA-256, the analysis limits that were applied, optional discovery totals, program counts, the dispatcher/part layout, and the RAM artifact. It is deterministic and contains no timestamps, machine names, or random values, so an identical invocation produces byte-identical output. It also records `playable: false`. Host compiler identity and flags are not known to the frontend and belong to the future native build driver; the frontend neither invokes nor guesses a C++ compiler. The library record (`game.json`) and the build manifest share string-escaping rules but have independent schemas and version numbers.
+`recompile-elf` emits a separate build manifest as the machine-readable half of the frontend/native boundary. `<stem>.manifest.json` records the manifest schema version, frontend version, exact host target, input path/size/SHA-256, the analysis limits that were applied, optional discovery totals, program counts, the dispatcher/part layout, and the RAM artifact. It is deterministic and contains no timestamps, machine names, or random values, so an identical invocation produces byte-identical output. It also records `playable: false`. Host compiler identity and flags are not known to the frontend: `--native-build` writes a compilable project but the frontend neither invokes nor guesses a C++ compiler, and recording the selected toolchain remains a later capability. The library record (`game.json`) and the build manifest share string-escaping rules but have independent schemas and version numbers.
 
 The current import command defaults to the per-user application-data library (Windows: `%LOCALAPPDATA%\\REPS2\\Library`; Linux: `$XDG_DATA_HOME/reps2/Library` or `$HOME/.local/share/reps2/Library`). Set `REPS2_LIBRARY_DIR` or use the optional `--library` argument to override the path. A normal user supplies only the ISO path.\n\nThe current import command is:
 
