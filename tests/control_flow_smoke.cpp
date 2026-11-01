@@ -91,7 +91,7 @@ int main() {
     EeState call{};
     call.pc = 0x2000;
     const auto call_status = reps2::generated::execute_cfg(call, 64);
-    if (call_status != Status::exception_delivered || call.pc != 0x80000180U) {
+    if (call_status != Status::exception_delivered || call.pc != 0x80000200U) {
         return fail(11);
     }
     if (call.gpr[31].low != 0x2008) {
@@ -112,7 +112,7 @@ int main() {
     link_not_taken.pc = 0x3000;
     link_not_taken.gpr[8].low = 1;
     const auto link_not_taken_status = reps2::generated::execute_cfg(link_not_taken, 64);
-    if (link_not_taken_status != Status::exception_delivered || link_not_taken.pc != 0x80000180U
+    if (link_not_taken_status != Status::exception_delivered || link_not_taken.pc != 0x80000200U
         || link_not_taken.cop0[reps2::runtime::kCop0Epc] != 0x3008U) {
         return fail(14);
     }
@@ -125,7 +125,7 @@ int main() {
     link_taken.pc = 0x3000;
     link_taken.gpr[8].low = 0xFFFFFFFFFFFFFFFFULL;
     const auto link_taken_status = reps2::generated::execute_cfg(link_taken, 64);
-    if (link_taken_status != Status::exception_delivered || link_taken.pc != 0x80000180U
+    if (link_taken_status != Status::exception_delivered || link_taken.pc != 0x80000200U
         || link_taken.cop0[reps2::runtime::kCop0Epc] != 0x300CU) {
         return fail(16);
     }
@@ -138,7 +138,7 @@ int main() {
     EeState break_trap{};
     break_trap.pc = 0x8000U;
     const auto break_status = reps2::generated::execute_cfg(break_trap, 64U);
-    if (break_status != Status::exception_delivered || break_trap.pc != 0x80000180U
+    if (break_status != Status::exception_delivered || break_trap.pc != 0x80000200U
         || break_trap.cop0[reps2::runtime::kCop0Epc] != 0x8000U
         || (break_trap.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)
         || (break_trap.cop0[reps2::runtime::kCop0Status] & reps2::runtime::kCop0StatusExlMask) == 0U) {
