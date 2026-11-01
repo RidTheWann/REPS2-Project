@@ -344,6 +344,62 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_cop1_codegen_smoke COMMAND reps2_cop1_codegen_smoke)
 
+    set(REPS2_COP1_ARITH_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/cop1_arith_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_COP1_ARITH_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_COP1_ARITH_GENERATED_CPP}"
+            0x00010000
+            0x44810800  # mtc1    $1, $f1      FPR[1] = 1.0
+            0x44821000  # mtc1    $2, $f2      FPR[2] = 2.0
+            0x44831800  # mtc1    $3, $f3      FPR[3] = 0.5
+            0x44842000  # mtc1    $4, $f4      FPR[4] = 4.0
+            0x46020A80  # add.s   $f10, $f1, $f2
+            0x46020AC1  # sub.s   $f11, $f1, $f2
+            0x46020B02  # mul.s   $f12, $f1, $f2
+            0x46020B43  # div.s   $f13, $f1, $f2
+            0x46040384  # sqrt.s  $f14, $f4   operand comes from ft
+            0x46005BC5  # abs.s   $f15, $f11
+            0x46005C06  # mov.s   $f16, $f11
+            0x46005C47  # neg.s   $f17, $f11
+            0x46040C96  # rsqrt.s $f18, $f1, $f4
+            0x46020818  # adda.s  $f1, $f2     ACC = 3.0
+            0x46020CDC  # madd.s  $f19, $f1, $f2 ACC + 2 = 5.0
+            0x46020819  # suba.s  $f1, $f2     ACC = -1.0
+            0x46020D1D  # msub.s  $f20, $f1, $f2 ACC - 2 = -3.0
+            0x4602081A  # mula.s  $f1, $f2     ACC = 2.0
+            0x4602081E  # madda.s $f1, $f2     ACC = 4.0
+            0x4602081F  # msuba.s $f1, $f2     ACC = 2.0
+            0x46035D68  # max.s   $f21, $f11, $f3
+            0x46035DA9  # min.s   $f22, $f11, $f3
+            0x46005DE4  # cvt.w.s $f23, $f11
+            0x4680BE20  # cvt.s.w $f24, $f23
+            0x44800000  # mtc1    $zero, $f0   FPR[0] = 0.0
+            0x46000E43  # div.s   $f25, $f1, $f0 1/0 = +Fmax with cause D
+            0x4445F800  # cfc1    $5, $31      read FCSR back
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the synthetic R5900 COP1 arithmetic block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_COP1_ARITH_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_cop1_arith_codegen_fixture DEPENDS "${REPS2_COP1_ARITH_GENERATED_CPP}")
+    add_executable(reps2_cop1_arith_codegen_smoke
+        "${REPS2_COP1_ARITH_GENERATED_CPP}"
+        tests/cop1_arith_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_cop1_arith_codegen_smoke reps2_cop1_arith_codegen_fixture)
+    target_link_libraries(reps2_cop1_arith_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cop1_arith_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cop1_arith_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cop1_arith_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_cop1_arith_codegen_smoke COMMAND reps2_cop1_arith_codegen_smoke)
+
     # Differential test of the COP1 numeric core against the exact-rational
     # oracle in tools/ee_fpu_model.py. No generated code is involved: the
     # vectors are the expectation and the runtime headers are the subject.
