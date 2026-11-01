@@ -127,6 +127,7 @@ The library must distinguish these states; no state implies a later one:
 - [ ] Record the host compiler identity and options used for a native build alongside the frontend manifest, and key the build cache on them; the frontend boundary does not invoke or guess a C++ compiler.
 - [x] CFG-aware C++20 dispatcher for the implemented direct and register-indirect control-flow subset.
 - [x] Synthetic generated control-flow code compiled and executed on Windows/MSVC and Linux/GCC, including branch-taken, branch-not-taken, delay slots, JAL/JR return, and instruction-budget behaviour.
+- [x] Distinguish architectural SYSCALL/BREAK guest traps from unknown encodings: the decoder exposes the 20-bit code field, the control IR carries a typed trap kind, and generated code returns `Status::syscall`/`Status::breakpoint` with the PC left on the trapping instruction. A synthetic fixture asserts both statuses plus the classification helper, and a Black/USA native probe reaches `status=10` at the first SYSCALL. No HLE service is delivered and ERET remains unsupported (ADR 0031).
 - [x] ELF-to-CFG-IR-to-C++ command path for the currently supported subset.
 - [ ] Validate recompile-elf and the generated RAM image against a lawfully owned PS2 ELF; document translated coverage and unresolved relocations.
 
