@@ -249,7 +249,7 @@ void report(const Row& row, const FpuResult& result, std::uint32_t fcsr) {
     // check_flag_routing builds its FpuResult values by hand, so it proves
     // apply_fpu_flags and nothing about the helpers themselves. These cases
     // feed the helpers' own output: SQRT.S must name D as cleared,
-    // NEG.S/MAX.S/MIN.S O and U, and every form that names no clear must
+    // ABS.S/NEG.S/MAX.S/MIN.S O and U, and every form that names no clear must
     // leave all four cause flags set.
     using namespace reps2::runtime;
     constexpr std::uint32_t all_flags = kFpuCauseInvalid | kFpuCauseDivideByZero
@@ -266,6 +266,7 @@ void report(const Row& row, const FpuResult& result, std::uint32_t fcsr) {
     };
     const Case cases[] = {
         {"sqrt", fpu_sqrt(0x40800000U), no_d},
+        {"abs", fpu_abs(0xBF800000U), no_o_u},
         {"neg", fpu_neg(0x3F800000U), no_o_u},
         {"max", fpu_max(0x3F800000U, 0x40000000U), no_o_u},
         {"min", fpu_min(0x3F800000U, 0x40000000U), no_o_u},
@@ -332,9 +333,12 @@ auto main() -> int {
     }
 
     // A table that failed to reach this binary would otherwise look like a
-    // clean run, so the row count is itself an assertion.
-    if (kVectorCount < 400U) {
-        std::printf("vector table too small: %zu rows\n", kVectorCount);
+    // clean run, so the row count is an exact assertion: the generator's own
+    // output says 426, and a shorter table means rows were lost on the way.
+    constexpr std::size_t kExpectedVectors = 426U;
+    if (kVectorCount != kExpectedVectors) {
+        std::printf("vector table has %zu rows, want %zu\n",
+            kVectorCount, kExpectedVectors);
         ++failures;
     }
     if (!check_control_store()) {
