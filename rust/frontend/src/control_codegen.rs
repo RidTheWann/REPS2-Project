@@ -710,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn emits_distinct_status_for_syscall_and_break_traps() {
+    fn emits_level1_exception_entry_for_syscall_and_break() {
         let words = [
             0x0000_000C, // syscall code 0
             0x0000_004D, // break code 1
