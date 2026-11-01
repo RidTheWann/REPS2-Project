@@ -444,22 +444,22 @@ pub(crate) fn emit_instruction(
             emit_shift(output, dst, src, amount, "arithmetic", true);
         }
         Operation::LoadByteSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 1, true, in_branch_delay);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 1, signed: true }, in_branch_delay);
         }
         Operation::LoadByteUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 1, false, in_branch_delay);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 1, signed: false }, in_branch_delay);
         }
         Operation::LoadHalfSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 2, true, in_branch_delay);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 2, signed: true }, in_branch_delay);
         }
         Operation::LoadHalfUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 2, false, in_branch_delay);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 2, signed: false }, in_branch_delay);
         }
         Operation::LoadWordSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 4, true, in_branch_delay);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 4, signed: true }, in_branch_delay);
         }
         Operation::LoadWordUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 4, false, in_branch_delay);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 4, signed: false }, in_branch_delay);
         }
         Operation::StoreByte { src, base, offset } => {
             emit_memory_store(output, index, src, base, offset, 1, in_branch_delay);
@@ -527,7 +527,7 @@ pub(crate) fn emit_instruction(
             );
         }
         Operation::LoadDoubleword { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 8, false, in_branch_delay);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 8, signed: false }, in_branch_delay);
         }
         Operation::StoreDoubleword { src, base, offset } => {
             emit_memory_store(output, index, src, base, offset, 8, in_branch_delay);
@@ -614,16 +614,22 @@ fn emit_fpu_madd(
     );
 }
 
+#[derive(Clone, Copy)]
+struct MemoryLoadSpec {
+    width: u8,
+    signed: bool,
+}
+
 fn emit_memory_load(
     output: &mut String,
     index: usize,
     dst: Gpr,
     base: Gpr,
     offset: u16,
-    width: u8,
-    signed: bool,
+    access: MemoryLoadSpec,
     in_branch_delay: bool,
 ) {
+    let MemoryLoadSpec { width, signed } = access;
     let tag = format!("{index:04}");
     let value_type = match width {
         1 => "std::uint8_t",
