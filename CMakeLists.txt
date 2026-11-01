@@ -314,6 +314,47 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_div_mov_codegen_smoke COMMAND reps2_div_mov_codegen_smoke)
 
+    set(REPS2_COP0_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop0_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_COP0_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_COP0_GENERATED_CPP}"
+            0x0000D000
+            0x40017800
+            0x40827800
+            0x40037800
+            0x40844800
+            0x40054800
+            0x42000038
+            0x40066000
+            0x42000039
+            0x40076000
+            0x40886000
+            0x40096000
+            0x40007800
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the synthetic R5900 COP0 register transfers and status block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_COP0_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_cop0_codegen_fixture DEPENDS "${REPS2_COP0_GENERATED_CPP}")
+    add_executable(reps2_cop0_codegen_smoke
+        "${REPS2_COP0_GENERATED_CPP}"
+        tests/cop0_smoke.cpp
+    )
+    add_dependencies(reps2_cop0_codegen_smoke reps2_cop0_codegen_fixture)
+    target_link_libraries(reps2_cop0_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cop0_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cop0_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cop0_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_cop0_codegen_smoke COMMAND reps2_cop0_codegen_smoke)
+
     set(REPS2_SA_GENERATED_CPP "${REPS2_GENERATED_DIR}/sa_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_SA_GENERATED_CPP}"
