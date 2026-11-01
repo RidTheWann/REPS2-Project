@@ -121,7 +121,8 @@ The library must distinguish these states; no state implies a later one:
 - [x] Reject allocated REL/RELA relocations and ELF segments outside the implemented default main-RAM mapping.
 - [ ] Full EE virtual-memory/TLB mapping, exception delivery, cache semantics and memory-mapped device models.
 - [x] Split the emitted CFG into multiple C++ translation units with a shared dispatch/ABI so discovered retail executables (hundreds of thousands of blocks, ~178 MB as one unit for Black/USA) can be built natively. Each block is now a separate `block_0xXXXXXXXX` function dispatched through a sorted table with `std::lower_bound`; `--tu-count N` emits a dispatcher plus `N` part files. Black/USA as 1 dispatcher + 8 parts compiles and links with MSVC `/O2 /W4 /permissive-` in ~149 s sequentially with zero warnings, and a runtime probe confirms block-atomic budget behavior across units (ADR 0027, `reps2_cfg_split_codegen_smoke`).
-- [ ] Build manifest with input hash, compiler options, and generated function metadata.
+- [x] Build manifest with input SHA-256, tool/host provenance, analysis limits, discovery totals, program counts, and translation-unit layout. `<stem>.manifest.json` is deterministic and timestamp-free, so identical invocations produce byte-identical output; it always records `playable: false` (ADR 0028).
+- [ ] Native build driver that compiles the emitted translation units with an explicit host compiler identity/options and records them alongside the frontend manifest; the frontend boundary does not invoke or guess a C++ compiler.
 - [x] CFG-aware C++20 dispatcher for the implemented direct and register-indirect control-flow subset.
 - [x] Synthetic generated control-flow code compiled and executed on Windows/MSVC and Linux/GCC, including branch-taken, branch-not-taken, delay slots, JAL/JR return, and instruction-budget behaviour.
 - [x] ELF-to-CFG-IR-to-C++ command path for the currently supported subset.

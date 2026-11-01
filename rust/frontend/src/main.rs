@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use reps2_frontend::analysis::{self, AnalysisLimits};
+use reps2_frontend::build_manifest::{BuildManifest, DiscoveryStats, ProgramStats};
 use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::coverage;
+use reps2_frontend::digest;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
 use reps2_frontend::iso9660::{self, Iso9660};
@@ -487,11 +489,13 @@ fn extract_boot_elf(input: &Path, output: &Path) -> Result<(), String> {
 
 fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result<(), String> {
     let bytes = read_input(input)?;
+    let input_digest = digest::sha256_bytes(&bytes);
     let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
     if !image.is_mips() {
         return Err("ELF machine is not EM_MIPS; refusing PS2 EE compilation".to_owned());
     }
 
+    let limits = AnalysisLimits::default();
     let ram_image = elf::build_main_ram_image(&bytes, &image)
         .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
     let (graph, discovery) = if options.discover {
@@ -501,15 +505,15 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             accepted_roots,
             skipped_roots,
             skipped_blocks,
-        } = analysis::discover_elf_with_discovery(&image, &bytes, AnalysisLimits::default())
+        } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
             .map_err(|error| error.to_string())?;
         (
             graph,
             Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
         )
     } else {
-        let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
-            .map_err(|error| error.to_string())?;
+        let graph =
+            analysis::discover_elf(&image, &bytes, limits).map_err(|error| error.to_string())?;
         (graph, None)
     };
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
@@ -524,11 +528,61 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
         .map_err(|error| format!("cannot write initial EE RAM image: {error}"))?;
     let parts = write_translation_units(output, &units)?;
 
+    let discovery_stats =
+        discovery
+            .as_ref()
+            .map(
+                |(found, accepted_roots, skipped_roots, skipped_blocks)| DiscoveryStats {
+                    candidate_count: found.candidate_count(),
+                    call_target_count: found.call_targets.len(),
+                    prologue_candidate_count: found.prologue_candidates.len(),
+                    scanned_words: found.scanned_words,
+                    truncated: found.truncated,
+                    accepted_root_count: *accepted_roots,
+                    skipped_root_count: skipped_roots.len(),
+                    skipped_block_count: skipped_blocks.len(),
+                },
+            );
+    let manifest = BuildManifest {
+        input_path: input.to_string_lossy().into_owned(),
+        input_size_bytes: bytes.len() as u64,
+        input_sha256: digest::hex_digest(&input_digest),
+        entry_point: image.entry_point,
+        machine: image.machine,
+        file_type: image.file_type,
+        loadable_segment_count: image.loadable_segment_count(),
+        limits: limits.into(),
+        discovery: discovery_stats,
+        program: ProgramStats {
+            entry_point_count: program.entry_points.len(),
+            basic_block_count: program.blocks.len(),
+            guest_instruction_count: program.instruction_count(),
+            unsupported_stop_count: program.unsupported_count(),
+            static_edge_count: graph.edges().len(),
+            unresolved_indirect_target_count: graph.unresolved_indirect_jumps.len(),
+            external_target_count: graph.external_targets.len(),
+        },
+        translation_unit_count: units.len(),
+        primary_output: output_file_name(output),
+        part_outputs: parts.iter().map(|part| output_file_name(part)).collect(),
+        ram_output: output_file_name(&ram_output),
+        ram_image_bytes: ram_image.bytes.len(),
+    };
+    let manifest_output = output.with_extension("manifest.json");
+    fs::write(&manifest_output, manifest.to_json()).map_err(|error| {
+        format!(
+            "cannot write build manifest to {}: {error}",
+            manifest_output.display()
+        )
+    })?;
+
     println!("Generated CFG-aware C++20 translation and initial EE RAM image");
     println!("  Input: {}", input.display());
+    println!("  Input SHA-256: {}", manifest.input_sha256);
     println!("  C++ output: {}", output.display());
     println!("  RAM image: {}", ram_output.display());
     println!("  RAM image bytes: {}", ram_image.bytes.len());
+    println!("  Build manifest: {}", manifest_output.display());
     println!("  ELF entry point: 0x{:08X}", image.entry_point);
     println!("  PT_LOAD segments placed: {}", ram_image.segments.len());
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
@@ -621,6 +675,13 @@ fn generated_output_parts(output: &Path) -> (String, String) {
 fn part_output_path(output: &Path, index: usize) -> PathBuf {
     let (stem, extension) = generated_output_parts(output);
     output.with_file_name(format!("{stem}.part{index:04}.{extension}"))
+}
+
+/// A file name suitable for recording in the build manifest.
+fn output_file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 /// Removes `<stem>.partNNNN.<ext>` files left by an earlier, larger split.
@@ -1086,6 +1147,9 @@ fn usage() {
     );
     println!(
         "recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images."
+    );
+    println!(
+        "It also writes <stem>.manifest.json: a deterministic record of the input SHA-256, analysis limits, program shape, and translation-unit layout."
     );
     println!(
         "--discover augments the ELF entry and STT_FUNC roots with static function discovery (JAL targets and ABI stack prologues) for stripped executables."
