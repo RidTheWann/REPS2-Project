@@ -732,10 +732,10 @@ mod tests {
         let cpp = emit_cpp(&program).expect("single unit");
 
         assert!(cpp.contains(
-            "state.pc = 0x00002000U;\\n    return raise_ee_exception(state, ExceptionCode::SystemCall);"
+            "state.pc = 0x00002000U;\n    return raise_ee_exception(state, ExceptionCode::SystemCall);"
         ));
         assert!(cpp.contains(
-            "state.pc = 0x00002004U;\\n    return raise_ee_exception(state, ExceptionCode::Breakpoint);"
+            "state.pc = 0x00002004U;\n    return raise_ee_exception(state, ExceptionCode::Breakpoint);"
         ));
         assert!(!cpp.contains("return Status::unsupported_instruction;"));
     }
@@ -761,7 +761,7 @@ mod tests {
 
         let cpp = emit_cpp(&program).expect("single unit");
         assert!(cpp.contains(
-            "state.pc = 0x00004000U;\\n    return return_from_ee_exception(state);"
+            "state.pc = 0x00004000U;\n    return return_from_ee_exception(state);"
         ));
     }
 
