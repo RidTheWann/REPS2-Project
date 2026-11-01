@@ -150,6 +150,18 @@ pub enum Opcode {
     Bc1t,
     Bc1fl,
     Bc1tl,
+    /// SYNC is a memory barrier; static recompilation treats it as a
+    /// scheduling fence with no guest-visible data effect.
+    Sync,
+    /// Move Conditional on Not Zero: GPR[rd] = GPR[rs] if GPR[rt] != 0.
+    Movn,
+    /// Move Conditional on Zero: GPR[rd] = GPR[rs] if GPR[rt] == 0.
+    Movz,
+    /// Cache maintenance hint; no guest-visible data effect for static
+    /// recompilation. The op field is in bits 20..16 (rt position).
+    Cache,
+    /// Prefetch hint; no guest-visible data effect.
+    Pref,
     Unknown,
 }
 
@@ -370,6 +382,11 @@ impl Opcode {
             Self::Bc1t => "bc1t",
             Self::Bc1fl => "bc1fl",
             Self::Bc1tl => "bc1tl",
+            Self::Sync => "sync",
+            Self::Movn => "movn",
+            Self::Movz => "movz",
+            Self::Cache => "cache",
+            Self::Pref => "pref",
             Self::Unknown => "unknown",
         }
     }
@@ -932,6 +949,24 @@ impl Instruction {
                 effects.may_raise_exception = true;
             }
 
+            // SYNC is a memory barrier. It has no data-flow effects that the
+            // static compiler needs to track, but it acts as a scheduling
+            // fence.
+            Opcode::Sync => {}
+
+            // MOVN/MOVZ: conditional register move. The destination is
+            // written only when the test condition is met, but conservative
+            // analysis must mark it as potentially written.
+            Opcode::Movn | Opcode::Movz => {
+                effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rd;
+            }
+
+            // CACHE and PREF are hint instructions with no guest-visible
+            // data effects. CACHE can raise an address error in theory, but
+            // for static recompilation we model them as no-ops.
+            Opcode::Cache | Opcode::Pref => {}
+
             Opcode::Unknown => {
                 // Do not let an unrecognized EE, COP, FPU, MMI, or malformed
                 // encoding look like a side-effect-free instruction.
@@ -1126,6 +1161,16 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x04 if shift_amount == 0 => Opcode::Sllv,
             0x06 if shift_amount == 0 => Opcode::Srlv,
             0x07 if shift_amount == 0 => Opcode::Srav,
+            // SYNC is SPECIAL funct 0x0F. The stype field in bits 10..6
+            // selects the barrier type; the EE documents only stype 0
+            // (completion barrier). REPS2 accepts any stype and treats
+            // the instruction as a scheduling fence.
+            0x0F if rs == 0 && rt == 0 && rd == 0 => Opcode::Sync,
+            // MOVZ/MOVN: conditional register moves. Both use the
+            // standard three-register R-type encoding with sa reserved
+            // zero.
+            0x0A if shift_amount == 0 => Opcode::Movz,
+            0x0B if shift_amount == 0 => Opcode::Movn,
             0x14 if shift_amount == 0 => Opcode::Dsllv,
             0x16 if shift_amount == 0 => Opcode::Dsrlv,
             0x17 if shift_amount == 0 => Opcode::Dsrav,
@@ -1232,7 +1277,13 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x24 => Opcode::Lbu,
             0x25 => Opcode::Lhu,
             0x27 => Opcode::Lwu,
+            // CACHE: primary 0x2F, op in rt, base in rs, offset in
+            // imm16. No architectural data effect.
+            0x2F => Opcode::Cache,
             0x31 => Opcode::LoadFpuWord,
+            // PREF: primary 0x33, hint in rt, base in rs, offset in
+            // imm16. No architectural data effect.
+            0x33 => Opcode::Pref,
             0x39 => Opcode::StoreFpuWord,
             0x28 => Opcode::Sb,
             0x29 => Opcode::Sh,
@@ -2120,7 +2171,9 @@ mod tests {
 
         // The IEEE-only predicates (C.UN, C.UEQ, C.OLT, C.ULE, C.SEQ, ...)
         // and the unused encodings above them do not exist on the EE.
-        for funct in [0x31, 0x33, 0x35, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F] {
+        for funct in [
+            0x31, 0x33, 0x35, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+        ] {
             assert_eq!(
                 decode(encode_cop1(0x10, 2, 1, 0, funct), 0).opcode,
                 Opcode::Unknown,
@@ -2226,7 +2279,11 @@ mod tests {
         // condition bit. They never write an FPR or the accumulator.
         for funct in [0x32, 0x34, 0x36] {
             let effects = decode(encode_cop1(0x10, 2, 1, 0, funct), 0).effects();
-            assert_eq!(effects.fpr_read_mask, (1 << 1) | (1 << 2), "funct {funct:02X}");
+            assert_eq!(
+                effects.fpr_read_mask,
+                (1 << 1) | (1 << 2),
+                "funct {funct:02X}"
+            );
             assert_eq!(effects.fpr_write_mask, 0);
             assert!(effects.writes_fcr);
             assert!(!effects.reads_fcr);
@@ -2318,5 +2375,63 @@ mod tests {
         assert_eq!(store.fpr_write_mask, 0);
         assert_eq!(store.memory, MemoryEffect::Write);
         assert!(store.may_raise_exception);
+    }
+
+    #[test]
+    fn decodes_sync_movn_movz_cache_and_pref() {
+        // SYNC with stype=0: 0x0000000F
+        let sync = decode(0x0000_000F, 0x1000);
+        assert_eq!(sync.opcode, Opcode::Sync);
+        assert!(!sync.has_delay_slot);
+
+        // SYNC with stype=16 (0x10 in bits 10..6): 0x0000040F
+        let sync_stype = decode(0x0000_040F, 0x1000);
+        assert_eq!(sync_stype.opcode, Opcode::Sync);
+
+        // SYNC effects: no data dependencies
+        let sync_eff = sync.effects();
+        assert_eq!(sync_eff.gpr_read_mask, 0);
+        assert_eq!(sync_eff.gpr_write_mask, 0);
+        assert_eq!(sync_eff.memory, MemoryEffect::None);
+        assert!(!sync_eff.may_raise_exception);
+
+        // MOVZ: rd = rs if rt == 0. funct 0x0A, shift_amount = 0.
+        // MOVZ r5, r3, r4 = (3 << 21) | (4 << 16) | (5 << 11) | 0x0A
+        let movz = decode((3 << 21) | (4 << 16) | (5 << 11) | 0x0A, 0x2000);
+        assert_eq!(movz.opcode, Opcode::Movz);
+        assert_eq!(movz.rs, 3);
+        assert_eq!(movz.rt, 4);
+        assert_eq!(movz.rd, 5);
+        let movz_eff = movz.effects();
+        assert_eq!(movz_eff.gpr_read_mask, (1 << 3) | (1 << 4));
+        assert_eq!(movz_eff.gpr_write_mask, 1 << 5);
+
+        // MOVN: rd = rs if rt != 0. funct 0x0B, shift_amount = 0.
+        let movn = decode((3 << 21) | (4 << 16) | (5 << 11) | 0x0B, 0x2000);
+        assert_eq!(movn.opcode, Opcode::Movn);
+        assert_eq!(movn.rs, 3);
+        assert_eq!(movn.rt, 4);
+        assert_eq!(movn.rd, 5);
+
+        // MOVZ/MOVN with nonzero shift_amount are rejected
+        assert!(!decode((3 << 21) | (4 << 16) | (5 << 11) | (1 << 6) | 0x0A, 0).is_supported());
+        assert!(!decode((3 << 21) | (4 << 16) | (5 << 11) | (1 << 6) | 0x0B, 0).is_supported());
+
+        // CACHE: primary 0x2F, base=r5, op=0x10, offset=0x0040
+        // 0x2F << 26 | 5 << 21 | 0x10 << 16 | 0x0040
+        let cache = decode((0x2F << 26) | (5 << 21) | (0x10 << 16) | 0x0040, 0x3000);
+        assert_eq!(cache.opcode, Opcode::Cache);
+        let cache_eff = cache.effects();
+        assert_eq!(cache_eff.gpr_read_mask, 0);
+        assert_eq!(cache_eff.gpr_write_mask, 0);
+        assert_eq!(cache_eff.memory, MemoryEffect::None);
+
+        // PREF: primary 0x33, base=r6, hint=0x04, offset=0x0080
+        let pref = decode((0x33 << 26) | (6 << 21) | (0x04 << 16) | 0x0080, 0x4000);
+        assert_eq!(pref.opcode, Opcode::Pref);
+        let pref_eff = pref.effects();
+        assert_eq!(pref_eff.gpr_read_mask, 0);
+        assert_eq!(pref_eff.gpr_write_mask, 0);
+        assert_eq!(pref_eff.memory, MemoryEffect::None);
     }
 }
