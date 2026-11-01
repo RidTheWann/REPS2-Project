@@ -2,6 +2,8 @@
 name = "reps2-frontend"
 version = "0.7.0"
 edition = "2024"
+# let-chains in edition 2024 were stabilized in Rust 1.88; 1.85 fails to compile.
+rust-version = "1.88"
 license = "GPL-3.0-or-later"
 description = "Independent PlayStation 2 static recompilation frontend"
 publish = false
