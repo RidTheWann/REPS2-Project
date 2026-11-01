@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <span>
 
+#include "reps2/runtime/ee_fpu.hpp"
+
 namespace reps2::runtime {
 
 struct Gpr128 {
@@ -21,19 +23,11 @@ struct EeMemory {
     std::span<std::uint8_t> main_ram{};
 };
 
-// FCR31 as documented by the EE Core User's Manual Table 8-2: the condition
-// bit is 23, the cause flags I/D/O/U are 17..14, the sticky flags SI/SD/SO/SU
-// are 6..3, and bit 24 is a one-bit field that reads as 1. Bits 1..0 read as
-// 0b01 because the rounding mode is fixed to round toward zero (section 8.7).
-// Secondary emulator sources do not agree about bit 24, so the reset value is
-// named here rather than inlined and stays an open differential case. Only the
-// hard-wired low bits are enforced by this slice; the flag fields arrive with
-// the arithmetic operations that set them.
-inline constexpr std::uint32_t kFpuControlResetValue{0x0100'0001U};
-inline constexpr std::uint32_t kFpuControlReadOnlyMask{0x0000'0003U};
-// FIR (FCR0) is read-only: implementation 0x2E in bits 15..8, revision 0 in
-// bits 7..0, and zero above. Tests assert the literal, not this constant, so a
-// wrong value cannot pass by agreeing with the code that emits it.
+// FCR31 (the condition, cause and sticky flags plus their hardwired fields) is
+// declared in ee_fpu.hpp, next to the arithmetic that sets it. FIR (FCR0) is
+// read-only: implementation 0x2E in bits 15..8, revision 0 in bits 7..0, and
+// zero above. Tests assert the literal, not this constant, so a wrong value
+// cannot pass by agreeing with the code that emits it.
 inline constexpr std::uint32_t kFpuImplementationRegister{0x0000'2E00U};
 
 struct EeState {
@@ -49,7 +43,11 @@ struct EeState {
     std::uint64_t sa{};
     // The EE FPU is single-precision only: 32 x 32-bit FPRs, plus FCR0 (FIR,
     // read-only) and FCR31 (FCSR). FCR1..FCR30 are reserved and store nothing.
+    // ACC is a separate 32-bit register, not FPR[32]: section 8.2 gives it no
+    // COP1 address, so only ADDA/SUBA/MULA/MADDA/MSUBA write it and only
+    // MADD/MSUB/MADDA/MSUBA read it.
     std::array<std::uint32_t, 32> fpr{};
+    std::uint32_t acc{};
     std::uint32_t fcsr{kFpuControlResetValue};
     EeMemory memory{};
 };
@@ -128,14 +126,18 @@ enum class Status : std::uint8_t {
     state.lo1 = 0;
     state.sa = 0;
     state.fpr = {};
+    state.acc = 0;
     state.fcsr = kFpuControlResetValue;
     state.pc = entry_pc;
     return Status::ok;
 }
 
-// CTC1 cannot program the EE rounding field, so bits 1..0 always read back 01.
+// CTC1 can program only C and the eight flag bits: bits 31..25, 22..18 and 13..7
+// read as zero and bit 24 always reads as one, so a store must not be able to
+// persist anything else. Rounding is fixed toward zero, which is why bits 1..0
+// read back 0b01.
 constexpr void store_fpu_control(std::uint32_t& control, std::uint32_t value) noexcept {
-    control = (value & ~kFpuControlReadOnlyMask) | 0x0000'0001U;
+    control = (value & kFpuControlWritableMask) | kFpuControlResetValue;
 }
 
 [[nodiscard]] inline Status resolve_ee_memory_access(
