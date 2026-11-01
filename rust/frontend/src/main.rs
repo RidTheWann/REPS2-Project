@@ -1285,7 +1285,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0x7200, &fpu_branch_likely),
         segment(0x7300, &fpu_branch_likely_true),
         segment(0x8000, &break_trap),
-        segment(0x9000, &eret_return),
+        segment(0xF000, &eret_return),
     ];
     let entries = vec![
         entry(0x1000, "branch-fixture"),
@@ -1304,12 +1304,12 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0x7200, "fpu-branch-likely-fixture"),
         entry(0x7300, "fpu-branch-likely-true-fixture"),
         entry(0x8000, "break-trap-fixture"),
-        entry(0x9000, "eret-fixture"),
-        entry(0x9004, "eret-return-continuation-fixture"),
+        entry(0xF000, "eret-fixture"),
+        entry(0xF004, "eret-return-continuation-fixture"),
     ];
     let roots = [
         0x1000, 0x2000, 0x3000, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
-        0x7000, 0x7100, 0x7200, 0x7300, 0x8000, 0x9000, 0x9004,
+        0x7000, 0x7100, 0x7200, 0x7300, 0x8000, 0xF000, 0xF004,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
