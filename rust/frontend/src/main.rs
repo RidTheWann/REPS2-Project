@@ -17,6 +17,7 @@ use reps2_frontend::ir;
 use reps2_frontend::iso9660::{self, Iso9660};
 use reps2_frontend::library;
 use reps2_frontend::mips;
+use reps2_frontend::native_build;
 
 const MAX_INPUT_SIZE: u64 = 512 * 1024 * 1024;
 
@@ -543,6 +544,9 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
                     skipped_block_count: skipped_blocks.len(),
                 },
             );
+    let primary_output = output_file_name(output);
+    let part_outputs: Vec<String> = parts.iter().map(|part| output_file_name(part)).collect();
+    let ram_output_name = output_file_name(&ram_output);
     let manifest = BuildManifest {
         input_path: input.to_string_lossy().into_owned(),
         input_size_bytes: bytes.len() as u64,
@@ -563,9 +567,9 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             external_target_count: graph.external_targets.len(),
         },
         translation_unit_count: units.len(),
-        primary_output: output_file_name(output),
-        part_outputs: parts.iter().map(|part| output_file_name(part)).collect(),
-        ram_output: output_file_name(&ram_output),
+        primary_output: primary_output.clone(),
+        part_outputs: part_outputs.clone(),
+        ram_output: ram_output_name.clone(),
         ram_image_bytes: ram_image.bytes.len(),
     };
     let manifest_output = output.with_extension("manifest.json");
@@ -576,6 +580,19 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
         )
     })?;
 
+    let native_directory = if options.native_build {
+        let mut sources = Vec::with_capacity(part_outputs.len() + 1);
+        sources.push(primary_output.clone());
+        sources.extend(part_outputs.iter().cloned());
+        Some(write_native_project(
+            output,
+            &sources,
+            Some(&ram_output_name),
+        )?)
+    } else {
+        None
+    };
+
     println!("Generated CFG-aware C++20 translation and initial EE RAM image");
     println!("  Input: {}", input.display());
     println!("  Input SHA-256: {}", manifest.input_sha256);
@@ -583,6 +600,9 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
     println!("  RAM image: {}", ram_output.display());
     println!("  RAM image bytes: {}", ram_image.bytes.len());
     println!("  Build manifest: {}", manifest_output.display());
+    if let Some(directory) = &native_directory {
+        println!("  Native build project: {}", directory.display());
+    }
     println!("  ELF entry point: 0x{:08X}", image.entry_point);
     println!("  PT_LOAD segments placed: {}", ram_image.segments.len());
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
@@ -624,6 +644,7 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
 struct RecompileOptions {
     discover: bool,
     translation_units: usize,
+    native_build: bool,
 }
 
 impl Default for RecompileOptions {
@@ -631,6 +652,7 @@ impl Default for RecompileOptions {
         Self {
             discover: false,
             translation_units: 1,
+            native_build: false,
         }
     }
 }
@@ -653,7 +675,51 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
                 })?;
                 index += 2;
             }
+            "--native-build" => {
+                options.native_build = true;
+                index += 1;
+            }
             other => return Err(format!("unknown recompile-elf option {other:?}")),
+        }
+    }
+    Ok(options)
+}
+
+/// Parsed `compile-cfg-fixture` options.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FixtureOptions {
+    translation_units: usize,
+    native_build: bool,
+}
+
+impl Default for FixtureOptions {
+    fn default() -> Self {
+        Self {
+            translation_units: 1,
+            native_build: false,
+        }
+    }
+}
+
+fn parse_fixture_options(arguments: &[String]) -> Result<FixtureOptions, String> {
+    let mut options = FixtureOptions::default();
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--tu-count" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--tu-count requires a value".to_owned())?;
+                options.translation_units = value.parse::<usize>().map_err(|_| {
+                    format!("invalid translation-unit count {value:?}; expected a positive integer")
+                })?;
+                index += 2;
+            }
+            "--native-build" => {
+                options.native_build = true;
+                index += 1;
+            }
+            other => return Err(format!("unknown compile-cfg-fixture option {other:?}")),
         }
     }
     Ok(options)
@@ -766,6 +832,37 @@ fn print_translation_unit_summary(parts: &[PathBuf]) {
     println!("  Part files: {first} .. {last}");
 }
 
+/// Writes a deterministic standalone CMake project beside the translation.
+fn write_native_project(
+    output: &Path,
+    sources: &[String],
+    ram_image: Option<&str>,
+) -> Result<PathBuf, String> {
+    let (stem, _) = generated_output_parts(output);
+    let directory = output.with_file_name(format!("{stem}.native"));
+    fs::create_dir_all(&directory).map_err(|error| {
+        format!(
+            "cannot create native build directory {}: {error}",
+            directory.display()
+        )
+    })?;
+
+    let project = native_build::render(&stem, sources, ram_image);
+    fs::write(directory.join("CMakeLists.txt"), project.cmake_lists).map_err(|error| {
+        format!(
+            "cannot write native build CMakeLists.txt in {}: {error}",
+            directory.display()
+        )
+    })?;
+    fs::write(directory.join("probe_main.cpp"), project.probe_source).map_err(|error| {
+        format!(
+            "cannot write native build probe in {}: {error}",
+            directory.display()
+        )
+    })?;
+    Ok(directory)
+}
+
 fn default_library_root() -> Result<std::path::PathBuf, String> {
     if let Some(path) = env::var_os("REPS2_LIBRARY_DIR").filter(|value| !value.is_empty()) {
         return Ok(Path::new(&path).to_path_buf());
@@ -847,7 +944,7 @@ fn add_game(input: &Path, library_override: Option<&Path>) -> Result<(), String>
     Ok(())
 }
 
-fn compile_cfg_fixture(output: &Path, translation_units: usize) -> Result<(), String> {
+fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), String> {
     use reps2_frontend::analysis::{self, AnalysisLimits, EntryPoint};
     use reps2_frontend::elf::LoadedSegment;
 
@@ -1071,8 +1168,9 @@ fn compile_cfg_fixture(output: &Path, translation_units: usize) -> Result<(), St
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
-    let units = control_codegen::emit_cpp_units_with_entry(&program, 0x1000, translation_units)
-        .map_err(|error| error.to_string())?;
+    let units =
+        control_codegen::emit_cpp_units_with_entry(&program, 0x1000, options.translation_units)
+            .map_err(|error| error.to_string())?;
     let parts = write_translation_units(output, &units)?;
     println!(
         "Generated synthetic CFG fixture: {} block(s), {} guest instruction(s), {} unsupported stop(s)",
@@ -1081,6 +1179,13 @@ fn compile_cfg_fixture(output: &Path, translation_units: usize) -> Result<(), St
         program.unsupported_count()
     );
     print_translation_unit_summary(&parts);
+    if options.native_build {
+        let mut sources = Vec::with_capacity(parts.len() + 1);
+        sources.push(output_file_name(output));
+        sources.extend(parts.iter().map(|part| output_file_name(part)));
+        let directory = write_native_project(output, &sources, None)?;
+        println!("  Native build project: {}", directory.display());
+    }
     Ok(())
 }
 
@@ -1128,9 +1233,11 @@ fn usage() {
     println!("  reps2 elf-info <elf-file>");
     println!("  reps2 analyze-elf <elf-file> [--discover]");
     println!("  reps2 profile-elf <elf-file>");
-    println!("  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N]");
+    println!(
+        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build]"
+    );
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
-    println!("  reps2 compile-cfg-fixture <output.cpp> [--tu-count N]");
+    println!("  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build]");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
     println!(
@@ -1156,6 +1263,9 @@ fn usage() {
     );
     println!(
         "--tu-count N splits generated C++ into a dispatcher plus N block part files (<stem>.partNNNN.cpp); the default is 1."
+    );
+    println!(
+        "--native-build writes a deterministic <stem>.native/ CMake project plus a host probe that compiles and runs the emitted units; pass -DREPS2_RUNTIME_INCLUDE=<repo>/runtime/include when configuring it."
     );
     println!(
         "Allocated relocations, non-main-RAM PT_LOAD segments, and PS2 hardware services remain unsupported."
@@ -1190,17 +1300,9 @@ fn run() -> Result<(), String> {
             let options = parse_recompile_options(&arguments[4..])?;
             compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), options)
         }
-        Some("compile-cfg-fixture") if arguments.len() == 3 => {
-            compile_cfg_fixture(Path::new(&arguments[2]), 1)
-        }
-        Some("compile-cfg-fixture") if arguments.len() == 5 && arguments[3] == "--tu-count" => {
-            let translation_units = arguments[4].parse::<usize>().map_err(|_| {
-                format!(
-                    "invalid translation-unit count {:?}; expected a positive integer",
-                    arguments[4]
-                )
-            })?;
-            compile_cfg_fixture(Path::new(&arguments[2]), translation_units)
+        Some("compile-cfg-fixture") if arguments.len() >= 3 => {
+            let options = parse_fixture_options(&arguments[3..])?;
+            compile_cfg_fixture(Path::new(&arguments[2]), options)
         }
         Some("decode") if (3..=4).contains(&arguments.len()) => {
             decode_word(&arguments[2], arguments.get(3).map(String::as_str))
@@ -1239,6 +1341,7 @@ mod tests {
         assert_eq!(options, RecompileOptions::default());
         assert_eq!(options.translation_units, 1);
         assert!(!options.discover);
+        assert!(!options.native_build);
     }
 
     #[test]
@@ -1247,6 +1350,7 @@ mod tests {
             "--tu-count".to_owned(),
             "4".to_owned(),
             "--discover".to_owned(),
+            "--native-build".to_owned(),
         ])
         .expect("ordered options");
         assert_eq!(
@@ -1254,8 +1358,27 @@ mod tests {
             RecompileOptions {
                 discover: true,
                 translation_units: 4,
+                native_build: true,
             }
         );
+    }
+
+    #[test]
+    fn parses_fixture_options_and_native_build() {
+        let options = parse_fixture_options(&[
+            "--native-build".to_owned(),
+            "--tu-count".to_owned(),
+            "4".to_owned(),
+        ])
+        .expect("fixture options");
+        assert_eq!(
+            options,
+            FixtureOptions {
+                translation_units: 4,
+                native_build: true,
+            }
+        );
+        assert!(parse_fixture_options(&["--unknown".to_owned()]).is_err());
     }
 
     #[test]

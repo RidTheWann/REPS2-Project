@@ -610,6 +610,20 @@ if(BUILD_TESTING)
     endif()
 
     add_test(NAME reps2_cfg_split_codegen_smoke COMMAND reps2_cfg_split_codegen_smoke)
+
+    # The emitted `<stem>.native/` project must configure, compile and run the
+    # same split fixture through its generated probe, with no hand-written
+    # build script. This pins the native build-driver contract end to end.
+    add_test(
+        NAME reps2_native_build_driver_smoke
+        COMMAND "${CMAKE_COMMAND}"
+            "-DREPS2_FRONTEND=${REPS2_FRONTEND_EXECUTABLE}"
+            "-DREPS2_RUNTIME_INCLUDE=${CMAKE_CURRENT_SOURCE_DIR}/runtime/include"
+            "-DREPS2_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-build-driver"
+            "-DREPS2_CMAKE=${CMAKE_COMMAND}"
+            "-DREPS2_CTEST=${CMAKE_CTEST_COMMAND}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/native_build_driver_smoke.cmake"
+    )
 endif()
 
 install(PROGRAMS "${REPS2_FRONTEND_EXECUTABLE}" DESTINATION bin)
