@@ -344,6 +344,24 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_cop1_codegen_smoke COMMAND reps2_cop1_codegen_smoke)
 
+    # Differential test of the COP1 numeric core against the exact-rational
+    # oracle in tools/ee_fpu_model.py. No generated code is involved: the
+    # vectors are the expectation and the runtime headers are the subject.
+    add_executable(reps2_cop1_arith_smoke
+        tests/cop1_arith_smoke.cpp
+    )
+    target_link_libraries(reps2_cop1_arith_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cop1_arith_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cop1_arith_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cop1_arith_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+
+    add_test(NAME reps2_cop1_arith_smoke COMMAND reps2_cop1_arith_smoke)
+
     set(REPS2_CFG_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow.cpp")
     add_custom_command(
         OUTPUT "${REPS2_CFG_GENERATED_CPP}"
