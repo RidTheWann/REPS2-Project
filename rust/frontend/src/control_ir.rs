@@ -656,7 +656,7 @@ mod tests {
     #[test]
     fn unsupported_scalar_operation_becomes_an_explicit_stop() {
         let words = [
-            0x4000_4800, // mfc0 $t0, $9: COP0 transfer, not lifted
+            0x4C00_0000, // primary 0x13 (unassigned COP3), unknown opcode
             0x03E0_0008,
             0x0000_0000,
         ];
