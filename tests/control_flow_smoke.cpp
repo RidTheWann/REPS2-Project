@@ -888,8 +888,10 @@ int main() {
     if (initialized.gpr[8].low != 0 || initialized.gpr[0].low != 0
         || initialized.hi != 0 || initialized.lo != 0
         || initialized.memory.main_ram[0x1000U] != 0x12U
-        || initialized.memory.main_ram[0x1001U] != 0x34U) {
-        std::fprintf(stderr, "ELF runtime initializer did not copy RAM/reset GPR state\n");
+        || initialized.memory.main_ram[0x1001U] != 0x34U
+        || initialized.cop0[reps2::runtime::kCop0PrId] != reps2::runtime::kEeProcessorId
+        || initialized.cop0[reps2::runtime::kCop0Status] != 0x1040'0004U) {
+        std::fprintf(stderr, "ELF runtime initializer did not copy RAM/reset guest state\n");
         return fail(33);
     }
 
