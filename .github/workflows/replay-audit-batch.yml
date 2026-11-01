@@ -46,7 +46,7 @@ jobs:
           git fetch "$RUNNER_TEMP/reps2-audit-batch-1.bundle" HEAD:refs/audit/replay-batch
           git merge-base --is-ancestor "$BASE_COMMIT" refs/audit/replay-batch
           mkdir -p "$RUNNER_TEMP/audit-patches"
-          git format-patch --keep-cr --output-directory "$RUNNER_TEMP/audit-patches" "$BASE_COMMIT"..refs/audit/replay-batch
+          git format-patch --output-directory "$RUNNER_TEMP/audit-patches" "$BASE_COMMIT"..refs/audit/replay-batch
           test "$(find "$RUNNER_TEMP/audit-patches" -maxdepth 1 -name '*.patch' | wc -l)" -eq 6
 
       - name: Apply the six commits to a clean integration branch
