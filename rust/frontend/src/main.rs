@@ -635,6 +635,10 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
         program.unsupported_count()
     );
     println!(
+        "  Guest trap stops (syscall/break): {}",
+        program.trap_count()
+    );
+    println!(
         "  Unresolved indirect targets: {}",
         graph.unresolved_indirect_jumps.len()
     );
@@ -1254,6 +1258,9 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x03E0_0008, // taken return
         0x240D_000B, // return delay slot: t5 = 11
     ];
+    let break_trap = [
+        0x0000_004D, // break code 1: a guest trap, not an unknown encoding
+    ];
 
     let segments = [
         segment(0x1000, &branch_and_jump),
@@ -1271,6 +1278,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0x7100, &fpu_branch_false),
         segment(0x7200, &fpu_branch_likely),
         segment(0x7300, &fpu_branch_likely_true),
+        segment(0x8000, &break_trap),
     ];
     let entries = vec![
         entry(0x1000, "branch-fixture"),
@@ -1288,10 +1296,11 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0x7100, "fpu-branch-false-fixture"),
         entry(0x7200, "fpu-branch-likely-fixture"),
         entry(0x7300, "fpu-branch-likely-true-fixture"),
+        entry(0x8000, "break-trap-fixture"),
     ];
     let roots = [
         0x1000, 0x2000, 0x3000, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
-        0x7000, 0x7100, 0x7200, 0x7300,
+        0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
@@ -1301,10 +1310,11 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
             .map_err(|error| error.to_string())?;
     let parts = write_translation_units(output, &units)?;
     println!(
-        "Generated synthetic CFG fixture: {} block(s), {} guest instruction(s), {} unsupported stop(s)",
+        "Generated synthetic CFG fixture: {} block(s), {} guest instruction(s), {} unsupported stop(s) ({} guest trap(s))",
         program.blocks.len(),
         program.instruction_count(),
-        program.unsupported_count()
+        program.unsupported_count(),
+        program.trap_count()
     );
     print_translation_unit_summary(&parts);
     if options.native_build {

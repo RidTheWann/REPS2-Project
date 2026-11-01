@@ -544,6 +544,16 @@ impl Instruction {
         !matches!(self.opcode, Opcode::Unknown)
     }
 
+    /// Returns the 20-bit code field carried by SYSCALL and BREAK (bits 25..6).
+    ///
+    /// The field is meaningful only for those traps; callers should check the
+    /// opcode first. Returning the field for other encodings would silently
+    /// reinterpret unrelated operand bits.
+    #[must_use]
+    pub const fn trap_code(self) -> u32 {
+        (self.raw >> 6) & 0x000F_FFFF
+    }
+
     /// Returns whether the opcode transfers control and owns a delay slot.
     #[must_use]
     pub const fn is_control_transfer(self) -> bool {
@@ -1379,6 +1389,25 @@ mod tests {
         assert_eq!(decoded.rs, 4);
         assert_eq!(decoded.rt, 5);
         assert_eq!(decoded.signed_immediate(), -4);
+    }
+
+    #[test]
+    fn decodes_syscall_and_break_code_fields() {
+        let syscall = decode(0x0000_000C, 0x1000);
+        assert_eq!(syscall.opcode, Opcode::Syscall);
+        assert_eq!(syscall.trap_code(), 0);
+
+        let syscall_code_one = decode(0x0000_004C, 0x1000);
+        assert_eq!(syscall_code_one.opcode, Opcode::Syscall);
+        assert_eq!(syscall_code_one.trap_code(), 1);
+
+        let break_code_one = decode(0x0000_004D, 0x1000);
+        assert_eq!(break_code_one.opcode, Opcode::Break);
+        assert_eq!(break_code_one.trap_code(), 1);
+
+        let max_code = decode(0x03FF_FFCD, 0x1000);
+        assert_eq!(max_code.opcode, Opcode::Break);
+        assert_eq!(max_code.trap_code(), 0x000F_FFFF);
     }
 
     #[test]

@@ -196,6 +196,12 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 - Emitting the same CFG as one dispatcher plus eight block parts (`--tu-count 8`) yields a 15.84 MiB dispatcher and eight parts of 17.89-23.87 MiB. MSVC 19.51 `/std:c++20 /O2 /W4 /permissive-` compiles the dispatcher in about 5 s, a representative ~20 MiB part in about 17 s, and the complete dispatcher-plus-parts set links in **148.9 s sequentially with zero warnings**. A runtime probe initializes from a 32 MiB RAM image, calls `execute_cfg(state, 0)`, receives `instruction_budget_exhausted`, and finds `state.pc` unchanged at the entry block start (`0x00100008`), confirming sorted-table dispatch and block-atomic budget accounting across the split units. Part compilation is independent, so parallel builds reduce wall time toward the slowest part; the exact speedup is machine-dependent and is not claimed. See ADR 0027.
 - Because embedded data can decode as a plausible `JAL` or prologue, accepted candidates are not validated functions and may produce unreachable or nonsensical blocks. The measurements bound the heuristic's output, not its semantic correctness, and they do not establish playability.
 
+## Guest traps on a real entry path
+
+- SYSCALL and BREAK were previously reported as `unsupported_instruction`. They now carry a typed trap kind through the control IR and return `Status::syscall` (10) or `Status::breakpoint` (11) with the PC left on the trapping instruction; the 20-bit code field is bits 25..6 of the word at that PC (ADR 0031).
+- Black/USA default analysis still yields 9 blocks / 113 decoded instructions / 1 explicit stop, and that stop is now classified as a guest trap. The native probe must cover the entry path's RAM clear (about 0.55 MiB) before the trap: with budget 1,000,000 it reports `entry=0x00100008 status=10 pc=0x001001C8`, and the word at `0x001001C8` is `0x0000000C` (SYSCALL, code 0). With budget 4096 it truthfully stops earlier with `instruction_budget_exhausted`.
+- This is status classification, not service delivery: no kernel/BIOS handler runs, ERET remains unsupported, and the build still records `playable: false`.
+
 ## Decoder coverage profiling
 
 - `profile-elf` treats every complete, naturally aligned 32-bit word in file-backed executable PT_LOAD ranges as a census unit. It does not claim those words are reachable code; embedded data, padding, and never-executed functions are included.
