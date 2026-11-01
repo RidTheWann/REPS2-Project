@@ -123,6 +123,86 @@ else()
     target_compile_options(reps2_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
+# Keep host-toolchain provenance separate from the deterministic frontend
+# manifest: this file is emitted by CMake at configure time, where the actual
+# host compiler and generator are known.
+function(reps2_json_quote output value)
+    string(REPLACE "\\" "\\\\" escaped "${value}")
+    string(REPLACE "\"" "\\\"" escaped "${escaped}")
+    string(REPLACE "\n" "\\n" escaped "${escaped}")
+    string(REPLACE "\r" "\\r" escaped "${escaped}")
+    string(REPLACE "\t" "\\t" escaped "${escaped}")
+    set(${output} "\"${escaped}\"" PARENT_SCOPE)
+endfunction()
+
+function(reps2_json_set_string json_variable key value)
+    reps2_json_quote(quoted_value "${value}")
+    string(JSON updated_json SET "${${json_variable}}" "${key}" "${quoted_value}")
+    set(${json_variable} "${updated_json}" PARENT_SCOPE)
+endfunction()
+
+if(MSVC)
+    set(REPS2_TARGET_COMPILE_OPTIONS "/W4" "/permissive-")
+else()
+    set(REPS2_TARGET_COMPILE_OPTIONS "-Wall" "-Wextra" "-Wpedantic" "-Wconversion")
+endif()
+set(REPS2_TARGET_COMPILE_OPTIONS_JSON "[")
+set(REPS2_FIRST_COMPILE_OPTION TRUE)
+foreach(option IN LISTS REPS2_TARGET_COMPILE_OPTIONS)
+    if(NOT REPS2_FIRST_COMPILE_OPTION)
+        string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON ", ")
+    endif()
+    reps2_json_quote(quoted_option "${option}")
+    string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON "${quoted_option}")
+    set(REPS2_FIRST_COMPILE_OPTION FALSE)
+endforeach()
+string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON "]")
+
+set(REPS2_COMPILER_JSON "{}")
+reps2_json_set_string(REPS2_COMPILER_JSON id "${CMAKE_CXX_COMPILER_ID}")
+reps2_json_set_string(REPS2_COMPILER_JSON version "${CMAKE_CXX_COMPILER_VERSION}")
+reps2_json_set_string(REPS2_COMPILER_JSON target "${CMAKE_CXX_COMPILER_TARGET}")
+reps2_json_set_string(REPS2_COMPILER_JSON frontend_variant "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}")
+reps2_json_set_string(REPS2_COMPILER_JSON architecture_id "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+
+set(REPS2_CMAKE_JSON "{}")
+reps2_json_set_string(REPS2_CMAKE_JSON version "${CMAKE_VERSION}")
+reps2_json_set_string(REPS2_CMAKE_JSON generator "${CMAKE_GENERATOR}")
+reps2_json_set_string(REPS2_CMAKE_JSON generator_platform "${CMAKE_GENERATOR_PLATFORM}")
+reps2_json_set_string(REPS2_CMAKE_JSON generator_toolset "${CMAKE_GENERATOR_TOOLSET}")
+reps2_json_set_string(REPS2_CMAKE_JSON host_system "${CMAKE_HOST_SYSTEM_NAME}")
+reps2_json_set_string(REPS2_CMAKE_JSON host_processor "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+reps2_json_set_string(REPS2_CMAKE_JSON target_system "${CMAKE_SYSTEM_NAME}")
+reps2_json_set_string(REPS2_CMAKE_JSON target_processor "${CMAKE_SYSTEM_PROCESSOR}")
+reps2_json_set_string(REPS2_CMAKE_JSON configuration "$<CONFIG>")
+
+set(REPS2_COMPILE_JSON "{}")
+string(JSON REPS2_COMPILE_JSON SET "${REPS2_COMPILE_JSON}" cxx_standard 20)
+string(JSON REPS2_COMPILE_JSON SET "${REPS2_COMPILE_JSON}" cxx_extensions false)
+string(JSON REPS2_COMPILE_JSON SET "${REPS2_COMPILE_JSON}" target_options "${REPS2_TARGET_COMPILE_OPTIONS_JSON}")
+reps2_json_set_string(REPS2_COMPILE_JSON global_cxx_flags "${CMAKE_CXX_FLAGS}")
+reps2_json_set_string(REPS2_COMPILE_JSON debug_cxx_flags "${CMAKE_CXX_FLAGS_DEBUG}")
+reps2_json_set_string(REPS2_COMPILE_JSON release_cxx_flags "${CMAKE_CXX_FLAGS_RELEASE}")
+reps2_json_set_string(REPS2_COMPILE_JSON relwithdebinfo_cxx_flags "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+reps2_json_set_string(REPS2_COMPILE_JSON minsizerel_cxx_flags "${CMAKE_CXX_FLAGS_MINSIZEREL}")
+reps2_json_set_string(REPS2_COMPILE_JSON global_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS}")
+reps2_json_set_string(REPS2_COMPILE_JSON debug_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_DEBUG}")
+reps2_json_set_string(REPS2_COMPILE_JSON release_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_RELEASE}")
+reps2_json_set_string(REPS2_COMPILE_JSON relwithdebinfo_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}")
+reps2_json_set_string(REPS2_COMPILE_JSON minsizerel_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_MINSIZEREL}")
+
+set(REPS2_NATIVE_TOOLCHAIN_JSON "{}")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" schema_version 1)
+reps2_json_set_string(REPS2_NATIVE_TOOLCHAIN_JSON tool "reps2-native-build")
+reps2_json_set_string(REPS2_NATIVE_TOOLCHAIN_JSON frontend_version "@VERSION@")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" compiler "${REPS2_COMPILER_JSON}")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" cmake "${REPS2_CMAKE_JSON}")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" compile "${REPS2_COMPILE_JSON}")
+file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reps2-native-toolchain-$<CONFIG>.json"
+    CONTENT "${REPS2_NATIVE_TOOLCHAIN_JSON}\n"
+)
+
 enable_testing()
 @TEST@
 set_tests_properties(reps2_generated_probe PROPERTIES
@@ -318,6 +398,18 @@ mod tests {
         assert!(project.probe_source.contains("execute_cfg(state, budget)"));
         assert!(project.probe_source.contains("kEeMainRamSize"));
         assert!(project.probe_source.contains("instruction budget"));
+    }
+
+    #[test]
+    fn renders_native_toolchain_provenance_contract() {
+        let project = render("game", &sources(), Some("game.ram.bin"));
+        assert!(project.cmake_lists.contains("function(reps2_json_quote output value)"));
+        assert!(project.cmake_lists.contains("CMAKE_CXX_COMPILER_ID"));
+        assert!(project.cmake_lists.contains("CMAKE_CXX_COMPILER_VERSION"));
+        assert!(project.cmake_lists.contains("CMAKE_GENERATOR"));
+        assert!(project.cmake_lists.contains("CMAKE_CXX_FLAGS_RELEASE"));
+        assert!(project.cmake_lists.contains("target_options"));
+        assert!(project.cmake_lists.contains("reps2-native-toolchain-$<CONFIG>.json"));
     }
 
     #[test]
