@@ -12,8 +12,9 @@ Sources (Sony primary documents only; secondary emulator behaviour is rejected
 where it disagrees):
   * EE Core (User's) Manual v6.0 section 8.1.1 (format), 8.2 (register set and
     the 32-bit accumulator), 8.3.2 Figure 8-5 and Table 8-2 (FCR31 layout),
-    8.5 Table 8-4 (abnormal results), 8.6 Table 8-5 and 8-6 (signs of zero),
-    8.7 (rounding), 8.8 (IEEE 754 compatibility statement).
+    8.5 Table 8-4 (abnormal results), 8.6 Table 8-5 (signed zero) and
+    Table 8-6 (differences from IEEE 754), 8.7 (rounding), 8.8 (IEEE 754
+    compatibility statement).
   * EE Core Instruction Set Manual v6.0 Ch.5 (per-operation "operation" boxes,
     their explicit flag writes, and the opening note that flags an instruction
     does not name are unchanged) and section 7.4 (COP1 class encodings).
@@ -42,8 +43,8 @@ Two readings of the manuals conflict and are resolved explicitly here:
     operation rewrites all four cause flags, while every per-operation box in
     the instruction set manual says "flags that are not indicated in the
     instructions are not changed". This model follows the per-operation boxes,
-    because they name the flags each operation writes, and only NEG.S, MAX.S,
-    MIN.S (O and U) and SQRT.S (D) indicate a clear.
+    because they name the flags each operation writes, and only ABS.S, NEG.S,
+    MAX.S, MIN.S (O and U) and SQRT.S (D) indicate a clear.
   * RSQRT.S with a zero divisor. The instruction box names D; Table 8-5 lists
     both I and D. The box is the instruction-level authority, so D only.
 
@@ -203,12 +204,13 @@ def add(a: int, b: int, subtract: bool = False) -> Result:
     sa, _ea, _ma = split(a)
     sb, _eb, _mb = split(b)
     if va == 0 and vb == 0:
-        # Table 8-6:
+        # Table 8-5:
         #   (+0)+(+0)=+0  (+0)+(-0)=+0  (-0)+(+0)=+0  (-0)+(-0)=-0
-        #   (+0)-(+0)=+0  (+0)-(-0)=+0  (-0)-(+0)=-0  (-0)-(-0)=-0
+        #   (+0)-(+0)=+0  (+0)-(-0)=+0  (-0)-(+0)=-0  (-0)-(-0)=+0
         # A zero is an exponent field of 0, not a fraction field of 0, so this
-        # test reads the value, not the stored mantissa.
-        sign = sa if subtract else (sa & sb)
+        # test reads the value, not the stored mantissa. Only a subtraction
+        # from -0 leaves a negative zero, hence sa & ~sb rather than sa.
+        sign = (sa & ~sb) if subtract else (sa & sb)
         return Result(pack(sign, 0, 0))
     r = va + vb
     if r == 0:
@@ -321,7 +323,7 @@ def cvt_s_w(i: int) -> Result:
 
 def compare(a: int, b: int, kind: str) -> Result:
     """C.<cc>.S writes only FCR31 bit 23. There is no NaN, so C.F.S is always
-    false, and Table 8-6 makes +0 and -0 compare equal."""
+    false, and Table 8-5 makes +0 and -0 compare equal."""
     if kind == "f":
         return Result(0)
     va, vb = value(a), value(b)
@@ -329,10 +331,16 @@ def compare(a: int, b: int, kind: str) -> Result:
 
 
 def max_(a: int, b: int) -> Result:
+    if value(a) == 0 and value(b) == 0:
+        # Table 8-5: Max is +0 unless both operands are -0.
+        return Result(pack(((a >> 31) & 1) & ((b >> 31) & 1), 0, 0))
     return Result(a if value(a) >= value(b) else b)
 
 
 def min_(a: int, b: int) -> Result:
+    if value(a) == 0 and value(b) == 0:
+        # Table 8-5: Min is -0 if either operand is -0.
+        return Result(pack(((a >> 31) & 1) | ((b >> 31) & 1), 0, 0))
     return Result(a if value(a) <= value(b) else b)
 
 
@@ -415,12 +423,12 @@ def execute(op: str, a: int, b: int, acc: int) -> Result:
 
 # Cause flags this operation writes to zero, per the instruction boxes only.
 EXPLICIT_CLEARS = {
+    "abs": CAUSE_O | CAUSE_U,
     "neg": CAUSE_O | CAUSE_U,
     "max": CAUSE_O | CAUSE_U,
     "min": CAUSE_O | CAUSE_U,
     "sqrt": CAUSE_D,
     "mov": 0,
-    "abs": 0,
 }
 
 
@@ -495,7 +503,7 @@ POOL = {
 ACC_CASES = ("p0", "p1", "m1", "fmax", "e_min")
 
 # Curated operand pairs. The point is coverage of the documented families -
-# exact small sums, cancellation, the Table 8-6 zero rows, saturation, the
+# exact small sums, cancellation, the Table 8-5 zero rows, saturation, the
 # exponent-0xFF neighbourhood, underflow, wide exponent spreads (where the
 # no-guard-bit datapath can diverge from one-truncation) and the conversion
 # clamp boundary - not a cross product, which would bury the interesting rows.
@@ -540,7 +548,7 @@ PAIRS = {
             ("p0", "m0"), ("m0", "m0"), ("p0", "p1"), ("fmax", "fmax"),
             ("e_max", "half"), ("p1", "e_min"), ("e_min", "p1"),
             ("frac_lo", "p1"), ("p1", "frac_lo"), ("one_9", "p1"),
-            ("nfmax", "m1"), ("third", "third")],
+            ("nfmax", "m1"), ("third", "third"), ("p0", "m1")],
     "max": [("p1", "p25"), ("p25", "p1"), ("m1", "p1"), ("p1", "m1"),
             ("p0", "m0"), ("m0", "p0"), ("fmax", "nfmax"), ("nfmax", "fmax"),
             ("e_min", "denorm"), ("frac_lo", "p1"), ("junk", "junk")],
@@ -661,7 +669,7 @@ def self_check() -> int:
                 "" if cause is None else "cause=0x%X" % cause,
                 "" if cond is None else "cond=%s" % cond))
 
-    # add / sub: the exact sums, the Table 8-6 zero-sign rows and saturation.
+    # add / sub: the exact sums, the Table 8-5 zero-sign rows and saturation.
     want("add 1+1", add(F, F), TWO)
     want("add 1+1.5", add(F, P15), P25)
     want("sub 1-2.25", sub(F, P225), 0xBFA00000)
@@ -674,7 +682,7 @@ def self_check() -> int:
     want("sub +0-+0", sub(Z, Z), Z)
     want("sub +0--0", sub(Z, NZ), Z)
     want("sub -0-+0", sub(NZ, Z), NZ)
-    want("sub -0--0", sub(NZ, NZ), NZ)
+    want("sub -0--0", sub(NZ, NZ), Z)
     # Exponent 0xFF is normal, so 2^128 + 2^128 overflows but doubling the IEEE
     # largest finite lands exactly on +Fmax with no flag at all.
     want("add 2^128*2", add(0x7F800000, 0x7F800000), FMAX, CAUSE_O)
@@ -753,8 +761,17 @@ def self_check() -> int:
     want("max 1 2.5", max_(F, P25), P25)
     want("max 2.5 1", max_(P25, F), P25)
     want("min 2.5 1", min_(P25, F), F)
-    want("max -0 +0", max_(NZ, Z), NZ)
-    want("min +0 -0", min_(Z, NZ), Z)
+    # Table 8-5 gives every signed-zero combination, not just the mixed ones:
+    # Max is +0 unless both operands are -0; Min is -0 if either operand is -0
+    # and +0 only when both are +0.
+    want("max +0 -0", max_(Z, NZ), Z)
+    want("max -0 +0", max_(NZ, Z), Z)
+    want("max -0 -0", max_(NZ, NZ), NZ)
+    want("max +0 +0", max_(Z, Z), Z)
+    want("min +0 -0", min_(Z, NZ), NZ)
+    want("min -0 +0", min_(NZ, Z), NZ)
+    want("min -0 -0", min_(NZ, NZ), NZ)
+    want("min +0 +0", min_(Z, Z), Z)
     # multiply-accumulate
     want("madd 1+0.25", madd(F, H, H), P125)
     want("msub 1-0.25", msub(F, H, H), P75)
@@ -790,6 +807,12 @@ def self_check() -> int:
     f3 = fcsr_after(f, "neg", neg(F))
     if f3 != (0x01000001 | STICKY_O):
         fails.append("neg clears O -> 0x%08X" % f3)
+    checks += 1
+    # ABS.S's operation box lists O and U as cleared, so the sticky copies stay
+    # and the causes go.
+    f3b = fcsr_after(f, "abs", abs_(M35))
+    if f3b != (0x01000001 | STICKY_O):
+        fails.append("abs clears O -> 0x%08X" % f3b)
     checks += 1
     f4 = fcsr_after(f, "add", add(F, F))
     if f4 != f:
