@@ -656,7 +656,7 @@ mod tests {
     #[test]
     fn unsupported_scalar_operation_becomes_an_explicit_stop() {
         let words = [
-            0x0000_001A, // div: decoded but not yet lifted into executable scalar IR
+            0x4000_4800, // mfc0 $t0, $9: COP0 transfer, not lifted
             0x03E0_0008,
             0x0000_0000,
         ];
@@ -672,7 +672,7 @@ mod tests {
         let program = ControlProgram::lift(&graph).expect("unsupported remains explicit");
         assert!(matches!(
             &program.blocks[&0x2000].terminator,
-            ControlTerminator::Unsupported { guest_pc: 0x2000, mnemonic } if mnemonic == "div"
+            ControlTerminator::Unsupported { guest_pc: 0x2000, mnemonic } if mnemonic == "unknown"
         ));
         assert_eq!(program.unsupported_count(), 1);
     }

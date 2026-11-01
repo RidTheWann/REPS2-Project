@@ -168,6 +168,16 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 | `SYSCALL`/`BREAK` traps | 13,729 (0.18%) | 13,729 (0.18%) | 11,336 (0.18%) |
 | unsupported | 744,367 (9.53%) | 654,380 (8.37%) | 557,006 (8.71%) |
 
+| census unit | before SPECIAL fences/DIV/moves (8 images) | after SPECIAL fences/DIV/moves (8 images) | after fences/DIV/moves (7 distinct cores) |
+| --- | --- | --- | --- |
+| scanned words | 7,814,471 | 7,814,471 | 6,393,607 |
+| supported | 7,146,362 (91.45%) | 7,164,374 (91.68%) | 5,841,092 (91.36%) |
+| `SYSCALL`/`BREAK` traps | 13,729 (0.18%) | 13,729 (0.18%) | 11,336 (0.18%) |
+| unsupported | 654,380 (8.37%) | 636,368 (8.14%) | 541,179 (8.46%) |
+
+- The SYNC/DIV/DIVU/MOVN/MOVZ/CACHE/PREF slice accounts for +18,012 words leaving unsupported (supported up to 91.68% on 8 images, 91.36% on 7 distinct cores).
+- The bounded entry scan reaches a major milestone: **100% of sampled retail executables** (Bully, Downhill Domination, God of War II, GTA San Andreas, Need for Speed Most Wanted, Resident Evil 4) now decode cleanly through their entire startup sequence (92 to 112 consecutive words) and successfully arrive at their first kernel/BIOS `SYSCALL` trap (`0x0000000C`) without encountering any unsupported opcode.
+
 - The compare and BC1 slice accounts for the entire +89,987-word change: 44,952 compare words (`C.EQ.S` 5,884, `C.LT.S` 22,769, `C.LE.S` 16,299, `C.F.S` 0) and 45,035 `BC1` words (`BC1F` 21,441, `BC1T` 15,686, `BC1FL` 3,856, `BC1TL` 4,052). The remaining `cop1` family falls from 100,766 to 10,779 (1.65% of unsupported), and that remainder is dominated by data patterns such as `0x44455243` (`"CRED"` as little-endian bytes) rather than executable compares.
 - Current remaining unsupported families: `special` 381,245 (58.3% of unsupported), `cop2` 87,297 (13.3%), `load-store` 55,533 (8.5%), `other` 28,058, `immediate` 21,674, `cop0` 21,654, `mmi` 14,645, `branch` 10,899, `cop1` 10,779, `mmi2` 10,429, then `mmi0` 5,005, `regimm` 3,146, `mmi3` 2,870 and `mmi1` 1,146.
 

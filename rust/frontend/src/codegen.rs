@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Deterministic C++20 source generation for the verified scalar IR subset.
 
-use crate::ir::{Fpr, FpuComparison, FpuControl, Gpr, Instruction, Operation, Program, VerifyError};
+use crate::ir::{
+    Fpr, FpuComparison, FpuControl, Gpr, Instruction, Operation, Program, VerifyError,
+};
 
 /// Generates one C++ translation unit exporting
 /// reps2::generated::execute(EeState&).
@@ -12,6 +14,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
     output.push_str(
         "#include <bit>\n\
          #include <cstdint>\n\
+         #include <limits>\n\
          #include \"reps2/runtime/ee_state.hpp\"\n\n\
          namespace reps2::generated {\n\
          [[nodiscard]] reps2::runtime::Status execute(reps2::runtime::EeState& state) noexcept {\n\
@@ -255,6 +258,16 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         }
         Operation::MultiplyWordUnsigned { dst, lhs, rhs } => {
             emit_multiply_word(output, index, dst, lhs, rhs, false)
+        }
+        Operation::DivideWordSigned { lhs, rhs } => emit_divide_word(output, index, lhs, rhs, true),
+        Operation::DivideWordUnsigned { lhs, rhs } => {
+            emit_divide_word(output, index, lhs, rhs, false)
+        }
+        Operation::MoveConditionalNotZero { dst, src, test } => {
+            emit_move_conditional(output, dst, src, test, false)
+        }
+        Operation::MoveConditionalZero { dst, src, test } => {
+            emit_move_conditional(output, dst, src, test, true)
         }
         Operation::Nor64 { dst, lhs, rhs } => emit_binary64_not_or(output, dst, lhs, rhs),
         Operation::SetLessThanSigned64 { dst, lhs, rhs } => {
@@ -857,6 +870,73 @@ fn emit_multiply_word(
         "    state.lo = sign_extend_word(multiply_low_{tag});\n\
          \x20   state.hi = sign_extend_word(multiply_high_{tag});\n\
          \x20   if ({d} != 0) state.gpr[{d}].low = state.lo;\n"
+    ));
+}
+
+/// Emits C++ for R5900 DIV/DIVU.
+///
+/// The R5900 defines the results for every input pair:
+/// - Divisor zero: quotient = ±1 (sign-dependent for DIV, all-ones for DIVU),
+///   remainder = dividend.
+/// - INT32_MIN / -1 (signed only): quotient = INT32_MIN, remainder = 0.
+///
+/// The EE does *not* leave the results undefined for these edge cases; PCSX2
+/// implements the same table. The generated code must handle them without
+/// invoking C++ signed-overflow or division-by-zero UB.
+fn emit_divide_word(output: &mut String, index: usize, lhs: Gpr, rhs: Gpr, signed: bool) {
+    let tag = format!("{index:04}");
+    let a = lhs.index();
+    let b = rhs.index();
+
+    if signed {
+        // Signed division: extract low 32-bit words, sign-extend to int32_t.
+        output.push_str(&format!(
+            "    {{\n\
+             \x20       const std::int32_t div_lhs_{tag} = static_cast<std::int32_t>(static_cast<std::uint32_t>(state.gpr[{a}].low));\n\
+             \x20       const std::int32_t div_rhs_{tag} = static_cast<std::int32_t>(static_cast<std::uint32_t>(state.gpr[{b}].low));\n\
+             \x20       if (div_rhs_{tag} == 0) {{\n\
+             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} >= 0 ? -1 : 1));\n\
+             \x20           state.hi = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag}));\n\
+             \x20       }} else if (div_lhs_{tag} == std::numeric_limits<std::int32_t>::min() && div_rhs_{tag} == -1) {{\n\
+             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::min()));\n\
+             \x20           state.hi = sign_extend_word(0U);\n\
+             \x20       }} else {{\n\
+             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} / div_rhs_{tag}));\n\
+             \x20           state.hi = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} % div_rhs_{tag}));\n\
+             \x20       }}\n\
+             \x20   }}\n"
+        ));
+    } else {
+        // Unsigned division: extract low 32-bit words.
+        output.push_str(&format!(
+            "    {{\n\
+             \x20       const std::uint32_t div_lhs_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low);\n\
+             \x20       const std::uint32_t div_rhs_{tag} = static_cast<std::uint32_t>(state.gpr[{b}].low);\n\
+             \x20       if (div_rhs_{tag} == 0U) {{\n\
+             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(UINT32_MAX));\n\
+             \x20           state.hi = sign_extend_word(div_lhs_{tag});\n\
+             \x20       }} else {{\n\
+             \x20           state.lo = sign_extend_word(div_lhs_{tag} / div_rhs_{tag});\n\
+             \x20           state.hi = sign_extend_word(div_lhs_{tag} % div_rhs_{tag});\n\
+             \x20       }}\n\
+             \x20   }}\n"
+        ));
+    }
+}
+
+/// Emits C++ for MOVN/MOVZ conditional register moves.
+///
+/// MOVN: GPR[rd] = GPR[rs] if GPR[rt] != 0 (when_zero = false)
+/// MOVZ: GPR[rd] = GPR[rs] if GPR[rt] == 0 (when_zero = true)
+///
+/// The move copies GPR[63:0] only, preserving GPR[127:64].
+fn emit_move_conditional(output: &mut String, dst: Gpr, src: Gpr, test: Gpr, when_zero: bool) {
+    let d = dst.index();
+    let s = src.index();
+    let t = test.index();
+    let cmp = if when_zero { "==" } else { "!=" };
+    output.push_str(&format!(
+        "    if ({d} != 0 && state.gpr[{t}].low {cmp} 0U) state.gpr[{d}].low = state.gpr[{s}].low;\n"
     ));
 }
 
