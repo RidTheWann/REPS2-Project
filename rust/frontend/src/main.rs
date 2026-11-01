@@ -156,34 +156,39 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-fn analyze_elf(path: &Path, discover: bool) -> Result<(), String> {
+fn analyze_elf(path: &Path, options: AnalyzeOptions) -> Result<(), String> {
     let bytes = read_input(path)?;
     let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
     if !image.is_mips() {
         return Err("ELF machine is not EM_MIPS; refusing PS2 EE analysis".to_owned());
     }
 
-    let (graph, discovery) = if discover {
+    let limits = options.limits.to_limits();
+    let (graph, discovery) = if options.discover {
         let analysis::DiscoveryAnalysis {
             graph,
             discovery,
             accepted_roots,
             skipped_roots,
             skipped_blocks,
-        } = analysis::discover_elf_with_discovery(&image, &bytes, AnalysisLimits::default())
-            .map_err(|error| error.to_string())?;
+        } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
+            .map_err(analysis_error_message)?;
         (
             graph,
             Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
         )
     } else {
-        let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
-            .map_err(|error| error.to_string())?;
+        let graph =
+            analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
         (graph, None)
     };
     let edges = graph.edges();
 
     println!("REPS2 reachable executable analysis");
+    println!(
+        "  Limits: blocks={}, instructions={}, function roots={}",
+        limits.max_blocks, limits.max_instructions, limits.max_function_roots
+    );
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
         println!("  Root discovery: enabled (static scan of executable bytes)");
         println!("    Scanned words: {}", found.scanned_words);
@@ -496,7 +501,7 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
         return Err("ELF machine is not EM_MIPS; refusing PS2 EE compilation".to_owned());
     }
 
-    let limits = AnalysisLimits::default();
+    let limits = options.limits.to_limits();
     let ram_image = elf::build_main_ram_image(&bytes, &image)
         .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
     let (graph, discovery) = if options.discover {
@@ -507,14 +512,14 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             skipped_roots,
             skipped_blocks,
         } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
-            .map_err(|error| error.to_string())?;
+            .map_err(analysis_error_message)?;
         (
             graph,
             Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
         )
     } else {
         let graph =
-            analysis::discover_elf(&image, &bytes, limits).map_err(|error| error.to_string())?;
+            analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
         (graph, None)
     };
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
@@ -600,6 +605,10 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
     println!("  RAM image: {}", ram_output.display());
     println!("  RAM image bytes: {}", ram_image.bytes.len());
     println!("  Build manifest: {}", manifest_output.display());
+    println!(
+        "  Analysis limits: blocks={}, instructions={}, function roots={}",
+        limits.max_blocks, limits.max_instructions, limits.max_function_roots
+    );
     if let Some(directory) = &native_directory {
         println!("  Native build project: {}", directory.display());
     }
@@ -639,12 +648,123 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
     Ok(())
 }
 
+/// Largest analysis-limit override accepted by the developer CLI. A 32 MiB EE
+/// main-RAM image can hold at most 8,388,608 aligned words, so these ceilings
+/// stay above every physically reachable count while keeping an explicit bound
+/// on caller-selected work over untrusted input.
+const MAX_BLOCKS_OVERRIDE: usize = 1 << 24;
+const MAX_INSTRUCTIONS_OVERRIDE: usize = 1 << 25;
+const MAX_FUNCTION_ROOTS_OVERRIDE: usize = 1 << 24;
+
+/// Caller-selected bounds for bounded ELF analysis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LimitOptions {
+    max_blocks: usize,
+    max_instructions: usize,
+    max_function_roots: usize,
+}
+
+impl Default for LimitOptions {
+    fn default() -> Self {
+        let limits = AnalysisLimits::default();
+        Self {
+            max_blocks: limits.max_blocks,
+            max_instructions: limits.max_instructions,
+            max_function_roots: limits.max_function_roots,
+        }
+    }
+}
+
+impl LimitOptions {
+    fn to_limits(self) -> AnalysisLimits {
+        AnalysisLimits {
+            max_blocks: self.max_blocks,
+            max_instructions: self.max_instructions,
+            max_function_roots: self.max_function_roots,
+            ..AnalysisLimits::default()
+        }
+    }
+}
+
+fn parse_limit(value: &str, flag: &str, ceiling: usize) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| format!("invalid {flag} value {value:?}; expected a positive integer"))?;
+    if parsed == 0 {
+        return Err(format!("{flag} must be at least 1"));
+    }
+    if parsed > ceiling {
+        return Err(format!("{flag} exceeds the supported maximum of {ceiling}"));
+    }
+    Ok(parsed)
+}
+
+fn parse_limit_option(flag: &str, value: &str, limits: &mut LimitOptions) -> Result<(), String> {
+    match flag {
+        "--max-blocks" => {
+            limits.max_blocks = parse_limit(value, flag, MAX_BLOCKS_OVERRIDE)?;
+        }
+        "--max-instructions" => {
+            limits.max_instructions = parse_limit(value, flag, MAX_INSTRUCTIONS_OVERRIDE)?;
+        }
+        "--max-roots" => {
+            limits.max_function_roots = parse_limit(value, flag, MAX_FUNCTION_ROOTS_OVERRIDE)?;
+        }
+        _ => return Err(format!("unknown analysis-limit option {flag:?}")),
+    }
+    Ok(())
+}
+
+/// Adds an actionable override hint to a limit failure without hiding the
+/// analyzer's original diagnostic.
+fn analysis_error_message(error: analysis::AnalysisError) -> String {
+    match &error {
+        analysis::AnalysisError::BlockLimitExceeded { limit } => {
+            format!("{error}; raise --max-blocks above {limit} to analyze more")
+        }
+        analysis::AnalysisError::InstructionLimitExceeded { limit } => {
+            format!("{error}; raise --max-instructions above {limit} to analyze more")
+        }
+        _ => error.to_string(),
+    }
+}
+
+/// Parsed `analyze-elf` options.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct AnalyzeOptions {
+    discover: bool,
+    limits: LimitOptions,
+}
+
+fn parse_analyze_options(arguments: &[String]) -> Result<AnalyzeOptions, String> {
+    let mut options = AnalyzeOptions::default();
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--discover" => {
+                options.discover = true;
+                index += 1;
+            }
+            flag @ ("--max-blocks" | "--max-instructions" | "--max-roots") => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                parse_limit_option(flag, value, &mut options.limits)?;
+                index += 2;
+            }
+            other => return Err(format!("unknown analyze-elf option {other:?}")),
+        }
+    }
+    Ok(options)
+}
+
 /// Parsed `recompile-elf` options.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RecompileOptions {
     discover: bool,
     translation_units: usize,
     native_build: bool,
+    limits: LimitOptions,
 }
 
 impl Default for RecompileOptions {
@@ -653,6 +773,7 @@ impl Default for RecompileOptions {
             discover: false,
             translation_units: 1,
             native_build: false,
+            limits: LimitOptions::default(),
         }
     }
 }
@@ -678,6 +799,13 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
             "--native-build" => {
                 options.native_build = true;
                 index += 1;
+            }
+            flag @ ("--max-blocks" | "--max-instructions" | "--max-roots") => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                parse_limit_option(flag, value, &mut options.limits)?;
+                index += 2;
             }
             other => return Err(format!("unknown recompile-elf option {other:?}")),
         }
@@ -1231,10 +1359,12 @@ fn usage() {
     println!("  reps2 add-game <disc-image.iso> [--library <directory>]");
     println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
     println!("  reps2 elf-info <elf-file>");
-    println!("  reps2 analyze-elf <elf-file> [--discover]");
+    println!(
+        "  reps2 analyze-elf <elf-file> [--discover] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+    );
     println!("  reps2 profile-elf <elf-file>");
     println!(
-        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build]"
+        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--max-blocks N] [--max-instructions N] [--max-roots N]"
     );
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!("  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build]");
@@ -1268,6 +1398,9 @@ fn usage() {
         "--native-build writes a deterministic <stem>.native/ CMake project plus a host probe that compiles and runs the emitted units; pass -DREPS2_RUNTIME_INCLUDE=<repo>/runtime/include when configuring it."
     );
     println!(
+        "--max-blocks/--max-instructions/--max-roots override the default analysis bounds (250000 blocks, 2000000 instructions, 500000 discovered roots). Overrides must be positive and stay below the CLI ceilings."
+    );
+    println!(
         "Allocated relocations, non-main-RAM PT_LOAD segments, and PS2 hardware services remain unsupported."
     );
 }
@@ -1291,9 +1424,9 @@ fn run() -> Result<(), String> {
             extract_boot_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
         }
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
-        Some("analyze-elf") if arguments.len() == 3 => analyze_elf(Path::new(&arguments[2]), false),
-        Some("analyze-elf") if arguments.len() == 4 && arguments[3] == "--discover" => {
-            analyze_elf(Path::new(&arguments[2]), true)
+        Some("analyze-elf") if arguments.len() >= 3 => {
+            let options = parse_analyze_options(&arguments[3..])?;
+            analyze_elf(Path::new(&arguments[2]), options)
         }
         Some("profile-elf") if arguments.len() == 3 => profile_elf(Path::new(&arguments[2])),
         Some("recompile-elf") if arguments.len() >= 4 => {
@@ -1342,6 +1475,7 @@ mod tests {
         assert_eq!(options.translation_units, 1);
         assert!(!options.discover);
         assert!(!options.native_build);
+        assert_eq!(options.limits, LimitOptions::default());
     }
 
     #[test]
@@ -1351,6 +1485,12 @@ mod tests {
             "4".to_owned(),
             "--discover".to_owned(),
             "--native-build".to_owned(),
+            "--max-blocks".to_owned(),
+            "300000".to_owned(),
+            "--max-instructions".to_owned(),
+            "2500000".to_owned(),
+            "--max-roots".to_owned(),
+            "600000".to_owned(),
         ])
         .expect("ordered options");
         assert_eq!(
@@ -1359,8 +1499,70 @@ mod tests {
                 discover: true,
                 translation_units: 4,
                 native_build: true,
+                limits: LimitOptions {
+                    max_blocks: 300_000,
+                    max_instructions: 2_500_000,
+                    max_function_roots: 600_000,
+                },
             }
         );
+    }
+
+    #[test]
+    fn parses_analyze_options_and_overrides() {
+        let options = parse_analyze_options(&[
+            "--discover".to_owned(),
+            "--max-blocks".to_owned(),
+            "500000".to_owned(),
+        ])
+        .expect("analyze options");
+        assert!(options.discover);
+        assert_eq!(options.limits.max_blocks, 500_000);
+        assert_eq!(
+            options.limits.max_instructions,
+            AnalysisLimits::default().max_instructions
+        );
+        assert_eq!(
+            parse_analyze_options(&[]).expect("defaults"),
+            AnalyzeOptions::default()
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_analysis_limit_overrides() {
+        for flag in ["--max-blocks", "--max-instructions", "--max-roots"] {
+            assert!(parse_analyze_options(&[flag.to_owned()]).is_err(), "{flag}");
+            assert!(
+                parse_analyze_options(&[flag.to_owned(), "0".to_owned()]).is_err(),
+                "{flag}"
+            );
+            assert!(
+                parse_analyze_options(&[flag.to_owned(), "many".to_owned()]).is_err(),
+                "{flag}"
+            );
+            assert!(
+                parse_analyze_options(&[flag.to_owned(), "999999999999".to_owned()]).is_err(),
+                "{flag}"
+            );
+        }
+        assert!(parse_recompile_options(&["--max-blocks".to_owned()]).is_err());
+        assert!(parse_recompile_options(&["--max-roots".to_owned(), "0".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn limit_options_preserve_unrelated_defaults() {
+        let limits = LimitOptions {
+            max_blocks: 42,
+            max_instructions: 43,
+            max_function_roots: 44,
+        }
+        .to_limits();
+        let defaults = AnalysisLimits::default();
+        assert_eq!(limits.max_blocks, 42);
+        assert_eq!(limits.max_instructions, 43);
+        assert_eq!(limits.max_function_roots, 44);
+        assert_eq!(limits.max_loaded_memory, defaults.max_loaded_memory);
+        assert_eq!(limits.max_aliased_roots, defaults.max_aliased_roots);
     }
 
     #[test]
@@ -1386,6 +1588,7 @@ mod tests {
         assert!(parse_recompile_options(&["--tu-count".to_owned()]).is_err());
         assert!(parse_recompile_options(&["--tu-count".to_owned(), "many".to_owned()]).is_err());
         assert!(parse_recompile_options(&["--unknown".to_owned()]).is_err());
+        assert!(parse_analyze_options(&["--unknown".to_owned()]).is_err());
     }
 
     #[test]
