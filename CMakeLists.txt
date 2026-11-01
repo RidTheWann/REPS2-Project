@@ -418,6 +418,23 @@ if(BUILD_TESTING)
 
     add_test(NAME reps2_cop1_arith_smoke COMMAND reps2_cop1_arith_smoke)
 
+    # Differential test of the COP1 compare family and the FCR31 condition bit
+    # against the same exact-rational oracle.
+    add_executable(reps2_cop1_compare_smoke
+        tests/cop1_compare_smoke.cpp
+    )
+    target_link_libraries(reps2_cop1_compare_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cop1_compare_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cop1_compare_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cop1_compare_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+
+    add_test(NAME reps2_cop1_compare_smoke COMMAND reps2_cop1_compare_smoke)
+
     set(REPS2_CFG_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow.cpp")
     add_custom_command(
         OUTPUT "${REPS2_CFG_GENERATED_CPP}"

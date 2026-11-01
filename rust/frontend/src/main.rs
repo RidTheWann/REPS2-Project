@@ -727,6 +727,45 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
     }
     unaligned_doubleword_merge.extend([0x03E0_0008, 0x0000_0000]);
 
+    let fpu_branch = [
+        0x4601_0034, // c.lt.s f0, f1
+        0x4501_0002, // bc1t 0x7010
+        0x2409_0007, // delay slot: t1 = 7
+        0x240A_0005, // not-taken path: t2 = 5
+        0x03E0_0008, // common return
+        0x240B_0009, // return delay slot: t3 = 9
+    ];
+    let fpu_branch_false = [
+        0x4601_0030, // c.f.s f0, f1
+        0x4500_0002, // bc1f 0x7110
+        0x2409_0007, // delay slot: t1 = 7
+        0x240A_0005, // fallthrough when the condition is set: t2 = 5
+        0x03E0_0008, // common return
+        0x240B_0009, // return delay slot: t3 = 9
+    ];
+    let fpu_branch_likely = [
+        0x4601_0032, // c.eq.s f0, f1
+        0x4502_0004, // bc1fl 0x7218
+        0x2409_0007, // delay slot: t1 = 7 (taken only)
+        0x240A_0005, // not-taken path: t2 = 5
+        0x03E0_0008, // not-taken return
+        0x240E_000D, // return delay slot: t6 = 13
+        0x240C_0009, // taken path: t4 = 9
+        0x03E0_0008, // taken return
+        0x240D_000B, // return delay slot: t5 = 11
+    ];
+    let fpu_branch_likely_true = [
+        0x4601_0036, // c.le.s f0, f1
+        0x4503_0004, // bc1tl 0x7318
+        0x2409_0007, // delay slot: t1 = 7 (taken only)
+        0x240A_0005, // not-taken path: t2 = 5
+        0x03E0_0008, // not-taken return
+        0x240E_000D, // return delay slot: t6 = 13
+        0x240C_0009, // taken path: t4 = 9
+        0x03E0_0008, // taken return
+        0x240D_000B, // return delay slot: t5 = 11
+    ];
+
     let segments = [
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
@@ -739,6 +778,10 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         segment(0x5200, &unaligned_doubleword),
         segment(0x5300, &unaligned_word_merge),
         segment(0x5400, &unaligned_doubleword_merge),
+        segment(0x7000, &fpu_branch),
+        segment(0x7100, &fpu_branch_false),
+        segment(0x7200, &fpu_branch_likely),
+        segment(0x7300, &fpu_branch_likely_true),
     ];
     let entries = vec![
         entry(0x1000, "branch-fixture"),
@@ -752,9 +795,14 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
         entry(0x5200, "unaligned-doubleword-fixture"),
         entry(0x5300, "unaligned-word-merge-fixture"),
         entry(0x5400, "unaligned-doubleword-merge-fixture"),
+        entry(0x7000, "fpu-branch-fixture"),
+        entry(0x7100, "fpu-branch-false-fixture"),
+        entry(0x7200, "fpu-branch-likely-fixture"),
+        entry(0x7300, "fpu-branch-likely-true-fixture"),
     ];
     let roots = [
         0x1000, 0x2000, 0x3000, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200, 0x5300, 0x5400,
+        0x7000, 0x7100, 0x7200, 0x7300,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
