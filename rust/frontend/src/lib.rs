@@ -6,15 +6,21 @@
 
 pub mod address;
 pub mod analysis;
+pub mod build_manifest;
 pub mod codegen;
 pub mod control_codegen;
 pub mod control_ir;
 pub mod coverage;
+pub mod digest;
 pub mod elf;
 pub mod ir;
 pub mod iso9660;
+pub mod json;
 pub mod library;
 pub mod mips;
 
 /// Frontend version reported by the command-line tool.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Exact Rust compilation target triple recorded in build manifests.
+pub const BUILD_TARGET: &str = env!("REPS2_BUILD_TARGET");
