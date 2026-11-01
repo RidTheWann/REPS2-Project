@@ -48,6 +48,10 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
              using reps2::runtime::load_u64_right;\n\
              using reps2::runtime::store_u64_left;\n\
              using reps2::runtime::store_u64_right;\n\
+             using reps2::runtime::read_cop0;\n\
+             using reps2::runtime::write_cop0;\n\
+             using reps2::runtime::enable_interrupts;\n\
+             using reps2::runtime::disable_interrupts;\n\
              std::uint64_t remaining = instruction_budget;\n\
              state.gpr[0] = {};\n\
              for (;;) {\n\
