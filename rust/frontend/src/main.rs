@@ -567,6 +567,7 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             basic_block_count: program.blocks.len(),
             guest_instruction_count: program.instruction_count(),
             unsupported_stop_count: program.unsupported_count(),
+            guest_exception_count: program.trap_count(),
             static_edge_count: graph.edges().len(),
             unresolved_indirect_target_count: graph.unresolved_indirect_jumps.len(),
             external_target_count: graph.external_targets.len(),
