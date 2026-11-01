@@ -80,6 +80,29 @@ pub enum Operation {
     MoveToFpuControl { src: Gpr, register: FpuControl },
     LoadFpuWord { dst: Fpr, base: Gpr, offset: u16 },
     StoreFpuWord { src: Fpr, base: Gpr, offset: u16 },
+    // Single-precision COP1 arithmetic. Every form updates the FCR31 flag
+    // summary; the accumulate forms write ACC, a separate 32-bit register with
+    // no COP1 address, and the two MADD forms additionally read it.
+    FpuAddSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuSubtractSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuMultiplySingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuDivideSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuSquareRootSingle { dst: Fpr, src: Fpr },
+    FpuAbsoluteSingle { dst: Fpr, src: Fpr },
+    FpuMoveSingle { dst: Fpr, src: Fpr },
+    FpuNegateSingle { dst: Fpr, src: Fpr },
+    FpuReciprocalSquareRootSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuAddAccumulateSingle { lhs: Fpr, rhs: Fpr },
+    FpuSubtractAccumulateSingle { lhs: Fpr, rhs: Fpr },
+    FpuMultiplyAccumulateSingle { lhs: Fpr, rhs: Fpr },
+    FpuMultiplyAddSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuMultiplySubtractSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuMultiplyAddAccumulateSingle { lhs: Fpr, rhs: Fpr },
+    FpuMultiplySubtractAccumulateSingle { lhs: Fpr, rhs: Fpr },
+    FpuMaximumSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuMinimumSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
+    FpuConvertSingleToWord { dst: Fpr, src: Fpr },
+    FpuConvertWordToSingle { dst: Fpr, src: Fpr },
     MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Nor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -430,6 +453,102 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: fpr(instruction.rt),
                 base: gpr(instruction.rs),
                 offset: instruction.immediate,
+            },
+            // S-class arithmetic: fs is bits 15..11 (decoder rd), ft is bits
+            // 20..16 (decoder rt) and fd is bits 10..6 (decoder shift_amount).
+            // The decoder already rejected any word whose reserved field is
+            // non-zero, so these mappings cannot fold an invalid encoding onto
+            // a valid operation.
+            Opcode::FpuAddSingle => Operation::FpuAddSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuSubtractSingle => Operation::FpuSubtractSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuMultiplySingle => Operation::FpuMultiplySingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuDivideSingle => Operation::FpuDivideSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuSquareRootSingle => Operation::FpuSquareRootSingle {
+                dst: fpr(instruction.shift_amount),
+                src: fpr(instruction.rt),
+            },
+            Opcode::FpuAbsoluteSingle => Operation::FpuAbsoluteSingle {
+                dst: fpr(instruction.shift_amount),
+                src: fpr(instruction.rd),
+            },
+            Opcode::FpuMoveSingle => Operation::FpuMoveSingle {
+                dst: fpr(instruction.shift_amount),
+                src: fpr(instruction.rd),
+            },
+            Opcode::FpuNegateSingle => Operation::FpuNegateSingle {
+                dst: fpr(instruction.shift_amount),
+                src: fpr(instruction.rd),
+            },
+            Opcode::FpuReciprocalSquareRootSingle => Operation::FpuReciprocalSquareRootSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuAddAccumulateSingle => Operation::FpuAddAccumulateSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuSubtractAccumulateSingle => Operation::FpuSubtractAccumulateSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuMultiplyAccumulateSingle => Operation::FpuMultiplyAccumulateSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuMultiplyAddSingle => Operation::FpuMultiplyAddSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuMultiplySubtractSingle => Operation::FpuMultiplySubtractSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuMultiplyAddAccumulateSingle => Operation::FpuMultiplyAddAccumulateSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuMultiplySubtractAccumulateSingle => {
+                Operation::FpuMultiplySubtractAccumulateSingle {
+                    lhs: fpr(instruction.rd),
+                    rhs: fpr(instruction.rt),
+                }
+            }
+            Opcode::FpuMaximumSingle => Operation::FpuMaximumSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuMinimumSingle => Operation::FpuMinimumSingle {
+                dst: fpr(instruction.shift_amount),
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+            },
+            Opcode::FpuConvertSingleToWord => Operation::FpuConvertSingleToWord {
+                dst: fpr(instruction.shift_amount),
+                src: fpr(instruction.rd),
+            },
+            Opcode::FpuConvertWordToSingle => Operation::FpuConvertWordToSingle {
+                dst: fpr(instruction.shift_amount),
+                src: fpr(instruction.rd),
             },
             Opcode::Dadd => Operation::AddDoublewordSigned {
                 dst: gpr(instruction.rd),
@@ -1211,6 +1330,83 @@ mod tests {
             LiftError::UnsupportedOpcode {
                 pc: 0x1104,
                 mnemonic: "ctc1"
+            }
+        );
+    }
+
+    #[test]
+    fn lifts_cop1_single_precision_arithmetic_field_placements() {
+        // fs is bits 15..11 (decoder rd), ft is 20..16 (decoder rt) and fd is
+        // 10..6 (decoder shift_amount). Each operand is distinct so a swapped
+        // mapping cannot pass.
+        let stream = [
+            mips::decode(0x4602_08C0, 0x1200), // add.s   $f3, $f1, $f2
+            mips::decode(0x4602_00C4, 0x1204), // sqrt.s  $f3, $f2
+            mips::decode(0x4602_081E, 0x1208), // madda.s $f1, $f2
+            mips::decode(0x4602_08DC, 0x120C), // madd.s  $f3, $f1, $f2
+            mips::decode(0x4602_0818, 0x1210), // adda.s  $f1, $f2
+            mips::decode(0x4680_08E0, 0x1214), // cvt.s.w $f3, $f1
+            mips::decode(0x4600_08E1, 0x1218), // cvt.w.s $f3, $f1 (wrong class)
+        ];
+        // The last word is S-class funct 0x21, which is undefined.
+        let program = lift(&stream[..6]).expect("lift COP1 arithmetic");
+        let operations: Vec<_> = program
+            .instructions()
+            .iter()
+            .map(|instruction| instruction.operation)
+            .collect();
+        assert!(matches!(
+            operations[0],
+            Operation::FpuAddSingle {
+                dst: Fpr(3),
+                lhs: Fpr(1),
+                rhs: Fpr(2)
+            }
+        ));
+        assert!(matches!(
+            operations[1],
+            Operation::FpuSquareRootSingle {
+                dst: Fpr(3),
+                src: Fpr(2)
+            }
+        ));
+        assert!(matches!(
+            operations[2],
+            Operation::FpuMultiplyAddAccumulateSingle {
+                lhs: Fpr(1),
+                rhs: Fpr(2)
+            }
+        ));
+        assert!(matches!(
+            operations[3],
+            Operation::FpuMultiplyAddSingle {
+                dst: Fpr(3),
+                lhs: Fpr(1),
+                rhs: Fpr(2)
+            }
+        ));
+        assert!(matches!(
+            operations[4],
+            Operation::FpuAddAccumulateSingle {
+                lhs: Fpr(1),
+                rhs: Fpr(2)
+            }
+        ));
+        assert!(matches!(
+            operations[5],
+            Operation::FpuConvertWordToSingle {
+                dst: Fpr(3),
+                src: Fpr(1)
+            }
+        ));
+        program.verify().expect("COP1 arithmetic verifies");
+
+        let error = lift(&stream[6..]).expect_err("undefined S-class funct 0x21");
+        assert_eq!(
+            error,
+            LiftError::UnsupportedOpcode {
+                pc: 0x1218,
+                mnemonic: "unknown"
             }
         );
     }

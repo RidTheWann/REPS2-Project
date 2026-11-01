@@ -111,6 +111,32 @@ pub enum Opcode {
     MoveToFpuControl,
     LoadFpuWord,
     StoreFpuWord,
+    // COP1 arithmetic. The S-class names the field in bits 15..11 fs and the
+    // one in bits 20..16 ft, which is the same placement MFC1 uses for the FPR
+    // number; Sony's SQRT.S takes its operand in ft and reserves fs, while
+    // ABS.S, MOV.S, NEG.S and CVT.W.S take it in fs and reserve ft. Retail
+    // code agrees with that reading without exception, and it is what makes the
+    // reserved-zero fields in out/census-v4-cop1-fields.json line up.
+    FpuAddSingle,
+    FpuSubtractSingle,
+    FpuMultiplySingle,
+    FpuDivideSingle,
+    FpuSquareRootSingle,
+    FpuAbsoluteSingle,
+    FpuMoveSingle,
+    FpuNegateSingle,
+    FpuReciprocalSquareRootSingle,
+    FpuAddAccumulateSingle,
+    FpuSubtractAccumulateSingle,
+    FpuMultiplyAccumulateSingle,
+    FpuMultiplyAddSingle,
+    FpuMultiplySubtractSingle,
+    FpuMultiplyAddAccumulateSingle,
+    FpuMultiplySubtractAccumulateSingle,
+    FpuMaximumSingle,
+    FpuMinimumSingle,
+    FpuConvertSingleToWord,
+    FpuConvertWordToSingle,
     Unknown,
 }
 
@@ -303,6 +329,26 @@ impl Opcode {
             Self::MoveToFpuControl => "ctc1",
             Self::LoadFpuWord => "lwc1",
             Self::StoreFpuWord => "swc1",
+            Self::FpuAddSingle => "add.s",
+            Self::FpuSubtractSingle => "sub.s",
+            Self::FpuMultiplySingle => "mul.s",
+            Self::FpuDivideSingle => "div.s",
+            Self::FpuSquareRootSingle => "sqrt.s",
+            Self::FpuAbsoluteSingle => "abs.s",
+            Self::FpuMoveSingle => "mov.s",
+            Self::FpuNegateSingle => "neg.s",
+            Self::FpuReciprocalSquareRootSingle => "rsqrt.s",
+            Self::FpuAddAccumulateSingle => "adda.s",
+            Self::FpuSubtractAccumulateSingle => "suba.s",
+            Self::FpuMultiplyAccumulateSingle => "mula.s",
+            Self::FpuMultiplyAddSingle => "madd.s",
+            Self::FpuMultiplySubtractSingle => "msub.s",
+            Self::FpuMultiplyAddAccumulateSingle => "madda.s",
+            Self::FpuMultiplySubtractAccumulateSingle => "msuba.s",
+            Self::FpuMaximumSingle => "max.s",
+            Self::FpuMinimumSingle => "min.s",
+            Self::FpuConvertSingleToWord => "cvt.w.s",
+            Self::FpuConvertWordToSingle => "cvt.s.w",
             Self::Unknown => "unknown",
         }
     }
@@ -360,6 +406,11 @@ pub struct InstructionEffects {
     /// CFC1 reads and CTC1 writes the single implemented FPU control register.
     pub reads_fcr: bool,
     pub writes_fcr: bool,
+    /// The COP1 accumulator. Section 8.2 gives ACC no register number, so only
+    /// the .A forms and the multiply-accumulate family touch it: ADDA, SUBA,
+    /// MULA, MADDA and MSUBA write it, and MADD, MSUB, MADDA and MSUBA read it.
+    pub reads_acc: bool,
+    pub writes_acc: bool,
     pub memory: MemoryEffect,
     pub control_flow: ControlFlowEffect,
     /// True when instruction execution can synchronously raise an exception.
@@ -388,6 +439,8 @@ impl InstructionEffects {
             writes_sa: false,
             reads_fcr: false,
             writes_fcr: false,
+            reads_acc: false,
+            writes_acc: false,
             memory: MemoryEffect::None,
             control_flow: ControlFlowEffect::None,
             may_raise_exception: false,
@@ -734,6 +787,60 @@ impl Instruction {
                 effects.may_raise_exception = true;
             }
 
+            // COP1 arithmetic never raises: section 8.8 says processing
+            // continues after setting a cause flag. Every form updates the
+            // sticky summary in FCR31, and the accumulate forms touch ACC,
+            // which has no COP1 register number and is reachable only here.
+            Opcode::FpuAddSingle
+            | Opcode::FpuSubtractSingle
+            | Opcode::FpuMultiplySingle
+            | Opcode::FpuDivideSingle
+            | Opcode::FpuMaximumSingle
+            | Opcode::FpuMinimumSingle => {
+                effects.fpr_read_mask = fpr_bit(self.rd) | fpr_bit(self.rt);
+                effects.fpr_write_mask = fpr_bit(self.shift_amount);
+                effects.writes_fcr = true;
+            }
+            Opcode::FpuSquareRootSingle => {
+                effects.fpr_read_mask = fpr_bit(self.rt);
+                effects.fpr_write_mask = fpr_bit(self.shift_amount);
+                effects.writes_fcr = true;
+            }
+            Opcode::FpuReciprocalSquareRootSingle => {
+                effects.fpr_read_mask = fpr_bit(self.rd) | fpr_bit(self.rt);
+                effects.fpr_write_mask = fpr_bit(self.shift_amount);
+                effects.writes_fcr = true;
+            }
+            Opcode::FpuAbsoluteSingle
+            | Opcode::FpuMoveSingle
+            | Opcode::FpuNegateSingle
+            | Opcode::FpuConvertSingleToWord
+            | Opcode::FpuConvertWordToSingle => {
+                effects.fpr_read_mask = fpr_bit(self.rd);
+                effects.fpr_write_mask = fpr_bit(self.shift_amount);
+                effects.writes_fcr = true;
+            }
+            Opcode::FpuAddAccumulateSingle
+            | Opcode::FpuSubtractAccumulateSingle
+            | Opcode::FpuMultiplyAccumulateSingle => {
+                effects.fpr_read_mask = fpr_bit(self.rd) | fpr_bit(self.rt);
+                effects.writes_acc = true;
+                effects.writes_fcr = true;
+            }
+            Opcode::FpuMultiplyAddAccumulateSingle
+            | Opcode::FpuMultiplySubtractAccumulateSingle => {
+                effects.fpr_read_mask = fpr_bit(self.rd) | fpr_bit(self.rt);
+                effects.reads_acc = true;
+                effects.writes_acc = true;
+                effects.writes_fcr = true;
+            }
+            Opcode::FpuMultiplyAddSingle | Opcode::FpuMultiplySubtractSingle => {
+                effects.fpr_read_mask = fpr_bit(self.rd) | fpr_bit(self.rt);
+                effects.reads_acc = true;
+                effects.fpr_write_mask = fpr_bit(self.shift_amount);
+                effects.writes_fcr = true;
+            }
+
             Opcode::Lb
             | Opcode::Lh
             | Opcode::Lw
@@ -815,6 +922,64 @@ fn jump_target(pc: u32, word: u32) -> u32 {
     // Bits 31..28, including the carry out of bit 31 as bit 32.
     let region = (delay_pc >> 28) as u32;
     (region << 28) | ((word & 0x03FF_FFFF) << 2)
+}
+
+/// Decodes the COP1 transfer, S-class and W-class formats.
+///
+/// The `fmt` field (bits 25..21) selects the transfer sub-operation for the
+/// classic forms and the operand format for arithmetic. The S-class names the
+/// FPR in bits 15..11 `fs` and the one in bits 20..16 `ft`, the same placement
+/// MFC1 already uses, and `fd` is bits 10..6. The manual masks make the unused
+/// field reserved-zero; retail code leaves those fields at zero in every
+/// sampled word, so a non-zero reserved field is not decoded as the
+/// instruction it would otherwise name.
+fn decode_cop1(word: u32) -> Opcode {
+    let format = ((word >> 21) & 0x1F) as u8;
+    let ft = ((word >> 16) & 0x1F) as u8;
+    let fs = ((word >> 11) & 0x1F) as u8;
+    let fd = ((word >> 6) & 0x1F) as u8;
+    let funct = (word & 0x3F) as u8;
+
+    if matches!(format, 0 | 2 | 4 | 6) {
+        // Every transfer form reserves bits 10..0 (mask 0xFFFFF800).
+        if (word & 0x7FF) != 0 {
+            return Opcode::Unknown;
+        }
+        return match format {
+            0 => Opcode::MoveFromFpuRegister,
+            2 if fs == 0 || fs == 31 => Opcode::MoveFromFpuControl,
+            4 => Opcode::MoveToFpuRegister,
+            6 if fs == 31 => Opcode::MoveToFpuControl,
+            _ => Opcode::Unknown,
+        };
+    }
+
+    match format {
+        0x10 => match funct {
+            0x00 => Opcode::FpuAddSingle,
+            0x01 => Opcode::FpuSubtractSingle,
+            0x02 => Opcode::FpuMultiplySingle,
+            0x03 => Opcode::FpuDivideSingle,
+            0x04 if fs == 0 => Opcode::FpuSquareRootSingle,
+            0x05 if ft == 0 => Opcode::FpuAbsoluteSingle,
+            0x06 if ft == 0 => Opcode::FpuMoveSingle,
+            0x07 if ft == 0 => Opcode::FpuNegateSingle,
+            0x16 => Opcode::FpuReciprocalSquareRootSingle,
+            0x18 if fd == 0 => Opcode::FpuAddAccumulateSingle,
+            0x19 if fd == 0 => Opcode::FpuSubtractAccumulateSingle,
+            0x1A if fd == 0 => Opcode::FpuMultiplyAccumulateSingle,
+            0x1C => Opcode::FpuMultiplyAddSingle,
+            0x1D => Opcode::FpuMultiplySubtractSingle,
+            0x1E if fd == 0 => Opcode::FpuMultiplyAddAccumulateSingle,
+            0x1F if fd == 0 => Opcode::FpuMultiplySubtractAccumulateSingle,
+            0x24 if ft == 0 => Opcode::FpuConvertSingleToWord,
+            0x28 => Opcode::FpuMaximumSingle,
+            0x29 => Opcode::FpuMinimumSingle,
+            _ => Opcode::Unknown,
+        },
+        0x14 if funct == 0x20 && ft == 0 => Opcode::FpuConvertWordToSingle,
+        _ => Opcode::Unknown,
+    }
 }
 
 /// Decodes one word from the explicitly supported base-MIPS integer subset.
@@ -987,17 +1152,11 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x13 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mtlo1,
                 _ => Opcode::Unknown,
             },
-            // COP1 register transfers select on bits 25..21, which is the rs
-            // field position; bits 10..0 are reserved zero for all four formats.
             // Bit 25 is not a COP1/COP2 flag: COP2 (VU0) has its own primary
-            // opcode 0x12, so 0x11 is unambiguously the FPU.
-            0x11 if (word & 0x7FF) == 0 => match rs {
-                0 => Opcode::MoveFromFpuRegister,
-                2 if rd == 0 || rd == 31 => Opcode::MoveFromFpuControl,
-                4 => Opcode::MoveToFpuRegister,
-                6 if rd == 31 => Opcode::MoveToFpuControl,
-                _ => Opcode::Unknown,
-            },
+            // opcode 0x12, so 0x11 is unambiguously the FPU. Bits 25..21 are the
+            // format selector, which is why the register transfers and the
+            // arithmetic share one arm.
+            0x11 => decode_cop1(word),
             0x20 => Opcode::Lb,
             0x21 => Opcode::Lh,
             0x22 => Opcode::Lwl,
@@ -1032,6 +1191,12 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds a COP1 word from the hardware field layout: format in 25..21,
+    /// ft in 20..16, fs in 15..11, fd in 10..6.
+    fn encode_cop1(format: u32, ft: u32, fs: u32, fd: u32, funct: u32) -> u32 {
+        (0x11 << 26) | (format << 21) | (ft << 16) | (fs << 11) | (fd << 6) | funct
+    }
 
     #[test]
     fn decodes_nop_addiu_and_signed_immediate() {
@@ -1735,13 +1900,167 @@ mod tests {
         );
         // Setting bit 25 moves mfc1's format selector from 0 to 16, which is
         // S-class arithmetic, so the bit is part of the selector and not a
-        // COP1/COP2 flag.
-        assert_eq!(decode(0x4402_2800 | (1 << 25), 0).opcode, Opcode::Unknown);
+        // COP1/COP2 flag. The remaining fields then read as ADD.S $f0, $f5, $f2.
+        let arithmetic = decode(0x4402_2800 | (1 << 25), 0);
+        assert_eq!(arithmetic.opcode, Opcode::FpuAddSingle);
+        assert_eq!(
+            (arithmetic.rd, arithmetic.rt, arithmetic.shift_amount),
+            (5, 2, 0)
+        );
         // COP2 (VU0) is a separate primary opcode and stays unsupported here.
         assert_eq!(
             decode((0x12 << 26) | (2 << 16) | (5 << 11), 0).opcode,
             Opcode::Unknown
         );
+    }
+
+    #[test]
+    fn decodes_cop1_single_precision_arithmetic() {
+        // Distinct operand numbers in every word make a swapped field change
+        // the decoded values, not just the mnemonic.
+        let cases = [
+            (0x00, Opcode::FpuAddSingle, "add.s"),
+            (0x01, Opcode::FpuSubtractSingle, "sub.s"),
+            (0x02, Opcode::FpuMultiplySingle, "mul.s"),
+            (0x03, Opcode::FpuDivideSingle, "div.s"),
+            (0x16, Opcode::FpuReciprocalSquareRootSingle, "rsqrt.s"),
+            (0x1C, Opcode::FpuMultiplyAddSingle, "madd.s"),
+            (0x1D, Opcode::FpuMultiplySubtractSingle, "msub.s"),
+            (0x28, Opcode::FpuMaximumSingle, "max.s"),
+            (0x29, Opcode::FpuMinimumSingle, "min.s"),
+        ];
+        for (funct, opcode, mnemonic) in cases {
+            let decoded = decode(encode_cop1(0x10, 2, 1, 3, funct), 0x2000);
+            assert_eq!(decoded.opcode, opcode, "funct 0x{funct:02X}");
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert_eq!((decoded.rt, decoded.rd, decoded.shift_amount), (2, 1, 3));
+            assert!(!decoded.has_delay_slot);
+            assert!(!decoded.is_control_transfer());
+        }
+
+        // SQRT.S takes its operand from ft and reserves fs.
+        let sqrt = decode(encode_cop1(0x10, 2, 0, 3, 0x04), 0);
+        assert_eq!(sqrt.opcode, Opcode::FpuSquareRootSingle);
+        assert_eq!((sqrt.rt, sqrt.rd, sqrt.shift_amount), (2, 0, 3));
+
+        // The unary forms take fs and reserve ft.
+        for (funct, opcode, mnemonic) in [
+            (0x05, Opcode::FpuAbsoluteSingle, "abs.s"),
+            (0x06, Opcode::FpuMoveSingle, "mov.s"),
+            (0x07, Opcode::FpuNegateSingle, "neg.s"),
+            (0x24, Opcode::FpuConvertSingleToWord, "cvt.w.s"),
+        ] {
+            let decoded = decode(encode_cop1(0x10, 0, 1, 3, funct), 0);
+            assert_eq!(decoded.opcode, opcode, "funct 0x{funct:02X}");
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert_eq!((decoded.rd, decoded.shift_amount), (1, 3));
+        }
+
+        // The accumulate forms have no destination register: fd is reserved.
+        for (funct, opcode, mnemonic) in [
+            (0x18, Opcode::FpuAddAccumulateSingle, "adda.s"),
+            (0x19, Opcode::FpuSubtractAccumulateSingle, "suba.s"),
+            (0x1A, Opcode::FpuMultiplyAccumulateSingle, "mula.s"),
+            (0x1E, Opcode::FpuMultiplyAddAccumulateSingle, "madda.s"),
+            (0x1F, Opcode::FpuMultiplySubtractAccumulateSingle, "msuba.s"),
+        ] {
+            let decoded = decode(encode_cop1(0x10, 2, 1, 0, funct), 0);
+            assert_eq!(decoded.opcode, opcode, "funct 0x{funct:02X}");
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert_eq!((decoded.rt, decoded.rd, decoded.shift_amount), (2, 1, 0));
+        }
+
+        // CVT.S.W is the only W-class (format 0x14) instruction.
+        let cvt = decode(encode_cop1(0x14, 0, 1, 3, 0x20), 0);
+        assert_eq!(cvt.opcode, Opcode::FpuConvertWordToSingle);
+        assert_eq!((cvt.rt, cvt.rd, cvt.shift_amount), (0, 1, 3));
+    }
+
+    #[test]
+    fn rejects_cop1_arithmetic_with_a_nonzero_reserved_field() {
+        // SQRT.S reserves fs; ABS/MOV/NEG/CVT.W.S reserve ft; the accumulate
+        // forms reserve fd; CVT.S.W reserves ft.
+        assert_eq!(
+            decode(encode_cop1(0x10, 2, 1, 3, 0x04), 0).opcode,
+            Opcode::Unknown
+        );
+        for funct in [0x05, 0x06, 0x07, 0x24] {
+            assert_eq!(
+                decode(encode_cop1(0x10, 2, 1, 3, funct), 0).opcode,
+                Opcode::Unknown,
+                "funct 0x{funct:02X} must reserve ft"
+            );
+        }
+        for funct in [0x18, 0x19, 0x1A, 0x1E, 0x1F] {
+            assert_eq!(
+                decode(encode_cop1(0x10, 2, 1, 3, funct), 0).opcode,
+                Opcode::Unknown,
+                "funct 0x{funct:02X} must reserve fd"
+            );
+        }
+        assert_eq!(
+            decode(encode_cop1(0x14, 2, 1, 3, 0x20), 0).opcode,
+            Opcode::Unknown
+        );
+        // CVT.S.W uses funct 0x20; the S-class value is not a W-class encoding.
+        assert_eq!(
+            decode(encode_cop1(0x14, 0, 1, 3, 0x24), 0).opcode,
+            Opcode::Unknown
+        );
+        // Undefined S-class functions and unimplemented COP1 formats.
+        for funct in [0x08, 0x20, 0x2A] {
+            assert_eq!(
+                decode(encode_cop1(0x10, 2, 1, 3, funct), 0).opcode,
+                Opcode::Unknown,
+                "funct 0x{funct:02X}"
+            );
+        }
+        for format in [0x01, 0x08, 0x12, 0x13, 0x15] {
+            assert_eq!(
+                decode(encode_cop1(format, 2, 1, 3, 0x00), 0).opcode,
+                Opcode::Unknown,
+                "format 0x{format:02X}"
+            );
+        }
+    }
+
+    #[test]
+    fn effects_track_cop1_arithmetic_dependencies() {
+        let add = decode(encode_cop1(0x10, 2, 1, 3, 0x00), 0).effects();
+        assert_eq!(add.fpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(add.fpr_write_mask, 1 << 3);
+        assert!(add.writes_fcr);
+        assert!(!add.reads_fcr);
+        assert!(!add.reads_acc);
+        assert!(!add.writes_acc);
+        assert_eq!(add.memory, MemoryEffect::None);
+        assert!(!add.may_raise_exception);
+
+        // A reserved-zero field must not become a dependency on FPR[0].
+        let sqrt = decode(encode_cop1(0x10, 2, 0, 3, 0x04), 0).effects();
+        assert_eq!(sqrt.fpr_read_mask, 1 << 2);
+        assert_eq!(sqrt.fpr_write_mask, 1 << 3);
+        let abs = decode(encode_cop1(0x10, 0, 1, 3, 0x05), 0).effects();
+        assert_eq!(abs.fpr_read_mask, 1 << 1);
+        assert_eq!(abs.fpr_write_mask, 1 << 3);
+
+        let madd = decode(encode_cop1(0x10, 2, 1, 3, 0x1C), 0).effects();
+        assert!(madd.reads_acc);
+        assert!(!madd.writes_acc);
+        assert_eq!(madd.fpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(madd.fpr_write_mask, 1 << 3);
+        assert!(madd.writes_fcr);
+
+        let adda = decode(encode_cop1(0x10, 2, 1, 0, 0x18), 0).effects();
+        assert!(!adda.reads_acc);
+        assert!(adda.writes_acc);
+        assert_eq!(adda.fpr_write_mask, 0);
+        assert_eq!(adda.fpr_read_mask, (1 << 1) | (1 << 2));
+
+        let madda = decode(encode_cop1(0x10, 2, 1, 0, 0x1E), 0).effects();
+        assert!(madda.reads_acc);
+        assert!(madda.writes_acc);
+        assert_eq!(madda.fpr_write_mask, 0);
     }
 
     #[test]
