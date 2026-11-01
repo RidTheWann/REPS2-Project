@@ -131,6 +131,16 @@ pub enum Operation {
         src: Gpr,
         register: FpuControl,
     },
+    MoveFromCop0 {
+        dst: Gpr,
+        cop0_reg: u8,
+    },
+    MoveToCop0 {
+        src: Gpr,
+        cop0_reg: u8,
+    },
+    EnableInterrupts,
+    DisableInterrupts,
     LoadFpuWord {
         dst: Fpr,
         base: Gpr,
@@ -871,6 +881,16 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 base: gpr(instruction.rs),
                 offset: instruction.immediate,
             },
+            Opcode::Mfc0 => Operation::MoveFromCop0 {
+                dst: gpr(instruction.rt),
+                cop0_reg: instruction.rd,
+            },
+            Opcode::Mtc0 => Operation::MoveToCop0 {
+                src: gpr(instruction.rt),
+                cop0_reg: instruction.rd,
+            },
+            Opcode::Ei => Operation::EnableInterrupts,
+            Opcode::Di => Operation::DisableInterrupts,
             // S-class arithmetic: fs is bits 15..11 (decoder rd), ft is bits
             // 20..16 (decoder rt) and fd is bits 10..6 (decoder shift_amount).
             // The decoder already rejected any word whose reserved field is
