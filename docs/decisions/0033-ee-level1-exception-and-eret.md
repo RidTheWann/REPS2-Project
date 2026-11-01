@@ -45,10 +45,10 @@ The runtime exposes `raise_ee_exception(EeState&, ExceptionCode, bool in_branch_
 - SYSCALL writes Cause.ExcCode = 8; BREAK writes Cause.ExcCode = 9.
 - When Status.EXL is clear, EPC becomes the faulting PC (or PC-4 for a branch-delay exception), Cause.BD is set or cleared accordingly, and Status.EXL is set.
 - When Status.EXL is already set, a nested Level-1 exception updates ExcCode but preserves the original EPC and BD frame.
-- With Status.BEV set, execution transfers to the bootstrap common vector `0xBFC00380`; otherwise it transfers to the common vector `0x80000200`.
+- With Status.BEV set, execution transfers to the bootstrap common vector `0xBFC00380`; otherwise it transfers to the general common exception vector `0x80000180`. The interrupt vector is distinct (`0x80000200` normal and `0xBFC00400` bootstrap) and is not used for synchronous Level-1 exceptions.
 - The helper returns `Status::exception_delivered` so the native host knows that an exception transition occurred.
 
-The current CFG rejects traps in delay slots, as it has no representation for that control-flow case. The helper's BD/EPC rule is nevertheless directly unit-tested and is ready for a future delay-slot exception terminator.
+The current CFG still rejects SYSCALL/BREAK trap instructions in delay slots, as those control-flow terminators are not represented. Signed arithmetic operations in supported delay slots do have an exception-aware lowering path: a fault passes the delay-slot flag to this helper, preserving the owning branch in EPC and setting Cause.BD (ADR 0034).
 
 ### 3. ERET return
 
@@ -82,7 +82,7 @@ The native fixtures are synthetic and prove isolated state transitions; they do 
 
 ## Scope and limitations
 
-This increment does not implement BIOS or kernel HLE services, other synchronous exception causes, TLB refill/translation, bus-error delivery, Level-2 events, asynchronous interrupts, timer/DMA interrupt delivery, or branch-delay trap integration in the static CFG. It does not claim that the selected exception vector or its handler is available in every compiled title. The full PS2 runtime and all compatibility gates remain incomplete.
+This increment does not implement BIOS or kernel HLE services, synchronous exception causes beyond SYSCALL/BREAK/OVERFLOW, TLB refill/translation, bus-error delivery, Level-2 events, asynchronous interrupts, timer/DMA interrupt delivery, or SYSCALL/BREAK trap terminators in branch delay slots. It does not claim that the selected exception vector or its handler is available in every compiled title. The full PS2 runtime and all compatibility gates remain incomplete.
 
 ## Consequences
 

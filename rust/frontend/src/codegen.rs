@@ -73,14 +73,20 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
     );
 
     for (index, instruction) in program.instructions().iter().enumerate() {
-        emit_instruction(&mut output, index, *instruction);
+        output.push_str(&format!("    state.pc = 0x{:08X}U;\n", instruction.guest_pc));
+        emit_instruction(&mut output, index, *instruction, false);
     }
 
     output.push_str("    return Status::ok;\n}\n} // namespace reps2::generated\n");
     Ok(output)
 }
 
-pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: Instruction) {
+pub(crate) fn emit_instruction(
+    output: &mut String,
+    index: usize,
+    instruction: Instruction,
+    in_branch_delay: bool,
+) {
     let pc = instruction.guest_pc;
     let prefix = format!("    // guest PC 0x{pc:08X}\n");
     output.push_str(&prefix);
@@ -312,43 +318,49 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         } => {
             emit_set_less_than_immediate(output, dst, src, immediate, false);
         }
-        Operation::AddWord { dst, lhs, rhs } => emit_word_add(output, index, dst, lhs, rhs, true),
+        Operation::AddWord { dst, lhs, rhs } => {
+            emit_word_add(output, index, dst, lhs, rhs, true, in_branch_delay)
+        },
         Operation::AddImmediateWord {
             dst,
             src,
             immediate,
         } => {
-            emit_word_immediate_add(output, index, dst, src, immediate, true);
+            emit_word_immediate_add(output, index, dst, src, immediate, true, in_branch_delay);
         }
         Operation::AddUnsignedWord { dst, lhs, rhs } => {
-            emit_word_add(output, index, dst, lhs, rhs, false)
+            emit_word_add(output, index, dst, lhs, rhs, false, in_branch_delay)
         }
         Operation::AddImmediateUnsignedWord {
             dst,
             src,
             immediate,
         } => {
-            emit_word_immediate_add(output, index, dst, src, immediate, false);
+            emit_word_immediate_add(output, index, dst, src, immediate, false, in_branch_delay);
         }
-        Operation::SubWord { dst, lhs, rhs } => emit_word_sub(output, index, dst, lhs, rhs, true),
+        Operation::SubWord { dst, lhs, rhs } => {
+            emit_word_sub(output, index, dst, lhs, rhs, true, in_branch_delay)
+        },
         Operation::SubUnsignedWord { dst, lhs, rhs } => {
-            emit_word_sub(output, index, dst, lhs, rhs, false)
+            emit_word_sub(output, index, dst, lhs, rhs, false, in_branch_delay)
         }
         Operation::ParallelAddUnsignedWord { dst, lhs, rhs } => {
             emit_parallel_add_u32(output, dst, lhs, rhs);
         }
         Operation::AddDoublewordSigned { dst, lhs, rhs } => {
-            emit_doubleword_signed_add(output, index, dst, lhs, rhs);
+            emit_doubleword_signed_add(output, index, dst, lhs, rhs, in_branch_delay);
         }
         Operation::SubDoublewordSigned { dst, lhs, rhs } => {
-            emit_doubleword_signed_sub(output, index, dst, lhs, rhs);
+            emit_doubleword_signed_sub(output, index, dst, lhs, rhs, in_branch_delay);
         }
         Operation::AddImmediateDoublewordSigned {
             dst,
             src,
             immediate,
         } => {
-            emit_doubleword_signed_immediate_add(output, index, dst, src, immediate);
+            emit_doubleword_signed_immediate_add(
+                output, index, dst, src, immediate, in_branch_delay,
+            );
         }
         Operation::AddDoublewordUnsigned { dst, lhs, rhs } => {
             emit_binary64(output, dst, lhs, rhs, "+")
@@ -743,6 +755,7 @@ fn emit_word_add(
     lhs: Gpr,
     rhs: Gpr,
     trap_overflow: bool,
+    in_branch_delay: bool,
 ) {
     let a = lhs.index();
     let b = rhs.index();
@@ -756,7 +769,7 @@ fn emit_word_add(
             "    const std::int64_t lhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{a}].low));\n\
              \x20   const std::int64_t rhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{b}].low));\n\
              \x20   const std::int64_t result_{tag} = lhs_{tag} + rhs_{tag};\n\
-             \x20   if (result_{tag} < -2147483648LL || result_{tag} > 2147483647LL) return Status::integer_overflow;\n\
+             \x20   if (result_{tag} < -2147483648LL || result_{tag} > 2147483647LL) return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Overflow, {in_branch_delay});\n\
              \x20   if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(result_{tag}));\n"
         ));
     } else {
@@ -776,6 +789,7 @@ fn emit_word_immediate_add(
     src: Gpr,
     immediate: u16,
     trap_overflow: bool,
+    in_branch_delay: bool,
 ) {
     let s = src.index();
     let d = dst.index();
@@ -786,7 +800,7 @@ fn emit_word_immediate_add(
              \x20   const std::int64_t lhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{s}].low));\n\
              \x20   const std::int64_t rhs_{tag} = sign_extend_word_signed(sign_extend_immediate(0x{:04X}U));\n\
              \x20   const std::int64_t result_{tag} = lhs_{tag} + rhs_{tag};\n\
-             \x20   if (result_{tag} < -2147483648LL || result_{tag} > 2147483647LL) return Status::integer_overflow;\n\
+             \x20   if (result_{tag} < -2147483648LL || result_{tag} > 2147483647LL) return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Overflow, {in_branch_delay});\n\
              \x20   if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(result_{tag}));\n",
             immediate
         ));
@@ -809,6 +823,7 @@ fn emit_word_sub(
     lhs: Gpr,
     rhs: Gpr,
     trap_overflow: bool,
+    in_branch_delay: bool,
 ) {
     let a = lhs.index();
     let b = rhs.index();
@@ -822,7 +837,7 @@ fn emit_word_sub(
             "    const std::int64_t lhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{a}].low));\n\
              \x20   const std::int64_t rhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{b}].low));\n\
              \x20   const std::int64_t result_{tag} = lhs_{tag} - rhs_{tag};\n\
-             \x20   if (result_{tag} < -2147483648LL || result_{tag} > 2147483647LL) return Status::integer_overflow;\n\
+             \x20   if (result_{tag} < -2147483648LL || result_{tag} > 2147483647LL) return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Overflow, {in_branch_delay});\n\
              \x20   if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(result_{tag}));\n"
         ));
     } else {
@@ -1014,7 +1029,14 @@ fn emit_set_less_than_immediate(
     ));
 }
 
-fn emit_doubleword_signed_add(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr) {
+fn emit_doubleword_signed_add(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
+    in_branch_delay: bool,
+) {
     let tag = format!("{index:04}");
     let d = dst.index();
     let a = lhs.index();
@@ -1023,12 +1045,19 @@ fn emit_doubleword_signed_add(output: &mut String, index: usize, dst: Gpr, lhs: 
         "    const std::uint64_t signed_add_lhs_{tag} = state.gpr[{a}].low;\n\
          \x20   const std::uint64_t signed_add_rhs_{tag} = state.gpr[{b}].low;\n\
          \x20   const std::uint64_t signed_add_result_{tag} = signed_add_lhs_{tag} + signed_add_rhs_{tag};\n\
-         \x20   if (((~(signed_add_lhs_{tag} ^ signed_add_rhs_{tag}) & (signed_add_lhs_{tag} ^ signed_add_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return Status::integer_overflow;\n\
+         \x20   if (((~(signed_add_lhs_{tag} ^ signed_add_rhs_{tag}) & (signed_add_lhs_{tag} ^ signed_add_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Overflow, {in_branch_delay});\n\
          \x20   if ({d} != 0) state.gpr[{d}].low = signed_add_result_{tag};\n"
     ));
 }
 
-fn emit_doubleword_signed_sub(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr) {
+fn emit_doubleword_signed_sub(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
+    in_branch_delay: bool,
+) {
     let tag = format!("{index:04}");
     let d = dst.index();
     let a = lhs.index();
@@ -1037,7 +1066,7 @@ fn emit_doubleword_signed_sub(output: &mut String, index: usize, dst: Gpr, lhs: 
         "    const std::uint64_t signed_sub_lhs_{tag} = state.gpr[{a}].low;\n\
          \x20   const std::uint64_t signed_sub_rhs_{tag} = state.gpr[{b}].low;\n\
          \x20   const std::uint64_t signed_sub_result_{tag} = signed_sub_lhs_{tag} - signed_sub_rhs_{tag};\n\
-         \x20   if ((((signed_sub_lhs_{tag} ^ signed_sub_rhs_{tag}) & (signed_sub_lhs_{tag} ^ signed_sub_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return Status::integer_overflow;\n\
+         \x20   if ((((signed_sub_lhs_{tag} ^ signed_sub_rhs_{tag}) & (signed_sub_lhs_{tag} ^ signed_sub_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Overflow, {in_branch_delay});\n\
          \x20   if ({d} != 0) state.gpr[{d}].low = signed_sub_result_{tag};\n"
     ));
 }
@@ -1048,6 +1077,7 @@ fn emit_doubleword_signed_immediate_add(
     dst: Gpr,
     src: Gpr,
     immediate: u16,
+    in_branch_delay: bool,
 ) {
     let tag = format!("{index:04}");
     let d = dst.index();
@@ -1057,7 +1087,7 @@ fn emit_doubleword_signed_immediate_add(
         "    const std::uint64_t signed_addi_lhs_{tag} = state.gpr[{s}].low;\n\
          \x20   const std::uint64_t signed_addi_rhs_{tag} = static_cast<std::uint64_t>({signed_immediate}LL);\n\
          \x20   const std::uint64_t signed_addi_result_{tag} = signed_addi_lhs_{tag} + signed_addi_rhs_{tag};\n\
-         \x20   if (((~(signed_addi_lhs_{tag} ^ signed_addi_rhs_{tag}) & (signed_addi_lhs_{tag} ^ signed_addi_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return Status::integer_overflow;\n\
+         \x20   if (((~(signed_addi_lhs_{tag} ^ signed_addi_rhs_{tag}) & (signed_addi_lhs_{tag} ^ signed_addi_result_{tag})) & 0x8000000000000000ULL) != 0ULL) return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Overflow, {in_branch_delay});\n\
          \x20   if ({d} != 0) state.gpr[{d}].low = signed_addi_result_{tag};\n"
     ));
 }
@@ -1411,7 +1441,7 @@ mod tests {
         assert!(
             cpp.contains("signed_addi_result_0002 = signed_addi_lhs_0002 + signed_addi_rhs_0002")
         );
-        assert_eq!(cpp.matches("return Status::integer_overflow;").count(), 3);
+        assert_eq!(cpp.matches("ExceptionCode::Overflow, false);").count(), 3);
         assert!(cpp.contains("if (10 != 0) state.gpr[10].low = signed_add_result_0000"));
         assert!(cpp.contains("if (11 != 0) state.gpr[11].low = signed_sub_result_0001"));
         assert!(cpp.contains("if (14 != 0) state.gpr[14].low = signed_addi_result_0002"));

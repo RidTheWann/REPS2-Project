@@ -274,7 +274,7 @@ fn emit_block_definition(output: &mut String, block: &ControlBlock) {
             "    state.pc = 0x{:08X}U;\n",
             instruction.guest_pc
         ));
-        crate::codegen::emit_instruction(output, instruction_index, *instruction);
+        crate::codegen::emit_instruction(output, instruction_index, *instruction, false);
     }
 
     emit_terminator(output, &block.terminator, block.instructions.len());
@@ -424,7 +424,7 @@ fn emit_link_write(output: &mut String, register: Option<u8>, return_pc: u32) {
 
 fn emit_delay_slot(output: &mut String, index: usize, delay_slot: &crate::ir::Instruction) {
     output.push_str(&format!("    state.pc = 0x{:08X}U;\n", delay_slot.guest_pc));
-    crate::codegen::emit_instruction(output, index, *delay_slot);
+    crate::codegen::emit_instruction(output, index, *delay_slot, true);
 }
 
 fn condition_expression(condition: crate::analysis::BranchCondition) -> String {
