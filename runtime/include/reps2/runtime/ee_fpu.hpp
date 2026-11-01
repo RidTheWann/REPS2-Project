@@ -496,4 +496,47 @@ struct Operand {
     return fpu_accumulate(acc, a, b, true);
 }
 
+// ---------------------------------------------------------------------------
+// the compare family
+// ---------------------------------------------------------------------------
+
+/// C.<cc>.S condition selectors. The EE defines only these four encodings
+/// (funct 0x30, 0x32, 0x34 and 0x36); the odd values and 0x38..0x3F are
+/// undefined and never reach this layer.
+enum class FpuCompare : std::uint8_t {
+    False,
+    Equal,
+    LessThan,
+    LessThanOrEqual,
+};
+
+/// Evaluates one compare. There is no NaN, +0 equals -0, and the comparison is
+/// exact, so it can never raise a cause of its own.
+[[nodiscard]] constexpr bool fpu_compare(
+    FpuCompare comparison,
+    std::uint32_t a,
+    std::uint32_t b
+) noexcept {
+    switch (comparison) {
+    case FpuCompare::False:
+        return false;
+    case FpuCompare::Equal:
+        return fpu_detail::compare(a, b) == 0;
+    case FpuCompare::LessThan:
+        return fpu_detail::compare(a, b) < 0;
+    case FpuCompare::LessThanOrEqual:
+        return fpu_detail::compare(a, b) <= 0;
+    }
+    return false;
+}
+
+/// Writes only FCR31 bit 23, the way C.<cc>.S does; every cause, sticky and
+/// hard-wired field is left as it was.
+[[nodiscard]] constexpr std::uint32_t apply_fpu_condition(
+    std::uint32_t control,
+    bool condition
+) noexcept {
+    return (control & ~kFpuCondition) | (condition ? kFpuCondition : 0U);
+}
+
 } // namespace reps2::runtime
