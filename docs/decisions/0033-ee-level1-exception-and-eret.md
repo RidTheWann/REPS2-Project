@@ -45,7 +45,7 @@ The runtime exposes `raise_ee_exception(EeState&, ExceptionCode, bool in_branch_
 - SYSCALL writes Cause.ExcCode = 8; BREAK writes Cause.ExcCode = 9.
 - When Status.EXL is clear, EPC becomes the faulting PC (or PC-4 for a branch-delay exception), Cause.BD is set or cleared accordingly, and Status.EXL is set.
 - When Status.EXL is already set, a nested Level-1 exception updates ExcCode but preserves the original EPC and BD frame.
-- With Status.BEV set, execution transfers to the bootstrap common vector `0xBFC00380`; otherwise it transfers to the common vector `0x80000180`.
+- With Status.BEV set, execution transfers to the bootstrap common vector `0xBFC00380`; otherwise it transfers to the common vector `0x80000200`.
 - The helper returns `Status::exception_delivered` so the native host knows that an exception transition occurred.
 
 The current CFG rejects traps in delay slots, as it has no representation for that control-flow case. The helper's BD/EPC rule is nevertheless directly unit-tested and is ready for a future delay-slot exception terminator.
