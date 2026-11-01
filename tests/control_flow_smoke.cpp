@@ -609,6 +609,55 @@ int main() {
     if (address_error_ram[0x6000U] != 0x55U || address_error_ram[0x6001U] != 0x66U
         || address_error_ram[0x6002U] != 0x77U || address_error_ram[0x6003U] != 0x88U) return fail(52);
 
+    // LWC1 and SWC1 use their own COP1 codegen path, but must deliver the
+    // same guest-visible alignment frames and avoid partial architectural commits.
+    std::vector<std::uint8_t> fpu_alignment_ram = main_ram;
+    fpu_alignment_ram[0x1000U] = 0x91U;
+    fpu_alignment_ram[0x1001U] = 0x82U;
+    fpu_alignment_ram[0x1002U] = 0x73U;
+    fpu_alignment_ram[0x1003U] = 0x64U;
+
+    EeState unaligned_fpu_load{};
+    unaligned_fpu_load.pc = 0x5700U;
+    unaligned_fpu_load.memory.main_ram = fpu_alignment_ram;
+    unaligned_fpu_load.gpr[8].low = 0x1001U;
+    unaligned_fpu_load.fpr[6] = 0xCAFEBABEU;
+    const auto fpu_load_alignment_status = reps2::generated::execute_cfg(unaligned_fpu_load, 8U);
+    if (fpu_load_alignment_status != Status::exception_delivered
+        || unaligned_fpu_load.pc != reps2::runtime::kEeCommonExceptionVector
+        || unaligned_fpu_load.cop0[reps2::runtime::kCop0Epc] != 0x5700U
+        || unaligned_fpu_load.cop0[reps2::runtime::kCop0BadVAddr] != 0x1001U
+        || (unaligned_fpu_load.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (unaligned_fpu_load.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || unaligned_fpu_load.fpr[6] != 0xCAFEBABEU) {
+        std::fprintf(stderr, "LWC1 AdEL frame mismatch: status=%u pc=0x%08X epc=0x%08X badvaddr=0x%08X fpr6=0x%08X\n",
+            static_cast<unsigned>(fpu_load_alignment_status), unaligned_fpu_load.pc,
+            unaligned_fpu_load.cop0[reps2::runtime::kCop0Epc],
+            unaligned_fpu_load.cop0[reps2::runtime::kCop0BadVAddr], unaligned_fpu_load.fpr[6]);
+        return fail(53);
+    }
+
+    EeState unaligned_fpu_store{};
+    unaligned_fpu_store.pc = 0x5800U;
+    unaligned_fpu_store.memory.main_ram = fpu_alignment_ram;
+    unaligned_fpu_store.gpr[8].low = 0x1001U;
+    unaligned_fpu_store.fpr[9] = 0xA1B2C3D4U;
+    const auto fpu_store_alignment_status = reps2::generated::execute_cfg(unaligned_fpu_store, 8U);
+    if (fpu_store_alignment_status != Status::exception_delivered
+        || unaligned_fpu_store.pc != reps2::runtime::kEeCommonExceptionVector
+        || unaligned_fpu_store.cop0[reps2::runtime::kCop0Epc] != 0x5800U
+        || unaligned_fpu_store.cop0[reps2::runtime::kCop0BadVAddr] != 0x1001U
+        || (unaligned_fpu_store.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (5U << 2U)
+        || (unaligned_fpu_store.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseBranchDelayMask) != 0U) {
+        std::fprintf(stderr, "SWC1 AdES frame mismatch: status=%u pc=0x%08X epc=0x%08X badvaddr=0x%08X\n",
+            static_cast<unsigned>(fpu_store_alignment_status), unaligned_fpu_store.pc,
+            unaligned_fpu_store.cop0[reps2::runtime::kCop0Epc],
+            unaligned_fpu_store.cop0[reps2::runtime::kCop0BadVAddr]);
+        return fail(54);
+    }
+    if (fpu_alignment_ram[0x1000U] != 0x91U || fpu_alignment_ram[0x1001U] != 0x82U
+        || fpu_alignment_ram[0x1002U] != 0x73U || fpu_alignment_ram[0x1003U] != 0x64U) return fail(55);
+
     // MMIO and hardware regions are not silently modelled as RAM.
     EeState mmio{};
     mmio.pc = 0x5000U;
