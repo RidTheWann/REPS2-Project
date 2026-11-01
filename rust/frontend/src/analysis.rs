@@ -53,15 +53,31 @@ pub enum DelaySlotPolicy {
 /// Conditions used by supported direct conditional branches.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BranchCondition {
-    Equal { lhs: u8, rhs: u8 },
-    NotEqual { lhs: u8, rhs: u8 },
-    LessThanOrEqualZero { register: u8 },
-    GreaterThanZero { register: u8 },
-    LessThanZero { register: u8 },
-    GreaterThanOrEqualZero { register: u8 },
+    Equal {
+        lhs: u8,
+        rhs: u8,
+    },
+    NotEqual {
+        lhs: u8,
+        rhs: u8,
+    },
+    LessThanOrEqualZero {
+        register: u8,
+    },
+    GreaterThanZero {
+        register: u8,
+    },
+    LessThanZero {
+        register: u8,
+    },
+    GreaterThanOrEqualZero {
+        register: u8,
+    },
     /// The FCR31 condition bit (bit 23) written by the preceding COP1 compare.
     /// BC1F branches when it is clear and BC1T when it is set.
-    FpuCondition { when_set: bool },
+    FpuCondition {
+        when_set: bool,
+    },
 }
 
 /// The semantic role of an outgoing static edge.

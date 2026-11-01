@@ -72,114 +72,494 @@ pub enum FpuComparison {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Operation {
     Nop,
-    MoveFromHi { dst: Gpr },
-    MoveFromLo { dst: Gpr },
-    MoveToHi { src: Gpr },
-    MoveToLo { src: Gpr },
-    MoveFromHi1 { dst: Gpr },
-    MoveFromLo1 { dst: Gpr },
-    MoveToHi1 { src: Gpr },
-    MoveToLo1 { src: Gpr },
-    MoveFromSa { dst: Gpr },
-    MoveToSa { src: Gpr },
-    MoveToSaByte { src: Gpr, immediate: u16 },
-    MoveToSaHalfword { src: Gpr, immediate: u16 },
-    FunnelShiftRightVec { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    MoveFromFpuRegister { dst: Gpr, src: Fpr },
-    MoveToFpuRegister { dst: Fpr, src: Gpr },
-    MoveFromFpuControl { dst: Gpr, register: FpuControl },
-    MoveToFpuControl { src: Gpr, register: FpuControl },
-    LoadFpuWord { dst: Fpr, base: Gpr, offset: u16 },
-    StoreFpuWord { src: Fpr, base: Gpr, offset: u16 },
+    MoveFromHi {
+        dst: Gpr,
+    },
+    MoveFromLo {
+        dst: Gpr,
+    },
+    MoveToHi {
+        src: Gpr,
+    },
+    MoveToLo {
+        src: Gpr,
+    },
+    MoveFromHi1 {
+        dst: Gpr,
+    },
+    MoveFromLo1 {
+        dst: Gpr,
+    },
+    MoveToHi1 {
+        src: Gpr,
+    },
+    MoveToLo1 {
+        src: Gpr,
+    },
+    MoveFromSa {
+        dst: Gpr,
+    },
+    MoveToSa {
+        src: Gpr,
+    },
+    MoveToSaByte {
+        src: Gpr,
+        immediate: u16,
+    },
+    MoveToSaHalfword {
+        src: Gpr,
+        immediate: u16,
+    },
+    FunnelShiftRightVec {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    MoveFromFpuRegister {
+        dst: Gpr,
+        src: Fpr,
+    },
+    MoveToFpuRegister {
+        dst: Fpr,
+        src: Gpr,
+    },
+    MoveFromFpuControl {
+        dst: Gpr,
+        register: FpuControl,
+    },
+    MoveToFpuControl {
+        src: Gpr,
+        register: FpuControl,
+    },
+    LoadFpuWord {
+        dst: Fpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreFpuWord {
+        src: Fpr,
+        base: Gpr,
+        offset: u16,
+    },
     // Single-precision COP1 arithmetic. Every form updates the FCR31 flag
     // summary; the accumulate forms write ACC, a separate 32-bit register with
     // no COP1 address, and the two MADD forms additionally read it.
-    FpuAddSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuSubtractSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuMultiplySingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuDivideSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuSquareRootSingle { dst: Fpr, src: Fpr },
-    FpuAbsoluteSingle { dst: Fpr, src: Fpr },
-    FpuMoveSingle { dst: Fpr, src: Fpr },
-    FpuNegateSingle { dst: Fpr, src: Fpr },
-    FpuReciprocalSquareRootSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuAddAccumulateSingle { lhs: Fpr, rhs: Fpr },
-    FpuSubtractAccumulateSingle { lhs: Fpr, rhs: Fpr },
-    FpuMultiplyAccumulateSingle { lhs: Fpr, rhs: Fpr },
-    FpuMultiplyAddSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuMultiplySubtractSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuMultiplyAddAccumulateSingle { lhs: Fpr, rhs: Fpr },
-    FpuMultiplySubtractAccumulateSingle { lhs: Fpr, rhs: Fpr },
-    FpuMaximumSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuMinimumSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
-    FpuConvertSingleToWord { dst: Fpr, src: Fpr },
-    FpuConvertWordToSingle { dst: Fpr, src: Fpr },
+    FpuAddSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuSubtractSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMultiplySingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuDivideSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuSquareRootSingle {
+        dst: Fpr,
+        src: Fpr,
+    },
+    FpuAbsoluteSingle {
+        dst: Fpr,
+        src: Fpr,
+    },
+    FpuMoveSingle {
+        dst: Fpr,
+        src: Fpr,
+    },
+    FpuNegateSingle {
+        dst: Fpr,
+        src: Fpr,
+    },
+    FpuReciprocalSquareRootSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuAddAccumulateSingle {
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuSubtractAccumulateSingle {
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMultiplyAccumulateSingle {
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMultiplyAddSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMultiplySubtractSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMultiplyAddAccumulateSingle {
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMultiplySubtractAccumulateSingle {
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMaximumSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuMinimumSingle {
+        dst: Fpr,
+        lhs: Fpr,
+        rhs: Fpr,
+    },
+    FpuConvertSingleToWord {
+        dst: Fpr,
+        src: Fpr,
+    },
+    FpuConvertWordToSingle {
+        dst: Fpr,
+        src: Fpr,
+    },
     /// C.<cc>.S writes only the FCR31 condition bit.
     FpuCompareSingle {
         lhs: Fpr,
         rhs: Fpr,
         comparison: FpuComparison,
     },
-    MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    Nor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    SetLessThanSigned64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    SetLessThanUnsigned64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    SetLessThanImmediateSigned64 { dst: Gpr, src: Gpr, immediate: u16 },
-    SetLessThanImmediateUnsigned64 { dst: Gpr, src: Gpr, immediate: u16 },
-    AddWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    AddImmediateWord { dst: Gpr, src: Gpr, immediate: u16 },
-    AddUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    AddImmediateUnsignedWord { dst: Gpr, src: Gpr, immediate: u16 },
-    ParallelAddUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    SubWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    SubUnsignedWord { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    AddDoublewordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    SubDoublewordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    AddImmediateDoublewordSigned { dst: Gpr, src: Gpr, immediate: u16 },
-    AddDoublewordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    SubDoublewordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    AddImmediateDoublewordUnsigned { dst: Gpr, src: Gpr, immediate: u16 },
-    ShiftLeftDoubleword { dst: Gpr, src: Gpr, amount: u8 },
-    ShiftRightLogicalDoubleword { dst: Gpr, src: Gpr, amount: u8 },
-    ShiftRightArithmeticDoubleword { dst: Gpr, src: Gpr, amount: u8 },
-    ShiftLeftWordVariable { dst: Gpr, src: Gpr, amount: Gpr },
-    ShiftRightLogicalWordVariable { dst: Gpr, src: Gpr, amount: Gpr },
-    ShiftRightArithmeticWordVariable { dst: Gpr, src: Gpr, amount: Gpr },
-    ShiftLeftDoublewordVariable { dst: Gpr, src: Gpr, amount: Gpr },
-    ShiftRightLogicalDoublewordVariable { dst: Gpr, src: Gpr, amount: Gpr },
-    ShiftRightArithmeticDoublewordVariable { dst: Gpr, src: Gpr, amount: Gpr },
-    And64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    Or64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    Xor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
-    AndImmediate64 { dst: Gpr, src: Gpr, immediate: u16 },
-    OrImmediate64 { dst: Gpr, src: Gpr, immediate: u16 },
-    XorImmediate64 { dst: Gpr, src: Gpr, immediate: u16 },
-    LoadUpperWord { dst: Gpr, immediate: u16 },
-    ShiftLeftWord { dst: Gpr, src: Gpr, amount: u8 },
-    ShiftRightLogicalWord { dst: Gpr, src: Gpr, amount: u8 },
-    ShiftRightArithmeticWord { dst: Gpr, src: Gpr, amount: u8 },
-    LoadByteSigned { dst: Gpr, base: Gpr, offset: u16 },
-    LoadByteUnsigned { dst: Gpr, base: Gpr, offset: u16 },
-    LoadHalfSigned { dst: Gpr, base: Gpr, offset: u16 },
-    LoadHalfUnsigned { dst: Gpr, base: Gpr, offset: u16 },
-    LoadWordSigned { dst: Gpr, base: Gpr, offset: u16 },
-    LoadWordUnsigned { dst: Gpr, base: Gpr, offset: u16 },
-    StoreByte { src: Gpr, base: Gpr, offset: u16 },
-    StoreHalf { src: Gpr, base: Gpr, offset: u16 },
-    StoreWord { src: Gpr, base: Gpr, offset: u16 },
-    LoadWordLeft { dst: Gpr, base: Gpr, offset: u16 },
-    LoadWordRight { dst: Gpr, base: Gpr, offset: u16 },
-    StoreWordLeft { src: Gpr, base: Gpr, offset: u16 },
-    StoreWordRight { src: Gpr, base: Gpr, offset: u16 },
-    LoadDoublewordLeft { dst: Gpr, base: Gpr, offset: u16 },
-    LoadDoublewordRight { dst: Gpr, base: Gpr, offset: u16 },
-    StoreDoublewordLeft { src: Gpr, base: Gpr, offset: u16 },
-    StoreDoublewordRight { src: Gpr, base: Gpr, offset: u16 },
-    LoadDoubleword { dst: Gpr, base: Gpr, offset: u16 },
-    StoreDoubleword { src: Gpr, base: Gpr, offset: u16 },
-    LoadQuadword { dst: Gpr, base: Gpr, offset: u16 },
-    StoreQuadword { src: Gpr, base: Gpr, offset: u16 },
+    MultiplyWordSigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    MultiplyWordUnsigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// DIV: signed 32-bit division. LO = quotient, HI = remainder.
+    DivideWordSigned {
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// DIVU: unsigned 32-bit division. LO = quotient, HI = remainder.
+    DivideWordUnsigned {
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// MOVN: GPR[rd] = GPR[rs] if GPR[rt] != 0.
+    MoveConditionalNotZero {
+        dst: Gpr,
+        src: Gpr,
+        test: Gpr,
+    },
+    /// MOVZ: GPR[rd] = GPR[rs] if GPR[rt] == 0.
+    MoveConditionalZero {
+        dst: Gpr,
+        src: Gpr,
+        test: Gpr,
+    },
+    Nor64 {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    SetLessThanSigned64 {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    SetLessThanUnsigned64 {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    SetLessThanImmediateSigned64 {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    SetLessThanImmediateUnsigned64 {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    AddWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    AddImmediateWord {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    AddUnsignedWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    AddImmediateUnsignedWord {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    ParallelAddUnsignedWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    SubWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    SubUnsignedWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    AddDoublewordSigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    SubDoublewordSigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    AddImmediateDoublewordSigned {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    AddDoublewordUnsigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    SubDoublewordUnsigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    AddImmediateDoublewordUnsigned {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    ShiftLeftDoubleword {
+        dst: Gpr,
+        src: Gpr,
+        amount: u8,
+    },
+    ShiftRightLogicalDoubleword {
+        dst: Gpr,
+        src: Gpr,
+        amount: u8,
+    },
+    ShiftRightArithmeticDoubleword {
+        dst: Gpr,
+        src: Gpr,
+        amount: u8,
+    },
+    ShiftLeftWordVariable {
+        dst: Gpr,
+        src: Gpr,
+        amount: Gpr,
+    },
+    ShiftRightLogicalWordVariable {
+        dst: Gpr,
+        src: Gpr,
+        amount: Gpr,
+    },
+    ShiftRightArithmeticWordVariable {
+        dst: Gpr,
+        src: Gpr,
+        amount: Gpr,
+    },
+    ShiftLeftDoublewordVariable {
+        dst: Gpr,
+        src: Gpr,
+        amount: Gpr,
+    },
+    ShiftRightLogicalDoublewordVariable {
+        dst: Gpr,
+        src: Gpr,
+        amount: Gpr,
+    },
+    ShiftRightArithmeticDoublewordVariable {
+        dst: Gpr,
+        src: Gpr,
+        amount: Gpr,
+    },
+    And64 {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    Or64 {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    Xor64 {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    AndImmediate64 {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    OrImmediate64 {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    XorImmediate64 {
+        dst: Gpr,
+        src: Gpr,
+        immediate: u16,
+    },
+    LoadUpperWord {
+        dst: Gpr,
+        immediate: u16,
+    },
+    ShiftLeftWord {
+        dst: Gpr,
+        src: Gpr,
+        amount: u8,
+    },
+    ShiftRightLogicalWord {
+        dst: Gpr,
+        src: Gpr,
+        amount: u8,
+    },
+    ShiftRightArithmeticWord {
+        dst: Gpr,
+        src: Gpr,
+        amount: u8,
+    },
+    LoadByteSigned {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadByteUnsigned {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadHalfSigned {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadHalfUnsigned {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadWordSigned {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadWordUnsigned {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreByte {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreHalf {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreWord {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadWordLeft {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadWordRight {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreWordLeft {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreWordRight {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadDoublewordLeft {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadDoublewordRight {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreDoublewordLeft {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreDoublewordRight {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadDoubleword {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreDoubleword {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadQuadword {
+        dst: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreQuadword {
+        src: Gpr,
+        base: Gpr,
+        offset: u16,
+    },
 }
 
 /// One IR operation with its original guest instruction address.
@@ -367,6 +747,26 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
             },
+            Opcode::Div => Operation::DivideWordSigned {
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::Divu => Operation::DivideWordUnsigned {
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::Movn => Operation::MoveConditionalNotZero {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rs),
+                test: gpr(instruction.rt),
+            },
+            Opcode::Movz => Operation::MoveConditionalZero {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rs),
+                test: gpr(instruction.rt),
+            },
+            // SYNC, CACHE and PREF have no guest-visible data effects.
+            Opcode::Sync | Opcode::Cache | Opcode::Pref => Operation::Nop,
             Opcode::Nor => Operation::Nor64 {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
