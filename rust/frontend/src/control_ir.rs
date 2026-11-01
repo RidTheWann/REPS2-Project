@@ -51,6 +51,11 @@ pub enum ControlTerminator {
         source_register: u8,
         delay_slot: ScalarInstruction,
     },
+    /// Architectural SYSCALL/BREAK exception entry.
+    GuestException {
+        guest_pc: u32,
+        trap: TrapKind,
+    },
     /// Dynamic return from an EE exception context through COP0.EPC/ErrorEPC.
     ExceptionReturn {
         guest_pc: u32,
@@ -58,10 +63,6 @@ pub enum ControlTerminator {
     Unsupported {
         guest_pc: u32,
         mnemonic: String,
-        /// Set when the terminator is an architectural SYSCALL or BREAK
-        /// exception rather than an unknown encoding. Code generation enters
-        /// the EE exception vector; it does not invoke a BIOS/HLE service.
-        trap: Option<TrapKind>,
     },
     SegmentEnd {
         next_pc: u32,
@@ -82,6 +83,7 @@ impl ControlTerminator {
             | Self::DirectJump { guest_pc, .. }
             | Self::IndirectJump { guest_pc, .. }
             | Self::Return { guest_pc, .. }
+            | Self::GuestException { guest_pc, .. }
             | Self::ExceptionReturn { guest_pc }
             | Self::Unsupported { guest_pc, .. } => Some(*guest_pc),
             Self::Fallthrough { .. } | Self::SegmentEnd { .. } => None,
@@ -95,6 +97,7 @@ impl ControlTerminator {
             | Self::IndirectJump { delay_slot, .. }
             | Self::Return { delay_slot, .. } => Some(delay_slot),
             Self::Fallthrough { .. }
+            | Self::GuestException { .. }
             | Self::ExceptionReturn { .. }
             | Self::Unsupported { .. }
             | Self::SegmentEnd { .. } => None,
@@ -108,7 +111,9 @@ impl ControlTerminator {
             | Self::DirectJump { .. }
             | Self::IndirectJump { .. }
             | Self::Return { .. } => 2,
-            Self::ExceptionReturn { .. } | Self::Unsupported { .. } => 1,
+            Self::GuestException { .. }
+            | Self::ExceptionReturn { .. }
+            | Self::Unsupported { .. } => 1,
             Self::Fallthrough { .. } | Self::SegmentEnd { .. } => 0,
         }
     }
@@ -209,7 +214,6 @@ impl ControlProgram {
                 ControlTerminator::Unsupported {
                     guest_pc,
                     mnemonic,
-                    trap: None,
                 }
             } else {
                 lift_terminator(&block.terminator)?
@@ -353,7 +357,7 @@ impl ControlProgram {
             .filter(|block| {
                 matches!(
                     &block.terminator,
-                    ControlTerminator::Unsupported { trap: Some(_), .. }
+                    ControlTerminator::GuestException { .. }
                 )
             })
             .count()
@@ -432,17 +436,20 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             delay_slot: lift_delay_slot(delay_slot)?,
         }),
         Terminator::Unsupported { instruction } => match instruction.opcode {
+            crate::mips::Opcode::Syscall => Ok(ControlTerminator::GuestException {
+                guest_pc: instruction.pc,
+                trap: TrapKind::Syscall,
+            }),
+            crate::mips::Opcode::Break => Ok(ControlTerminator::GuestException {
+                guest_pc: instruction.pc,
+                trap: TrapKind::Break,
+            }),
             crate::mips::Opcode::Eret => {
                 Ok(ControlTerminator::ExceptionReturn { guest_pc: instruction.pc })
             }
             opcode => Ok(ControlTerminator::Unsupported {
                 guest_pc: instruction.pc,
                 mnemonic: opcode.mnemonic().to_owned(),
-                trap: match opcode {
-                    crate::mips::Opcode::Syscall => Some(TrapKind::Syscall),
-                    crate::mips::Opcode::Break => Some(TrapKind::Break),
-                    _ => None,
-                },
             }),
         },
         Terminator::SegmentEnd { next_pc } => {
@@ -507,6 +514,7 @@ fn verify_terminator_targets(terminator: &ControlTerminator) -> Result<(), Contr
             verify_link_continuation(*guest_pc, *link_register, *return_pc)?;
         }
         ControlTerminator::Return { .. }
+        | ControlTerminator::GuestException { .. }
         | ControlTerminator::ExceptionReturn { .. }
         | ControlTerminator::Unsupported { .. } => {}
     }
@@ -592,6 +600,7 @@ fn verify_terminator_registers(terminator: &ControlTerminator) -> Result<(), Con
             source_register, ..
         } => validate(*source_register)?,
         ControlTerminator::Fallthrough { .. }
+        | ControlTerminator::GuestException { .. }
         | ControlTerminator::Unsupported { .. }
         | ControlTerminator::SegmentEnd { .. } => {}
     }
@@ -736,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn syscall_and_break_blocks_carry_guest_trap_kinds() {
+    fn syscall_and_break_blocks_lift_as_guest_exceptions() {
         let words = [
             0x0000_000C, // syscall code 0
             0x0000_004D, // break code 1
@@ -750,25 +759,23 @@ mod tests {
             AnalysisLimits::default(),
         )
         .expect("synthetic CFG");
-        let program = ControlProgram::lift(&graph).expect("traps remain explicit");
+        let program = ControlProgram::lift(&graph).expect("trap terminators lift");
         assert!(matches!(
             &program.blocks[&0x2000].terminator,
-            ControlTerminator::Unsupported {
+            ControlTerminator::GuestException {
                 guest_pc: 0x2000,
-                trap: Some(TrapKind::Syscall),
-                ..
+                trap: TrapKind::Syscall,
             }
         ));
         assert!(matches!(
             &program.blocks[&0x2004].terminator,
-            ControlTerminator::Unsupported {
+            ControlTerminator::GuestException {
                 guest_pc: 0x2004,
-                trap: Some(TrapKind::Break),
-                ..
+                trap: TrapKind::Break,
             }
         ));
         assert_eq!(program.trap_count(), 2);
-        assert_eq!(program.unsupported_count(), 2);
+        assert_eq!(program.unsupported_count(), 0);
     }
 
     #[test]
