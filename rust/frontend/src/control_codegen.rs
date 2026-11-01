@@ -388,17 +388,21 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 "    state.pc = 0x{guest_pc:08X}U;\n    return return_from_ee_exception(state);\n"
             ));
         }
-        ControlTerminator::Unsupported { guest_pc, trap, .. } => {
+        ControlTerminator::GuestException { guest_pc, trap } => {
             output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
             match trap {
-                Some(TrapKind::Syscall) => output.push_str(
+                TrapKind::Syscall => output.push_str(
                     "    return raise_ee_exception(state, ExceptionCode::SystemCall);\n"
                 ),
-                Some(TrapKind::Break) => output.push_str(
+                TrapKind::Break => output.push_str(
                     "    return raise_ee_exception(state, ExceptionCode::Breakpoint);\n"
                 ),
-                None => output.push_str("    return Status::unsupported_instruction;\n"),
             }
+        }
+        ControlTerminator::Unsupported { guest_pc, .. } => {
+            output.push_str(&format!(
+                "    state.pc = 0x{guest_pc:08X}U;\n    return Status::unsupported_instruction;\n"
+            ));
         }
         ControlTerminator::SegmentEnd { next_pc } => {
             output.push_str(&format!(
