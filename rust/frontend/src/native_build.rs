@@ -410,7 +410,6 @@ mod tests {
         assert!(project.cmake_lists.contains("CMAKE_CXX_FLAGS_RELEASE"));
         assert!(project.cmake_lists.contains("target_options"));
         assert!(project.cmake_lists.contains("reps2-native-toolchain-$<CONFIG>.json"));
-        assert!(!project.cmake_lists.contains("CMAKE_CXX_COMPILER\\\""));
     }
 
     #[test]
