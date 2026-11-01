@@ -18,6 +18,11 @@ pub struct AnalysisLimits {
     /// materialized at once. The EE exposes four aliases of the same RAM, so
     /// four is the architectural maximum.
     pub max_aliased_roots: u8,
+    /// Maximum number of heuristic function-root candidates that static
+    /// discovery may collect before it stops and reports truncation. Retail
+    /// executables are stripped, so this bounds the work spent on a hostile or
+    /// unusually large image.
+    pub max_function_roots: usize,
 }
 
 impl Default for AnalysisLimits {
@@ -27,6 +32,7 @@ impl Default for AnalysisLimits {
             max_instructions: 2_000_000,
             max_blocks: 250_000,
             max_aliased_roots: 4,
+            max_function_roots: 500_000,
         }
     }
 }
@@ -487,13 +493,117 @@ pub fn collect_entry_points(image: &Image, segments: &[LoadedSegment]) -> Vec<En
         .collect()
 }
 
-/// Loads PT_LOAD segments, discovers executable entry points, and builds a
-/// delay-slot-aware CFG from the ELF entry and function symbols.
-pub fn discover_elf(
+/// Heuristic function roots recovered from executable bytes.
+///
+/// Retail PS2 boot executables are commonly stripped of every `STT_FUNC`
+/// symbol, so the ELF entry alone bounds static analysis to the entry's first
+/// few blocks. This pass recovers additional entry candidates from two
+/// encoding-level signals. Both are candidates rather than reachability proofs:
+/// embedded data can decode as a `JAL` or as a stack prologue, and every
+/// candidate is validated by the CFG traversal before any block is emitted.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FunctionDiscovery {
+    /// Addresses targeted by a `JAL` whose word is file-backed executable code.
+    pub call_targets: BTreeSet<u32>,
+    /// Addresses whose first word is `addiu $sp, $sp, -N`, the PS2/EE ABI
+    /// callee prologue.
+    pub prologue_candidates: BTreeSet<u32>,
+    /// Number of aligned words examined.
+    pub scanned_words: u64,
+    /// Whether the candidate limit stopped the scan before the end of `.text`.
+    pub truncated: bool,
+}
+
+impl FunctionDiscovery {
+    /// The union of both evidence sets in deterministic address order.
+    #[must_use]
+    pub fn candidate_roots(&self) -> BTreeSet<u32> {
+        self.call_targets
+            .union(&self.prologue_candidates)
+            .copied()
+            .collect()
+    }
+
+    /// Number of distinct candidate addresses.
+    #[must_use]
+    pub fn candidate_count(&self) -> usize {
+        self.call_targets.union(&self.prologue_candidates).count()
+    }
+}
+
+/// Scans file-backed executable bytes for function entry candidates.
+///
+/// The scan reads each executable `PT_LOAD` segment in its declared alias view,
+/// so the four EE aliases of one segment are not revisited. A `JAL` target is
+/// admitted only when the target is itself backed by file bytes in an
+/// executable segment; a prologue is admitted only from an executable,
+/// file-backed word.
+#[must_use]
+pub fn discover_function_roots(
+    segments: &[LoadedSegment],
+    limits: AnalysisLimits,
+) -> FunctionDiscovery {
+    let mut discovery = FunctionDiscovery::default();
+    for segment in segments {
+        if segment.flags & elf::PF_X == 0 {
+            continue;
+        }
+        let file_size = segment.file_size.min(segment.bytes.len());
+        if file_size < 4 {
+            continue;
+        }
+        let base = segment.virtual_address;
+        let mut offset = ((4 - (base % 4)) % 4) as usize;
+        while offset + 4 <= file_size {
+            if discovery.call_targets.len() + discovery.prologue_candidates.len()
+                >= limits.max_function_roots
+            {
+                discovery.truncated = true;
+                return discovery;
+            }
+            let word = u32::from_le_bytes(
+                segment.bytes[offset..offset + 4]
+                    .try_into()
+                    .expect("four-byte discovery window"),
+            );
+            let Some(pc) = base.checked_add(offset as u32) else {
+                break;
+            };
+            discovery.scanned_words += 1;
+            let instruction = mips::decode(word, pc);
+            if instruction.opcode == Opcode::Jal
+                && crate::address::file_backed_executable_segment(segments, instruction.target)
+                    .is_some()
+            {
+                discovery.call_targets.insert(instruction.target);
+            }
+            if instruction.opcode == Opcode::Addiu
+                && instruction.rs == 29
+                && instruction.rt == 29
+                && instruction.signed_immediate() < 0
+            {
+                discovery.prologue_candidates.insert(pc);
+            }
+            offset += 4;
+        }
+    }
+    discovery
+}
+
+/// Materialized image segments plus the authoritative analysis roots.
+struct PreparedImage {
+    segments: Vec<LoadedSegment>,
+    entry_points: Vec<EntryPoint>,
+    roots: Vec<u32>,
+}
+
+/// Materializes PT_LOAD segments and collects the authoritative entry points
+/// (the ELF entry and any `STT_FUNC` symbols that map to executable bytes).
+fn prepare(
     image: &Image,
     file_bytes: &[u8],
     limits: AnalysisLimits,
-) -> Result<ControlFlowGraph, AnalysisError> {
+) -> Result<PreparedImage, AnalysisError> {
     let segments = elf::load_segments(file_bytes, image, limits.max_loaded_memory)
         .map_err(|error| AnalysisError::Elf(error.to_string()))?;
     let entry_points = collect_entry_points(image, &segments);
@@ -501,17 +611,145 @@ pub fn discover_elf(
         .iter()
         .map(|entry| entry.address)
         .collect::<Vec<_>>();
+    Ok(PreparedImage {
+        segments,
+        entry_points,
+        roots,
+    })
+}
+
+/// Loads PT_LOAD segments, discovers executable entry points, and builds a
+/// delay-slot-aware CFG from the ELF entry and function symbols.
+pub fn discover_elf(
+    image: &Image,
+    file_bytes: &[u8],
+    limits: AnalysisLimits,
+) -> Result<ControlFlowGraph, AnalysisError> {
+    let PreparedImage {
+        segments,
+        entry_points,
+        roots,
+    } = prepare(image, file_bytes, limits)?;
     discover_cfg(&segments, entry_points, &roots, limits)
 }
 
+/// The result of an analysis that augments authoritative roots with
+/// heuristically discovered function roots.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiscoveryAnalysis {
+    pub graph: ControlFlowGraph,
+    pub discovery: FunctionDiscovery,
+    /// Entry points that produced a block, including accepted discoveries.
+    pub accepted_roots: usize,
+    /// Discovered candidates the traversal rejected (delay-slot interior or
+    /// otherwise undecodable) and which are therefore not represented.
+    pub skipped_roots: Vec<u32>,
+    /// Heuristic-only block starts that could not be decoded and were skipped,
+    /// including any that were reached from an accepted discovered candidate
+    /// rather than being candidates themselves.
+    pub skipped_blocks: Vec<u32>,
+}
+
+/// Builds a CFG from the ELF entry and function symbols plus static function
+/// discovery over file-backed executable bytes.
+///
+/// This is the path a stripped retail executable needs: it never trusts a
+/// discovered candidate as a reachability claim, and a candidate that cannot be
+/// decoded as a block is dropped and reported rather than aborting the whole
+/// analysis.
+pub fn discover_elf_with_discovery(
+    image: &Image,
+    file_bytes: &[u8],
+    limits: AnalysisLimits,
+) -> Result<DiscoveryAnalysis, AnalysisError> {
+    let PreparedImage {
+        segments,
+        mut entry_points,
+        roots: authoritative,
+    } = prepare(image, file_bytes, limits)?;
+    let discovery = discover_function_roots(&segments, limits);
+
+    let authoritative_set: BTreeSet<u32> = authoritative.iter().copied().collect();
+    let mut discovered_roots = Vec::new();
+    for candidate in discovery.candidate_roots() {
+        if !authoritative_set.contains(&candidate) {
+            discovered_roots.push(candidate);
+        }
+    }
+
+    let mut roots = authoritative;
+    roots.extend(discovered_roots.iter().copied());
+    let heuristic: BTreeSet<u32> = discovered_roots.iter().copied().collect();
+    for root in &discovered_roots {
+        entry_points.push(EntryPoint {
+            address: *root,
+            labels: vec!["discovered".to_owned()],
+            is_elf_entry: false,
+        });
+    }
+
+    let built = build_cfg(&segments, entry_points, &roots, &heuristic, limits)?;
+    let mut graph = built.graph;
+    // A candidate the traversal could not turn into a block must not remain an
+    // entry point, or the control-IR verifier would reject the program.
+    graph
+        .entry_points
+        .retain(|entry| graph.blocks.contains_key(&entry.address));
+    let accepted_roots = graph.entry_points.len();
+    Ok(DiscoveryAnalysis {
+        graph,
+        discovery,
+        accepted_roots,
+        skipped_roots: built.rejected_roots,
+        skipped_blocks: built.skipped_blocks,
+    })
+}
+
+fn enqueue_root(
+    queue: &mut VecDeque<(u32, bool)>,
+    queued_authoritative: &mut BTreeSet<u32>,
+    queued_lenient: &mut BTreeSet<u32>,
+    address: u32,
+    lenient: bool,
+) {
+    let inserted = if lenient {
+        queued_lenient.insert(address)
+    } else {
+        queued_authoritative.insert(address)
+    };
+    if inserted {
+        queue.push_back((address, lenient));
+    }
+}
+
+/// A CFG plus the heuristic-only blocks the traversal could not decode.
+struct BuiltCfg {
+    graph: ControlFlowGraph,
+    rejected_roots: Vec<u32>,
+    skipped_blocks: Vec<u32>,
+}
+
 /// Builds a CFG from one or more executable roots in already materialized
-/// PT_LOAD segments. Only reachable words are decoded.
+/// PT_LOAD segments. Only reachable words are decoded. Authoritative roots must
+/// decode; heuristic roots that fail are reported through `BuiltCfg` instead of
+/// aborting the analysis.
 pub fn discover_cfg(
     segments: &[LoadedSegment],
     entry_points: Vec<EntryPoint>,
     roots: &[u32],
     limits: AnalysisLimits,
 ) -> Result<ControlFlowGraph, AnalysisError> {
+    let built = build_cfg(segments, entry_points, roots, &BTreeSet::new(), limits)?;
+    Ok(built.graph)
+}
+
+fn build_cfg(
+    segments: &[LoadedSegment],
+    entry_points: Vec<EntryPoint>,
+    roots: &[u32],
+    heuristic_roots: &BTreeSet<u32>,
+    limits: AnalysisLimits,
+) -> Result<BuiltCfg, AnalysisError> {
     if roots.is_empty() {
         return Err(AnalysisError::NoExecutableEntryPoints);
     }
@@ -581,28 +819,83 @@ pub fn discover_cfg(
         });
     }
 
-    let mut queue = VecDeque::new();
-    let mut queued = BTreeSet::new();
+    // Each queue entry records whether it is only heuristically reachable.
+    // Authoritative reachability is never dropped: a heuristic-only block that
+    // fails to decode is skipped and reported, and it is revisited with hard
+    // error semantics if authoritative reachability later arrives there.
+    let mut queue: VecDeque<(u32, bool)> = VecDeque::new();
+    let mut queued_authoritative = BTreeSet::new();
+    let mut queued_lenient = BTreeSet::new();
 
     let mut leaders = admitted_roots.clone();
-    for root in admitted_roots {
-        queue.push_back(root);
-        queued.insert(root);
+    let authoritative_roots: BTreeSet<u32> = admitted_roots
+        .iter()
+        .filter(|root| !heuristic_roots.contains(root))
+        .copied()
+        .collect();
+    let mut authoritative_leaders = authoritative_roots.clone();
+    for root in &admitted_roots {
+        enqueue_root(
+            &mut queue,
+            &mut queued_authoritative,
+            &mut queued_lenient,
+            *root,
+            !authoritative_roots.contains(root),
+        );
     }
 
     let mut blocks = BTreeMap::new();
     let mut owners: BTreeMap<u32, InstructionOwner> = BTreeMap::new();
     let mut external_targets = BTreeSet::new();
     let mut unresolved_indirect_jumps = BTreeSet::new();
+    let mut rejected_roots = Vec::new();
+    let mut skipped_blocks = Vec::new();
     let mut decoded_instruction_count = 0usize;
 
-    while let Some(start_pc) = queue.pop_front() {
-        if blocks.contains_key(&start_pc) {
+    let is_executable_view = |addr: u32| -> bool {
+        contains_executable_address(segments, addr)
+            || (crate::address::AliasRegion::of(addr).is_some_and(|r| {
+                aliased_root_views
+                    .iter()
+                    .any(|(view_r, _)| *view_r == Some(r))
+            }) && crate::address::physical_main_ram_address(addr)
+                .is_some_and(|p| crate::address::executable_file_bytes(segments, p, 4).is_some()))
+    };
+
+    while let Some((start_pc, lenient)) = queue.pop_front() {
+        if let Some(block) = blocks.get(&start_pc) {
+            // Authoritative reachability arriving at an already decoded
+            // heuristic block upgrades its successors: any of them that were
+            // skipped as heuristic-only must now be retried with hard errors.
+            if !lenient {
+                for target in block_targets(block) {
+                    if !is_executable_view(target) {
+                        external_targets.insert(target);
+                        continue;
+                    }
+                    leaders.insert(target);
+                    authoritative_leaders.insert(target);
+                    enqueue_root(
+                        &mut queue,
+                        &mut queued_authoritative,
+                        &mut queued_lenient,
+                        target,
+                        false,
+                    );
+                }
+            }
             continue;
         }
 
         if let Some(owner) = owners.get(&start_pc).copied() {
             if owner.location == OwnerLocation::DelaySlot {
+                if lenient {
+                    skipped_blocks.push(start_pc);
+                    if heuristic_roots.contains(&start_pc) {
+                        rejected_roots.push(start_pc);
+                    }
+                    continue;
+                }
                 let owning_control_pc = blocks
                     .get(&owner.block_start)
                     .and_then(|block: &BasicBlock| block.terminator.control_instruction())
@@ -613,7 +906,16 @@ pub fn discover_cfg(
                     owning_control_pc,
                 });
             }
-            split_block_at(start_pc, owner, &mut blocks, &mut owners)?;
+            if let Err(error) = split_block_at(start_pc, owner, &mut blocks, &mut owners) {
+                if lenient {
+                    skipped_blocks.push(start_pc);
+                    if heuristic_roots.contains(&start_pc) {
+                        rejected_roots.push(start_pc);
+                    }
+                    continue;
+                }
+                return Err(error);
+            }
             if blocks.len() > limits.max_blocks {
                 return Err(AnalysisError::BlockLimitExceeded {
                     limit: limits.max_blocks,
@@ -621,17 +923,6 @@ pub fn discover_cfg(
             }
             continue;
         }
-
-        let is_executable_view = |addr: u32| -> bool {
-            contains_executable_address(segments, addr)
-                || (crate::address::AliasRegion::of(addr).is_some_and(|r| {
-                    aliased_root_views
-                        .iter()
-                        .any(|(view_r, _)| *view_r == Some(r))
-                }) && crate::address::physical_main_ram_address(addr).is_some_and(|p| {
-                    crate::address::executable_file_bytes(segments, p, 4).is_some()
-                }))
-        };
 
         if !is_executable_view(start_pc) {
             external_targets.insert(start_pc);
@@ -643,143 +934,27 @@ pub fn discover_cfg(
             });
         }
 
-        let mut instructions = Vec::new();
-        let mut pc = start_pc;
-        let terminator = loop {
-            if pc != start_pc
-                && (leaders.contains(&pc) || blocks.contains_key(&pc) || owners.contains_key(&pc))
-            {
-                break Terminator::Fallthrough { next_pc: pc };
-            }
-
-            let Some(word) = read_instruction_word(segments, pc) else {
-                break Terminator::SegmentEnd { next_pc: pc };
-            };
-
-            increment_instruction_count(&mut decoded_instruction_count, limits.max_instructions)?;
-
-            let instruction = mips::decode(word, pc);
-            if !instruction.is_supported()
-                || matches!(
-                    instruction.opcode,
-                    Opcode::Syscall | Opcode::Break | Opcode::Eret
-                )
-            {
-                break Terminator::Unsupported { instruction };
-            }
-
-            if instruction.is_conditional_branch() {
-                let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                increment_instruction_count(
-                    &mut decoded_instruction_count,
-                    limits.max_instructions,
-                )?;
-                let condition = branch_condition(instruction)
-                    .ok_or(AnalysisError::InternalBlockOwnershipError(instruction.pc))?;
-                let fallthrough_pc = instruction
-                    .pc
-                    .checked_add(8)
-                    .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?;
-                break Terminator::ConditionalBranch {
-                    instruction,
-                    condition,
-                    target_pc: instruction.target,
-                    fallthrough_pc,
-                    delay_slot,
-                    delay_slot_policy: if instruction.is_branch_likely() {
-                        DelaySlotPolicy::AnnulWhenNotTaken
-                    } else {
-                        DelaySlotPolicy::ExecuteAlways
-                    },
-                    link_register: matches!(
-                        instruction.opcode,
-                        Opcode::Bltzal | Opcode::Bgezal | Opcode::Bltzall | Opcode::Bgezall
-                    )
-                    .then_some(31),
-                };
-            }
-
-            match instruction.opcode {
-                Opcode::J | Opcode::Jal => {
-                    let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                    increment_instruction_count(
-                        &mut decoded_instruction_count,
-                        limits.max_instructions,
-                    )?;
-                    let return_pc = if instruction.opcode == Opcode::Jal {
-                        Some(
-                            instruction
-                                .pc
-                                .checked_add(8)
-                                .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?,
-                        )
-                    } else {
-                        None
-                    };
-                    break Terminator::DirectJump {
-                        instruction,
-                        target_pc: instruction.target,
-                        delay_slot,
-                        link_register: (instruction.opcode == Opcode::Jal).then_some(31),
-                        return_pc,
-                    };
-                }
-                Opcode::Jr if instruction.rs == 31 => {
-                    let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                    increment_instruction_count(
-                        &mut decoded_instruction_count,
-                        limits.max_instructions,
-                    )?;
-                    break Terminator::Return {
-                        instruction,
-                        source_register: instruction.rs,
-                        delay_slot,
-                    };
-                }
-                Opcode::Jr | Opcode::Jalr => {
-                    let delay_slot = fetch_delay_slot(segments, instruction, &leaders, &owners)?;
-                    increment_instruction_count(
-                        &mut decoded_instruction_count,
-                        limits.max_instructions,
-                    )?;
-                    let link_register = if instruction.opcode == Opcode::Jalr && instruction.rd != 0
-                    {
-                        Some(instruction.rd)
-                    } else {
-                        None
-                    };
-                    let return_pc = if link_register.is_some() {
-                        Some(
-                            instruction
-                                .pc
-                                .checked_add(8)
-                                .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?,
-                        )
-                    } else {
-                        None
-                    };
-                    break Terminator::IndirectJump {
-                        instruction,
-                        source_register: instruction.rs,
-                        delay_slot,
-                        link_register,
-                        return_pc,
-                    };
-                }
-                _ => {}
-            }
-
-            instructions.push(instruction);
-            pc = pc
-                .checked_add(4)
-                .ok_or(AnalysisError::GuestPcOverflow(pc))?;
-        };
-
-        let block = BasicBlock {
+        let block = match build_block(
+            segments,
             start_pc,
-            instructions,
-            terminator,
+            &leaders,
+            &authoritative_leaders,
+            &owners,
+            &blocks,
+            &mut decoded_instruction_count,
+            limits,
+        ) {
+            Ok(block) => block,
+            Err(_) if lenient => {
+                skipped_blocks.push(start_pc);
+                if heuristic_roots.contains(&start_pc) {
+                    rejected_roots.push(start_pc);
+                }
+                continue;
+            }
+            Err(error) => return Err(error),
         };
+
         register_block_owners(&block, &mut owners)?;
         let next_targets = block_targets(&block);
         if let Terminator::IndirectJump { instruction, .. } = &block.terminator {
@@ -798,18 +973,175 @@ pub fn discover_cfg(
             // costs at most one extra queue entry per view, and each view that
             // is decoded is claimed in `decoded_alias_views`.
             leaders.insert(target);
-            if queued.insert(target) {
-                queue.push_back(target);
+            if !lenient {
+                authoritative_leaders.insert(target);
             }
+            enqueue_root(
+                &mut queue,
+                &mut queued_authoritative,
+                &mut queued_lenient,
+                target,
+                lenient,
+            );
         }
     }
 
-    Ok(ControlFlowGraph {
-        entry_points,
-        blocks,
-        unresolved_indirect_jumps: unresolved_indirect_jumps.into_iter().collect(),
-        external_targets: external_targets.into_iter().collect(),
-        decoded_instruction_count,
+    Ok(BuiltCfg {
+        graph: ControlFlowGraph {
+            entry_points,
+            blocks,
+            unresolved_indirect_jumps: unresolved_indirect_jumps.into_iter().collect(),
+            external_targets: external_targets.into_iter().collect(),
+            decoded_instruction_count,
+        },
+        rejected_roots,
+        skipped_blocks,
+    })
+}
+
+/// Decodes exactly one basic block beginning at `start_pc`.
+///
+/// The terminator and its delay slot stay explicit; the returned block's body
+/// excludes both. Errors propagate to the caller so authoritative roots fail
+/// hard while heuristic roots are tolerated.
+#[allow(clippy::too_many_arguments)]
+fn build_block(
+    segments: &[LoadedSegment],
+    start_pc: u32,
+    leaders: &BTreeSet<u32>,
+    authoritative_leaders: &BTreeSet<u32>,
+    owners: &BTreeMap<u32, InstructionOwner>,
+    blocks: &BTreeMap<u32, BasicBlock>,
+    decoded_instruction_count: &mut usize,
+    limits: AnalysisLimits,
+) -> Result<BasicBlock, AnalysisError> {
+    let mut instructions = Vec::new();
+    let mut pc = start_pc;
+    let terminator = loop {
+        if pc != start_pc
+            && (leaders.contains(&pc) || blocks.contains_key(&pc) || owners.contains_key(&pc))
+        {
+            break Terminator::Fallthrough { next_pc: pc };
+        }
+
+        let Some(word) = read_instruction_word(segments, pc) else {
+            break Terminator::SegmentEnd { next_pc: pc };
+        };
+
+        increment_instruction_count(decoded_instruction_count, limits.max_instructions)?;
+
+        let instruction = mips::decode(word, pc);
+        if !instruction.is_supported()
+            || matches!(
+                instruction.opcode,
+                Opcode::Syscall | Opcode::Break | Opcode::Eret
+            )
+        {
+            break Terminator::Unsupported { instruction };
+        }
+
+        if instruction.is_conditional_branch() {
+            let delay_slot =
+                fetch_delay_slot(segments, instruction, authoritative_leaders, owners)?;
+            increment_instruction_count(decoded_instruction_count, limits.max_instructions)?;
+            let condition = branch_condition(instruction)
+                .ok_or(AnalysisError::InternalBlockOwnershipError(instruction.pc))?;
+            let fallthrough_pc = instruction
+                .pc
+                .checked_add(8)
+                .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?;
+            break Terminator::ConditionalBranch {
+                instruction,
+                condition,
+                target_pc: instruction.target,
+                fallthrough_pc,
+                delay_slot,
+                delay_slot_policy: if instruction.is_branch_likely() {
+                    DelaySlotPolicy::AnnulWhenNotTaken
+                } else {
+                    DelaySlotPolicy::ExecuteAlways
+                },
+                link_register: matches!(
+                    instruction.opcode,
+                    Opcode::Bltzal | Opcode::Bgezal | Opcode::Bltzall | Opcode::Bgezall
+                )
+                .then_some(31),
+            };
+        }
+
+        match instruction.opcode {
+            Opcode::J | Opcode::Jal => {
+                let delay_slot =
+                    fetch_delay_slot(segments, instruction, authoritative_leaders, owners)?;
+                increment_instruction_count(decoded_instruction_count, limits.max_instructions)?;
+                let return_pc = if instruction.opcode == Opcode::Jal {
+                    Some(
+                        instruction
+                            .pc
+                            .checked_add(8)
+                            .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?,
+                    )
+                } else {
+                    None
+                };
+                break Terminator::DirectJump {
+                    instruction,
+                    target_pc: instruction.target,
+                    delay_slot,
+                    link_register: (instruction.opcode == Opcode::Jal).then_some(31),
+                    return_pc,
+                };
+            }
+            Opcode::Jr if instruction.rs == 31 => {
+                let delay_slot =
+                    fetch_delay_slot(segments, instruction, authoritative_leaders, owners)?;
+                increment_instruction_count(decoded_instruction_count, limits.max_instructions)?;
+                break Terminator::Return {
+                    instruction,
+                    source_register: instruction.rs,
+                    delay_slot,
+                };
+            }
+            Opcode::Jr | Opcode::Jalr => {
+                let delay_slot =
+                    fetch_delay_slot(segments, instruction, authoritative_leaders, owners)?;
+                increment_instruction_count(decoded_instruction_count, limits.max_instructions)?;
+                let link_register = if instruction.opcode == Opcode::Jalr && instruction.rd != 0 {
+                    Some(instruction.rd)
+                } else {
+                    None
+                };
+                let return_pc = if link_register.is_some() {
+                    Some(
+                        instruction
+                            .pc
+                            .checked_add(8)
+                            .ok_or(AnalysisError::GuestPcOverflow(instruction.pc))?,
+                    )
+                } else {
+                    None
+                };
+                break Terminator::IndirectJump {
+                    instruction,
+                    source_register: instruction.rs,
+                    delay_slot,
+                    link_register,
+                    return_pc,
+                };
+            }
+            _ => {}
+        }
+
+        instructions.push(instruction);
+        pc = pc
+            .checked_add(4)
+            .ok_or(AnalysisError::GuestPcOverflow(pc))?;
+    };
+
+    Ok(BasicBlock {
+        start_pc,
+        instructions,
+        terminator,
     })
 }
 
@@ -835,14 +1167,18 @@ fn increment_instruction_count(count: &mut usize, limit: usize) -> Result<(), An
 fn fetch_delay_slot(
     segments: &[LoadedSegment],
     control: DecodedInstruction,
-    leaders: &BTreeSet<u32>,
+    authoritative_leaders: &BTreeSet<u32>,
     owners: &BTreeMap<u32, InstructionOwner>,
 ) -> Result<DecodedInstruction, AnalysisError> {
     let delay_pc = control
         .pc
         .checked_add(4)
         .ok_or(AnalysisError::GuestPcOverflow(control.pc))?;
-    if leaders.contains(&delay_pc) || owners.contains_key(&delay_pc) {
+    // A heuristic-only leader that happens to land in this delay slot is not an
+    // authoritative boundary claim. Ignoring it lets the authoritative control
+    // instruction decode; the candidate is rejected as a delay-slot interior
+    // when its own queue entry is visited.
+    if authoritative_leaders.contains(&delay_pc) || owners.contains_key(&delay_pc) {
         return Err(AnalysisError::TargetEntersDelaySlot {
             target_pc: delay_pc,
             owning_control_pc: control.pc,
@@ -855,7 +1191,15 @@ fn fetch_delay_slot(
         });
     };
     let delay_slot = mips::decode(word, delay_pc);
-    if !delay_slot.is_supported() {
+    // A trap in a delay slot has no scalar-IR representation. Rejecting it here
+    // turns the owning block into an explicit unsupported stop instead of
+    // allowing a graph that cannot be lowered to control IR.
+    if !delay_slot.is_supported()
+        || matches!(
+            delay_slot.opcode,
+            Opcode::Syscall | Opcode::Break | Opcode::Eret
+        )
+    {
         return Err(AnalysisError::UnsupportedDelaySlot {
             control_pc: control.pc,
             delay_pc,
@@ -1444,5 +1788,191 @@ mod tests {
         )
         .expect_err("aliased root without budget");
         assert_eq!(error, AnalysisError::AliasedViewLimitExceeded { limit: 0 });
+    }
+
+    #[test]
+    fn rejects_a_trap_instruction_in_a_delay_slot() {
+        let words = [
+            0x1100_0001, // beq $t0, $zero, 0x3008
+            0x0000_000D, // delay slot: break, which scalar IR cannot represent
+            0x03E0_0008, // jr $ra
+            0x0000_0000, // return delay slot
+        ];
+        let segments = [segment(0x3000, &words)];
+        let error = discover_cfg(
+            &segments,
+            vec![entry(0x3000)],
+            &[0x3000],
+            AnalysisLimits::default(),
+        )
+        .expect_err("trap delay slot is an explicit unsupported stop");
+        assert!(matches!(
+            error,
+            AnalysisError::UnsupportedDelaySlot {
+                control_pc: 0x3000,
+                delay_pc: 0x3004,
+            }
+        ));
+    }
+
+    #[test]
+    fn discovers_jal_targets_and_stack_prologues() {
+        let words = [
+            0x27BD_FFE0, // 0x1000: addiu $sp, $sp, -32
+            0x0C00_0404, // 0x1004: jal 0x1010
+            0x0000_0000, // 0x1008: delay slot
+            0x03E0_0008, // 0x100C: jr $ra
+            0x27BD_FFF0, // 0x1010: addiu $sp, $sp, -16
+            0x0C00_2400, // 0x1014: jal 0x9000, outside executable file bytes
+        ];
+        let segments = [segment(0x1000, &words)];
+        let discovery = discover_function_roots(&segments, AnalysisLimits::default());
+
+        assert_eq!(discovery.scanned_words, 6);
+        assert!(!discovery.truncated);
+        assert_eq!(
+            discovery.call_targets,
+            BTreeSet::from([0x1010]),
+            "only JAL targets backed by executable file bytes are admitted"
+        );
+        assert_eq!(
+            discovery.prologue_candidates,
+            BTreeSet::from([0x1000, 0x1010])
+        );
+        assert_eq!(
+            discovery.candidate_roots(),
+            BTreeSet::from([0x1000, 0x1010])
+        );
+        assert_eq!(discovery.candidate_count(), 2);
+    }
+
+    #[test]
+    fn tolerates_a_heuristic_root_inside_a_delay_slot() {
+        // 0x3004 is the delay slot of the branch at 0x3000 but is also queued
+        // as a discovered candidate. The candidate must not stop the
+        // authoritative block from decoding; it is rejected when visited.
+        let words = [
+            0x1100_0001, // 0x3000: beq $t0, $zero, 0x3008
+            0x0000_0000, // 0x3004: delay slot (also a heuristic candidate)
+            0x03E0_0008, // 0x3008: jr $ra
+            0x0000_0000, // 0x300C: return delay slot
+        ];
+        let segments = [segment(0x3000, &words)];
+        let heuristic = BTreeSet::from([0x3004]);
+        let built = build_cfg(
+            &segments,
+            vec![entry(0x3000), entry(0x3004)],
+            &[0x3000, 0x3004],
+            &heuristic,
+            AnalysisLimits::default(),
+        )
+        .expect("authoritative control flow still decodes");
+
+        assert_eq!(built.rejected_roots, vec![0x3004]);
+        assert_eq!(built.skipped_blocks, vec![0x3004]);
+        assert!(built.graph.blocks.contains_key(&0x3000));
+        assert!(built.graph.blocks.contains_key(&0x3008));
+        assert!(!built.graph.blocks.contains_key(&0x3004));
+        assert_eq!(built.graph.blocks.len(), 2);
+        assert!(matches!(
+            &built.graph.blocks[&0x3000].terminator,
+            Terminator::ConditionalBranch { delay_slot, .. } if delay_slot.pc == 0x3004
+        ));
+    }
+
+    #[test]
+    fn stops_discovery_scan_at_the_candidate_limit() {
+        let words = [
+            0x27BD_FFE0, // 0x1000: addiu $sp, $sp, -32
+            0x27BD_FFF0, // 0x1004: addiu $sp, $sp, -16
+            0x03E0_0008, // 0x1008: jr $ra
+            0x0000_0000, // 0x100C: delay slot
+        ];
+        let segments = [segment(0x1000, &words)];
+        let limits = AnalysisLimits {
+            max_function_roots: 1,
+            ..Default::default()
+        };
+        let discovery = discover_function_roots(&segments, limits);
+
+        assert!(discovery.truncated);
+        assert_eq!(discovery.scanned_words, 1);
+        assert_eq!(discovery.prologue_candidates, BTreeSet::from([0x1000]));
+        assert_eq!(discovery.candidate_roots(), BTreeSet::from([0x1000]));
+    }
+
+    #[test]
+    fn discovers_roots_in_a_stripped_executable_image() {
+        // A stripped PT_LOAD has no STT_FUNC symbols, so the ELF entry alone
+        // only yields the `jr $ra` at 0x100000. Discovery recovers the stack
+        // prologues at 0x100010 and 0x100030 plus the `jal` target, which makes
+        // the rest of the callee bodies statically reachable.
+        let mut words = vec![0u32; 15]; // 0x100000..0x10003B
+        words[0] = 0x03E0_0008; // 0x100000: jr $ra
+        words[4] = 0x27BD_FFE0; // 0x100010: addiu $sp, $sp, -32
+        words[5] = 0x0C04_000C; // 0x100014: jal 0x100030
+        words[7] = 0x03E0_0008; // 0x10001C: jr $ra
+        words[12] = 0x27BD_FFF0; // 0x100030: addiu $sp, $sp, -16
+        words[13] = 0x03E0_0008; // 0x100034: jr $ra
+
+        let mut file_bytes = Vec::with_capacity(words.len() * 4);
+        for word in &words {
+            file_bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let file_size = u32::try_from(file_bytes.len()).expect("synthetic image size");
+
+        let image = Image {
+            file_type: elf::ET_EXEC,
+            machine: elf::EM_MIPS,
+            entry_point: 0x0010_0000,
+            flags: 0,
+            section_name_table_index: 0,
+            program_headers: vec![elf::ProgramHeader {
+                kind: elf::PT_LOAD,
+                offset: 0,
+                virtual_address: 0x0010_0000,
+                physical_address: 0x0010_0000,
+                file_size,
+                memory_size: file_size,
+                flags: elf::PF_R | PF_X,
+                alignment: 4,
+            }],
+            section_headers: Vec::new(),
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+        };
+
+        let analysis = discover_elf_with_discovery(&image, &file_bytes, AnalysisLimits::default())
+            .expect("stripped synthetic ELF");
+
+        assert_eq!(
+            analysis.discovery.candidate_roots(),
+            BTreeSet::from([0x0010_0010, 0x0010_0030])
+        );
+        assert!(analysis.skipped_roots.is_empty());
+        assert!(analysis.skipped_blocks.is_empty());
+        assert_eq!(analysis.accepted_roots, 3);
+        assert_eq!(
+            analysis
+                .graph
+                .entry_points
+                .iter()
+                .map(|entry| entry.address)
+                .collect::<Vec<_>>(),
+            vec![0x0010_0000, 0x0010_0010, 0x0010_0030]
+        );
+        let discovered = analysis
+            .graph
+            .entry_points
+            .iter()
+            .find(|entry| entry.address == 0x0010_0010)
+            .expect("discovered prologue is an entry point");
+        assert_eq!(discovered.labels, vec!["discovered".to_owned()]);
+        assert!(!discovered.is_elf_entry);
+        assert_eq!(
+            analysis.graph.blocks.keys().copied().collect::<Vec<_>>(),
+            vec![0x0010_0000, 0x0010_0010, 0x0010_001C, 0x0010_0030]
+        );
+        assert_eq!(analysis.graph.decoded_instruction_count, 10);
     }
 }

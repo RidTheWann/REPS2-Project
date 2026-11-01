@@ -1681,8 +1681,8 @@ mod tests {
         let words = [
             (0x10 << 26) | (2 << 16) | (12 << 11), // mfc0 $v0, $12 (Status)
             (0x10 << 26) | (4 << 21) | (3 << 16) | (12 << 11), // mtc0 $v1, $12 (Status)
-            0x4200_0038, // ei
-            0x4200_0039, // di
+            0x4200_0038,                           // ei
+            0x4200_0039,                           // di
         ];
         let decoded = words
             .iter()
@@ -1692,8 +1692,12 @@ mod tests {
         let program = ir::lift(&decoded).expect("COP0 IR");
         let cpp = emit_cpp(&program).expect("COP0 C++");
 
-        assert!(cpp.contains("if (2 != 0) state.gpr[2].low = sign_extend_word(read_cop0(state, 12));"));
-        assert!(cpp.contains("write_cop0(state, 12, static_cast<std::uint32_t>(state.gpr[3].low));"));
+        assert!(
+            cpp.contains("if (2 != 0) state.gpr[2].low = sign_extend_word(read_cop0(state, 12));")
+        );
+        assert!(
+            cpp.contains("write_cop0(state, 12, static_cast<std::uint32_t>(state.gpr[3].low));")
+        );
         assert!(cpp.contains("enable_interrupts(state);"));
         assert!(cpp.contains("disable_interrupts(state);"));
         assert!(cpp.contains("using reps2::runtime::read_cop0;"));
