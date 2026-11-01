@@ -153,18 +153,50 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-fn analyze_elf(path: &Path) -> Result<(), String> {
+fn analyze_elf(path: &Path, discover: bool) -> Result<(), String> {
     let bytes = read_input(path)?;
     let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
     if !image.is_mips() {
         return Err("ELF machine is not EM_MIPS; refusing PS2 EE analysis".to_owned());
     }
 
-    let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
-        .map_err(|error| error.to_string())?;
+    let (graph, discovery) = if discover {
+        let analysis::DiscoveryAnalysis {
+            graph,
+            discovery,
+            accepted_roots,
+            skipped_roots,
+            skipped_blocks,
+        } = analysis::discover_elf_with_discovery(&image, &bytes, AnalysisLimits::default())
+            .map_err(|error| error.to_string())?;
+        (
+            graph,
+            Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
+        )
+    } else {
+        let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
+            .map_err(|error| error.to_string())?;
+        (graph, None)
+    };
     let edges = graph.edges();
 
     println!("REPS2 reachable executable analysis");
+    if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
+        println!("  Root discovery: enabled (static scan of executable bytes)");
+        println!("    Scanned words: {}", found.scanned_words);
+        println!("    JAL call-target roots: {}", found.call_targets.len());
+        println!(
+            "    Stack-prologue roots: {}",
+            found.prologue_candidates.len()
+        );
+        println!("    Distinct candidates: {}", found.candidate_count());
+        println!("    Truncated by limit: {}", found.truncated);
+        println!("    Accepted roots: {accepted_roots}");
+        println!("    Skipped candidates: {}", skipped_roots.len());
+        println!("    Skipped heuristic blocks: {}", skipped_blocks.len());
+    } else {
+        println!("  Root discovery: disabled (ELF entry and STT_FUNC symbols only)");
+    }
     println!("  Entry roots: {}", graph.entry_points.len());
     println!("  Basic blocks: {}", graph.blocks.len());
     println!(
@@ -453,7 +485,7 @@ fn extract_boot_elf(input: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
+fn compile_elf(input: &Path, output: &Path, discover: bool) -> Result<(), String> {
     let bytes = read_input(input)?;
     let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
     if !image.is_mips() {
@@ -462,8 +494,24 @@ fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
 
     let ram_image = elf::build_main_ram_image(&bytes, &image)
         .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
-    let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
-        .map_err(|error| error.to_string())?;
+    let (graph, discovery) = if discover {
+        let analysis::DiscoveryAnalysis {
+            graph,
+            discovery,
+            accepted_roots,
+            skipped_roots,
+            skipped_blocks,
+        } = analysis::discover_elf_with_discovery(&image, &bytes, AnalysisLimits::default())
+            .map_err(|error| error.to_string())?;
+        (
+            graph,
+            Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
+        )
+    } else {
+        let graph = analysis::discover_elf(&image, &bytes, AnalysisLimits::default())
+            .map_err(|error| error.to_string())?;
+        (graph, None)
+    };
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
     let cpp = control_codegen::emit_cpp_with_entry(&program, image.entry_point)
         .map_err(|error| error.to_string())?;
@@ -479,6 +527,16 @@ fn compile_elf(input: &Path, output: &Path) -> Result<(), String> {
     println!("  RAM image bytes: {}", ram_image.bytes.len());
     println!("  ELF entry point: 0x{:08X}", image.entry_point);
     println!("  PT_LOAD segments placed: {}", ram_image.segments.len());
+    if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
+        println!(
+            "  Root discovery: enabled ({} candidate(s), {accepted_roots} accepted, {} candidate(s) skipped, {} heuristic block(s) skipped)",
+            found.candidate_count(),
+            skipped_roots.len(),
+            skipped_blocks.len()
+        );
+    } else {
+        println!("  Root discovery: disabled (ELF entry and STT_FUNC symbols only)");
+    }
     println!("  Entry points: {}", program.entry_points.len());
     println!("  Basic blocks: {}", program.blocks.len());
     println!(
@@ -862,9 +920,9 @@ fn usage() {
     println!("  reps2 add-game <disc-image.iso> [--library <directory>]");
     println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
     println!("  reps2 elf-info <elf-file>");
-    println!("  reps2 analyze-elf <elf-file>");
+    println!("  reps2 analyze-elf <elf-file> [--discover]");
     println!("  reps2 profile-elf <elf-file>");
-    println!("  reps2 recompile-elf <input-elf> <output.cpp>");
+    println!("  reps2 recompile-elf <input-elf> <output.cpp> [--discover]");
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!("  reps2 compile-cfg-fixture <output.cpp>");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
@@ -883,6 +941,9 @@ fn usage() {
     );
     println!(
         "recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images."
+    );
+    println!(
+        "--discover augments the ELF entry and STT_FUNC roots with static function discovery (JAL targets and ABI stack prologues) for stripped executables."
     );
     println!(
         "Allocated relocations, non-main-RAM PT_LOAD segments, and PS2 hardware services remain unsupported."
@@ -908,10 +969,16 @@ fn run() -> Result<(), String> {
             extract_boot_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
         }
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
-        Some("analyze-elf") if arguments.len() == 3 => analyze_elf(Path::new(&arguments[2])),
+        Some("analyze-elf") if arguments.len() == 3 => analyze_elf(Path::new(&arguments[2]), false),
+        Some("analyze-elf") if arguments.len() == 4 && arguments[3] == "--discover" => {
+            analyze_elf(Path::new(&arguments[2]), true)
+        }
         Some("profile-elf") if arguments.len() == 3 => profile_elf(Path::new(&arguments[2])),
         Some("recompile-elf") if arguments.len() == 4 => {
-            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]))
+            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), false)
+        }
+        Some("recompile-elf") if arguments.len() == 5 && arguments[4] == "--discover" => {
+            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), true)
         }
         Some("compile-cfg-fixture") if arguments.len() == 3 => {
             compile_cfg_fixture(Path::new(&arguments[2]))

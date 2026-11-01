@@ -87,7 +87,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
 - [x] Decode, lift and AOT-lower R5900 branch-likely BEQL/BNEL/BLEZL/BGTZL and BLTZL/BGEZL/BLTZALL/BGEZALL with not-taken delay-slot annulment; verify taken/not-taken side effects and unconditional PC+8 link writes in generated native code.
 - [x] Direct branch/call recovery and unresolved indirect-edge tracking.
-- [x] Entry/function root discovery from ELF entry and STT_FUNC symbols (indirect function discovery remains unresolved).
+- [x] Entry/function root discovery from ELF entry and STT_FUNC symbols, plus opt-in static discovery of `JAL` call targets and canonical `addiu $sp, $sp, -N` prologues for stripped retail executables. Discovered roots are labeled candidates rather than reachability claims; heuristic-only blocks that cannot decode are skipped and reported while authoritative roots still fail hard. Eight retail ELFs complete without truncation. See `docs/decisions/0026-static-function-discovery.md`.
 - [ ] Full documented R5900 branch, branch-likely, and control-transfer coverage.
 - [ ] Differential instruction corpus against documented behavior and an external oracle.
 
@@ -120,6 +120,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Generated ELF entry-point initializer which validates/copies a companion RAM image, resets GPRs and selects the ELF entry PC.
 - [x] Reject allocated REL/RELA relocations and ELF segments outside the implemented default main-RAM mapping.
 - [ ] Full EE virtual-memory/TLB mapping, exception delivery, cache semantics and memory-mapped device models.
+- [ ] Split the emitted CFG into multiple C++ translation units with a shared dispatch/ABI so discovered retail executables (hundreds of thousands of blocks, ~178 MB as one unit for Black/USA) can be built natively.
 - [ ] Build manifest with input hash, compiler options, and generated function metadata.
 - [x] CFG-aware C++20 dispatcher for the implemented direct and register-indirect control-flow subset.
 - [x] Synthetic generated control-flow code compiled and executed on Windows/MSVC and Linux/GCC, including branch-taken, branch-not-taken, delay slots, JAL/JR return, and instruction-budget behaviour.
