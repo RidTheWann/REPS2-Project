@@ -211,10 +211,7 @@ impl ControlProgram {
             }
 
             let terminator = if let Some((guest_pc, mnemonic)) = unsupported {
-                ControlTerminator::Unsupported {
-                    guest_pc,
-                    mnemonic,
-                }
+                ControlTerminator::Unsupported { guest_pc, mnemonic }
             } else {
                 lift_terminator(&block.terminator)?
             };
@@ -354,12 +351,7 @@ impl ControlProgram {
     pub fn trap_count(&self) -> usize {
         self.blocks
             .values()
-            .filter(|block| {
-                matches!(
-                    &block.terminator,
-                    ControlTerminator::GuestException { .. }
-                )
-            })
+            .filter(|block| matches!(&block.terminator, ControlTerminator::GuestException { .. }))
             .count()
     }
 }
@@ -444,9 +436,9 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
                 guest_pc: instruction.pc,
                 trap: TrapKind::Break,
             }),
-            crate::mips::Opcode::Eret => {
-                Ok(ControlTerminator::ExceptionReturn { guest_pc: instruction.pc })
-            }
+            crate::mips::Opcode::Eret => Ok(ControlTerminator::ExceptionReturn {
+                guest_pc: instruction.pc,
+            }),
             opcode => Ok(ControlTerminator::Unsupported {
                 guest_pc: instruction.pc,
                 mnemonic: opcode.mnemonic().to_owned(),
