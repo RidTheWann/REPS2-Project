@@ -167,7 +167,7 @@ enum class Status : std::uint8_t {
 }
 
 // Address errors publish the offending guest virtual address to BadVAddr.
-/// Only checked natural-alignment faults are routed here; translation, bus and
+// Only checked natural-alignment faults are routed here; translation, bus and
 /// device failures retain their distinct host/runtime statuses.
 [[nodiscard]] inline Status raise_ee_address_error(
     EeState& state, AddressErrorCode code, std::uint32_t bad_virtual_address,
