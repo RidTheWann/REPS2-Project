@@ -391,12 +391,10 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
         ControlTerminator::GuestException { guest_pc, trap } => {
             output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
             match trap {
-                TrapKind::Syscall => output.push_str(
-                    "    return raise_ee_exception(state, ExceptionCode::SystemCall);\n"
-                ),
-                TrapKind::Break => output.push_str(
-                    "    return raise_ee_exception(state, ExceptionCode::Breakpoint);\n"
-                ),
+                TrapKind::Syscall => output
+                    .push_str("    return raise_ee_exception(state, ExceptionCode::SystemCall);\n"),
+                TrapKind::Break => output
+                    .push_str("    return raise_ee_exception(state, ExceptionCode::Breakpoint);\n"),
             }
         }
         ControlTerminator::Unsupported { guest_pc, .. } => {
@@ -760,9 +758,9 @@ mod tests {
         ));
 
         let cpp = emit_cpp(&program).expect("single unit");
-        assert!(cpp.contains(
-            "state.pc = 0x00004000U;\n    return return_from_ee_exception(state);"
-        ));
+        assert!(
+            cpp.contains("state.pc = 0x00004000U;\n    return return_from_ee_exception(state);")
+        );
     }
 
     #[test]
