@@ -185,6 +185,23 @@ int main() {
         return fail(92);
     }
 
+    // A nested address error updates BadVAddr/ExcCode but preserves EPC/BD.
+    EeState nested_address_error{};
+    nested_address_error.pc = 0x7010U;
+    nested_address_error.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusExlMask;
+    nested_address_error.cop0[reps2::runtime::kCop0Epc] = 0x12345678U;
+    nested_address_error.cop0[reps2::runtime::kCop0Cause] =
+        reps2::runtime::kCop0CauseBranchDelayMask | (9U << 2U);
+    if (reps2::runtime::raise_ee_address_error(
+            nested_address_error, reps2::runtime::AddressErrorCode::Load, 0xDEADBEEFU, false)
+            != Status::exception_delivered
+        || nested_address_error.cop0[reps2::runtime::kCop0BadVAddr] != 0xDEADBEEFU
+        || nested_address_error.cop0[reps2::runtime::kCop0Epc] != 0x12345678U
+        || (nested_address_error.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U
+        || (nested_address_error.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)) return fail(99);
+
     EeState bootstrap_exception{};
     bootstrap_exception.pc = 0x4000U;
     bootstrap_exception.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusBevMask;
@@ -502,8 +519,15 @@ int main() {
     unaligned.gpr[14].low = 0x123456789ABCDEF0ULL;
     unaligned.gpr[14].high = 0x0BADF00D0BADF00DULL;
     const auto alignment_status = reps2::generated::execute_cfg(unaligned, 8U);
-    if (alignment_status != Status::address_error || unaligned.pc != 0x5100U) {
-        std::fprintf(stderr, "alignment status mismatch: status=%u pc=0x%08X\n", static_cast<unsigned>(alignment_status), unaligned.pc);
+    if (alignment_status != Status::exception_delivered
+        || unaligned.pc != reps2::runtime::kEeCommonExceptionVector
+        || unaligned.cop0[reps2::runtime::kCop0Epc] != 0x5100U
+        || unaligned.cop0[reps2::runtime::kCop0BadVAddr] != 0x1001U
+        || (unaligned.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (unaligned.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseBranchDelayMask) != 0U) {
+        std::fprintf(stderr, "AdEL frame mismatch: status=%u pc=0x%08X epc=0x%08X badvaddr=0x%08X\n",
+            static_cast<unsigned>(alignment_status), unaligned.pc,
+            unaligned.cop0[reps2::runtime::kCop0Epc], unaligned.cop0[reps2::runtime::kCop0BadVAddr]);
         return fail(27);
     }
     if (unaligned.gpr[14].low != 0x123456789ABCDEF0ULL
@@ -520,13 +544,70 @@ int main() {
     unaligned_doubleword.gpr[14].low = 0x123456789ABCDEF0ULL;
     unaligned_doubleword.gpr[14].high = 0x0BADF00D0BADF00DULL;
     const auto doubleword_alignment_status = reps2::generated::execute_cfg(unaligned_doubleword, 8U);
-    if (doubleword_alignment_status != Status::address_error || unaligned_doubleword.pc != 0x5200U
+    if (doubleword_alignment_status != Status::exception_delivered
+        || unaligned_doubleword.pc != reps2::runtime::kEeCommonExceptionVector
+        || unaligned_doubleword.cop0[reps2::runtime::kCop0Epc] != 0x5200U
+        || unaligned_doubleword.cop0[reps2::runtime::kCop0BadVAddr] != 0x1004U
+        || (unaligned_doubleword.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (unaligned_doubleword.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
         || unaligned_doubleword.gpr[14].low != 0x123456789ABCDEF0ULL
         || unaligned_doubleword.gpr[14].high != 0x0BADF00D0BADF00DULL) {
-        std::fprintf(stderr, "LD alignment fault was not precise: status=%u pc=0x%08X\n",
+        std::fprintf(stderr, "LD AdEL frame was not precise: status=%u pc=0x%08X\n",
             static_cast<unsigned>(doubleword_alignment_status), unaligned_doubleword.pc);
         return fail(41);
     }
+
+    // SW with an unaligned effective address raises AdES before changing RAM.
+    std::vector<std::uint8_t> address_error_ram = main_ram;
+    address_error_ram[0x1000U] = 0x11U;
+    address_error_ram[0x1001U] = 0x22U;
+    address_error_ram[0x1002U] = 0x33U;
+    address_error_ram[0x1003U] = 0x44U;
+    EeState unaligned_store{};
+    unaligned_store.pc = 0x5500U;
+    unaligned_store.memory.main_ram = address_error_ram;
+    unaligned_store.gpr[8].low = 0x1001U;
+    unaligned_store.gpr[9].low = 0xAABBCCDDU;
+    const auto store_alignment_status = reps2::generated::execute_cfg(unaligned_store, 8U);
+    if (store_alignment_status != Status::exception_delivered
+        || unaligned_store.pc != reps2::runtime::kEeCommonExceptionVector
+        || unaligned_store.cop0[reps2::runtime::kCop0Epc] != 0x5500U
+        || unaligned_store.cop0[reps2::runtime::kCop0BadVAddr] != 0x1001U
+        || (unaligned_store.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (5U << 2U)
+        || (unaligned_store.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseBranchDelayMask) != 0U) {
+        std::fprintf(stderr, "AdES frame mismatch: status=%u pc=0x%08X epc=0x%08X badvaddr=0x%08X\n",
+            static_cast<unsigned>(store_alignment_status), unaligned_store.pc,
+            unaligned_store.cop0[reps2::runtime::kCop0Epc], unaligned_store.cop0[reps2::runtime::kCop0BadVAddr]);
+        return fail(49);
+    }
+    if (address_error_ram[0x1000U] != 0x11U || address_error_ram[0x1001U] != 0x22U
+        || address_error_ram[0x1002U] != 0x33U || address_error_ram[0x1003U] != 0x44U) return fail(50);
+
+    address_error_ram[0x6000U] = 0x55U;
+    address_error_ram[0x6001U] = 0x66U;
+    address_error_ram[0x6002U] = 0x77U;
+    address_error_ram[0x6003U] = 0x88U;
+    EeState delayed_store{};
+    delayed_store.pc = 0x5600U;
+    delayed_store.memory.main_ram = address_error_ram;
+    delayed_store.gpr[8].low = 1U;
+    delayed_store.gpr[9].low = 1U;
+    delayed_store.gpr[10].low = 0x6001U;
+    delayed_store.gpr[11].low = 0x11223344U;
+    const auto delayed_store_status = reps2::generated::execute_cfg(delayed_store, 8U);
+    if (delayed_store_status != Status::exception_delivered
+        || delayed_store.pc != reps2::runtime::kEeCommonExceptionVector
+        || delayed_store.cop0[reps2::runtime::kCop0Epc] != 0x5600U
+        || delayed_store.cop0[reps2::runtime::kCop0BadVAddr] != 0x6001U
+        || (delayed_store.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (5U << 2U)
+        || (delayed_store.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseBranchDelayMask) == 0U) {
+        std::fprintf(stderr, "delay-slot AdES frame mismatch: status=%u pc=0x%08X epc=0x%08X badvaddr=0x%08X\n",
+            static_cast<unsigned>(delayed_store_status), delayed_store.pc,
+            delayed_store.cop0[reps2::runtime::kCop0Epc], delayed_store.cop0[reps2::runtime::kCop0BadVAddr]);
+        return fail(51);
+    }
+    if (address_error_ram[0x6000U] != 0x55U || address_error_ram[0x6001U] != 0x66U
+        || address_error_ram[0x6002U] != 0x77U || address_error_ram[0x6003U] != 0x88U) return fail(52);
 
     // MMIO and hardware regions are not silently modelled as RAM.
     EeState mmio{};

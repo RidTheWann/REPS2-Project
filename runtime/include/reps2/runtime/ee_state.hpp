@@ -77,6 +77,9 @@ enum class ExceptionCode : std::uint8_t {
     Overflow = 12,
 };
 
+/// Level-1 data-address exceptions raised by naturally misaligned accesses.
+enum class AddressErrorCode : std::uint8_t { Load = 4, Store = 5 };
+
 struct EeState {
     std::uint32_t pc{};
     std::array<Gpr128, 32> gpr{};
@@ -129,8 +132,8 @@ enum class Status : std::uint8_t {
         || status == Status::exception_delivered;
 }
 
-// Enter the EE's general Level-1 exception vector for SYSCALL, BREAK or signed
-// arithmetic overflow. The caller sets state.pc to the faulting instruction.
+// Enter the EE's general Level-1 vector for synchronous exceptions. The caller
+// sets state.pc to the faulting instruction before calling this helper.
 // For a delay-slot fault, state.pc is the delay-slot PC and BD/EPC identify the
 // owning branch. Nested exceptions preserve the first EPC/BD frame.
 [[nodiscard]] inline Status raise_ee_exception(
@@ -161,6 +164,17 @@ enum class Status : std::uint8_t {
         ? kEeBootstrapCommonExceptionVector
         : kEeCommonExceptionVector;
     return Status::exception_delivered;
+}
+
+// Address errors publish the offending guest virtual address to BadVAddr.
+// Only checked natural-alignment faults are routed here; translation, bus and
+// device failures retain their distinct host/runtime statuses.
+[[nodiscard]] inline Status raise_ee_address_error(
+    EeState& state, AddressErrorCode code, std::uint32_t bad_virtual_address,
+    bool in_branch_delay = false
+) noexcept {
+    state.cop0[kCop0BadVAddr] = bad_virtual_address;
+    return raise_ee_exception(state, static_cast<ExceptionCode>(code), in_branch_delay);
 }
 
 // ERET restores one unambiguous saved exception context. Sony's EE manual

@@ -174,17 +174,19 @@ pub(crate) fn emit_instruction(
             let tag = format!("{index:04}");
             emit_effective_address(output, &tag, base, offset);
             output.push_str(&format!(
-                "    std::uint32_t memory_value_{tag}{{}};\n    const auto memory_status_{tag} = load_u32(state.memory, effective_address_{tag}, memory_value_{tag});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n    state.fpr[{}] = memory_value_{tag};\n",
-                dst.index()
+                "    std::uint32_t memory_value_{tag}{{}};\n    const auto memory_status_{tag} = load_u32(state.memory, effective_address_{tag}, memory_value_{tag});\n"
             ));
+            emit_memory_status_check(output, &tag, false, in_branch_delay);
+            output.push_str(&format!("    state.fpr[{}] = memory_value_{tag};\n", dst.index()));
         }
         Operation::StoreFpuWord { src, base, offset } => {
             let tag = format!("{index:04}");
             emit_effective_address(output, &tag, base, offset);
             output.push_str(&format!(
-                "    const auto memory_status_{tag} = store_u32(state.memory, effective_address_{tag}, state.fpr[{}]);\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
+                "    const auto memory_status_{tag} = store_u32(state.memory, effective_address_{tag}, state.fpr[{}]);\n",
                 src.index()
             ));
+            emit_memory_status_check(output, &tag, true, in_branch_delay);
         }
         Operation::MoveFromCop0 { dst, cop0_reg } => {
             let d = dst.index();
@@ -442,31 +444,31 @@ pub(crate) fn emit_instruction(
             emit_shift(output, dst, src, amount, "arithmetic", true);
         }
         Operation::LoadByteSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 1, true);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 1, signed: true }, in_branch_delay);
         }
         Operation::LoadByteUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 1, false);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 1, signed: false }, in_branch_delay);
         }
         Operation::LoadHalfSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 2, true);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 2, signed: true }, in_branch_delay);
         }
         Operation::LoadHalfUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 2, false);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 2, signed: false }, in_branch_delay);
         }
         Operation::LoadWordSigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 4, true);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 4, signed: true }, in_branch_delay);
         }
         Operation::LoadWordUnsigned { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 4, false);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 4, signed: false }, in_branch_delay);
         }
         Operation::StoreByte { src, base, offset } => {
-            emit_memory_store(output, index, src, base, offset, 1);
+            emit_memory_store(output, index, src, base, offset, 1, in_branch_delay);
         }
         Operation::StoreHalf { src, base, offset } => {
-            emit_memory_store(output, index, src, base, offset, 2);
+            emit_memory_store(output, index, src, base, offset, 2, in_branch_delay);
         }
         Operation::StoreWord { src, base, offset } => {
-            emit_memory_store(output, index, src, base, offset, 4);
+            emit_memory_store(output, index, src, base, offset, 4, in_branch_delay);
         }
         Operation::LoadWordLeft { dst, base, offset } => {
             emit_partial_memory_load(output, index, dst, base, offset, "load_u32_left");
@@ -525,10 +527,10 @@ pub(crate) fn emit_instruction(
             );
         }
         Operation::LoadDoubleword { dst, base, offset } => {
-            emit_memory_load(output, index, dst, base, offset, 8, false);
+            emit_memory_load(output, index, dst, base, offset, MemoryLoadSpec { width: 8, signed: false }, in_branch_delay);
         }
         Operation::StoreDoubleword { src, base, offset } => {
-            emit_memory_store(output, index, src, base, offset, 8);
+            emit_memory_store(output, index, src, base, offset, 8, in_branch_delay);
         }
         Operation::LoadQuadword { dst, base, offset } => {
             emit_quadword_load(output, index, dst, base, offset);
@@ -612,15 +614,22 @@ fn emit_fpu_madd(
     );
 }
 
+#[derive(Clone, Copy)]
+struct MemoryLoadSpec {
+    width: u8,
+    signed: bool,
+}
+
 fn emit_memory_load(
     output: &mut String,
     index: usize,
     dst: Gpr,
     base: Gpr,
     offset: u16,
-    width: u8,
-    signed: bool,
+    access: MemoryLoadSpec,
+    in_branch_delay: bool,
 ) {
+    let MemoryLoadSpec { width, signed } = access;
     let tag = format!("{index:04}");
     let value_type = match width {
         1 => "std::uint8_t",
@@ -638,8 +647,9 @@ fn emit_memory_load(
     };
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
-        "    {value_type} memory_value_{tag}{{}};\n    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, memory_value_{tag});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n"
+        "    {value_type} memory_value_{tag}{{}};\n    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, memory_value_{tag});\n"
     ));
+    emit_memory_status_check(output, &tag, false, in_branch_delay);
 
     let value_expression = match (width, signed) {
         (1, true) => format!(
@@ -670,6 +680,7 @@ fn emit_memory_store(
     base: Gpr,
     offset: u16,
     width: u8,
+    in_branch_delay: bool,
 ) {
     let tag = format!("{index:04}");
     let (helper, value_type) = match width {
@@ -681,8 +692,21 @@ fn emit_memory_store(
     };
     emit_effective_address(output, &tag, base, offset);
     output.push_str(&format!(
-        "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
+        "    const auto memory_status_{tag} = {helper}(state.memory, effective_address_{tag}, static_cast<{value_type}>(state.gpr[{}].low));\n",
         src.index()
+    ));
+    emit_memory_status_check(output, &tag, true, in_branch_delay);
+}
+
+fn emit_memory_status_check(
+    output: &mut String,
+    tag: &str,
+    is_store: bool,
+    in_branch_delay: bool,
+) {
+    let code = if is_store { "Store" } else { "Load" };
+    output.push_str(&format!(
+        "    if (memory_status_{tag} == Status::address_error) return reps2::runtime::raise_ee_address_error(state, reps2::runtime::AddressErrorCode::{code}, effective_address_{tag}, {in_branch_delay});\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n"
     ));
 }
 
@@ -1270,7 +1294,9 @@ mod tests {
         assert!(cpp.contains("0xFFFFFFFFFFFFFF00ULL"));
         assert!(cpp.contains("0xFFFFFFFFFFFF0000ULL"));
         assert!(cpp.contains("sign_extend_word(memory_value_0003)"));
-        assert!(!cpp.contains("Status::address_error"));
+        assert!(cpp.contains("AddressErrorCode::Load"));
+        assert!(cpp.contains("AddressErrorCode::Store"));
+        assert!(cpp.contains("raise_ee_address_error"));
         assert!(cpp.contains("memory_status_0000 != Status::ok"));
     }
 
