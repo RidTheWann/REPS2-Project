@@ -33,12 +33,11 @@ IEEE 754 Rounding to 0. This difference is usually restricted to the least
 significant bit only." A datapath that truncates while aligning addends -
 which is what "no guard, round or sticky bits" describes - can therefore
 disagree with this model in the last bit for wide exponent spreads. The
-runtime models the hardware structure; vectors whose ideal and structural
-answers differ are labelled in the emitted table instead of being dropped, and
-`self_check` asserts that no such vector exists for the same-sign and
-same-exponent families.
+runtime models the hardware structure; the emitted table keeps vectors with
+wide exponent spreads, so an align-and-truncate answer that parts company with
+exact rounding fails a row instead of being filtered out.
 
-Two readings of the manuals conflict and are resolved explicitly here:
+The readings of the manuals that conflict are resolved explicitly here:
   * Cause-flag clearing. Table 8-2's column note reads as if every arithmetic
     operation rewrites all four cause flags, while every per-operation box in
     the instruction set manual says "flags that are not indicated in the
