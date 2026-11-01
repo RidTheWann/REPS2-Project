@@ -84,6 +84,8 @@ The ISO itself remains at its canonical source path to avoid duplicating multi-g
 
 The manifest separates discovery facts from execution claims. It records disc/ELF identity, loadable ranges, analysis coverage, unresolved edges, and optional generated artifacts. The current command always reports `playable: false`: parser success, a valid PT_LOAD image, and generated C++ are not evidence that the game can boot. This distinction is a required invariant for the launcher and compatibility catalog.
 
+`recompile-elf` emits a separate build manifest as the machine-readable half of the frontend/native boundary. `<stem>.manifest.json` records the manifest schema version, frontend version, exact host target, input path/size/SHA-256, the analysis limits that were applied, optional discovery totals, program counts, the dispatcher/part layout, and the RAM artifact. It is deterministic and contains no timestamps, machine names, or random values, so an identical invocation produces byte-identical output. It also records `playable: false`. Host compiler identity and flags are not known to the frontend and belong to the future native build driver; the frontend neither invokes nor guesses a C++ compiler. The library record (`game.json`) and the build manifest share string-escaping rules but have independent schemas and version numbers.
+
 The current import command defaults to the per-user application-data library (Windows: `%LOCALAPPDATA%\\REPS2\\Library`; Linux: `$XDG_DATA_HOME/reps2/Library` or `$HOME/.local/share/reps2/Library`). Set `REPS2_LIBRARY_DIR` or use the optional `--library` argument to override the path. A normal user supplies only the ISO path.\n\nThe current import command is:
 
     reps2 add-game <disc-image.iso> [--library <directory>]
