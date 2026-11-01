@@ -64,7 +64,7 @@ These projects have different goals and different completion levels. Their demos
 
 - PCSX2's R5900 interpreter implements `DADD`, `DSUB`, and `DADDI` as signed 64-bit operations with integer-overflow exceptions. Its handlers compute and check overflow before suppressing writes to GPR[0], so an overflowing instruction still raises the exception when the destination field is zero: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/R5900OpcodeImpl.cpp (see `_add64_Overflow`, `DADDI`, `DADD`, and `DSUB`).
 - `DADDI` sign-extends its 16-bit immediate before the 64-bit addition. `DADDU`, `DSUBU`, and `DADDIU` remain separate modulo-2^64 operations that do not raise signed-overflow exceptions.
-- REPS2 generated code computes result bits in `std::uint64_t` and uses sign-bit overflow identities for addition and subtraction. This avoids evaluating an overflowing signed C++ expression, which would invoke host-language undefined behavior. A failed operation returns `Status::integer_overflow` before committing its destination register.
+- REPS2 generated code computes result bits in `std::uint64_t` and uses sign-bit overflow identities for addition and subtraction. This avoids evaluating an overflowing signed C++ expression, which would invoke host-language undefined behavior. A signed overflow is delivered as EE Level-1 `Cause.ExcCode 12` through the shared exception helper before committing its destination register (ADR 0034).
 - Native tests cover normal results, `INT64_MAX + 1`, `INT64_MIN - 1`, `INT64_MIN + sign_extend(-2)`, source/destination aliasing, prior-instruction commit behavior, and overflow with `rd = 0`.
 
 ## R5900 64-bit compare and NOR cross-checks
@@ -200,10 +200,17 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 
 - ADR 0031 documented the intermediate stage where SYSCALL/BREAK were distinguished from unknown encodings but still returned terminal host statuses. Its historical Black/USA probe (status=10 at PC 0x001001C8) predates the exception-delivery work below; it is not evidence for the new runtime result.
 - ADR 0033 moves the instructions into typed `GuestException` control terminators, separate from `Unsupported`. SYSCALL enters with Cause.ExcCode 8 and BREAK with code 9. When Status.EXL is clear, exception entry records EPC (the trapping PC, or branch PC for a delay-slot exception), writes Cause.BD, and sets EXL. If EXL is already set, the first EPC/BD frame is preserved while the new ExcCode is recorded.
-- BEV selects the bootstrap common vector `0xBFC00380`; otherwise the common vector is `0x80000200`. `Status::exception_delivered` is a host boundary that returns control with COP0 state and PC populated. It is not a BIOS/HLE system-call implementation and does not claim that the handler itself has executed.
+- BEV selects the bootstrap common vector `0xBFC00380`; otherwise the common vector is `0x80000180`. `Status::exception_delivered` is a host boundary that returns control with COP0 state and PC populated. It is not a BIOS/HLE system-call implementation and does not claim that the handler itself has executed.
 - ERET is represented by a typed exception-return terminator. It restores PC from EPC when EXL is set or ErrorEPC when ERL is set, then clears the corresponding level bit. A missing or ambiguous context (including EXL and ERL both set) returns `invalid_exception_return` rather than guessing. The dispatcher can continue at the restored PC only when that target is part of the translated block table.
-- The runtime helper's branch-delay EPC/BD rule, nested Level-1 behavior, BEV vector selection, EXL/ERL return selection, generated ERET continuation and invalid-return cases are covered by native C++ tests on Windows/MSVC and Linux/GCC. The static CFG still rejects SYSCALL/BREAK/ERET in a branch delay slot, so generated code does not claim support for delay-slot exception entry.
+- The runtime helper's branch-delay EPC/BD rule, nested Level-1 behavior, BEV vector selection, EXL/ERL return selection, generated ERET continuation and invalid-return cases are covered by native C++ tests on Windows/MSVC and Linux/GCC. The static CFG still rejects SYSCALL/BREAK/ERET in a branch delay slot; generated data-memory operations can independently deliver AdEL/AdES from an admitted branch delay slot.
 - Build manifest schema v2 records `guest_exception_count` separately from `unsupported_stop_count`; the latter now counts only genuinely unsupported terminators. All generated manifests continue to record `playable: false`.
+
+## EE data address errors (AdEL / AdES)
+
+- Sony's EE Core User's Manual v6.0, section 4.2.9, defines AdEL as Cause.ExcCode 4 for a misaligned instruction fetch or load and AdES as code 5 for a misaligned store. V_COMMON is `0x80000180` when BEV=0 and `0xBFC00380` when BEV=1; BadVAddr receives the virtual address that directly caused the exception (https://docs.alexrp.com/mips/ee.pdf).
+- Generated memory code delivers AdEL for naturally misaligned LH/LHU/LW/LWU/LD and LWC1, and AdES for SH/SW/SD and SWC1. Byte operations cannot fail natural alignment; LQ/SQ retain their 16-byte rounding behavior; LWL/LWR/LDL/LDR and their stores retain aligned merge accesses.
+- Only `Status::address_error` is translated into a guest exception. `unmapped_memory`, `unsupported_memory_access`, short backing spans, TLB/translation, instruction-fetch faults, privilege faults and bus/MMIO failures are not relabeled as AdEL/AdES.
+- Native CFG tests cover BadVAddr, Cause codes, no destination or memory commit, AdES in a taken branch delay slot, and nested-frame preservation.
 
 ## Decoder coverage profiling
 
