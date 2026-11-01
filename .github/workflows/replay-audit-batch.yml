@@ -1,0 +1,96 @@
+name: Temporary audit batch replay
+
+on:
+  push:
+    branches:
+      - chore/audit-batch-1-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  replay-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure automation identity
+        run: |
+          git config user.name "REPS2 Maintainer Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Import the uploaded Git bundle
+        env:
+          BASE_COMMIT: f9e235cec854558dc2baeea2080284730961dd3e
+          BOOTSTRAP_BRANCH: chore/audit-batch-1-bootstrap
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/heads/$BOOTSTRAP_BRANCH:refs/remotes/origin/$BOOTSTRAP_BRANCH"
+          git show "refs/remotes/origin/$BOOTSTRAP_BRANCH:bootstrap/reps2-audit-batch-1.bundle" > "$RUNNER_TEMP/reps2-audit-batch-1.bundle"
+          git fetch "$RUNNER_TEMP/reps2-audit-batch-1.bundle" HEAD:refs/audit/replay-batch
+          git merge-base --is-ancestor "$BASE_COMMIT" refs/audit/replay-batch
+          mkdir -p "$RUNNER_TEMP/audit-patches"
+          git format-patch --keep-cr --output-directory "$RUNNER_TEMP/audit-patches" "$BASE_COMMIT"..refs/audit/replay-batch
+          test "$(find "$RUNNER_TEMP/audit-patches" -maxdepth 1 -name '*.patch' | wc -l)" -eq 6
+
+      - name: Apply the six commits to a clean integration branch
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git switch -c chore/audit-batch-1 origin/main
+          git am --keep-cr --reset-author "$RUNNER_TEMP"/audit-patches/*.patch
+          test "$(git rev-list --count origin/main..HEAD)" -eq 6
+          git log --oneline --decorate -6
+
+      - name: Install Rust 1.89 and 1.88
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+          components: clippy, rustfmt
+
+      - name: Verify formatting, lint, and Rust tests
+        working-directory: rust
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --locked
+
+      - name: Verify declared MSRV 1.88
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+          cargo +1.88.0 check --manifest-path rust/Cargo.toml --workspace --locked
+
+      - name: Verify full native CMake build and CTest
+        run: |
+          cmake -S . -B build -DBUILD_TESTING=ON
+          cmake --build build --config Release --parallel 2
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Publish the validated integration branch
+        run: git push origin HEAD:refs/heads/chore/audit-batch-1
+
+      - name: Remove the temporary replay workflow from main
+        run: |
+          set -euo pipefail
+          git switch main
+          git pull --ff-only origin main
+          git rm .github/workflows/replay-audit-batch.yml
+          git commit -m "chore: remove temporary audit batch replay workflow"
+          git push origin main
+
+      - name: Rebase the six-commit branch onto cleaned main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git switch chore/audit-batch-1
+          git rebase origin/main
+          test "$(git rev-list --count origin/main..HEAD)" -eq 6
+          git push --force-with-lease origin HEAD:refs/heads/chore/audit-batch-1
+
+      - name: Remove the temporary bundle branch
+        run: git push origin --delete chore/audit-batch-1-bootstrap
