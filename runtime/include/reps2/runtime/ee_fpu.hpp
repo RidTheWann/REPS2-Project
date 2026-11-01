@@ -6,9 +6,10 @@
 // EE COP1 single-precision arithmetic, modeled from the Sony primary sources:
 // EE Core (User's) Manual v6.0 sections 8.1.1 (format), 8.2 (register set and
 // the 32-bit accumulator), 8.3.2 (FCR31), 8.5 Table 8-4 (abnormal results),
-// 8.6 Tables 8-5 and 8-6 (signs of zero and of divide results), 8.7 (rounding)
-// and 8.8 (the compatibility statement), plus the per-operation boxes and
-// flag-scope note in the EE Core Instruction Set Manual Ch.5.
+// 8.6 Table 8-5 (signed zero, including the divide rows) and Table 8-6
+// (differences from IEEE 754), 8.7 (rounding) and 8.8 (the compatibility
+// statement), plus the per-operation boxes and flag-scope note in the EE Core
+// Instruction Set Manual Ch.5.
 //
 // Nothing here calls the host floating-point unit. The host float would be
 // wrong twice over: the EE rounds only toward zero with no guard, round or
@@ -235,7 +236,7 @@ struct Operand {
     const auto lhs = decode(a);
     const auto rhs = decode(b);
     if (lhs.mantissa == 0ULL && rhs.mantissa == 0ULL) {
-        // Table 8-6: a sum of two zeros is negative only when both are.
+        // Table 8-5: a sum of two zeros is negative only when both are.
         return {signed_zero(lhs.sign & rhs.sign), 0U, 0U};
     }
     if (lhs.mantissa == 0ULL) {
@@ -297,12 +298,13 @@ struct Operand {
 [[nodiscard]] constexpr FpuResult fpu_sub(std::uint32_t a, std::uint32_t b) noexcept {
     using namespace fpu_detail;
     const auto minuend = decode(a);
-    if (minuend.mantissa == 0ULL && decode(b).mantissa == 0ULL) {
-        // Table 8-6: (+0)-(+0)=+0, (+0)-(-0)=+0, (-0)-(+0)=-0, (-0)-(-0)=-0.
-        // The difference of two zeros always carries the minuend's sign, which
-        // is not what fpu_add's both-zero rule would give on the flipped
-        // subtrahend, so this case cannot be delegated.
-        return {signed_zero(minuend.sign), 0U, 0U};
+    const auto subtrahend = decode(b);
+    if (minuend.mantissa == 0ULL && subtrahend.mantissa == 0ULL) {
+        // Table 8-5: (+0)-(+0)=+0, (+0)-(-0)=+0, (-0)-(+0)=-0, (-0)-(-0)=+0.
+        // Only a negative minuend over a positive subtrahend stays negative,
+        // so the minuend-sign rule alone is wrong for (-0)-(-0), and this case
+        // cannot be delegated to fpu_add of the flipped subtrahend.
+        return {signed_zero(minuend.sign & ~subtrahend.sign), 0U, 0U};
     }
     return fpu_add(a, b ^ 0x8000'0000U);
 }
@@ -400,7 +402,9 @@ struct Operand {
 }
 
 [[nodiscard]] constexpr FpuResult fpu_abs(std::uint32_t a) noexcept {
-    return {a & 0x7FFF'FFFFU, 0U, 0U};
+    // ABS.S's operation box lists Flag O and Flag U as cleared, and PCSX2's
+    // ABS_S clears the same pair.
+    return {a & 0x7FFF'FFFFU, 0U, kFpuCauseOverflow | kFpuCauseUnderflow};
 }
 
 [[nodiscard]] constexpr FpuResult fpu_neg(std::uint32_t a) noexcept {
@@ -412,15 +416,27 @@ struct Operand {
 }
 
 [[nodiscard]] constexpr FpuResult fpu_max(std::uint32_t a, std::uint32_t b) noexcept {
-    return {fpu_detail::compare(a, b) >= 0 ? a : b,
-            0U,
-            kFpuCauseOverflow | kFpuCauseUnderflow};
+    using namespace fpu_detail;
+    if (decode(a).mantissa == 0ULL && decode(b).mantissa == 0ULL) {
+        // Table 8-5: Max is +0 unless both operands are -0, which the generic
+        // comparison cannot see because +0 and -0 compare equal.
+        return {signed_zero(decode(a).sign & decode(b).sign),
+                0U,
+                kFpuCauseOverflow | kFpuCauseUnderflow};
+    }
+    return {compare(a, b) >= 0 ? a : b, 0U, kFpuCauseOverflow | kFpuCauseUnderflow};
 }
 
 [[nodiscard]] constexpr FpuResult fpu_min(std::uint32_t a, std::uint32_t b) noexcept {
-    return {fpu_detail::compare(a, b) <= 0 ? a : b,
-            0U,
-            kFpuCauseOverflow | kFpuCauseUnderflow};
+    using namespace fpu_detail;
+    if (decode(a).mantissa == 0ULL && decode(b).mantissa == 0ULL) {
+        // Table 8-5: Min is -0 if either operand is -0, and +0 only when both
+        // are +0.
+        return {signed_zero(decode(a).sign | decode(b).sign),
+                0U,
+                kFpuCauseOverflow | kFpuCauseUnderflow};
+    }
+    return {compare(a, b) <= 0 ? a : b, 0U, kFpuCauseOverflow | kFpuCauseUnderflow};
 }
 
 [[nodiscard]] constexpr FpuResult fpu_cvt_w_s(std::uint32_t a) noexcept {
@@ -457,7 +473,10 @@ struct Operand {
 
 /// The multiply-accumulate family. The product truncates into the 32-bit
 /// accumulator path and the sum truncates again, so both operations' flags
-/// belong to the one instruction.
+/// belong to the one instruction. The instruction boxes instead short-circuit a
+/// product whose exponent reaches overflow and treat an ACC exponent of 0xFF as
+/// already overflowed; PCSX2's MADD_S/MSUB_S compute the plain product plus
+/// accumulator as done here, and ADR 0021 records the divergence.
 [[nodiscard]] constexpr FpuResult fpu_accumulate(
     std::uint32_t acc,
     std::uint32_t a,
