@@ -124,7 +124,7 @@ IR nodes retain guest PC and side-effect information. Word arithmetic restrictio
 
 Generated code uses explicit-width types and helper functions for guest arithmetic and architectural state. It must not rely on host signed-overflow behavior, pointer punning, or undefined behavior. Code generation is deterministic for the same IR. Generated scalar operations update GPR[63:0] while preserving the upper 64-bit lane.
 
-The first CFG backend emits a PC-based dispatcher over translated basic blocks. It evaluates branch predicates before link/delay-slot side effects, writes branch-link PC+8 independently of the predicate, captures indirect targets before potentially aliased link writes, runs the delay slot, then commits the next PC. Branch-likely terminators guard the delay-slot side effects with the evaluated predicate, so a not-taken branch annuls the delay slot while any link write remains unconditional. The runtime state carries the current 32-bit guest PC. A finite guest-instruction budget prevents an emitted loop from running without a bound; the dispatcher admits complete basic blocks atomically. Dynamic or out-of-graph targets return external_control_flow, and unsupported instructions return unsupported_instruction.
+The first CFG backend emits a PC-based dispatcher over translated basic blocks. It evaluates branch predicates before link/delay-slot side effects, writes branch-link PC+8 independently of the predicate, captures indirect targets before potentially aliased link writes, runs the delay slot, then commits the next PC. Branch-likely terminators guard the delay-slot side effects with the evaluated predicate, so a not-taken branch annuls the delay slot while any link write remains unconditional. The runtime state carries the current 32-bit guest PC. A finite guest-instruction budget prevents an emitted loop from running without a bound; the dispatcher admits complete basic blocks atomically. Dynamic or out-of-graph targets return external_control_flow, unsupported instructions return unsupported_instruction, and known SYSCALL/BREAK traps return syscall or breakpoint with the PC left on the trapping instruction. The trap code field in bits 25..6 is decodable but is not yet delivered to any service.
 
 ### Runtime
 
@@ -164,6 +164,7 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 - Checked little-endian EE main-RAM accesses over a caller-owned 32 MiB backing span with documented aliases and explicit MMIO/unmapped failures.
 - Default-map ET_EXEC PT_LOAD image construction with BSS zeroing, physical alias overlap rejection, and allocated-relocation refusal.
 - Generated ELF-entry RAM initializer, validated against synthetic 32 MiB image snapshots on Windows/MSVC and Linux/GCC.
+- Distinct `syscall`/`breakpoint` guest-trap statuses for SYSCALL/BREAK, with the trap code field exposed by the decoder and the PC preserved (ADR 0031).
 - Generated memory code executed in CI for signed/unsigned extension, write widths, all implemented RAM aliases, address alignment, unaligned byte-lane merges, unsupported devices and backing-span bounds.
 - CMake-generated C++ smoke test executed on Windows and Linux CI.
 
