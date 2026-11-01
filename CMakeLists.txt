@@ -1,10 +1,21 @@
 cmake_minimum_required(VERSION 3.25)
 
+# The frontend crate is the single source of truth for the project version.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/rust/frontend/Cargo.toml" REPS2_CARGO_VERSION_LINE
+    REGEX "^version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"$" LIMIT_COUNT 1)
+if(NOT REPS2_CARGO_VERSION_LINE MATCHES "\"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
+    message(FATAL_ERROR "Cannot read the version from rust/frontend/Cargo.toml")
+endif()
+set(REPS2_VERSION "${CMAKE_MATCH_1}")
+
 project(REPS2
-    VERSION 0.7.0
+    VERSION ${REPS2_VERSION}
     DESCRIPTION "Independent PlayStation 2 static recompilation toolchain"
     LANGUAGES CXX
 )
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/rust/frontend/Cargo.toml")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
