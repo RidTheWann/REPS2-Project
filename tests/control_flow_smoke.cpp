@@ -91,7 +91,7 @@ int main() {
     EeState call{};
     call.pc = 0x2000;
     const auto call_status = reps2::generated::execute_cfg(call, 64);
-    if (call_status != Status::exception_delivered || call.pc != 0x80000200U) {
+    if (call_status != Status::exception_delivered || call.pc != reps2::runtime::kEeCommonExceptionVector) {
         return fail(11);
     }
     if (call.gpr[31].low != 0x2008) {
@@ -112,7 +112,7 @@ int main() {
     link_not_taken.pc = 0x3000;
     link_not_taken.gpr[8].low = 1;
     const auto link_not_taken_status = reps2::generated::execute_cfg(link_not_taken, 64);
-    if (link_not_taken_status != Status::exception_delivered || link_not_taken.pc != 0x80000200U
+    if (link_not_taken_status != Status::exception_delivered || link_not_taken.pc != reps2::runtime::kEeCommonExceptionVector
         || link_not_taken.cop0[reps2::runtime::kCop0Epc] != 0x3008U) {
         return fail(14);
     }
@@ -125,7 +125,7 @@ int main() {
     link_taken.pc = 0x3000;
     link_taken.gpr[8].low = 0xFFFFFFFFFFFFFFFFULL;
     const auto link_taken_status = reps2::generated::execute_cfg(link_taken, 64);
-    if (link_taken_status != Status::exception_delivered || link_taken.pc != 0x80000200U
+    if (link_taken_status != Status::exception_delivered || link_taken.pc != reps2::runtime::kEeCommonExceptionVector
         || link_taken.cop0[reps2::runtime::kCop0Epc] != 0x300CU) {
         return fail(16);
     }
@@ -138,7 +138,7 @@ int main() {
     EeState break_trap{};
     break_trap.pc = 0x8000U;
     const auto break_status = reps2::generated::execute_cfg(break_trap, 64U);
-    if (break_status != Status::exception_delivered || break_trap.pc != 0x80000200U
+    if (break_status != Status::exception_delivered || break_trap.pc != reps2::runtime::kEeCommonExceptionVector
         || break_trap.cop0[reps2::runtime::kCop0Epc] != 0x8000U
         || (break_trap.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)
         || (break_trap.cop0[reps2::runtime::kCop0Status] & reps2::runtime::kCop0StatusExlMask) == 0U) {
@@ -154,9 +154,8 @@ int main() {
         return fail(89);
     }
 
-    // The first Level-1 exception records EPC and BD; an exception raised in a
-    // delay slot records the branch PC, even though delay-slot traps are not
-    // yet admitted by static CFG analysis.
+    // The first Level-1 exception records EPC and BD; arithmetic overflow in
+    // an admitted branch delay slot is delivered with the owning branch PC.
     EeState delay_exception{};
     delay_exception.pc = 0x1004U;
     if (reps2::runtime::raise_ee_exception(
@@ -193,6 +192,70 @@ int main() {
             bootstrap_exception, reps2::runtime::ExceptionCode::SystemCall) != Status::exception_delivered
         || bootstrap_exception.pc != reps2::runtime::kEeBootstrapCommonExceptionVector) {
         return fail(93);
+    }
+
+    // Signed arithmetic overflow is Cause.ExcCode 12 and uses V_COMMON,
+    // not the separate interrupt vector at 0x80000200.
+    EeState overflow_exception{};
+    overflow_exception.pc = 0x1234U;
+    if (reps2::runtime::raise_ee_exception(
+            overflow_exception, reps2::runtime::ExceptionCode::Overflow) != Status::exception_delivered
+        || overflow_exception.pc != 0x80000180U
+        || overflow_exception.cop0[reps2::runtime::kCop0Epc] != 0x1234U
+        || (overflow_exception.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (12U << 2U)
+        || (overflow_exception.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || (overflow_exception.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusExlMask) == 0U) {
+        return fail(95);
+    }
+    if (reps2::runtime::kEeInterruptVector != 0x80000200U
+        || reps2::runtime::kEeBootstrapInterruptVector != 0xBFC00400U) {
+        return fail(96);
+    }
+
+    // BLTZAL is not taken for positive t0, but still writes RA and executes its
+    // delay slot. DADD overflows there: EPC points to BLTZAL and Cause.BD is set.
+    EeState overflow_delay{};
+    overflow_delay.pc = 0x9000U;
+    overflow_delay.gpr[8].low = 0x7FFFFFFFFFFFFFFFULL;
+    overflow_delay.gpr[9].low = 1U;
+    overflow_delay.gpr[10].low = 0xAAAAAAAAAAAAAAAAULL;
+    const auto overflow_delay_status = reps2::generated::execute_cfg(overflow_delay, 64U);
+    if (overflow_delay_status != Status::exception_delivered
+        || overflow_delay.pc != reps2::runtime::kEeCommonExceptionVector
+        || overflow_delay.cop0[reps2::runtime::kCop0Epc] != 0x9000U
+        || (overflow_delay.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (12U << 2U)
+        || (overflow_delay.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U
+        || overflow_delay.gpr[10].low != 0xAAAAAAAAAAAAAAAAULL
+        || overflow_delay.gpr[31].low != 0x9008U) {
+        std::fprintf(stderr, "delay-slot DADD overflow frame mismatch: status=%u pc=0x%08X epc=0x%08X\n",
+            static_cast<unsigned>(overflow_delay_status), overflow_delay.pc,
+            overflow_delay.cop0[reps2::runtime::kCop0Epc]);
+        return fail(97);
+    }
+
+    // A not-taken branch-likely annuls its delay slot. The DADD would overflow
+    // if executed; reaching the following SYSCALL proves it was skipped.
+    EeState annulled_overflow_delay{};
+    annulled_overflow_delay.pc = 0xA000U;
+    annulled_overflow_delay.gpr[8].low = 1U;
+    annulled_overflow_delay.gpr[9].low = 0x7FFFFFFFFFFFFFFFULL;
+    annulled_overflow_delay.gpr[10].low = 0xBBBBBBBBBBBBBBBBULL;
+    const auto annulled_delay_status =
+        reps2::generated::execute_cfg(annulled_overflow_delay, 64U);
+    if (annulled_delay_status != Status::exception_delivered
+        || annulled_overflow_delay.pc != reps2::runtime::kEeCommonExceptionVector
+        || annulled_overflow_delay.cop0[reps2::runtime::kCop0Epc] != 0xA008U
+        || (annulled_overflow_delay.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
+        || (annulled_overflow_delay.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || annulled_overflow_delay.gpr[10].low != 0xBBBBBBBBBBBBBBBBULL) {
+        return fail(98);
     }
 
     // ERET is executable control flow: it restores EPC, clears EXL, and the
