@@ -63,6 +63,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Content-addressed, per-game ISO import manifest with internally extracted boot ELF and bounded analysis/code-generation status; original ISO remains external and no game binaries are committed.
 - [x] Discover ELF entry points and executable STT_FUNC symbol roots.
 - [x] Reachability-guided CFG for the implemented branch/jump subset; keep indirect targets unresolved.
+- [x] Explicit, validated analysis bounds with developer-CLI overrides (`--max-blocks`, `--max-instructions`, `--max-roots`). Defaults remain 250,000 blocks, 2,000,000 decoded instructions and 500,000 discovered roots; overrides must be positive and stay below ceilings above the physical 32 MiB address space, limit failures name the flag that raises them, and the applied values are recorded in the build manifest (ADR 0030).
 - [x] Distinguish file-backed executable bytes from zero-filled PT_LOAD tails during instruction reads.
 - [x] Report decoder coverage as an executable-byte census by supported opcode, trap, unsupported encoding family, and exact unsupported word, with a separate bounded entry-point scan; no reachability claim is made.
 
