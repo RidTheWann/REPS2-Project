@@ -64,7 +64,7 @@ The frontend executable is produced at:
 - Windows: build/cargo-target/release/reps2.exe
 - Linux: build/cargo-target/release/reps2
 
-The CMake build generates nine scalar/control translation units under `build/generated/` (`synthetic_program.cpp`, `compare_nor_program.cpp`, `signed_doubleword_program.cpp`, `word_overflow_program.cpp`, `hilo_program.cpp`, `sa_program.cpp`, `cop1_program.cpp`, `cop1_arith_program.cpp`, `control_flow.cpp`), compiles each with the host C++20 compiler into a native smoke executable, and runs them together with the Rust test target through CTest. A ninth fixture emits the same control-flow graph as a dispatcher (`control_flow_split.cpp`) plus four block parts (`control_flow_split.part0001.cpp` through `control_flow_split.part0004.cpp`) and links them into `reps2_cfg_split_codegen_smoke`, pinning the multi-translation-unit path.
+The CMake build generates nine scalar/control translation units under `build/generated/` (`synthetic_program.cpp`, `compare_nor_program.cpp`, `signed_doubleword_program.cpp`, `word_overflow_program.cpp`, `hilo_program.cpp`, `sa_program.cpp`, `cop1_program.cpp`, `cop1_arith_program.cpp`, `control_flow.cpp`), compiles each with the host C++20 compiler into a native smoke executable, and runs them together with the Rust test target through CTest. A separate split-CFG fixture emits the same control-flow graph as a dispatcher (`control_flow_split.cpp`) plus four block parts (`control_flow_split.part0001.cpp` through `control_flow_split.part0004.cpp`) and links them into `reps2_cfg_split_codegen_smoke`, pinning the multi-translation-unit path.
 
 For Rust-only work:
 

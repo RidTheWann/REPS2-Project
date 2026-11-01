@@ -190,7 +190,8 @@ int main() {
     bootstrap_exception.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusBevMask;
     if (reps2::runtime::raise_ee_exception(
             bootstrap_exception, reps2::runtime::ExceptionCode::SystemCall) != Status::exception_delivered
-        || bootstrap_exception.pc != reps2::runtime::kEeBootstrapCommonExceptionVector) {
+        || bootstrap_exception.pc != 0xBFC00380U
+        || reps2::runtime::kEeBootstrapCommonExceptionVector != 0xBFC00380U) {
         return fail(93);
     }
 

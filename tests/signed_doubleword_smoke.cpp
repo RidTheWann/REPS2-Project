@@ -71,7 +71,8 @@ int main() {
     add_overflow.gpr[8].low = 0x7FFFFFFFFFFFFFFFULL;
     add_overflow.gpr[9].low = 1ULL;
     add_overflow.gpr[10].low = 0xAAAAAAAAAAAAAAAAULL;
-    if (reps2::generated::execute(add_overflow) != Status::exception_delivered\n        || !has_overflow_frame(add_overflow, 0xB000U)) return 8;
+    if (reps2::generated::execute(add_overflow) != Status::exception_delivered
+        || !has_overflow_frame(add_overflow, 0xB000U)) return 8;
     if (add_overflow.gpr[10].low != 0xAAAAAAAAAAAAAAAAULL) return 9;
 
     // DSUB overflow: INT64_MIN - 1. The preceding DADD commits; DSUB does not.
@@ -79,7 +80,8 @@ int main() {
     sub_overflow.gpr[12].low = 0x8000000000000000ULL;
     sub_overflow.gpr[13].low = 1ULL;
     sub_overflow.gpr[11].low = 0xBBBBBBBBBBBBBBBBULL;
-    if (reps2::generated::execute(sub_overflow) != Status::exception_delivered\n        || !has_overflow_frame(sub_overflow, 0xB004U)) return 10;
+    if (reps2::generated::execute(sub_overflow) != Status::exception_delivered
+        || !has_overflow_frame(sub_overflow, 0xB004U)) return 10;
     if (sub_overflow.gpr[10].low != 30ULL) return 11;
     if (sub_overflow.gpr[11].low != 0xBBBBBBBBBBBBBBBBULL) return 12;
 
@@ -87,7 +89,8 @@ int main() {
     auto addi_overflow = make_state();
     addi_overflow.gpr[15].low = 0x8000000000000000ULL;
     addi_overflow.gpr[14].low = 0xCCCCCCCCCCCCCCCCULL;
-    if (reps2::generated::execute(addi_overflow) != Status::exception_delivered\n        || !has_overflow_frame(addi_overflow, 0xB008U)) return 13;
+    if (reps2::generated::execute(addi_overflow) != Status::exception_delivered
+        || !has_overflow_frame(addi_overflow, 0xB008U)) return 13;
     if (addi_overflow.gpr[10].low != 30ULL || addi_overflow.gpr[11].low != 10ULL) return 14;
     if (addi_overflow.gpr[14].low != 0xCCCCCCCCCCCCCCCCULL) return 15;
 
@@ -95,7 +98,8 @@ int main() {
     auto zero_destination_overflow = make_state();
     zero_destination_overflow.gpr[16].low = 0x7FFFFFFFFFFFFFFFULL;
     zero_destination_overflow.gpr[17].low = 1ULL;
-    if (reps2::generated::execute(zero_destination_overflow) != Status::exception_delivered\n        || !has_overflow_frame(zero_destination_overflow, 0xB00CU)) return 16;
+    if (reps2::generated::execute(zero_destination_overflow) != Status::exception_delivered
+        || !has_overflow_frame(zero_destination_overflow, 0xB00CU)) return 16;
     if (zero_destination_overflow.gpr[0].low != 0
         || zero_destination_overflow.gpr[0].high != 0) return 17;
     if (zero_destination_overflow.gpr[10].low != 30ULL

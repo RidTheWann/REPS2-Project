@@ -81,7 +81,12 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
     Ok(output)
 }
 
-pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: Instruction, in_branch_delay: bool) {
+pub(crate) fn emit_instruction(
+    output: &mut String,
+    index: usize,
+    instruction: Instruction,
+    in_branch_delay: bool,
+) {
     let pc = instruction.guest_pc;
     let prefix = format!("    // guest PC 0x{pc:08X}\n");
     output.push_str(&prefix);
@@ -313,7 +318,9 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         } => {
             emit_set_less_than_immediate(output, dst, src, immediate, false);
         }
-        Operation::AddWord { dst, lhs, rhs } => emit_word_add(output, index, dst, lhs, rhs, true, in_branch_delay),
+        Operation::AddWord { dst, lhs, rhs } => {
+            emit_word_add(output, index, dst, lhs, rhs, true, in_branch_delay)
+        },
         Operation::AddImmediateWord {
             dst,
             src,
@@ -331,7 +338,9 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         } => {
             emit_word_immediate_add(output, index, dst, src, immediate, false, in_branch_delay);
         }
-        Operation::SubWord { dst, lhs, rhs } => emit_word_sub(output, index, dst, lhs, rhs, true, in_branch_delay),
+        Operation::SubWord { dst, lhs, rhs } => {
+            emit_word_sub(output, index, dst, lhs, rhs, true, in_branch_delay)
+        },
         Operation::SubUnsignedWord { dst, lhs, rhs } => {
             emit_word_sub(output, index, dst, lhs, rhs, false, in_branch_delay)
         }
@@ -349,7 +358,9 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
             src,
             immediate,
         } => {
-            emit_doubleword_signed_immediate_add(output, index, dst, src, immediate, in_branch_delay);
+            emit_doubleword_signed_immediate_add(
+                output, index, dst, src, immediate, in_branch_delay,
+            );
         }
         Operation::AddDoublewordUnsigned { dst, lhs, rhs } => {
             emit_binary64(output, dst, lhs, rhs, "+")
@@ -1018,7 +1029,12 @@ fn emit_set_less_than_immediate(
     ));
 }
 
-fn emit_doubleword_signed_add(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr,
+fn emit_doubleword_signed_add(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
     in_branch_delay: bool,
 ) {
     let tag = format!("{index:04}");
@@ -1034,7 +1050,12 @@ fn emit_doubleword_signed_add(output: &mut String, index: usize, dst: Gpr, lhs: 
     ));
 }
 
-fn emit_doubleword_signed_sub(output: &mut String, index: usize, dst: Gpr, lhs: Gpr, rhs: Gpr,
+fn emit_doubleword_signed_sub(
+    output: &mut String,
+    index: usize,
+    dst: Gpr,
+    lhs: Gpr,
+    rhs: Gpr,
     in_branch_delay: bool,
 ) {
     let tag = format!("{index:04}");
@@ -1420,7 +1441,7 @@ mod tests {
         assert!(
             cpp.contains("signed_addi_result_0002 = signed_addi_lhs_0002 + signed_addi_rhs_0002")
         );
-        assert_eq!(cpp.matches("return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Overflow, false);").count(), 3);
+        assert_eq!(cpp.matches("ExceptionCode::Overflow, false);").count(), 3);
         assert!(cpp.contains("if (10 != 0) state.gpr[10].low = signed_add_result_0000"));
         assert!(cpp.contains("if (11 != 0) state.gpr[11].low = signed_sub_result_0001"));
         assert!(cpp.contains("if (14 != 0) state.gpr[14].low = signed_addi_result_0002"));
