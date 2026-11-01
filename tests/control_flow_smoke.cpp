@@ -208,6 +208,13 @@ int main() {
         || eret_return.cop0[reps2::runtime::kCop0Epc] != 0xF004U
         || (eret_return.cop0[reps2::runtime::kCop0Status]
             & reps2::runtime::kCop0StatusExlMask) != 0U) {
+        std::fprintf(stderr,
+            "ERET smoke: status=%u pc=0x%08X t0=0x%llX t1=0x%llX epc=0x%08X cop0_status=0x%08X\\n",
+            static_cast<unsigned>(eret_status), eret_return.pc,
+            static_cast<unsigned long long>(eret_return.gpr[8].low),
+            static_cast<unsigned long long>(eret_return.gpr[9].low),
+            eret_return.cop0[reps2::runtime::kCop0Epc],
+            eret_return.cop0[reps2::runtime::kCop0Status]);
         return fail(94);
     }
 
