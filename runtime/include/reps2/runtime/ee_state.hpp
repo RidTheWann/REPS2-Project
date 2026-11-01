@@ -64,7 +64,7 @@ inline constexpr std::uint32_t kCop0StatusBevMask{0x0040'0000U};
 // COP0 Cause fields used by synchronous Level-1 exceptions.
 inline constexpr std::uint32_t kCop0CauseExcCodeMask{0x0000'007CU};
 inline constexpr std::uint32_t kCop0CauseBranchDelayMask{0x8000'0000U};
-inline constexpr std::uint32_t kEeCommonExceptionVector{0x8000'0180U};
+inline constexpr std::uint32_t kEeCommonExceptionVector{0x8000'0200U};
 inline constexpr std::uint32_t kEeBootstrapCommonExceptionVector{0xBFC0'0380U};
 
 enum class ExceptionCode : std::uint8_t {
