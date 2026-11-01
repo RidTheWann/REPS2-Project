@@ -116,6 +116,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Decode, lift and lower LWL/LWR/SWL/SWR and LDL/LDR/SDL/SDR with checked aligned reads/writes and byte-lane merge semantics.
 - [x] Main-RAM backing span, documented aliases, endian-safe accessors, natural-alignment checks and explicit MMIO/unmapped statuses.
 - [x] Generated memory code compiled/executed on Windows/MSVC and Linux/GCC for load extension, store width, aliasing, alignment and bounds.
+- [x] Deliver precise EE AdEL/AdES for checked natural-alignment failures in generated scalar and FPU word loads/stores, with BadVAddr, Cause.ExcCode, no partial destination/memory commit and branch-delay EPC/BD validation on Windows/MSVC and Linux/GCC (ADR 0035).
 - [x] Generated LQ/SQ code compiled/executed on Windows/MSVC and Linux/GCC for both GPR lanes, 16-byte rounding, little-endian layout and backing-span bounds.
 - [x] Generated unaligned word and doubleword merge code exercised across every byte offset with GPR lane-preservation and short-backing failure tests.
 - [x] Generated ELF entry-point initializer which validates/copies a companion RAM image, resets GPRs and selects the ELF entry PC.

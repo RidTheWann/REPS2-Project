@@ -64,6 +64,7 @@ The synthetic native regression fixtures cover:
 - LW and LD AdEL entry with ExcCode 4, exact EPC, BadVAddr and clear BD.
 - SW AdES entry with ExcCode 5, exact EPC/BadVAddr and no partial memory write.
 - SW AdES in a taken BEQ delay slot, with EPC set to the BEQ, BD set, BadVAddr equal to the unaligned effective address, and memory unchanged.
+- LWC1 AdEL preserves the destination FPR; SWC1 AdES leaves every backing byte unchanged, and both record the correct virtual BadVAddr/EPC and clear BD.
 - Nested address error behavior: BadVAddr/ExcCode update while the previous EPC/BD restart frame is preserved.
 - Existing MMIO, unmapped-memory and low-level helper tests remain separate and continue expecting their distinct statuses.
 - Rust code-generation assertions verify that load and store paths emit the architectural helper instead of leaking `Status::address_error`.
