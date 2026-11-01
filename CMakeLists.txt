@@ -562,6 +562,54 @@ if(BUILD_TESTING)
     endif()
 
     add_test(NAME reps2_cfg_codegen_smoke COMMAND reps2_cfg_codegen_smoke)
+
+    # The same synthetic CFG emitted as one dispatcher plus four block parts.
+    # This pins the multi-translation-unit path: the dispatcher's sorted block
+    # table must link against definitions living in the part files, and the
+    # runtime behavior must still match tests/control_flow_smoke.cpp.
+    set(REPS2_CFG_SPLIT_GENERATED_CPP
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow_split.cpp"
+    )
+    set(REPS2_CFG_SPLIT_PART_CPP
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow_split.part0001.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow_split.part0002.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow_split.part0003.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/control_flow_split.part0004.cpp"
+    )
+    add_custom_command(
+        OUTPUT "${REPS2_CFG_SPLIT_GENERATED_CPP}" ${REPS2_CFG_SPLIT_PART_CPP}
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-cfg-fixture
+            "${REPS2_CFG_SPLIT_GENERATED_CPP}" --tu-count 4
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "Generating the synthetic EE control-flow graph as four translation units"
+        VERBATIM
+    )
+    set_source_files_properties(
+        "${REPS2_CFG_SPLIT_GENERATED_CPP}" ${REPS2_CFG_SPLIT_PART_CPP}
+        PROPERTIES GENERATED TRUE
+    )
+
+    add_custom_target(reps2_cfg_split_codegen_fixture
+        DEPENDS "${REPS2_CFG_SPLIT_GENERATED_CPP}" ${REPS2_CFG_SPLIT_PART_CPP}
+    )
+    add_executable(reps2_cfg_split_codegen_smoke
+        "${REPS2_CFG_SPLIT_GENERATED_CPP}"
+        ${REPS2_CFG_SPLIT_PART_CPP}
+        tests/control_flow_smoke.cpp
+    )
+    add_dependencies(reps2_cfg_split_codegen_smoke reps2_cfg_split_codegen_fixture)
+    target_link_libraries(reps2_cfg_split_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cfg_split_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cfg_split_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cfg_split_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+
+    add_test(NAME reps2_cfg_split_codegen_smoke COMMAND reps2_cfg_split_codegen_smoke)
 endif()
 
 install(PROGRAMS "${REPS2_FRONTEND_EXECUTABLE}" DESTINATION bin)

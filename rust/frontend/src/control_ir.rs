@@ -113,6 +113,7 @@ pub enum ControlError {
     TerminatorPcMismatch { expected: u32, actual: u32 },
     DelaySlotPcMismatch { expected: u32, actual: u32 },
     InvalidRegister(u8),
+    InvalidTranslationUnitCount(usize),
     ScalarLift(LiftError),
     ScalarVerify(ScalarVerifyError),
 }
@@ -146,6 +147,10 @@ impl fmt::Display for ControlError {
             Self::InvalidRegister(register) => {
                 write!(formatter, "invalid control-flow GPR index {register}")
             }
+            Self::InvalidTranslationUnitCount(count) => write!(
+                formatter,
+                "translation-unit count {count} is out of range (expected 1..=block count)"
+            ),
             Self::ScalarLift(error) => write!(formatter, "scalar IR lift failed: {error}"),
             Self::ScalarVerify(error) => {
                 write!(formatter, "scalar IR verification failed: {error}")
