@@ -219,20 +219,20 @@ int main() {
     // BLTZAL is not taken for positive t0, but still writes RA and executes its
     // delay slot. DADD overflows there: EPC points to BLTZAL and Cause.BD is set.
     EeState overflow_delay{};
-    overflow_delay.pc = 0x9000U;
+    overflow_delay.pc = 0xD000U;
     overflow_delay.gpr[8].low = 0x7FFFFFFFFFFFFFFFULL;
     overflow_delay.gpr[9].low = 1U;
     overflow_delay.gpr[10].low = 0xAAAAAAAAAAAAAAAAULL;
     const auto overflow_delay_status = reps2::generated::execute_cfg(overflow_delay, 64U);
     if (overflow_delay_status != Status::exception_delivered
         || overflow_delay.pc != reps2::runtime::kEeCommonExceptionVector
-        || overflow_delay.cop0[reps2::runtime::kCop0Epc] != 0x9000U
+        || overflow_delay.cop0[reps2::runtime::kCop0Epc] != 0xD000U
         || (overflow_delay.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseExcCodeMask) != (12U << 2U)
         || (overflow_delay.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseBranchDelayMask) == 0U
         || overflow_delay.gpr[10].low != 0xAAAAAAAAAAAAAAAAULL
-        || overflow_delay.gpr[31].low != 0x9008U) {
+        || overflow_delay.gpr[31].low != 0xD008U) {
         std::fprintf(stderr, "delay-slot DADD overflow frame mismatch: status=%u pc=0x%08X epc=0x%08X\n",
             static_cast<unsigned>(overflow_delay_status), overflow_delay.pc,
             overflow_delay.cop0[reps2::runtime::kCop0Epc]);
@@ -242,7 +242,7 @@ int main() {
     // A not-taken branch-likely annuls its delay slot. The DADD would overflow
     // if executed; reaching the following SYSCALL proves it was skipped.
     EeState annulled_overflow_delay{};
-    annulled_overflow_delay.pc = 0xA000U;
+    annulled_overflow_delay.pc = 0xD100U;
     annulled_overflow_delay.gpr[8].low = 1U;
     annulled_overflow_delay.gpr[9].low = 0x7FFFFFFFFFFFFFFFULL;
     annulled_overflow_delay.gpr[10].low = 0xBBBBBBBBBBBBBBBBULL;
@@ -250,7 +250,7 @@ int main() {
         reps2::generated::execute_cfg(annulled_overflow_delay, 64U);
     if (annulled_delay_status != Status::exception_delivered
         || annulled_overflow_delay.pc != reps2::runtime::kEeCommonExceptionVector
-        || annulled_overflow_delay.cop0[reps2::runtime::kCop0Epc] != 0xA008U
+        || annulled_overflow_delay.cop0[reps2::runtime::kCop0Epc] != 0xD108U
         || (annulled_overflow_delay.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
         || (annulled_overflow_delay.cop0[reps2::runtime::kCop0Cause]
