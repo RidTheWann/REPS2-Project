@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Mutation harness for the COP1 arithmetic wiring (decoder -> IR -> codegen).
+"""Mutation harness for the COP1 wiring (arithmetic, compare and BC1).
 
 Every mutation is applied to a Rust source, the workspace tests are run, and,
-only when those stay green, the two native COP1 targets are rebuilt and run.
+only when those stay green, the native COP1 targets are rebuilt and run.
 That ordering means a mutant is killed by whichever layer notices it, and the
 native run only spends build time when the Rust-level assertions were blind to
 the change. All files are restored from memory afterwards, and the restored
@@ -27,6 +27,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MIPS = os.path.join(REPO, "rust", "frontend", "src", "mips.rs")
 IR = os.path.join(REPO, "rust", "frontend", "src", "ir.rs")
 CODEGEN = os.path.join(REPO, "rust", "frontend", "src", "codegen.rs")
+ANALYSIS = os.path.join(REPO, "rust", "frontend", "src", "analysis.rs")
+CONTROL_CODEGEN = os.path.join(REPO, "rust", "frontend", "src", "control_codegen.rs")
 HEADER = os.path.join(REPO, "runtime", "include", "reps2", "runtime", "ee_fpu.hpp")
 
 MUTATIONS = [
@@ -41,6 +43,38 @@ MUTATIONS = [
      "0x18 if fd == 0 =>", "0x18 =>"),
     ("CVT.W.S accepts a nonzero ft", MIPS,
      "0x24 if ft == 0 =>", "0x24 =>"),
+    ("C.EQ.S accepts a nonzero fd", MIPS,
+     "0x32 if fd == 0 =>", "0x32 =>"),
+    ("BC1T decodes as BC1F", MIPS,
+     "            1 => Opcode::Bc1t,\n            2 => Opcode::Bc1fl,",
+     "            1 => Opcode::Bc1f,\n            2 => Opcode::Bc1fl,"),
+    ("BC1 drops the word-offset scale", MIPS,
+     "        Opcode::Bc1f | Opcode::Bc1t | Opcode::Bc1fl | Opcode::Bc1tl\n"
+     "    ) {\n"
+     "        let offset = ((immediate as i16 as i32).wrapping_mul(4)) as u32;",
+     "        Opcode::Bc1f | Opcode::Bc1t | Opcode::Bc1fl | Opcode::Bc1tl\n"
+     "    ) {\n"
+     "        let offset = (immediate as i16 as i32) as u32;"),
+    ("BC1FL stops annulling", MIPS,
+     "            Opcode::Beql\n"
+     "                | Opcode::Bnel\n"
+     "                | Opcode::Blezl\n"
+     "                | Opcode::Bgtzl\n"
+     "                | Opcode::Bltzl\n"
+     "                | Opcode::Bgezl\n"
+     "                | Opcode::Bltzall\n"
+     "                | Opcode::Bgezall\n"
+     "                | Opcode::Bc1fl\n"
+     "                | Opcode::Bc1tl",
+     "            Opcode::Beql\n"
+     "                | Opcode::Bnel\n"
+     "                | Opcode::Blezl\n"
+     "                | Opcode::Bgtzl\n"
+     "                | Opcode::Bltzl\n"
+     "                | Opcode::Bgezl\n"
+     "                | Opcode::Bltzall\n"
+     "                | Opcode::Bgezall\n"
+     "                | Opcode::Bc1tl"),
     ("SUB.S swaps its operands in the IR", IR,
      "            Opcode::FpuSubtractSingle => Operation::FpuSubtractSingle {\n"
      "                dst: fpr(instruction.shift_amount),\n"
@@ -71,19 +105,57 @@ MUTATIONS = [
      "                lhs: fpr(instruction.rd),\n"
      "                rhs: fpr(instruction.rt),\n"
      "            },"),
+    ("C.EQ.S swaps its operands in the IR", IR,
+     "            Opcode::FpuCompareEqual => Operation::FpuCompareSingle {\n"
+     "                lhs: fpr(instruction.rd),\n"
+     "                rhs: fpr(instruction.rt),\n"
+     "                comparison: FpuComparison::Equal,\n"
+     "            },",
+     "            Opcode::FpuCompareEqual => Operation::FpuCompareSingle {\n"
+     "                lhs: fpr(instruction.rt),\n"
+     "                rhs: fpr(instruction.rd),\n"
+     "                comparison: FpuComparison::Equal,\n"
+     "            },"),
+    ("C.LE.S lowers as C.LT.S", IR,
+     "                comparison: FpuComparison::LessThanOrEqual,",
+     "                comparison: FpuComparison::LessThan,"),
     ("codegen stops routing MADD through ACC", CODEGEN,
      "emit_fpu_madd(output, index, Some(dst), lhs, rhs, \"fpu_madd\");",
      "emit_fpu_madd(output, index, Some(dst), lhs, rhs, \"fpu_msub\");"),
     ("codegen stores the raw result into FCR31", CODEGEN,
      "state.fcsr = apply_fpu_flags(state.fcsr, fpu_result_{tag});",
      "state.fcsr = fpu_result_{tag}.bits;"),
-    # Rust never evaluates the runtime, so this one has to be caught natively.
+    ("codegen lowers C.LE.S as C.LT.S", CODEGEN,
+     "                FpuComparison::LessThan => \"FpuCompare::LessThan\",\n"
+     "                FpuComparison::LessThanOrEqual => \"FpuCompare::LessThanOrEqual\",",
+     "                FpuComparison::LessThan => \"FpuCompare::LessThan\",\n"
+     "                FpuComparison::LessThanOrEqual => \"FpuCompare::LessThan\","),
+    ("BC1T gets BC1F's predicate", ANALYSIS,
+     "        Opcode::Bc1f | Opcode::Bc1fl => Some(BranchCondition::FpuCondition { when_set: false }),\n"
+     "        Opcode::Bc1t | Opcode::Bc1tl => Some(BranchCondition::FpuCondition { when_set: true }),",
+     "        Opcode::Bc1f | Opcode::Bc1fl => Some(BranchCondition::FpuCondition { when_set: false }),\n"
+     "        Opcode::Bc1t | Opcode::Bc1tl => Some(BranchCondition::FpuCondition { when_set: false }),"),
+    ("control codegen inverts the condition test", CONTROL_CODEGEN,
+     "            let relation = if when_set { \"!=\" } else { \"==\" };",
+     "            let relation = if when_set { \"==\" } else { \"!=\" };"),
+    # Rust never evaluates the runtime, so these have to be caught natively.
     ("runtime MOV.S flips the sign", HEADER,
      "FpuResult fpu_mov(std::uint32_t a) noexcept {\n    return {a, 0U, 0U};",
      "FpuResult fpu_mov(std::uint32_t a) noexcept {\n    return {a ^ 0x8000'0000U, 0U, 0U};"),
+    ("runtime C.LT.S accepts equality", HEADER,
+     "        return fpu_detail::compare(a, b) < 0;",
+     "        return fpu_detail::compare(a, b) <= 0;"),
+    ("runtime condition update cannot clear C", HEADER,
+     "    return (control & ~kFpuCondition) | (condition ? kFpuCondition : 0U);",
+     "    return control | (condition ? kFpuCondition : 0U);"),
 ]
 
-TARGETS = ["reps2_cop1_arith_codegen_smoke", "reps2_cop1_arith_smoke"]
+TARGETS = [
+    "reps2_cop1_arith_codegen_smoke",
+    "reps2_cop1_arith_smoke",
+    "reps2_cop1_compare_smoke",
+    "reps2_cfg_codegen_smoke",
+]
 
 
 def store(path, text):
@@ -157,7 +229,7 @@ def main():
     args = parser.parse_args()
     build_dir = os.path.abspath(args.build_dir)
 
-    paths = {MIPS, IR, CODEGEN, HEADER}
+    paths = {MIPS, IR, CODEGEN, ANALYSIS, CONTROL_CODEGEN, HEADER}
     originals = {}
     for path in paths:
         with open(path, "r", encoding="utf-8", newline="") as handle:
