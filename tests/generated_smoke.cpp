@@ -87,11 +87,21 @@ int main() {
     overflow.gpr[21].low = 0x000000007FFFFFFFULL;
     overflow.gpr[22].low = 0xAABBCCDDULL;
     const auto overflow_status = reps2::generated::execute(overflow);
-    if (overflow_status != Status::integer_overflow) {
+    if (overflow_status != Status::exception_delivered) {
         return 15;
     }
-    if (overflow.gpr[22].low != 0xAABBCCDDULL) {
+    if (overflow.pc != reps2::runtime::kEeCommonExceptionVector
+        || overflow.cop0[reps2::runtime::kCop0Epc] != 0x0010002CU
+        || (overflow.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (12U << 2U)
+        || (overflow.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || (overflow.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusExlMask) == 0U) {
         return 16;
+    }
+    if (overflow.gpr[22].low != 0xAABBCCDDULL) {
+        return 17;
     }
 
     if (state.gpr[23].low != 0x20ULL) return 17; // DADDU wraps modulo 2^64.
