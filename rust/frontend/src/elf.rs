@@ -830,13 +830,17 @@ pub fn load_segments(
 ) -> Result<Vec<LoadedSegment>, Error> {
     let mut total = 0usize;
     let mut ranges: Vec<Range<u64>> = Vec::new();
-    let mut segments = Vec::new();
+    let mut segments: Vec<LoadedSegment> = Vec::new();
 
     for header in image
         .program_headers
         .iter()
         .filter(|header| header.kind == PT_LOAD)
     {
+        if header.memory_size == 0 {
+            // An empty segment allocates no memory and carries no file bytes.
+            continue;
+        }
         if header.file_size > header.memory_size {
             return Err(Error::new("ELF PT_LOAD file size exceeds memory size"));
         }
@@ -849,6 +853,43 @@ pub fn load_segments(
         }
         let memory_size = usize::try_from(header.memory_size)
             .map_err(|_| Error::new("ELF segment memory size does not fit host size"))?;
+
+        if header.file_size == 0 {
+            // Pure BSS zero-fill segment. PS2 linkers such as SN Systems ProDG emit
+            // multiple PT_LOAD entries with file_size == 0 sharing the same base
+            // address to describe multiple BSS sections or overlays. Coalesce them
+            // into the maximal BSS bounding range.
+            if let Some(existing) = segments
+                .iter_mut()
+                .find(|s| s.virtual_address == header.virtual_address && s.file_size == 0)
+            {
+                if memory_size > existing.bytes.len() {
+                    let additional = memory_size - existing.bytes.len();
+                    total = total
+                        .checked_add(additional)
+                        .ok_or_else(|| Error::new("ELF loaded memory size overflow"))?;
+                    if total > maximum_total_memory {
+                        return Err(Error::new(
+                            "ELF PT_LOAD memory exceeds configured load limit",
+                        ));
+                    }
+                    existing.bytes.resize(memory_size, 0);
+                    let start = u64::from(header.virtual_address);
+                    let new_end = start + u64::from(header.memory_size);
+                    for r in &mut ranges {
+                        if r.start == start {
+                            if new_end > r.end {
+                                r.end = new_end;
+                            }
+                            break;
+                        }
+                    }
+                }
+                existing.flags |= header.flags;
+                continue;
+            }
+        }
+
         total = total
             .checked_add(memory_size)
             .ok_or_else(|| Error::new("ELF loaded memory size overflow"))?;
@@ -1240,5 +1281,54 @@ mod tests {
         put_u32(&mut bytes, 128, 1);
         let image = parse(&bytes, ParseLimits::default()).expect("headers parse");
         assert!(load_segments(&bytes, &image, 1024).is_err());
+    }
+
+    #[test]
+    fn coalesces_overlapping_pure_bss_segments_and_ignores_empty_segments() {
+        let mut bytes = minimal_elf();
+        // 4 program headers:
+        // ph0: minimal_elf() at 0x0010_0000, filesz=8, memsz=16 (ends at 0x0010_0010)
+        // ph1: pure BSS at 0x0010_0010, filesz=0, memsz=16
+        // ph2: pure BSS at 0x0010_0010, filesz=0, memsz=32 (coalesces ph1)
+        // ph3: empty at 0x0010_0030, filesz=0, memsz=0 (ignored)
+        bytes.resize(52 + 32 * 4 + 4, 0);
+        put_u16(&mut bytes, 44, 4);
+
+        // ph1: 52 + 32
+        put_u32(&mut bytes, 52 + 32, PT_LOAD);
+        put_u32(&mut bytes, 52 + 32 + 4, 0);
+        put_u32(&mut bytes, 52 + 32 + 8, 0x0010_0010);
+        put_u32(&mut bytes, 52 + 32 + 12, 0x0010_0010);
+        put_u32(&mut bytes, 52 + 32 + 16, 0);
+        put_u32(&mut bytes, 52 + 32 + 20, 16);
+        put_u32(&mut bytes, 52 + 32 + 24, PF_R | PF_W);
+
+        // ph2: 52 + 64
+        put_u32(&mut bytes, 52 + 64, PT_LOAD);
+        put_u32(&mut bytes, 52 + 64 + 4, 0);
+        put_u32(&mut bytes, 52 + 64 + 8, 0x0010_0010);
+        put_u32(&mut bytes, 52 + 64 + 12, 0x0010_0010);
+        put_u32(&mut bytes, 52 + 64 + 16, 0);
+        put_u32(&mut bytes, 52 + 64 + 20, 32);
+        put_u32(&mut bytes, 52 + 64 + 24, PF_R | PF_W);
+
+        // ph3: 52 + 96
+        put_u32(&mut bytes, 52 + 96, PT_LOAD);
+        put_u32(&mut bytes, 52 + 96 + 4, 0);
+        put_u32(&mut bytes, 52 + 96 + 8, 0x0010_0030);
+        put_u32(&mut bytes, 52 + 96 + 12, 0x0010_0030);
+        put_u32(&mut bytes, 52 + 96 + 16, 0);
+        put_u32(&mut bytes, 52 + 96 + 20, 0);
+        put_u32(&mut bytes, 52 + 96 + 24, PF_R);
+
+        let image = parse(&bytes, ParseLimits::default()).expect("4 headers parse");
+        let loaded = load_segments(&bytes, &image, 1024).expect("BSS segments coalesce");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].virtual_address, 0x0010_0000);
+        assert_eq!(loaded[0].file_size, 8);
+        assert_eq!(loaded[0].bytes.len(), 16);
+        assert_eq!(loaded[1].virtual_address, 0x0010_0010);
+        assert_eq!(loaded[1].file_size, 0);
+        assert_eq!(loaded[1].bytes.len(), 32);
     }
 }
