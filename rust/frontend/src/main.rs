@@ -2,7 +2,7 @@
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use reps2_frontend::analysis::{self, AnalysisLimits};
@@ -485,7 +485,7 @@ fn extract_boot_elf(input: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn compile_elf(input: &Path, output: &Path, discover: bool) -> Result<(), String> {
+fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result<(), String> {
     let bytes = read_input(input)?;
     let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
     if !image.is_mips() {
@@ -494,7 +494,7 @@ fn compile_elf(input: &Path, output: &Path, discover: bool) -> Result<(), String
 
     let ram_image = elf::build_main_ram_image(&bytes, &image)
         .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
-    let (graph, discovery) = if discover {
+    let (graph, discovery) = if options.discover {
         let analysis::DiscoveryAnalysis {
             graph,
             discovery,
@@ -513,12 +513,16 @@ fn compile_elf(input: &Path, output: &Path, discover: bool) -> Result<(), String
         (graph, None)
     };
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
-    let cpp = control_codegen::emit_cpp_with_entry(&program, image.entry_point)
-        .map_err(|error| error.to_string())?;
+    let units = control_codegen::emit_cpp_units_with_entry(
+        &program,
+        image.entry_point,
+        options.translation_units,
+    )
+    .map_err(|error| error.to_string())?;
     let ram_output = output.with_extension("ram.bin");
     fs::write(&ram_output, &ram_image.bytes)
         .map_err(|error| format!("cannot write initial EE RAM image: {error}"))?;
-    fs::write(output, cpp).map_err(|error| format!("cannot write generated C++: {error}"))?;
+    let parts = write_translation_units(output, &units)?;
 
     println!("Generated CFG-aware C++20 translation and initial EE RAM image");
     println!("  Input: {}", input.display());
@@ -555,9 +559,150 @@ fn compile_elf(input: &Path, output: &Path, discover: bool) -> Result<(), String
         "  External/unmapped targets: {}",
         graph.external_targets.len()
     );
+    print_translation_unit_summary(&parts);
     println!("  Runtime entry: reps2::generated::initialize_ee_state(EeState&, ram_image)");
     println!("  Execution entry: reps2::generated::execute_cfg(EeState&, instruction_budget)");
     Ok(())
+}
+
+/// Parsed `recompile-elf` options.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RecompileOptions {
+    discover: bool,
+    translation_units: usize,
+}
+
+impl Default for RecompileOptions {
+    fn default() -> Self {
+        Self {
+            discover: false,
+            translation_units: 1,
+        }
+    }
+}
+
+fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, String> {
+    let mut options = RecompileOptions::default();
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--discover" => {
+                options.discover = true;
+                index += 1;
+            }
+            "--tu-count" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--tu-count requires a value".to_owned())?;
+                options.translation_units = value.parse::<usize>().map_err(|_| {
+                    format!("invalid translation-unit count {value:?}; expected a positive integer")
+                })?;
+                index += 2;
+            }
+            other => return Err(format!("unknown recompile-elf option {other:?}")),
+        }
+    }
+    Ok(options)
+}
+
+/// Splits an output path into the stem and extension used for part files.
+fn generated_output_parts(output: &Path) -> (String, String) {
+    let stem = output
+        .file_stem()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "output".to_owned());
+    let extension = output
+        .extension()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "cpp".to_owned());
+    (stem, extension)
+}
+
+fn part_output_path(output: &Path, index: usize) -> PathBuf {
+    let (stem, extension) = generated_output_parts(output);
+    output.with_file_name(format!("{stem}.part{index:04}.{extension}"))
+}
+
+/// Removes `<stem>.partNNNN.<ext>` files left by an earlier, larger split.
+fn remove_stale_part_files(output: &Path) -> Result<(), String> {
+    let directory = match output.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let (stem, extension) = generated_output_parts(output);
+    let prefix = format!("{stem}.part");
+    let suffix = format!(".{extension}");
+
+    let entries = fs::read_dir(directory).map_err(|error| {
+        format!(
+            "cannot scan {} for stale generated parts: {error}",
+            directory.display()
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "cannot inspect {} for stale generated parts: {error}",
+                directory.display()
+            )
+        })?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let is_generated_part = name
+            .strip_prefix(&prefix)
+            .and_then(|rest| rest.strip_suffix(&suffix))
+            .is_some_and(|digits| {
+                digits.len() >= 4 && digits.bytes().all(|byte| byte.is_ascii_digit())
+            });
+        if is_generated_part {
+            fs::remove_file(entry.path()).map_err(|error| {
+                format!(
+                    "cannot remove stale generated part {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes `units[0]` to `output` and every remaining unit to a numbered part
+/// file. Stale parts from an earlier run are removed first.
+fn write_translation_units(output: &Path, units: &[String]) -> Result<Vec<PathBuf>, String> {
+    remove_stale_part_files(output)?;
+    fs::write(output, &units[0]).map_err(|error| {
+        format!(
+            "cannot write generated C++ to {}: {error}",
+            output.display()
+        )
+    })?;
+
+    let mut parts = Vec::with_capacity(units.len().saturating_sub(1));
+    for (offset, source) in units.iter().enumerate().skip(1) {
+        let path = part_output_path(output, offset);
+        fs::write(&path, source)
+            .map_err(|error| format!("cannot write generated part {}: {error}", path.display()))?;
+        parts.push(path);
+    }
+    Ok(parts)
+}
+
+fn print_translation_unit_summary(parts: &[PathBuf]) {
+    if parts.is_empty() {
+        println!("  Translation units: 1 (single file)");
+        return;
+    }
+    let first = parts[0].file_name().unwrap_or_default().to_string_lossy();
+    let last = parts[parts.len() - 1]
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    println!(
+        "  Translation units: {} (1 dispatcher + {} block part(s))",
+        parts.len() + 1,
+        parts.len()
+    );
+    println!("  Part files: {first} .. {last}");
 }
 
 fn default_library_root() -> Result<std::path::PathBuf, String> {
@@ -641,7 +786,7 @@ fn add_game(input: &Path, library_override: Option<&Path>) -> Result<(), String>
     Ok(())
 }
 
-fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
+fn compile_cfg_fixture(output: &Path, translation_units: usize) -> Result<(), String> {
     use reps2_frontend::analysis::{self, AnalysisLimits, EntryPoint};
     use reps2_frontend::elf::LoadedSegment;
 
@@ -865,16 +1010,16 @@ fn compile_cfg_fixture(output: &Path) -> Result<(), String> {
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
-    let cpp = control_codegen::emit_cpp_with_entry(&program, 0x1000)
+    let units = control_codegen::emit_cpp_units_with_entry(&program, 0x1000, translation_units)
         .map_err(|error| error.to_string())?;
-    fs::write(output, cpp)
-        .map_err(|error| format!("cannot write generated C++ fixture: {error}"))?;
+    let parts = write_translation_units(output, &units)?;
     println!(
         "Generated synthetic CFG fixture: {} block(s), {} guest instruction(s), {} unsupported stop(s)",
         program.blocks.len(),
         program.instruction_count(),
         program.unsupported_count()
     );
+    print_translation_unit_summary(&parts);
     Ok(())
 }
 
@@ -922,9 +1067,9 @@ fn usage() {
     println!("  reps2 elf-info <elf-file>");
     println!("  reps2 analyze-elf <elf-file> [--discover]");
     println!("  reps2 profile-elf <elf-file>");
-    println!("  reps2 recompile-elf <input-elf> <output.cpp> [--discover]");
+    println!("  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N]");
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
-    println!("  reps2 compile-cfg-fixture <output.cpp>");
+    println!("  reps2 compile-cfg-fixture <output.cpp> [--tu-count N]");
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
     println!(
@@ -944,6 +1089,9 @@ fn usage() {
     );
     println!(
         "--discover augments the ELF entry and STT_FUNC roots with static function discovery (JAL targets and ABI stack prologues) for stripped executables."
+    );
+    println!(
+        "--tu-count N splits generated C++ into a dispatcher plus N block part files (<stem>.partNNNN.cpp); the default is 1."
     );
     println!(
         "Allocated relocations, non-main-RAM PT_LOAD segments, and PS2 hardware services remain unsupported."
@@ -974,14 +1122,21 @@ fn run() -> Result<(), String> {
             analyze_elf(Path::new(&arguments[2]), true)
         }
         Some("profile-elf") if arguments.len() == 3 => profile_elf(Path::new(&arguments[2])),
-        Some("recompile-elf") if arguments.len() == 4 => {
-            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), false)
-        }
-        Some("recompile-elf") if arguments.len() == 5 && arguments[4] == "--discover" => {
-            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), true)
+        Some("recompile-elf") if arguments.len() >= 4 => {
+            let options = parse_recompile_options(&arguments[4..])?;
+            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), options)
         }
         Some("compile-cfg-fixture") if arguments.len() == 3 => {
-            compile_cfg_fixture(Path::new(&arguments[2]))
+            compile_cfg_fixture(Path::new(&arguments[2]), 1)
+        }
+        Some("compile-cfg-fixture") if arguments.len() == 5 && arguments[3] == "--tu-count" => {
+            let translation_units = arguments[4].parse::<usize>().map_err(|_| {
+                format!(
+                    "invalid translation-unit count {:?}; expected a positive integer",
+                    arguments[4]
+                )
+            })?;
+            compile_cfg_fixture(Path::new(&arguments[2]), translation_units)
         }
         Some("decode") if (3..=4).contains(&arguments.len()) => {
             decode_word(&arguments[2], arguments.get(3).map(String::as_str))
@@ -1007,5 +1162,54 @@ fn main() -> ExitCode {
             eprintln!("Error: {error}");
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_to_a_single_translation_unit_without_discovery() {
+        let options = parse_recompile_options(&[]).expect("default options");
+        assert_eq!(options, RecompileOptions::default());
+        assert_eq!(options.translation_units, 1);
+        assert!(!options.discover);
+    }
+
+    #[test]
+    fn parses_recompile_options_in_any_order() {
+        let options = parse_recompile_options(&[
+            "--tu-count".to_owned(),
+            "4".to_owned(),
+            "--discover".to_owned(),
+        ])
+        .expect("ordered options");
+        assert_eq!(
+            options,
+            RecompileOptions {
+                discover: true,
+                translation_units: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_recompile_options() {
+        assert!(parse_recompile_options(&["--tu-count".to_owned()]).is_err());
+        assert!(parse_recompile_options(&["--tu-count".to_owned(), "many".to_owned()]).is_err());
+        assert!(parse_recompile_options(&["--unknown".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn names_part_files_beside_the_primary_output() {
+        assert_eq!(
+            part_output_path(Path::new("out/game.cpp"), 7),
+            Path::new("out/game.part0007.cpp")
+        );
+        assert_eq!(
+            part_output_path(Path::new("game"), 1),
+            Path::new("game.part0001.cpp")
+        );
     }
 }
