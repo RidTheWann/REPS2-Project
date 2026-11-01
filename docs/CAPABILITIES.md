@@ -1,0 +1,45 @@
+# REPS2 capabilities (v0.7.0)
+
+Detailed status and capability list, moved out of the README. The roadmap in [ROADMAP.md](ROADMAP.md) records what is still open.
+
+## Status
+
+> **Status: experimental AOT foundation (v0.7.0).** REPS2 now has a bounded read-only ISO 9660 reader for raw 2048-byte-sector images with SYSTEM.CNF BOOT2/BOOT executable discovery, a bounded ELF32 little-endian parser, initial symbols and REL/RELA metadata, a deliberately partial R5900 decoder with a deterministic executable-byte coverage profiler and bounded entry-point scan, a typed scalar IR with the first lane-saturating MMI operation (PADDUW), the EE single-precision FPU's data-movement set (MFC1/MTC1/CFC1/CTC1/LWC1/SWC1), its S/W-class arithmetic on an integer-only, non-IEEE numeric model with the separate ACC register and FCR31 flag routing, and the four COP1 compare predicates with the BC1F/BC1T/BC1FL/BC1TL branch family driven by FCR31's condition bit, a reachability-guided CFG, a CFG-aware control IR, deterministic C++20 lowering for a documented scalar/control-flow subset, byte/halfword/word/doubleword/quadword EE main-RAM loads and stores, including the R5900 left/right partial word and doubleword merge family, plus PT_LOAD-to-main-RAM image construction and a generated ELF-entry initializer. Generated control-flow C++ now emits one function per basic block with sorted-table dispatch and can be split across a dispatcher plus multiple translation units. CMake builds synthetic scalar, R5900 HI/LO/multiply, control-flow, memory and initialization programs, compiles the generated C++, and executes them in CI on Windows and Linux. The ELF-to-C++ command now emits a C++ translation, a companion 32 MiB initial RAM image, and a deterministic machine-readable build manifest for eligible static ELFs; full R5900 coverage, relocations, TLB mapping, asynchronous interrupts and exception types beyond the implemented SYSCALL/BREAK/OVERFLOW/AdEL/AdES Level-1 paths, MMIO devices, system services, native module linking, and game compatibility are not complete.
+
+## Current capabilities
+
+- Add one owned PS2 ISO directly to a managed multi-game library with `reps2 add-game`; identify the disc by streaming SHA-256, resolve SYSTEM.CNF BOOT2/BOOT, extract and validate the boot ELF internally, and write a versioned per-game JSON manifest plus any currently available analysis/code-generation artifacts. The original ISO remains at its source path and is not copied. Imported records are explicitly marked non-playable until the native PS2 runtime and title-stage validation exist.
+
+- Inspect raw 2048-byte-sector ISO 9660 images without loading the entire disc; validate the descriptor sequence and single-volume PVD, list root entries, resolve nested paths, and parse SYSTEM.CNF with BOOT2 preferred over BOOT.
+- Extract the SYSTEM.CNF boot target only after validating it as a MIPS ET_EXEC ELF; use create-new output semantics so an existing file or source image is never overwritten.
+- Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries.
+- Validate file-backed ranges, table bounds, cross-table references, entry sizes, address overflow, and parser resource limits.
+- Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges.
+- Decode an explicitly scoped base-MIPS integer subset, including BEQ/BNE/BLEZ/BGTZ and REGIMM BLTZ/BGEZ branch families.
+- Expose conservative per-instruction GPR/HI-LO dependencies, memory/control-flow effects, and possible synchronous exceptions; unsupported encodings remain explicitly opaque.
+- Decode, lift and AOT-lower base EE MTHI/MTLO/MFHI/MFLO plus R5900 three-operand MULT/MULTU; preserve HI/LO, the optional GPR destination, and both EE GPR lanes.
+- Decode, lift and AOT-lower 64-bit NOR, signed/unsigned SLT/SLTU, and SLTI/SLTIU with signed immediate extension and low-lane-only result writes.
+- Decode, lift and AOT-lower trapping 64-bit DADD, DSUB and DADDI with defined overflow checks; preserve destination atomicity, GPR[0] trap behavior and upper-lane state.
+- Discover entry points and STT_FUNC roots, then build a reachability-guided CFG for the currently supported control-transfer subset.
+- Recover function-entry candidates in stripped executables with opt-in `--discover`: `JAL` targets backed by executable file bytes and canonical `addiu $sp, $sp, -N` prologues. Candidates are labeled and are not reachability claims; heuristic-only blocks that cannot decode are skipped and reported, while authoritative roots still fail hard.
+- Preserve control instructions and delay slots as explicit terminators; record direct taken/fallthrough/call/return-continuation edges and unresolved indirect targets.
+- Read executable instructions only from file-backed PT_LOAD bytes; zero-filled BSS is never misinterpreted as code.
+- Lift discovered blocks into a CFG-aware typed IR with explicit fallthroughs, branch conditions, direct/indirect jumps, returns, and delay-slot operations.
+- Lower the supported CFG subset to a C++20 PC dispatcher; preserve branch/link/delay-slot ordering and stop explicitly at unsupported operations or unmapped control flow.
+- Emit each basic block as an independent `block_0xXXXXXXXX` C++ function and dispatch through a sorted table with `std::lower_bound`. `--tu-count N` splits a program into a dispatcher plus `N` independently compilable block parts, and the single-unit default remains available.
+- Write a deterministic `<stem>.manifest.json` beside every `recompile-elf` translation: the input path, size and SHA-256, host target, analysis limits and discovery totals, program counts, translation-unit layout, RAM artifact, and an explicit `playable: false` claim. Repeated identical invocations are byte-identical because no timestamps are recorded.
+- Generate a deterministic standalone `<stem>.native/` CMake project and host probe with `--native-build`. The project compiles the dispatcher, every part and the probe against an explicit `REPS2_RUNTIME_INCLUDE`, then registers a CTest that loads the RAM image (when present) and performs one bounded `execute_cfg` call. A CTest integration configures, compiles and runs the generated project end to end.
+- Bound analysis with explicit, validated limits and let the developer CLI override them. Defaults are 250,000 basic blocks, 2,000,000 decoded instructions and 500,000 discovered roots; `--max-blocks`, `--max-instructions` and `--max-roots` raise them up to ceilings above the 32 MiB address space. Limit failures name the flag that raises the bound instead of failing silently.
+- Bound generated execution by a guest-instruction budget, admitting each basic block atomically and preserving its starting PC when the budget is insufficient.
+- Decode and lift LB/LBU/LH/LHU/LW/LWU, LD, SB/SH/SW and SD into typed memory IR with width-correct lane updates, natural alignment checks and signed 16-bit offsets.
+- Decode and lower LWL/LWR/SWL/SWR and LDL/LDR/SDL/SDR through checked aligned main-RAM accesses and byte-lane merges; preserve unaffected EE GPR lanes and fail explicitly on invalid backing spans.
+- Provide caller-owned 32 MiB little-endian EE main RAM with the documented direct, uncached, accelerated, KSEG0 and KSEG1 aliases.
+- Perform checked byte/halfword/word/doubleword accesses without unaligned pointer casts; doubleword transfers require 8-byte alignment; report address errors, unmapped ranges, and unimplemented device/MMIO accesses as distinct statuses.
+- Materialize eligible ET_EXEC PT_LOAD segments into a 32 MiB initial EE RAM image, including zero-filled BSS and supported RAM aliases; reject physical alias overlap and out-of-RAM segments.
+- Emit a generated initialize_ee_state entry-point wrapper that installs the companion RAM image into caller-owned EE RAM and sets the ELF entry PC.
+- Reject ET_DYN/relocatable ELFs and relocations targeting allocated sections until a verified relocation engine is implemented.
+- Lift a supported straight-line instruction subset into typed Rust IR with guest-PC provenance and verification.
+- Emit deterministic C++20 for supported scalar operations: NOP, ADD/ADDI/ADDU/ADDIU, SUB/SUBU, AND/OR/XOR, immediate logical operations, LUI, and word shifts.
+- Keep a 128-bit EE GPR state shape in the runtime ABI; scalar instructions update only the low 64-bit lane and preserve the high lane.
+- Compile and execute a generated synthetic translation unit as part of CMake/CTest on Windows/MSVC and Linux/GCC.
+- Report unsupported control-flow, MMIO, TLB, exception, and hardware behavior explicitly; do not silently replace it with NOPs or backing RAM.
