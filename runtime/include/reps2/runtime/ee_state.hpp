@@ -55,8 +55,22 @@ inline constexpr std::uint8_t kCop0TagLo = 28;
 inline constexpr std::uint8_t kCop0TagHi = 29;
 inline constexpr std::uint8_t kCop0ErrorEpc = 30;
 
-// COP0 Status bit 16 is EIE (Enable Interrupts Enable bit)
+// COP0 Status bits used by the currently implemented exception path.
+inline constexpr std::uint32_t kCop0StatusExlMask{0x0000'0002U};
+inline constexpr std::uint32_t kCop0StatusErlMask{0x0000'0004U};
 inline constexpr std::uint32_t kCop0StatusEieMask{0x0001'0000U};
+inline constexpr std::uint32_t kCop0StatusBevMask{0x0040'0000U};
+
+// COP0 Cause fields used by synchronous Level-1 exceptions.
+inline constexpr std::uint32_t kCop0CauseExcCodeMask{0x0000'007CU};
+inline constexpr std::uint32_t kCop0CauseBranchDelayMask{0x8000'0000U};
+inline constexpr std::uint32_t kEeCommonExceptionVector{0x8000'0200U};
+inline constexpr std::uint32_t kEeBootstrapCommonExceptionVector{0xBFC0'0380U};
+
+enum class ExceptionCode : std::uint8_t {
+    SystemCall = 8,
+    Breakpoint = 9,
+};
 
 struct EeState {
     std::uint32_t pc{};
@@ -97,10 +111,71 @@ enum class Status : std::uint8_t {
     // 25..6 of the word at that PC. HLE service delivery is a later layer.
     syscall,
     breakpoint,
+    // A Level-1 guest exception was entered and COP0/PC now hold its context.
+    exception_delivered,
+    // ERET was executed without exactly one valid EXL/ERL return context.
+    invalid_exception_return,
 };
 
 [[nodiscard]] constexpr bool is_guest_trap(Status status) noexcept {
-    return status == Status::syscall || status == Status::breakpoint;
+    return status == Status::syscall || status == Status::breakpoint
+        || status == Status::exception_delivered;
+}
+
+// Enter the EE's general Level-1 exception vector for SYSCALL or BREAK.
+// The caller must set state.pc to the faulting instruction before calling.
+// Delay-slot traps are currently rejected by CFG analysis, but the helper
+// implements the architectural EPC/BD rule for direct runtime tests and future
+// control-flow support.
+[[nodiscard]] inline Status raise_ee_exception(
+    EeState& state,
+    ExceptionCode code,
+    bool in_branch_delay = false
+) noexcept {
+    auto& status = state.cop0[kCop0Status];
+    auto& cause = state.cop0[kCop0Cause];
+    const bool already_exl = (status & kCop0StatusExlMask) != 0U;
+
+    cause = (cause & ~kCop0CauseExcCodeMask)
+        | ((static_cast<std::uint32_t>(code) << 2U) & kCop0CauseExcCodeMask);
+
+    // A nested Level-1 exception updates ExcCode but preserves the first
+    // exception's restart address and BD bit.
+    if (!already_exl) {
+        state.cop0[kCop0Epc] = in_branch_delay ? state.pc - 4U : state.pc;
+        if (in_branch_delay) {
+            cause |= kCop0CauseBranchDelayMask;
+        } else {
+            cause &= ~kCop0CauseBranchDelayMask;
+        }
+        status |= kCop0StatusExlMask;
+    }
+
+    state.pc = (status & kCop0StatusBevMask) != 0U
+        ? kEeBootstrapCommonExceptionVector
+        : kEeCommonExceptionVector;
+    return Status::exception_delivered;
+}
+
+// ERET restores one unambiguous saved exception context. Sony's EE manual
+// documents EXL+ERL simultaneously set as an invalid ERET condition; reject it
+// (and an empty context) rather than inventing a priority.
+[[nodiscard]] inline Status return_from_ee_exception(EeState& state) noexcept {
+    auto& status = state.cop0[kCop0Status];
+    const bool exl = (status & kCop0StatusExlMask) != 0U;
+    const bool erl = (status & kCop0StatusErlMask) != 0U;
+    if (exl == erl) {
+        return Status::invalid_exception_return;
+    }
+
+    if (erl) {
+        state.pc = state.cop0[kCop0ErrorEpc];
+        status &= ~kCop0StatusErlMask;
+    } else {
+        state.pc = state.cop0[kCop0Epc];
+        status &= ~kCop0StatusExlMask;
+    }
+    return Status::ok;
 }
 
 [[nodiscard]] constexpr bool is_unsupported_physical_region(std::uint32_t address) noexcept {

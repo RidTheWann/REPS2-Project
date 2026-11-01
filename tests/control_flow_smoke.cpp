@@ -91,7 +91,7 @@ int main() {
     EeState call{};
     call.pc = 0x2000;
     const auto call_status = reps2::generated::execute_cfg(call, 64);
-    if (call_status != Status::syscall || call.pc != 0x2008) {
+    if (call_status != Status::exception_delivered || call.pc != 0x80000200U) {
         return fail(11);
     }
     if (call.gpr[31].low != 0x2008) {
@@ -100,13 +100,20 @@ int main() {
     if (call.gpr[14].low != 17 || call.gpr[15].low != 19) {
         return fail(13);
     }
+    if (call.cop0[reps2::runtime::kCop0Epc] != 0x2008U
+        || (call.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
+        || (call.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || (call.cop0[reps2::runtime::kCop0Status] & reps2::runtime::kCop0StatusExlMask) == 0U) {
+        return fail(90);
+    }
 
     // BLTZAL writes the link even when its predicate is false.
     EeState link_not_taken{};
     link_not_taken.pc = 0x3000;
     link_not_taken.gpr[8].low = 1;
     const auto link_not_taken_status = reps2::generated::execute_cfg(link_not_taken, 64);
-    if (link_not_taken_status != Status::syscall || link_not_taken.pc != 0x3008) {
+    if (link_not_taken_status != Status::exception_delivered || link_not_taken.pc != 0x80000200U
+        || link_not_taken.cop0[reps2::runtime::kCop0Epc] != 0x3008U) {
         return fail(14);
     }
     if (link_not_taken.gpr[31].low != 0x3008 || link_not_taken.gpr[9].low != 23) {
@@ -118,28 +125,124 @@ int main() {
     link_taken.pc = 0x3000;
     link_taken.gpr[8].low = 0xFFFFFFFFFFFFFFFFULL;
     const auto link_taken_status = reps2::generated::execute_cfg(link_taken, 64);
-    if (link_taken_status != Status::syscall || link_taken.pc != 0x300C) {
+    if (link_taken_status != Status::exception_delivered || link_taken.pc != 0x80000200U
+        || link_taken.cop0[reps2::runtime::kCop0Epc] != 0x300CU) {
         return fail(16);
     }
     if (link_taken.gpr[31].low != 0x3008 || link_taken.gpr[9].low != 23) {
         return fail(17);
     }
 
-    // BREAK is an architectural guest trap, distinct from an unknown
-    // encoding. The PC stays on the trapping instruction.
+    // SYSCALL/BREAK now enter the Level-1 common exception vector and publish
+    // a precise COP0 frame instead of returning a terminal trap status.
     EeState break_trap{};
     break_trap.pc = 0x8000U;
     const auto break_status = reps2::generated::execute_cfg(break_trap, 64U);
-    if (break_status != Status::breakpoint || break_trap.pc != 0x8000U) {
-        std::fprintf(stderr, "BREAK trap status mismatch: status=%u pc=0x%08X\n",
+    if (break_status != Status::exception_delivered || break_trap.pc != 0x80000200U
+        || break_trap.cop0[reps2::runtime::kCop0Epc] != 0x8000U
+        || (break_trap.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)
+        || (break_trap.cop0[reps2::runtime::kCop0Status] & reps2::runtime::kCop0StatusExlMask) == 0U) {
+        std::fprintf(stderr, "BREAK exception entry mismatch: status=%u pc=0x%08X\n",
             static_cast<unsigned>(break_status), break_trap.pc);
         return fail(88);
     }
     if (!reps2::runtime::is_guest_trap(Status::syscall)
         || !reps2::runtime::is_guest_trap(Status::breakpoint)
+        || !reps2::runtime::is_guest_trap(Status::exception_delivered)
         || reps2::runtime::is_guest_trap(Status::unsupported_instruction)) {
         std::fprintf(stderr, "guest-trap status classification mismatch\n");
         return fail(89);
+    }
+
+    // The first Level-1 exception records EPC and BD; an exception raised in a
+    // delay slot records the branch PC, even though delay-slot traps are not
+    // yet admitted by static CFG analysis.
+    EeState delay_exception{};
+    delay_exception.pc = 0x1004U;
+    if (reps2::runtime::raise_ee_exception(
+            delay_exception, reps2::runtime::ExceptionCode::SystemCall, true) != Status::exception_delivered
+        || delay_exception.cop0[reps2::runtime::kCop0Epc] != 0x1000U
+        || (delay_exception.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U) {
+        return fail(91);
+    }
+
+    // A nested Level-1 exception updates ExcCode but preserves the original
+    // EPC and BD marker while routing to the general vector.
+    EeState nested_exception{};
+    nested_exception.pc = 0x7008U;
+    nested_exception.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusExlMask;
+    nested_exception.cop0[reps2::runtime::kCop0Epc] = 0x12345678U;
+    nested_exception.cop0[reps2::runtime::kCop0Cause] =
+        reps2::runtime::kCop0CauseBranchDelayMask | (3U << 2U);
+    if (reps2::runtime::raise_ee_exception(
+            nested_exception, reps2::runtime::ExceptionCode::Breakpoint, false) != Status::exception_delivered
+        || nested_exception.pc != reps2::runtime::kEeCommonExceptionVector
+        || nested_exception.cop0[reps2::runtime::kCop0Epc] != 0x12345678U
+        || (nested_exception.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U
+        || (nested_exception.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)) {
+        return fail(92);
+    }
+
+    EeState bootstrap_exception{};
+    bootstrap_exception.pc = 0x4000U;
+    bootstrap_exception.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusBevMask;
+    if (reps2::runtime::raise_ee_exception(
+            bootstrap_exception, reps2::runtime::ExceptionCode::SystemCall) != Status::exception_delivered
+        || bootstrap_exception.pc != reps2::runtime::kEeBootstrapCommonExceptionVector) {
+        return fail(93);
+    }
+
+    // ERET is executable control flow: it restores EPC, clears EXL, and the
+    // dispatcher continues at that dynamic guest address.
+    EeState eret_return{};
+    eret_return.pc = 0xF000U;
+    eret_return.gpr[9].low = 0xDEADU;
+    eret_return.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusExlMask;
+    eret_return.cop0[reps2::runtime::kCop0Epc] = 0xF004U;
+    const auto eret_status = reps2::generated::execute_cfg(eret_return, 64U);
+    if (eret_status != Status::external_control_flow || eret_return.pc != 0xDEADU
+        || eret_return.gpr[8].low != 42U
+        || eret_return.cop0[reps2::runtime::kCop0Epc] != 0xF004U
+        || (eret_return.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusExlMask) != 0U) {
+        std::fprintf(stderr,
+            "ERET smoke: status=%u pc=0x%08X t0=0x%llX t1=0x%llX epc=0x%08X cop0_status=0x%08X\\n",
+            static_cast<unsigned>(eret_status), eret_return.pc,
+            static_cast<unsigned long long>(eret_return.gpr[8].low),
+            static_cast<unsigned long long>(eret_return.gpr[9].low),
+            eret_return.cop0[reps2::runtime::kCop0Epc],
+            eret_return.cop0[reps2::runtime::kCop0Status]);
+        return fail(94);
+    }
+
+    EeState invalid_eret{};
+    invalid_eret.pc = 0xF000U;
+    const auto invalid_eret_status = reps2::generated::execute_cfg(invalid_eret, 64U);
+    if (invalid_eret_status != Status::invalid_exception_return || invalid_eret.pc != 0xF000U) {
+        return fail(95);
+    }
+
+    EeState erl_return{};
+    erl_return.pc = 0x9000U;
+    erl_return.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusErlMask;
+    erl_return.cop0[reps2::runtime::kCop0ErrorEpc] = 0x76543210U;
+    if (reps2::runtime::return_from_ee_exception(erl_return) != Status::ok
+        || erl_return.pc != 0x76543210U
+        || (erl_return.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusErlMask) != 0U) {
+        return fail(96);
+    }
+
+    EeState ambiguous_eret{};
+    ambiguous_eret.pc = 0xCAFEBABEU;
+    ambiguous_eret.cop0[reps2::runtime::kCop0Status] =
+        reps2::runtime::kCop0StatusExlMask | reps2::runtime::kCop0StatusErlMask;
+    if (reps2::runtime::return_from_ee_exception(ambiguous_eret) != Status::invalid_exception_return
+        || ambiguous_eret.pc != 0xCAFEBABEU) {
+        return fail(97);
     }
 
     // A branch-likely executes its delay slot only on the taken path.
@@ -792,8 +895,10 @@ int main() {
     if (initialized.gpr[8].low != 0 || initialized.gpr[0].low != 0
         || initialized.hi != 0 || initialized.lo != 0
         || initialized.memory.main_ram[0x1000U] != 0x12U
-        || initialized.memory.main_ram[0x1001U] != 0x34U) {
-        std::fprintf(stderr, "ELF runtime initializer did not copy RAM/reset GPR state\n");
+        || initialized.memory.main_ram[0x1001U] != 0x34U
+        || initialized.cop0[reps2::runtime::kCop0PrId] != reps2::runtime::kEeProcessorId
+        || initialized.cop0[reps2::runtime::kCop0Status] != 0x1040'0004U) {
+        std::fprintf(stderr, "ELF runtime initializer did not copy RAM/reset guest state\n");
         return fail(33);
     }
 

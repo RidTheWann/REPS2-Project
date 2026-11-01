@@ -13,7 +13,7 @@ use crate::json::json_string;
 use crate::{BUILD_TARGET, VERSION};
 
 /// Schema version of the build manifest rendered by this module.
-pub const MANIFEST_VERSION: u32 = 1;
+pub const MANIFEST_VERSION: u32 = 2;
 
 /// Bounded analysis limits that produced the program.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +65,7 @@ pub struct ProgramStats {
     pub basic_block_count: usize,
     pub guest_instruction_count: usize,
     pub unsupported_stop_count: usize,
+    pub guest_exception_count: usize,
     pub static_edge_count: usize,
     pub unresolved_indirect_target_count: usize,
     pub external_target_count: usize,
@@ -212,6 +213,10 @@ impl BuildManifest {
             self.program.unsupported_stop_count
         ));
         output.push_str(&format!(
+            "    \"guest_exception_count\": {},\n",
+            self.program.guest_exception_count
+        ));
+        output.push_str(&format!(
             "    \"static_edge_count\": {},\n",
             self.program.static_edge_count
         ));
@@ -286,6 +291,7 @@ mod tests {
                 basic_block_count: 9,
                 guest_instruction_count: 113,
                 unsupported_stop_count: 0,
+                guest_exception_count: 0,
                 static_edge_count: 10,
                 unresolved_indirect_target_count: 0,
                 external_target_count: 0,
@@ -307,13 +313,24 @@ mod tests {
     #[test]
     fn records_versioned_identity_and_non_playable_status() {
         let json = sample().to_json();
-        assert!(json.contains("\"manifest_version\": 1"));
+        assert!(json.contains("\"manifest_version\": 2"));
+        assert!(json.contains("\"guest_exception_count\": 0"));
         assert!(json.contains(&format!("\"version\": \"{VERSION}\"")));
         assert!(json.contains(&format!("\"host_target\": \"{BUILD_TARGET}\"")));
         assert!(json.contains("\"playable\": false"));
         assert!(json.contains("\"input\": {"));
         assert!(json.contains("\"sha256\": \"0000"));
         assert!(json.contains("\"discovery\": null"));
+    }
+
+    #[test]
+    fn renders_guest_exceptions_separately_from_unsupported_stops() {
+        let mut manifest = sample();
+        manifest.program.unsupported_stop_count = 3;
+        manifest.program.guest_exception_count = 2;
+        let json = manifest.to_json();
+        assert!(json.contains("\"unsupported_stop_count\": 3"));
+        assert!(json.contains("\"guest_exception_count\": 2"));
     }
 
     #[test]
