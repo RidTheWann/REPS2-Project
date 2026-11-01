@@ -1,6 +1,6 @@
 //! Deterministic C++20 source generation for the verified scalar IR subset.
 
-use crate::ir::{FpuControl, Gpr, Instruction, Operation, Program, VerifyError};
+use crate::ir::{Fpr, FpuControl, Gpr, Instruction, Operation, Program, VerifyError};
 
 /// Generates one C++ translation unit exporting
 /// reps2::generated::execute(EeState&).
@@ -24,6 +24,22 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_add_u32;\n\
              using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::store_fpu_control;\n\
+             using reps2::runtime::apply_fpu_flags;\n\
+             using reps2::runtime::fpu_add;\n\
+             using reps2::runtime::fpu_sub;\n\
+             using reps2::runtime::fpu_mul;\n\
+             using reps2::runtime::fpu_div;\n\
+             using reps2::runtime::fpu_sqrt;\n\
+             using reps2::runtime::fpu_rsqrt;\n\
+             using reps2::runtime::fpu_abs;\n\
+             using reps2::runtime::fpu_neg;\n\
+             using reps2::runtime::fpu_mov;\n\
+             using reps2::runtime::fpu_max;\n\
+             using reps2::runtime::fpu_min;\n\
+             using reps2::runtime::fpu_cvt_w_s;\n\
+             using reps2::runtime::fpu_cvt_s_w;\n\
+             using reps2::runtime::fpu_madd;\n\
+             using reps2::runtime::fpu_msub;\n\
              using reps2::runtime::load_u8;\n\
              using reps2::runtime::load_u16;\n\
              using reps2::runtime::load_u32;\n\
@@ -152,6 +168,66 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
                 "    const auto memory_status_{tag} = store_u32(state.memory, effective_address_{tag}, state.fpr[{}]);\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
                 src.index()
             ));
+        }
+        Operation::FpuAddSingle { dst, lhs, rhs } => {
+            emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_add");
+        }
+        Operation::FpuSubtractSingle { dst, lhs, rhs } => {
+            emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_sub");
+        }
+        Operation::FpuMultiplySingle { dst, lhs, rhs } => {
+            emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_mul");
+        }
+        Operation::FpuDivideSingle { dst, lhs, rhs } => {
+            emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_div");
+        }
+        Operation::FpuReciprocalSquareRootSingle { dst, lhs, rhs } => {
+            emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_rsqrt");
+        }
+        Operation::FpuMaximumSingle { dst, lhs, rhs } => {
+            emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_max");
+        }
+        Operation::FpuMinimumSingle { dst, lhs, rhs } => {
+            emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_min");
+        }
+        Operation::FpuSquareRootSingle { dst, src } => {
+            emit_fpu_unary(output, index, dst, src, "fpu_sqrt");
+        }
+        Operation::FpuAbsoluteSingle { dst, src } => {
+            emit_fpu_unary(output, index, dst, src, "fpu_abs");
+        }
+        Operation::FpuMoveSingle { dst, src } => {
+            emit_fpu_unary(output, index, dst, src, "fpu_mov");
+        }
+        Operation::FpuNegateSingle { dst, src } => {
+            emit_fpu_unary(output, index, dst, src, "fpu_neg");
+        }
+        Operation::FpuConvertSingleToWord { dst, src } => {
+            emit_fpu_unary(output, index, dst, src, "fpu_cvt_w_s");
+        }
+        Operation::FpuConvertWordToSingle { dst, src } => {
+            emit_fpu_unary(output, index, dst, src, "fpu_cvt_s_w");
+        }
+        Operation::FpuAddAccumulateSingle { lhs, rhs } => {
+            emit_fpu_binary_to_acc(output, index, lhs, rhs, "fpu_add");
+        }
+        Operation::FpuSubtractAccumulateSingle { lhs, rhs } => {
+            emit_fpu_binary_to_acc(output, index, lhs, rhs, "fpu_sub");
+        }
+        Operation::FpuMultiplyAccumulateSingle { lhs, rhs } => {
+            emit_fpu_binary_to_acc(output, index, lhs, rhs, "fpu_mul");
+        }
+        Operation::FpuMultiplyAddSingle { dst, lhs, rhs } => {
+            emit_fpu_madd(output, index, Some(dst), lhs, rhs, "fpu_madd");
+        }
+        Operation::FpuMultiplySubtractSingle { dst, lhs, rhs } => {
+            emit_fpu_madd(output, index, Some(dst), lhs, rhs, "fpu_msub");
+        }
+        Operation::FpuMultiplyAddAccumulateSingle { lhs, rhs } => {
+            emit_fpu_madd(output, index, None, lhs, rhs, "fpu_madd");
+        }
+        Operation::FpuMultiplySubtractAccumulateSingle { lhs, rhs } => {
+            emit_fpu_madd(output, index, None, lhs, rhs, "fpu_msub");
         }
         Operation::MultiplyWordSigned { dst, lhs, rhs } => {
             emit_multiply_word(output, index, dst, lhs, rhs, true)
@@ -400,6 +476,72 @@ fn emit_effective_address(output: &mut String, tag: &str, base: Gpr, offset: u16
         "    const std::uint32_t effective_address_{tag} = static_cast<std::uint32_t>(state.gpr[{}].low) + static_cast<std::uint32_t>(sign_extend_immediate(0x{offset:04X}U));\n",
         base.index()
     ));
+}
+
+fn emit_fpu_operation(output: &mut String, index: usize, destination: &str, expression: &str) {
+    let tag = format!("{index:04}");
+    output.push_str(&format!(
+        "    const auto fpu_result_{tag} = {expression};\n    {destination} = fpu_result_{tag}.bits;\n    state.fcsr = apply_fpu_flags(state.fcsr, fpu_result_{tag});\n"
+    ));
+}
+
+fn emit_fpu_binary(output: &mut String, index: usize, dst: Fpr, lhs: Fpr, rhs: Fpr, helper: &str) {
+    emit_fpu_operation(
+        output,
+        index,
+        &format!("state.fpr[{}]", dst.index()),
+        &format!(
+            "{helper}(state.fpr[{}], state.fpr[{}])",
+            lhs.index(),
+            rhs.index()
+        ),
+    );
+}
+
+fn emit_fpu_unary(output: &mut String, index: usize, dst: Fpr, src: Fpr, helper: &str) {
+    emit_fpu_operation(
+        output,
+        index,
+        &format!("state.fpr[{}]", dst.index()),
+        &format!("{helper}(state.fpr[{}])", src.index()),
+    );
+}
+
+fn emit_fpu_binary_to_acc(output: &mut String, index: usize, lhs: Fpr, rhs: Fpr, helper: &str) {
+    emit_fpu_operation(
+        output,
+        index,
+        "state.acc",
+        &format!(
+            "{helper}(state.fpr[{}], state.fpr[{}])",
+            lhs.index(),
+            rhs.index()
+        ),
+    );
+}
+
+fn emit_fpu_madd(
+    output: &mut String,
+    index: usize,
+    dst: Option<Fpr>,
+    lhs: Fpr,
+    rhs: Fpr,
+    helper: &str,
+) {
+    let destination = match dst {
+        Some(dst) => format!("state.fpr[{}]", dst.index()),
+        None => "state.acc".to_owned(),
+    };
+    emit_fpu_operation(
+        output,
+        index,
+        &destination,
+        &format!(
+            "{helper}(state.acc, state.fpr[{}], state.fpr[{}])",
+            lhs.index(),
+            rhs.index()
+        ),
+    );
 }
 
 fn emit_memory_load(
@@ -1298,5 +1440,78 @@ mod tests {
         let cpp = emit_cpp(&ir::lift(&store).expect("swc1 IR")).expect("swc1 C++");
         assert!(cpp.contains("store_u32(state.memory, effective_address_0000, state.fpr[6])"));
         assert!(cpp.contains("sign_extend_immediate(0xFFFCU)"));
+    }
+
+    #[test]
+    fn emits_cop1_arithmetic_through_the_runtime_with_fcr31_and_acc() {
+        let words = [
+            0x4602_08C0, // add.s   $f3, $f1, $f2
+            0x4602_08C1, // sub.s   $f3, $f1, $f2
+            0x4602_00C4, // sqrt.s  $f3, $f2
+            0x4602_0818, // adda.s  $f1, $f2
+            0x4602_08DC, // madd.s  $f3, $f1, $f2
+            0x4602_081E, // madda.s $f1, $f2
+            0x4680_08E0, // cvt.s.w $f3, $f1
+            0x4600_08E4, // cvt.w.s $f3, $f1
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x1000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("COP1 arithmetic IR");
+        let cpp = emit_cpp(&program).expect("COP1 arithmetic C++");
+
+        // fs is the first argument and ft the second, so a swapped mapping
+        // would change SUB.S from fs-ft to ft-fs.
+        assert!(cpp.contains("const auto fpu_result_0000 = fpu_add(state.fpr[1], state.fpr[2]);"));
+        assert!(cpp.contains("const auto fpu_result_0001 = fpu_sub(state.fpr[1], state.fpr[2]);"));
+        // SQRT.S reads ft, not fs (which is reserved zero).
+        assert!(cpp.contains("const auto fpu_result_0002 = fpu_sqrt(state.fpr[2]);"));
+        // The accumulate forms write ACC instead of an FPR, and MADD reads it.
+        assert!(cpp.contains("const auto fpu_result_0003 = fpu_add(state.fpr[1], state.fpr[2]);"));
+        assert!(cpp.contains("state.acc = fpu_result_0003.bits;"));
+        assert!(cpp.contains(
+            "const auto fpu_result_0004 = fpu_madd(state.acc, state.fpr[1], state.fpr[2]);"
+        ));
+        assert!(cpp.contains("state.fpr[3] = fpu_result_0004.bits;"));
+        assert!(cpp.contains(
+            "const auto fpu_result_0005 = fpu_madd(state.acc, state.fpr[1], state.fpr[2]);"
+        ));
+        assert!(cpp.contains("state.acc = fpu_result_0005.bits;"));
+        assert!(cpp.contains("const auto fpu_result_0006 = fpu_cvt_s_w(state.fpr[1]);"));
+        assert!(cpp.contains("const auto fpu_result_0007 = fpu_cvt_w_s(state.fpr[1]);"));
+        // Every form routes its flags through FCR31's cause/sticky fields.
+        for tag in 0..8 {
+            assert!(
+                cpp.contains(&format!(
+                    "state.fcsr = apply_fpu_flags(state.fcsr, fpu_result_{tag:04});"
+                )),
+                "instruction {tag} must update FCR31"
+            );
+        }
+        for helper in [
+            "apply_fpu_flags",
+            "fpu_add",
+            "fpu_sub",
+            "fpu_mul",
+            "fpu_div",
+            "fpu_sqrt",
+            "fpu_rsqrt",
+            "fpu_abs",
+            "fpu_neg",
+            "fpu_mov",
+            "fpu_max",
+            "fpu_min",
+            "fpu_cvt_w_s",
+            "fpu_cvt_s_w",
+            "fpu_madd",
+            "fpu_msub",
+        ] {
+            assert!(
+                cpp.contains(&format!("using reps2::runtime::{helper};")),
+                "prologue must expose {helper}"
+            );
+        }
     }
 }
