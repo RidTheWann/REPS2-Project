@@ -51,6 +51,10 @@ pub enum ControlTerminator {
         source_register: u8,
         delay_slot: ScalarInstruction,
     },
+    /// Dynamic return from an EE exception context through COP0.EPC/ErrorEPC.
+    ExceptionReturn {
+        guest_pc: u32,
+    },
     Unsupported {
         guest_pc: u32,
         mnemonic: String,
@@ -78,6 +82,7 @@ impl ControlTerminator {
             | Self::DirectJump { guest_pc, .. }
             | Self::IndirectJump { guest_pc, .. }
             | Self::Return { guest_pc, .. }
+            | Self::ExceptionReturn { guest_pc }
             | Self::Unsupported { guest_pc, .. } => Some(*guest_pc),
             Self::Fallthrough { .. } | Self::SegmentEnd { .. } => None,
         }
@@ -89,7 +94,10 @@ impl ControlTerminator {
             | Self::DirectJump { delay_slot, .. }
             | Self::IndirectJump { delay_slot, .. }
             | Self::Return { delay_slot, .. } => Some(delay_slot),
-            Self::Fallthrough { .. } | Self::Unsupported { .. } | Self::SegmentEnd { .. } => None,
+            Self::Fallthrough { .. }
+            | Self::ExceptionReturn { .. }
+            | Self::Unsupported { .. }
+            | Self::SegmentEnd { .. } => None,
         }
     }
 
@@ -100,7 +108,7 @@ impl ControlTerminator {
             | Self::DirectJump { .. }
             | Self::IndirectJump { .. }
             | Self::Return { .. } => 2,
-            Self::Unsupported { .. } => 1,
+            Self::ExceptionReturn { .. } | Self::Unsupported { .. } => 1,
             Self::Fallthrough { .. } | Self::SegmentEnd { .. } => 0,
         }
     }
@@ -424,15 +432,20 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             source_register: *source_register,
             delay_slot: lift_delay_slot(delay_slot)?,
         }),
-        Terminator::Unsupported { instruction } => Ok(ControlTerminator::Unsupported {
-            guest_pc: instruction.pc,
-            mnemonic: instruction.opcode.mnemonic().to_owned(),
-            trap: match instruction.opcode {
-                crate::mips::Opcode::Syscall => Some(TrapKind::Syscall),
-                crate::mips::Opcode::Break => Some(TrapKind::Break),
-                _ => None,
-            },
-        }),
+        Terminator::Unsupported { instruction } => match instruction.opcode {
+            crate::mips::Opcode::Eret => {
+                Ok(ControlTerminator::ExceptionReturn { guest_pc: instruction.pc })
+            }
+            opcode => Ok(ControlTerminator::Unsupported {
+                guest_pc: instruction.pc,
+                mnemonic: opcode.mnemonic().to_owned(),
+                trap: match opcode {
+                    crate::mips::Opcode::Syscall => Some(TrapKind::Syscall),
+                    crate::mips::Opcode::Break => Some(TrapKind::Break),
+                    _ => None,
+                },
+            }),
+        },
         Terminator::SegmentEnd { next_pc } => {
             Ok(ControlTerminator::SegmentEnd { next_pc: *next_pc })
         }
@@ -494,7 +507,9 @@ fn verify_terminator_targets(terminator: &ControlTerminator) -> Result<(), Contr
             }
             verify_link_continuation(*guest_pc, *link_register, *return_pc)?;
         }
-        ControlTerminator::Return { .. } | ControlTerminator::Unsupported { .. } => {}
+        ControlTerminator::Return { .. }
+        | ControlTerminator::ExceptionReturn { .. }
+        | ControlTerminator::Unsupported { .. } => {}
     }
     Ok(())
 }
