@@ -302,4 +302,62 @@ mod tests {
             sha256_bytes(&payload)
         );
     }
+
+    /// SHA-256 pads to a 64-byte block with a 9-byte minimum trailer, so the
+    /// interesting lengths are those straddling 55/56 and 63/64 bytes. The
+    /// expected digests were produced independently with Python's `hashlib`.
+    #[test]
+    fn sha256_matches_independent_vectors_at_padding_boundaries() {
+        let vectors: [(usize, &str); 8] = [
+            (
+                55,
+                "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318",
+            ),
+            (
+                56,
+                "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a",
+            ),
+            (
+                63,
+                "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34",
+            ),
+            (
+                64,
+                "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb",
+            ),
+            (
+                65,
+                "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0",
+            ),
+            (
+                119,
+                "31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb",
+            ),
+            (
+                120,
+                "2f3d335432c70b580af0e8e1b3674a7c020d683aa5f73aaaedfdc55af904c21c",
+            ),
+            (
+                128,
+                "6836cf13bac400e9105071cd6af47084dfacad4e5e302c94bfed24e013afb73e",
+            ),
+        ];
+        for (length, expected) in vectors {
+            assert_eq!(
+                hex_digest(&sha256_bytes(&vec![b'a'; length])),
+                expected,
+                "length {length}"
+            );
+        }
+    }
+
+    #[test]
+    fn sha256_of_the_two_block_nist_message_matches() {
+        assert_eq!(
+            hex_digest(&sha256_bytes(
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+            )),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+    }
 }
