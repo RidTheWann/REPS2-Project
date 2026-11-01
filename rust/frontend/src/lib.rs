@@ -18,6 +18,7 @@ pub mod iso9660;
 pub mod json;
 pub mod library;
 pub mod mips;
+pub mod native_build;
 
 /// Frontend version reported by the command-line tool.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
