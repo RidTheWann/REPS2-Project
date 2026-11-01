@@ -49,6 +49,46 @@ jobs:
           git format-patch --output-directory "$RUNNER_TEMP/audit-patches" "$BASE_COMMIT"..refs/audit/replay-batch
           test "$(find "$RUNNER_TEMP/audit-patches" -maxdepth 1 -name '*.patch' | wc -l)" -eq 6
 
+      - name: Remove the workflow-file change from the replay patch
+        run: |
+          set -euo pipefail
+          patch3="$(find "$RUNNER_TEMP/audit-patches" -maxdepth 1 -name '0003-*.patch' -print -quit)"
+          test -n "$patch3"
+          python3 - "$patch3" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          patch = path.read_bytes()
+          patch = re.sub(
+              rb"(?m)^Subject: \[PATCH 3/6\] build: enforce rustfmt in CI, declare and test MSRV 1\.88,\r?\n derive CMake version from Cargo\r?\n",
+              b"Subject: [PATCH 3/6] build: declare MSRV 1.88 and derive CMake version from Cargo\n",
+              patch,
+              count=1,
+          )
+          patch = patch.replace(
+              b"- CI: add a 'cargo fmt --all -- --check' step (README already documents it).\n",
+              b"",
+          )
+          patch = patch.replace(
+              b"- CI: add an MSRV job on dtolnay/rust-toolchain@1.88.\n",
+              b"",
+          )
+          patch = re.sub(
+              rb"(?ms)^diff --git a/\.github/workflows/ci\.yml b/\.github/workflows/ci\.yml\r?\n.*?(?=^diff --git |\Z)",
+              b"",
+              patch,
+              count=1,
+          )
+          if b"diff --git a/.github/workflows/ci.yml " in patch:
+              raise SystemExit("workflow-file patch was not fully removed")
+          if b"Subject: [PATCH 3/6] build: declare MSRV 1.88" not in patch:
+              raise SystemExit("could not retitle the filtered build patch safely")
+          path.write_bytes(patch)
+          PY
+          ! grep -q '^diff --git a/.github/workflows/ci.yml ' "$patch3"
+
       - name: Apply the six commits to a clean integration branch
         run: |
           set -euo pipefail
