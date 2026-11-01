@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Deterministic C++20 source generation for the verified scalar IR subset.
 
 use crate::ir::{Fpr, FpuControl, Gpr, Instruction, Operation, Program, VerifyError};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Typed, host-independent IR for a deliberately bounded scalar EE subset.
 
 use std::fmt;
