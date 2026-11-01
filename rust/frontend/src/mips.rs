@@ -162,6 +162,16 @@ pub enum Opcode {
     Cache,
     /// Prefetch hint; no guest-visible data effect.
     Pref,
+    /// Move From COP0: GPR[rt] = sign-extend(COP0[rd]).
+    Mfc0,
+    /// Move To COP0: COP0[rd] = GPR[rt].
+    Mtc0,
+    /// Enable Interrupts: sets Status.EIE (bit 16).
+    Ei,
+    /// Disable Interrupts: clears Status.EIE (bit 16).
+    Di,
+    /// Exception Return: restores PC and clears EXL.
+    Eret,
     Unknown,
 }
 
@@ -387,6 +397,11 @@ impl Opcode {
             Self::Movz => "movz",
             Self::Cache => "cache",
             Self::Pref => "pref",
+            Self::Mfc0 => "mfc0",
+            Self::Mtc0 => "mtc0",
+            Self::Ei => "ei",
+            Self::Di => "di",
+            Self::Eret => "eret",
             Self::Unknown => "unknown",
         }
     }
@@ -967,6 +982,17 @@ impl Instruction {
             // for static recompilation we model them as no-ops.
             Opcode::Cache | Opcode::Pref => {}
 
+            Opcode::Mfc0 => {
+                effects.gpr_write_mask = rt;
+            }
+            Opcode::Mtc0 => {
+                effects.gpr_read_mask = rt;
+            }
+            Opcode::Ei | Opcode::Di => {}
+            Opcode::Eret => {
+                effects.control_flow = ControlFlowEffect::Trap;
+            }
+
             Opcode::Unknown => {
                 // Do not let an unrecognized EE, COP, FPU, MMI, or malformed
                 // encoding look like a side-effect-free instruction.
@@ -1019,6 +1045,22 @@ fn jump_target(pc: u32, word: u32) -> u32 {
 /// field reserved-zero; retail code leaves those fields at zero in every
 /// sampled word, so a non-zero reserved field is not decoded as the
 /// instruction it would otherwise name.
+fn decode_cop0(word: u32) -> Opcode {
+    let rs = ((word >> 21) & 0x1F) as u8;
+    let reserved_low = word & 0x7FF; // bits 10..0
+    match rs {
+        0x00 if reserved_low == 0 => Opcode::Mfc0,
+        0x04 if reserved_low == 0 => Opcode::Mtc0,
+        0x10 => match word {
+            0x4200_0018 => Opcode::Eret,
+            0x4200_0038 => Opcode::Ei,
+            0x4200_0039 => Opcode::Di,
+            _ => Opcode::Unknown,
+        },
+        _ => Opcode::Unknown,
+    }
+}
+
 fn decode_cop1(word: u32) -> Opcode {
     let format = ((word >> 21) & 0x1F) as u8;
     let ft = ((word >> 16) & 0x1F) as u8;
@@ -1265,6 +1307,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x13 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mtlo1,
                 _ => Opcode::Unknown,
             },
+            // COP0 system control instructions: MFC0, MTC0, EI, DI, ERET.
+            0x10 => decode_cop0(word),
             // Bit 25 is not a COP1/COP2 flag: COP2 (VU0) has its own primary
             // opcode 0x12, so 0x11 is unambiguously the FPU. Bits 25..21 are the
             // format selector, which is why the register transfers and the
@@ -2433,5 +2477,56 @@ mod tests {
         assert_eq!(pref_eff.gpr_read_mask, 0);
         assert_eq!(pref_eff.gpr_write_mask, 0);
         assert_eq!(pref_eff.memory, MemoryEffect::None);
+    }
+
+    #[test]
+    fn decodes_cop0_transfers_and_control() {
+        // MFC0: 0x40026000 -> mfc0  (2),  (Status)
+        // op=0x10, rs=0, rt=2, rd=12, rest 0
+        let mfc0 = decode((0x10 << 26) | (2 << 16) | (12 << 11), 0x1000);
+        assert_eq!(mfc0.opcode, Opcode::Mfc0);
+        assert_eq!(mfc0.rt, 2);
+        assert_eq!(mfc0.rd, 12);
+        let mfc0_eff = mfc0.effects();
+        assert_eq!(mfc0_eff.gpr_read_mask, 0);
+        assert_eq!(mfc0_eff.gpr_write_mask, 1 << 2);
+        assert_eq!(mfc0_eff.memory, MemoryEffect::None);
+
+        // MTC0: 0x40826000 -> mtc0  (2),  (Status)
+        // op=0x10, rs=4, rt=2, rd=12, rest 0
+        let mtc0 = decode((0x10 << 26) | (4 << 21) | (2 << 16) | (12 << 11), 0x1000);
+        assert_eq!(mtc0.opcode, Opcode::Mtc0);
+        assert_eq!(mtc0.rt, 2);
+        assert_eq!(mtc0.rd, 12);
+        let mtc0_eff = mtc0.effects();
+        assert_eq!(mtc0_eff.gpr_read_mask, 1 << 2);
+        assert_eq!(mtc0_eff.gpr_write_mask, 0);
+        assert_eq!(mtc0_eff.memory, MemoryEffect::None);
+
+        // Reserved bits in MFC0/MTC0 rejected
+        assert_eq!(
+            decode((0x10 << 26) | (2 << 16) | (12 << 11) | 1, 0).opcode,
+            Opcode::Unknown
+        );
+
+        // EI: 0x42000038
+        let ei = decode(0x4200_0038, 0x1000);
+        assert_eq!(ei.opcode, Opcode::Ei);
+        assert!(!ei.has_delay_slot);
+        let ei_eff = ei.effects();
+        assert_eq!(ei_eff.gpr_read_mask, 0);
+        assert_eq!(ei_eff.gpr_write_mask, 0);
+
+        // DI: 0x42000039
+        let di = decode(0x4200_0039, 0x1000);
+        assert_eq!(di.opcode, Opcode::Di);
+        assert!(!di.has_delay_slot);
+
+        // ERET: 0x42000018
+        let eret = decode(0x4200_0018, 0x1000);
+        assert_eq!(eret.opcode, Opcode::Eret);
+        assert!(!eret.has_delay_slot);
+        let eret_eff = eret.effects();
+        assert_eq!(eret_eff.control_flow, ControlFlowEffect::Trap);
     }
 }

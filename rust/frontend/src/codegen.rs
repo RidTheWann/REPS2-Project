@@ -65,6 +65,10 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::load_u64_right;\n\
              using reps2::runtime::store_u64_left;\n\
              using reps2::runtime::store_u64_right;\n\
+             using reps2::runtime::read_cop0;\n\
+             using reps2::runtime::write_cop0;\n\
+             using reps2::runtime::enable_interrupts;\n\
+             using reps2::runtime::disable_interrupts;\n\
              state.gpr[0] = {};\n",
     );
 
@@ -175,6 +179,24 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
                 "    const auto memory_status_{tag} = store_u32(state.memory, effective_address_{tag}, state.fpr[{}]);\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
                 src.index()
             ));
+        }
+        Operation::MoveFromCop0 { dst, cop0_reg } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(read_cop0(state, {cop0_reg}));\n"
+            ));
+        }
+        Operation::MoveToCop0 { src, cop0_reg } => {
+            let s = src.index();
+            output.push_str(&format!(
+                "    write_cop0(state, {cop0_reg}, static_cast<std::uint32_t>(state.gpr[{s}].low));\n"
+            ));
+        }
+        Operation::EnableInterrupts => {
+            output.push_str("    enable_interrupts(state);\n");
+        }
+        Operation::DisableInterrupts => {
+            output.push_str("    disable_interrupts(state);\n");
         }
         Operation::FpuAddSingle { dst, lhs, rhs } => {
             emit_fpu_binary(output, index, dst, lhs, rhs, "fpu_add");
@@ -1652,5 +1674,31 @@ mod tests {
                 "prologue must expose {helper}"
             );
         }
+    }
+
+    #[test]
+    fn emits_cop0_transfers_and_interrupt_controls() {
+        let words = [
+            (0x10 << 26) | (2 << 16) | (12 << 11), // mfc0 $v0, $12 (Status)
+            (0x10 << 26) | (4 << 21) | (3 << 16) | (12 << 11), // mtc0 $v1, $12 (Status)
+            0x4200_0038, // ei
+            0x4200_0039, // di
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x1000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("COP0 IR");
+        let cpp = emit_cpp(&program).expect("COP0 C++");
+
+        assert!(cpp.contains("if (2 != 0) state.gpr[2].low = sign_extend_word(read_cop0(state, 12));"));
+        assert!(cpp.contains("write_cop0(state, 12, static_cast<std::uint32_t>(state.gpr[3].low));"));
+        assert!(cpp.contains("enable_interrupts(state);"));
+        assert!(cpp.contains("disable_interrupts(state);"));
+        assert!(cpp.contains("using reps2::runtime::read_cop0;"));
+        assert!(cpp.contains("using reps2::runtime::write_cop0;"));
+        assert!(cpp.contains("using reps2::runtime::enable_interrupts;"));
+        assert!(cpp.contains("using reps2::runtime::disable_interrupts;"));
     }
 }

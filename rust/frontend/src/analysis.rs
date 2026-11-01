@@ -660,7 +660,10 @@ pub fn discover_cfg(
 
             let instruction = mips::decode(word, pc);
             if !instruction.is_supported()
-                || matches!(instruction.opcode, Opcode::Syscall | Opcode::Break)
+                || matches!(
+                    instruction.opcode,
+                    Opcode::Syscall | Opcode::Break | Opcode::Eret
+                )
             {
                 break Terminator::Unsupported { instruction };
             }

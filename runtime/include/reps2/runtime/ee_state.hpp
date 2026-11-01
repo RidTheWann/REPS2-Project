@@ -30,6 +30,34 @@ struct EeMemory {
 // cannot pass by agreeing with the code that emits it.
 inline constexpr std::uint32_t kFpuImplementationRegister{0x0000'2E00U};
 
+// COP0 Processor Revision ID for Emotion Engine (R5900):
+// Implementation 0x2E in bits 15..8, revision 0x20 in bits 7..0.
+inline constexpr std::uint32_t kEeProcessorId{0x0000'2E20U};
+
+inline constexpr std::uint8_t kCop0Index = 0;
+inline constexpr std::uint8_t kCop0Random = 1;
+inline constexpr std::uint8_t kCop0EntryLo0 = 2;
+inline constexpr std::uint8_t kCop0EntryLo1 = 3;
+inline constexpr std::uint8_t kCop0Context = 4;
+inline constexpr std::uint8_t kCop0PageMask = 5;
+inline constexpr std::uint8_t kCop0Wired = 6;
+inline constexpr std::uint8_t kCop0BadVAddr = 8;
+inline constexpr std::uint8_t kCop0Count = 9;
+inline constexpr std::uint8_t kCop0EntryHi = 10;
+inline constexpr std::uint8_t kCop0Compare = 11;
+inline constexpr std::uint8_t kCop0Status = 12;
+inline constexpr std::uint8_t kCop0Cause = 13;
+inline constexpr std::uint8_t kCop0Epc = 14;
+inline constexpr std::uint8_t kCop0PrId = 15;
+inline constexpr std::uint8_t kCop0Config = 16;
+inline constexpr std::uint8_t kCop0BadPAddr = 24;
+inline constexpr std::uint8_t kCop0TagLo = 28;
+inline constexpr std::uint8_t kCop0TagHi = 29;
+inline constexpr std::uint8_t kCop0ErrorEpc = 30;
+
+// COP0 Status bit 16 is EIE (Enable Interrupts Enable bit)
+inline constexpr std::uint32_t kCop0StatusEieMask{0x0001'0000U};
+
 struct EeState {
     std::uint32_t pc{};
     std::array<Gpr128, 32> gpr{};
@@ -49,6 +77,7 @@ struct EeState {
     std::array<std::uint32_t, 32> fpr{};
     std::uint32_t acc{};
     std::uint32_t fcsr{kFpuControlResetValue};
+    std::array<std::uint32_t, 32> cop0{};
     EeMemory memory{};
 };
 
@@ -128,6 +157,9 @@ enum class Status : std::uint8_t {
     state.fpr = {};
     state.acc = 0;
     state.fcsr = kFpuControlResetValue;
+    state.cop0 = {};
+    state.cop0[kCop0PrId] = kEeProcessorId;
+    state.cop0[kCop0Status] = 0x1040'0004U;
     state.pc = entry_pc;
     return Status::ok;
 }
@@ -138,6 +170,33 @@ enum class Status : std::uint8_t {
 // read back 0b01.
 constexpr void store_fpu_control(std::uint32_t& control, std::uint32_t value) noexcept {
     control = (value & kFpuControlWritableMask) | kFpuControlResetValue;
+}
+
+[[nodiscard]] inline std::uint32_t read_cop0(const EeState& state, std::uint8_t reg) noexcept {
+    if (reg == kCop0PrId) {
+        return kEeProcessorId;
+    }
+    if (reg < 32U) {
+        return state.cop0[reg];
+    }
+    return 0U;
+}
+
+inline void write_cop0(EeState& state, std::uint8_t reg, std::uint32_t value) noexcept {
+    if (reg == kCop0PrId) {
+        return; // PRId is read-only
+    }
+    if (reg < 32U) {
+        state.cop0[reg] = value;
+    }
+}
+
+inline void enable_interrupts(EeState& state) noexcept {
+    state.cop0[kCop0Status] |= kCop0StatusEieMask;
+}
+
+inline void disable_interrupts(EeState& state) noexcept {
+    state.cop0[kCop0Status] &= ~kCop0StatusEieMask;
 }
 
 [[nodiscard]] inline Status resolve_ee_memory_access(
