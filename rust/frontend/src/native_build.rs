@@ -142,11 +142,21 @@ function(reps2_json_set_string json_variable key value)
 endfunction()
 
 if(MSVC)
-    set(REPS2_TARGET_COMPILE_OPTIONS_JSON "[\\\"/W4\\\", \\\"/permissive-\\\"]")
+    set(REPS2_TARGET_COMPILE_OPTIONS "/W4" "/permissive-")
 else()
-    set(REPS2_TARGET_COMPILE_OPTIONS_JSON
-        "[\\\"-Wall\\\", \\\"-Wextra\\\", \\\"-Wpedantic\\\", \\\"-Wconversion\\\"]")
+    set(REPS2_TARGET_COMPILE_OPTIONS "-Wall" "-Wextra" "-Wpedantic" "-Wconversion")
 endif()
+set(REPS2_TARGET_COMPILE_OPTIONS_JSON "[")
+set(REPS2_FIRST_COMPILE_OPTION TRUE)
+foreach(option IN LISTS REPS2_TARGET_COMPILE_OPTIONS)
+    if(NOT REPS2_FIRST_COMPILE_OPTION)
+        string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON ", ")
+    endif()
+    reps2_json_quote(quoted_option "${option}")
+    string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON "${quoted_option}")
+    set(REPS2_FIRST_COMPILE_OPTION FALSE)
+endforeach()
+string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON "]")
 
 set(REPS2_COMPILER_JSON "{}")
 reps2_json_set_string(REPS2_COMPILER_JSON id "${CMAKE_CXX_COMPILER_ID}")
@@ -190,7 +200,7 @@ string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" cma
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" compile "${REPS2_COMPILE_JSON}")
 file(GENERATE
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reps2-native-toolchain-$<CONFIG>.json"
-    CONTENT "${REPS2_NATIVE_TOOLCHAIN_JSON}\\n"
+    CONTENT "${REPS2_NATIVE_TOOLCHAIN_JSON}\n"
 )
 
 enable_testing()
