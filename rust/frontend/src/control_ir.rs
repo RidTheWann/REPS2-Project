@@ -510,6 +510,7 @@ fn verify_terminator_registers(terminator: &ControlTerminator) -> Result<(), Con
                 | BranchCondition::GreaterThanZero { register }
                 | BranchCondition::LessThanZero { register }
                 | BranchCondition::GreaterThanOrEqualZero { register } => validate(*register)?,
+                BranchCondition::FpuCondition { .. } => {}
             }
             if let Some(register) = link_register {
                 validate(*register)?;

@@ -138,6 +138,18 @@ pub enum Opcode {
     FpuMinimumSingle,
     FpuConvertSingleToWord,
     FpuConvertWordToSingle,
+    // COP1 compares write only FCR31's condition bit. The EE defines funct
+    // 0x30, 0x32, 0x34 and 0x36 with fd zero; every other funct in this group
+    // is undefined. BC1 selects its four variants in rt (0..3) and carries the
+    // signed 16-bit branch offset in bits 15..0.
+    FpuCompareFalse,
+    FpuCompareEqual,
+    FpuCompareLessThan,
+    FpuCompareLessThanOrEqual,
+    Bc1f,
+    Bc1t,
+    Bc1fl,
+    Bc1tl,
     Unknown,
 }
 
@@ -350,6 +362,14 @@ impl Opcode {
             Self::FpuMinimumSingle => "min.s",
             Self::FpuConvertSingleToWord => "cvt.w.s",
             Self::FpuConvertWordToSingle => "cvt.s.w",
+            Self::FpuCompareFalse => "c.f.s",
+            Self::FpuCompareEqual => "c.eq.s",
+            Self::FpuCompareLessThan => "c.lt.s",
+            Self::FpuCompareLessThanOrEqual => "c.le.s",
+            Self::Bc1f => "bc1f",
+            Self::Bc1t => "bc1t",
+            Self::Bc1fl => "bc1fl",
+            Self::Bc1tl => "bc1tl",
             Self::Unknown => "unknown",
         }
     }
@@ -515,6 +535,10 @@ impl Instruction {
                 | Opcode::Bgezl
                 | Opcode::Bltzall
                 | Opcode::Bgezall
+                | Opcode::Bc1f
+                | Opcode::Bc1t
+                | Opcode::Bc1fl
+                | Opcode::Bc1tl
                 | Opcode::Jr
                 | Opcode::Jalr
         )
@@ -541,6 +565,10 @@ impl Instruction {
                 | Opcode::Bgezl
                 | Opcode::Bltzall
                 | Opcode::Bgezall
+                | Opcode::Bc1f
+                | Opcode::Bc1t
+                | Opcode::Bc1fl
+                | Opcode::Bc1tl
         )
     }
 
@@ -559,6 +587,8 @@ impl Instruction {
                 | Opcode::Bgezl
                 | Opcode::Bltzall
                 | Opcode::Bgezall
+                | Opcode::Bc1fl
+                | Opcode::Bc1tl
         )
     }
 
@@ -842,6 +872,26 @@ impl Instruction {
                 effects.writes_fcr = true;
             }
 
+            // C.EQ.S, C.LT.S and C.LE.S read both operands and write only the
+            // condition bit. C.F.S writes the same bit to zero without
+            // depending on either operand, so it claims no FPR read.
+            Opcode::FpuCompareEqual
+            | Opcode::FpuCompareLessThan
+            | Opcode::FpuCompareLessThanOrEqual => {
+                effects.fpr_read_mask = fpr_bit(self.rd) | fpr_bit(self.rt);
+                effects.writes_fcr = true;
+            }
+            Opcode::FpuCompareFalse => {
+                effects.writes_fcr = true;
+            }
+
+            // The BC1 family reads the condition bit and consumes no GPR. Its
+            // delay-slot policy follows the branch-likely classification.
+            Opcode::Bc1f | Opcode::Bc1t | Opcode::Bc1fl | Opcode::Bc1tl => {
+                effects.reads_fcr = true;
+                effects.control_flow = ControlFlowEffect::ConditionalDirect;
+            }
+
             Opcode::Lb
             | Opcode::Lh
             | Opcode::Lw
@@ -976,9 +1026,26 @@ fn decode_cop1(word: u32) -> Opcode {
             0x24 if ft == 0 => Opcode::FpuConvertSingleToWord,
             0x28 => Opcode::FpuMaximumSingle,
             0x29 => Opcode::FpuMinimumSingle,
+            // The compare forms put fs in 15..11 and ft in 20..16, leave bits
+            // 10..6 zero, and use funct 0x30/0x32/0x34/0x36. The odd funct
+            // values (C.UN, C.UEQ, C.OLT...) and 0x38..0x3F do not exist on
+            // the EE and stay unknown.
+            0x30 if fd == 0 => Opcode::FpuCompareFalse,
+            0x32 if fd == 0 => Opcode::FpuCompareEqual,
+            0x34 if fd == 0 => Opcode::FpuCompareLessThan,
+            0x36 if fd == 0 => Opcode::FpuCompareLessThanOrEqual,
             _ => Opcode::Unknown,
         },
         0x14 if funct == 0x20 && ft == 0 => Opcode::FpuConvertWordToSingle,
+        // BC1 puts the variant in bits 20..16 and a signed 16-bit offset in
+        // bits 15..0; all other selector values are reserved.
+        0x08 => match ft {
+            0 => Opcode::Bc1f,
+            1 => Opcode::Bc1t,
+            2 => Opcode::Bc1fl,
+            3 => Opcode::Bc1tl,
+            _ => Opcode::Unknown,
+        },
         _ => Opcode::Unknown,
     }
 }
@@ -1181,6 +1248,15 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x1F => Opcode::Sq,
             _ => Opcode::Unknown,
         };
+    }
+
+    if matches!(
+        instruction.opcode,
+        Opcode::Bc1f | Opcode::Bc1t | Opcode::Bc1fl | Opcode::Bc1tl
+    ) {
+        let offset = ((immediate as i16 as i32).wrapping_mul(4)) as u32;
+        instruction.target = pc.wrapping_add(4).wrapping_add(offset);
+        instruction.has_delay_slot = true;
     }
 
     if !instruction.is_control_transfer() {
@@ -2016,13 +2092,93 @@ mod tests {
                 "funct 0x{funct:02X}"
             );
         }
-        for format in [0x01, 0x08, 0x12, 0x13, 0x15] {
+        for format in [0x01, 0x12, 0x13, 0x15] {
             assert_eq!(
                 decode(encode_cop1(format, 2, 1, 3, 0x00), 0).opcode,
                 Opcode::Unknown,
                 "format 0x{format:02X}"
             );
         }
+    }
+
+    #[test]
+    fn decodes_cop1_compare_selectors() {
+        // fs is the left operand and ft the right one; fd is reserved-zero.
+        for (funct, opcode, mnemonic) in [
+            (0x30, Opcode::FpuCompareFalse, "c.f.s"),
+            (0x32, Opcode::FpuCompareEqual, "c.eq.s"),
+            (0x34, Opcode::FpuCompareLessThan, "c.lt.s"),
+            (0x36, Opcode::FpuCompareLessThanOrEqual, "c.le.s"),
+        ] {
+            let decoded = decode(encode_cop1(0x10, 2, 1, 0, funct), 0);
+            assert_eq!(decoded.opcode, opcode, "funct 0x{funct:02X}");
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert_eq!((decoded.rt, decoded.rd), (2, 1));
+            assert!(!decoded.has_delay_slot);
+            assert!(!decoded.is_control_transfer());
+        }
+
+        // The IEEE-only predicates (C.UN, C.UEQ, C.OLT, C.ULE, C.SEQ, ...)
+        // and the unused encodings above them do not exist on the EE.
+        for funct in [0x31, 0x33, 0x35, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F] {
+            assert_eq!(
+                decode(encode_cop1(0x10, 2, 1, 0, funct), 0).opcode,
+                Opcode::Unknown,
+                "funct 0x{funct:02X}"
+            );
+        }
+        // A nonzero fd is reserved and must not alias a valid compare.
+        for funct in [0x30, 0x32, 0x34, 0x36] {
+            assert_eq!(
+                decode(encode_cop1(0x10, 2, 1, 1, funct), 0).opcode,
+                Opcode::Unknown,
+                "funct 0x{funct:02X} must reserve fd"
+            );
+        }
+    }
+
+    #[test]
+    fn decodes_bc1_variants_target_and_annulment() {
+        // BC1 selects its variant in rt and a signed 16-bit word offset.
+        for (selector, opcode, mnemonic) in [
+            (0, Opcode::Bc1f, "bc1f"),
+            (1, Opcode::Bc1t, "bc1t"),
+            (2, Opcode::Bc1fl, "bc1fl"),
+            (3, Opcode::Bc1tl, "bc1tl"),
+        ] {
+            let decoded = decode(encode_cop1(0x08, selector, 0, 0, 2), 0x1000);
+            assert_eq!(decoded.opcode, opcode, "rt {selector}");
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert!(decoded.is_control_transfer());
+            assert!(decoded.has_delay_slot);
+            assert_eq!(decoded.target, 0x100C);
+            assert_eq!(
+                decoded.is_branch_likely(),
+                matches!(selector, 2 | 3),
+                "rt {selector}"
+            );
+        }
+
+        // A negative offset wraps and still targets pc + 4 + offset.
+        let back = decode(encode_cop1(0x08, 1, 0, 0, 0xFFFE), 0x1000);
+        assert_eq!(back.opcode, Opcode::Bc1t);
+        assert_eq!(back.target, 0x0FFC);
+
+        // Selectors 4..31 are reserved. The low funct bits are part of the
+        // offset, so they must not affect the variant selection.
+        for selector in 4..32 {
+            assert_eq!(
+                decode(encode_cop1(0x08, selector, 0, 0, 0), 0).opcode,
+                Opcode::Unknown,
+                "rt {selector}"
+            );
+        }
+        // Offset -1 targets pc + 4 - 4; the full 16-bit immediate, not just
+        // the fd-shaped low six bits, feeds the target.
+        let minus_one = (0x11 << 26) | (0x08 << 21) | (1 << 16) | 0xFFFF;
+        let decoded = decode(minus_one, 0x1000);
+        assert_eq!(decoded.opcode, Opcode::Bc1t);
+        assert_eq!(decoded.target, 0x1000);
     }
 
     #[test]
@@ -2062,6 +2218,48 @@ mod tests {
         assert!(madda.reads_acc);
         assert!(madda.writes_acc);
         assert_eq!(madda.fpr_write_mask, 0);
+    }
+
+    #[test]
+    fn effects_track_cop1_compare_and_bc1_dependencies() {
+        // C.EQ.S, C.LT.S and C.LE.S read fs and ft and write only the
+        // condition bit. They never write an FPR or the accumulator.
+        for funct in [0x32, 0x34, 0x36] {
+            let effects = decode(encode_cop1(0x10, 2, 1, 0, funct), 0).effects();
+            assert_eq!(effects.fpr_read_mask, (1 << 1) | (1 << 2), "funct {funct:02X}");
+            assert_eq!(effects.fpr_write_mask, 0);
+            assert!(effects.writes_fcr);
+            assert!(!effects.reads_fcr);
+            assert!(!effects.reads_acc);
+            assert!(!effects.writes_acc);
+            assert_eq!(effects.memory, MemoryEffect::None);
+        }
+
+        // C.F.S clears the condition without reading either operand.
+        let c_f = decode(encode_cop1(0x10, 2, 1, 0, 0x30), 0).effects();
+        assert_eq!(c_f.fpr_read_mask, 0);
+        assert_eq!(c_f.fpr_write_mask, 0);
+        assert!(c_f.writes_fcr);
+        assert!(!c_f.reads_fcr);
+
+        // BC1 reads the condition bit, consumes no GPR or FPR, and is a
+        // conditional direct branch. The likely forms are the annulling ones.
+        for (selector, likely) in [(0, false), (1, false), (2, true), (3, true)] {
+            let instruction = decode(encode_cop1(0x08, selector, 0, 0, 0), 0x1000);
+            let effects = instruction.effects();
+            assert!(effects.reads_fcr, "rt {selector}");
+            assert!(!effects.writes_fcr, "rt {selector}");
+            assert_eq!(effects.gpr_read_mask, 0, "rt {selector}");
+            assert_eq!(effects.gpr_write_mask, 0, "rt {selector}");
+            assert_eq!(effects.fpr_read_mask, 0, "rt {selector}");
+            assert_eq!(effects.fpr_write_mask, 0, "rt {selector}");
+            assert_eq!(
+                effects.control_flow,
+                ControlFlowEffect::ConditionalDirect,
+                "rt {selector}"
+            );
+            assert_eq!(instruction.is_branch_likely(), likely, "rt {selector}");
+        }
     }
 
     #[test]
