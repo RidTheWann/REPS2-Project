@@ -601,6 +601,7 @@ fn verify_terminator_registers(terminator: &ControlTerminator) -> Result<(), Con
         } => validate(*source_register)?,
         ControlTerminator::Fallthrough { .. }
         | ControlTerminator::GuestException { .. }
+        | ControlTerminator::ExceptionReturn { .. }
         | ControlTerminator::Unsupported { .. }
         | ControlTerminator::SegmentEnd { .. } => {}
     }
