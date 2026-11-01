@@ -85,6 +85,9 @@ using reps2::runtime::read_cop0;
 using reps2::runtime::write_cop0;
 using reps2::runtime::enable_interrupts;
 using reps2::runtime::disable_interrupts;
+using reps2::runtime::ExceptionCode;
+using reps2::runtime::raise_ee_exception;
+using reps2::runtime::return_from_ee_exception;
 
 ";
 
@@ -380,17 +383,25 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 "    state.pc = return_target_{guest_pc:08X};\n    return Status::ok;\n"
             ));
         }
-        ControlTerminator::Unsupported { guest_pc, trap, .. } => {
-            // A known SYSCALL/BREAK trap is reported distinctly from an
-            // unknown encoding so the caller can eventually deliver it to an
-            // HLE service layer. The PC stays on the trapping instruction.
-            let status = match trap {
-                Some(TrapKind::Syscall) => "Status::syscall",
-                Some(TrapKind::Break) => "Status::breakpoint",
-                None => "Status::unsupported_instruction",
-            };
+        ControlTerminator::ExceptionReturn { guest_pc } => {
             output.push_str(&format!(
-                "    state.pc = 0x{guest_pc:08X}U;\n    return {status};\n"
+                "    state.pc = 0x{guest_pc:08X}U;\n    return return_from_ee_exception(state);\n"
+            ));
+        }
+        ControlTerminator::GuestException { guest_pc, trap } => {
+            output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
+            match trap {
+                TrapKind::Syscall => output.push_str(
+                    "    return raise_ee_exception(state, ExceptionCode::SystemCall);\n"
+                ),
+                TrapKind::Break => output.push_str(
+                    "    return raise_ee_exception(state, ExceptionCode::Breakpoint);\n"
+                ),
+            }
+        }
+        ControlTerminator::Unsupported { guest_pc, .. } => {
+            output.push_str(&format!(
+                "    state.pc = 0x{guest_pc:08X}U;\n    return Status::unsupported_instruction;\n"
             ));
         }
         ControlTerminator::SegmentEnd { next_pc } => {
@@ -703,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn emits_distinct_status_for_syscall_and_break_traps() {
+    fn emits_level1_exception_entry_for_syscall_and_break() {
         let words = [
             0x0000_000C, // syscall code 0
             0x0000_004D, // break code 1
@@ -720,9 +731,38 @@ mod tests {
         let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
         let cpp = emit_cpp(&program).expect("single unit");
 
-        assert!(cpp.contains("state.pc = 0x00002000U;\n    return Status::syscall;"));
-        assert!(cpp.contains("state.pc = 0x00002004U;\n    return Status::breakpoint;"));
+        assert!(cpp.contains(
+            "state.pc = 0x00002000U;\n    return raise_ee_exception(state, ExceptionCode::SystemCall);"
+        ));
+        assert!(cpp.contains(
+            "state.pc = 0x00002004U;\n    return raise_ee_exception(state, ExceptionCode::Breakpoint);"
+        ));
         assert!(!cpp.contains("return Status::unsupported_instruction;"));
+    }
+
+    #[test]
+    fn emits_eret_as_a_dynamic_exception_return() {
+        let words = [0x4200_0018]; // eret
+        let segments = [segment(0x4000, &words)];
+        let roots = [0x4000];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x4000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic ERET CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let block = program.blocks.get(&0x4000).expect("ERET block");
+        assert!(matches!(
+            block.terminator,
+            ControlTerminator::ExceptionReturn { guest_pc: 0x4000 }
+        ));
+
+        let cpp = emit_cpp(&program).expect("single unit");
+        assert!(cpp.contains(
+            "state.pc = 0x00004000U;\n    return return_from_ee_exception(state);"
+        ));
     }
 
     #[test]
