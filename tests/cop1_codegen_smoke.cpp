@@ -24,7 +24,7 @@ constexpr std::uint64_t kSignExtendedFpr = 0xFFFF'FFFF'8000'00AAULL;
 // and 22 and the reserved 13..7 field, which are read-as-zero and must not
 // persist; the condition bit, cause I and sticky U, which must; and bits 1..0
 // as 0b10, where the EE hard-wires the rounding field to 0b01 on the read back.
-constexpr std::uint64_t kFcsrSource = 0x0000'0001'8082'100AULL;
+constexpr std::uint64_t kFcsrSource = 0x0000'0001'80C2'100AULL;
 constexpr std::uint32_t kFcsrValue = 0x0182'0009U;
 // CFC1 $31 can no longer show sign extension, because bit 31 is one of the
 // reserved-zero bits the store cannot set: the only patterns FCR31 can hold
@@ -33,7 +33,7 @@ constexpr std::uint32_t kFcsrValue = 0x0182'0009U;
 constexpr std::uint64_t kFcsrReadBack = 0x0182'0009ULL;
 // The same source through MTC1 keeps the reserved bits and bit 1: only CTC1
 // applies the mask.
-constexpr std::uint64_t kSignExtendedFcsrSource = 0xFFFF'FFFF'8082'100AULL;
+constexpr std::uint64_t kSignExtendedFcsrSource = 0xFFFF'FFFF'80C2'100AULL;
 constexpr std::uint32_t kScratchAddress = 0x40U;
 
 std::array<std::uint8_t, 256> main_memory{};

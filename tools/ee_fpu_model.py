@@ -14,8 +14,9 @@ where it disagrees):
     the 32-bit accumulator), 8.3.2 Figure 8-5 and Table 8-2 (FCR31 layout),
     8.5 Table 8-4 (abnormal results), 8.6 Table 8-5 and 8-6 (signs of zero),
     8.7 (rounding), 8.8 (IEEE 754 compatibility statement).
-  * EE Core Instruction Set Manual v6.0 section 7.4 (encodings, per-operation
-    "operation" boxes and their explicit flag writes).
+  * EE Core Instruction Set Manual v6.0 Ch.5 (per-operation "operation" boxes,
+    their explicit flag writes, and the opening note that flags an instruction
+    does not name are unchanged) and section 7.4 (COP1 class encodings).
 
 Model of the datapath
 ---------------------
@@ -238,7 +239,10 @@ def div(a: int, b: int) -> Result:
         return Result(FMAX if sign == 0 else NEG_FMAX,
                       CAUSE_I if va == 0 else CAUSE_D)
     if va == 0:
-        return Result(pack(sign, 0, 0), CAUSE_U)
+        # The exact quotient is zero, not an exponent underflow: DIV.S's box
+        # names a flag only when a divisor is zero, and Table 8-4 reserves U
+        # for a computed result whose exponent underflows.
+        return Result(pack(sign, 0, 0))
     return encode(va / vb, sign)
 
 
@@ -270,10 +274,13 @@ def sqrt(a: int) -> Result:
 
 def rsqrt(b: int, a: int) -> Result:
     """RSQRT.S fd,fs,ft -> fs / sqrt(|ft|). The root is a truncated float
-    before the divide, so this is a double rounding by design."""
+    before the divide, so this is a double rounding by design. A zero divisor
+    names D regardless of the numerator (the instruction box over Table 8-5's
+    0/SQRT(0) row), and its sign follows sqrt(-0), as the Table 8-5 rows for
+    0/SQRT(+-0) show."""
     vb = value(b)
     if vb == 0:
-        sa = (a >> 31) & 1
+        sa = ((a >> 31) & 1) ^ ((b >> 31) & 1)
         return Result(FMAX if sa == 0 else NEG_FMAX, CAUSE_D)
     quotient = div(a, sqrt(b & 0x7FFFFFFF).bits)
     return Result(quotient.bits, quotient.cause | (CAUSE_I if vb < 0 else 0))
@@ -456,8 +463,8 @@ POOL = {
     "third": 0x3EAAAAAB,        # the same magnitude rounded to nearest
     "e_min": 0x00800000,        # 2^-126, smallest normal
     "ne_min": 0x80800000,       # -2^-126
-    "p2m47": 0x33800000,        # 2^-47, half an ulp below 1.0
-    "p2m48": 0x33000000,        # 2^-48, a quarter ulp: below the align window
+    "p2m24": 0x33800000,        # 2^-24, half an ulp below 1.0
+    "p2m25": 0x33000000,        # 2^-25, a quarter ulp: below the align window
     "half_ulp_plus": 0x3F000001,  # 0.5 + one ulp of 0.5
     "denorm": 0x00400000,       # exponent field 0: flushes to +0
     "e_max": 0x7F800000,        # 2^128, exponent field 0xFF is normal
@@ -503,23 +510,24 @@ PAIRS = {
             ("one_9", "m1"), ("half", "neg_qtr"), ("neg_qtr", "half"),
             # Wide spreads on the same sign: the smaller operand is below the
             # larger one's own ulp, so the exact sum is the larger operand.
-            ("p1", "p2m48"), ("m1", "ne_min"), ("e_max", "p2m47")],
+            ("p1", "p2m25"), ("m1", "ne_min"), ("e_max", "p2m24")],
     "sub": [("p1", "p1"), ("p1", "p225"), ("p225", "p1"), ("m1", "p1"),
             ("p1", "m1"), ("p0", "p0"), ("p0", "m0"), ("m0", "p0"),
             ("m0", "m0"), ("fmax", "p1"), ("p1", "fmax"), ("e_max", "e_min"),
             ("ieee", "ieee"), ("frac_lo", "p1"), ("odd_hi", "p1"),
             ("nfmax", "p1"), ("one_9", "m1"), ("half", "neg_qtr"),
-            # The three shapes a spread of more than 24 exponents can take:
-            # an exact half-ulp step (delta 24), a quarter-ulp step with a
-            # mantissa above the hidden bit (delta 125) and one at exactly the
-            # hidden bit, where the difference must renormalize to 0x00FFFFFF
-            # one exponent lower. Each also runs with the anchor negative, and
-            # with the smaller operand as the minuend, so a runtime that only
-            # returns the larger operand cannot reproduce these rows.
-            ("p1", "p2m47"), ("p1", "p2m48"), ("frac_lo", "p2m48"),
-            ("odd_hi", "p2m48"), ("m1", "p2m48"), ("p2m48", "p1"),
-            ("e_max", "ne_min"), ("e_min", "p2m48"), ("p1", "half_ulp_plus"),
-            ("half_ulp_plus", "p1"), ("ne_min", "p2m48")],
+            # Wide exponent spreads exercise each shape the align-and-truncate
+            # path can take: an exact half-ulp step (delta 24), quarter-ulp
+            # steps with and without a mantissa above the hidden bit (delta
+            # 25), the power-of-two anchor whose difference must renormalize
+            # to 0x00FFFFFF one exponent lower, and spreads past 100
+            # exponents. Each also runs with the anchor negative, and with the
+            # smaller operand as the minuend, so a runtime that only returns
+            # the larger operand cannot reproduce these rows.
+            ("p1", "p2m24"), ("p1", "p2m25"), ("frac_lo", "p2m25"),
+            ("odd_hi", "p2m25"), ("m1", "p2m25"), ("p2m25", "p1"),
+            ("e_max", "ne_min"), ("e_min", "p2m25"), ("p1", "half_ulp_plus"),
+            ("half_ulp_plus", "p1"), ("ne_min", "p2m25")],
     "mul": [("p1", "p1"), ("p15", "p25"), ("m1", "p25"), ("half", "e_min"),
             ("half", "denorm"), ("p0", "five"), ("m0", "five"), ("five", "m0"),
             ("fmax", "two"), ("nfmax", "two"), ("e_max", "two"),
@@ -540,7 +548,8 @@ PAIRS = {
             ("m0", "p0"), ("fmax", "nfmax"), ("e_min", "denorm"),
             ("frac_lo", "p1")],
     "rsqrt": [("p1", "four"), ("two", "four"), ("p1", "two"), ("m1", "four"),
-              ("p1", "m0"), ("p1", "p0"), ("m1", "p0"), ("p25", "nfmax"),
+              ("p1", "m0"), ("p1", "p0"), ("m1", "p0"), ("m1", "m0"),
+              ("p0", "m0"), ("p25", "nfmax"),
               ("p1", "e_min"), ("e_min", "p1"), ("fmax", "e_max"),
               ("p1", "m1"), ("frac_lo", "frac_lo")],
     # Unary operations. For SQRT.S the source is ft (bits 20..16) and fs is
@@ -636,8 +645,11 @@ def self_check() -> int:
     """Returns the number of failed checks. Every expectation below was derived
     by hand from the manual rules before this file was run even once."""
     fails = []
+    checks = 0
 
     def want(name, got, bits, cause=None, cond=None):
+        nonlocal checks
+        checks += 1
         ok = got.bits == bits
         if cause is not None:
             ok = ok and got.cause == cause
@@ -690,7 +702,8 @@ def self_check() -> int:
     want("div x/-0", div(F, NZ), NEG_FMAX, CAUSE_D)
     want("div 0/0", div(Z, Z), FMAX, CAUSE_I)
     want("div -0/0", div(NZ, Z), NEG_FMAX, CAUSE_I)
-    want("div 0/x", div(Z, F), Z, CAUSE_U)
+    want("div 0/x", div(Z, F), Z)
+    want("div 0/-x", div(Z, M1), NZ)
     # sqrt: sqrt(2)*2^23 = 11863283.6 -> 0xB504F3; sqrt(0.5)*2^24 = 11863283.6.
     want("sqrt 4", sqrt(0x40800000), TWO)
     want("sqrt 2", sqrt(TWO), 0x3FB504F3)
@@ -702,6 +715,9 @@ def self_check() -> int:
     want("sqrt 0.25", sqrt(0x3E800000), H)
     want("rsqrt 2/sqrt4", rsqrt(0x40800000, TWO), F)
     want("rsqrt /0", rsqrt(Z, F), FMAX, CAUSE_D)
+    want("rsqrt 1/-0", rsqrt(NZ, F), NEG_FMAX, CAUSE_D)
+    want("rsqrt -1/-0", rsqrt(NZ, M1), FMAX, CAUSE_D)
+    want("rsqrt 0/-0", rsqrt(NZ, Z), NEG_FMAX, CAUSE_D)
     want("rsqrt -4", rsqrt(0xC0800000, 0x40800000), TWO, CAUSE_I)
     # sign ops
     want("abs -3.5", abs_(M35), P35)
@@ -750,35 +766,47 @@ def self_check() -> int:
     want("suba", suba(F, P225), 0xBFA00000)
     want("mula", mula(P15, P25), P375)
     # FCR31 shape and update rules
+    checks += 1
     if WRITABLE_FCSR != 0x0083C078:
         fails.append("writable mask 0x%08X" % WRITABLE_FCSR)
+    checks += 1
     if FCSR_RESET != 0x01000001:
         fails.append("reset value 0x%08X" % FCSR_RESET)
+    checks += 1
     if store_fpu_control(0xFFFFFFFF) != 0x0183C079:
         fails.append("ctc1 all ones -> 0x%08X" % store_fpu_control(0xFFFFFFFF))
+    checks += 1
     if store_fpu_control(0) != 0x01000001:
         fails.append("ctc1 zero -> 0x%08X" % store_fpu_control(0))
+    checks += 1
     f = fcsr_after(FCSR_RESET, "mul", mul(FMAX, TWO))
     if f != (0x01000001 | CAUSE_O | STICKY_O):
         fails.append("set O -> 0x%08X" % f)
+    checks += 1
     f2 = fcsr_after(f, "mul", mul(FMAX, TWO))
     if f2 != (0x01000001 | CAUSE_O | STICKY_O):
         fails.append("repeat set O -> 0x%08X" % f2)
+    checks += 1
     f3 = fcsr_after(f, "neg", neg(F))
     if f3 != (0x01000001 | STICKY_O):
         fails.append("neg clears O -> 0x%08X" % f3)
+    checks += 1
     f4 = fcsr_after(f, "add", add(F, F))
     if f4 != f:
         fails.append("unflagged op changed flags")
     # The documented total order: +Fmax is the largest value, one ulp above
     # 2^128, and the IEEE largest finite sits a whole exponent below them
     # because exponent 0xFF is a normal number on the EE.
+    checks += 1
     if not value(FMAX) > value(0x7F800000) > value(0x7F7FFFFF):
         fails.append("Fmax ordering")
+    checks += 1
     if value(FMAX) != Fraction(2 ** 128) * (2 - Fraction(1, 2 ** 23)):
         fails.append("Fmax value")
+    checks += 1
     if value(0x7F800000) != Fraction(2 ** 128):
         fails.append("2^128 value")
+    checks += 1
     if value(NZ) != 0:
         fails.append("-0 value")
     # Round-trip: re-encoding an exact pattern must reproduce it, for every
@@ -787,10 +815,11 @@ def self_check() -> int:
                        + [0, 1, 2, 0x7FFFFD, 0x7FFFFE, 0x7FFFFF]))
     bad = [m for e in (1, 127, 128, 254, 255) for m in fracs
            if encode_magnitude(0, value(pack(0, e, m))).bits != pack(0, e, m)]
+    checks += 1
     if bad:
         fails.append("round-trip mismatches: %d" % len(bad))
     print("oracle self-check: %d expectations, %d failed"
-          % (103, len(fails)))
+          % (checks, len(fails)))
     for line in fails:
         print("FAIL " + line)
     return len(fails)

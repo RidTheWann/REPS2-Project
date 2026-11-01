@@ -7,8 +7,8 @@
 // EE Core (User's) Manual v6.0 sections 8.1.1 (format), 8.2 (register set and
 // the 32-bit accumulator), 8.3.2 (FCR31), 8.5 Table 8-4 (abnormal results),
 // 8.6 Tables 8-5 and 8-6 (signs of zero and of divide results), 8.7 (rounding)
-// and 8.8 (the compatibility statement), plus the per-operation boxes of the
-// EE Core Instruction Set Manual section 7.4.
+// and 8.8 (the compatibility statement), plus the per-operation boxes and
+// flag-scope note in the EE Core Instruction Set Manual Ch.5.
 //
 // Nothing here calls the host floating-point unit. The host float would be
 // wrong twice over: the EE rounds only toward zero with no guard, round or
@@ -67,8 +67,8 @@ struct FpuResult {
     std::uint32_t bits{};
     /// Cause flags set by this operation. Their sticky partners are derived.
     std::uint32_t set_flags{};
-    /// Cause flags the operation names as cleared. Instruction Set Manual
-    /// section 7.4 states that flags an instruction does not name are left
+    /// Cause flags the operation names as cleared. The Instruction Set Manual's
+    /// Ch.5 opening states that flags an instruction does not name are left
     /// alone, so only NEG.S, MAX.S, MIN.S (O and U) and SQRT.S (D) appear.
     std::uint32_t clear_flags{};
 };
@@ -334,7 +334,11 @@ struct Operand {
         return {sign != 0U ? kFpuNegativeMax : kFpuPositiveMax, flags, 0U};
     }
     if (lhs.mantissa == 0ULL) {
-        return {signed_zero(sign), kFpuCauseUnderflow, 0U};
+        // The exact quotient is zero, not an exponent underflow. DIV.S's box
+        // names a flag only when a divisor is zero, and Table 8-4 reserves U
+        // for a computed result whose exponent underflows; fpu_mul treats a
+        // zero operand the same way.
+        return {signed_zero(sign), 0U, 0U};
     }
     std::uint32_t set_flags = 0U;
     // Scaling the dividend by 2^24 keeps the quotient at least as wide as a
@@ -379,10 +383,12 @@ struct Operand {
 [[nodiscard]] constexpr FpuResult fpu_rsqrt(std::uint32_t a, std::uint32_t b) noexcept {
     using namespace fpu_detail;
     const auto divisor = decode(b);
-    const auto sign = (a >> 31U) & 1U;
     if (divisor.mantissa == 0ULL) {
-        // The instruction box names D for this case; the User's Manual Table
-        // 8-5 also lists I, and the per-instruction box is the authority here.
+        // The instruction box names D whenever ft is zero, while Table 8-5
+        // gives 0/SQRT(0) the invalid flag instead; the instruction box is the
+        // authority here. The sign follows the quotient fs / SQRT(ft): SQRT.S
+        // keeps -0's sign, which is how Table 8-5's 0/SQRT(+-0) rows flip it.
+        const auto sign = ((a >> 31U) & 1U) ^ divisor.sign;
         return {sign != 0U ? kFpuNegativeMax : kFpuPositiveMax, kFpuCauseDivideByZero, 0U};
     }
     const auto root = fpu_sqrt(b & 0x7FFF'FFFFU);

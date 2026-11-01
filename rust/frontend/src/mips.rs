@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Decoder for the explicitly implemented base-MIPS integer subset.
 
 /// Decoded operation. Unsupported encodings remain Unknown and must never

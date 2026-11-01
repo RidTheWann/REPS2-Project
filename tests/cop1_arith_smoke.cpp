@@ -178,7 +178,7 @@ void report(const Row& row, const FpuResult& result, std::uint32_t fcsr) {
 
 [[nodiscard]] bool check_flag_routing() {
     // Every cause flag starts set, so an operation that names a flag as cleared
-    // is observable. The EE Core Instruction Set Manual section 7.4 states that
+    // is observable. The Instruction Set Manual's Ch.5 opening states that
     // "flags that are not indicated in the instructions are not changed", which
     // contradicts the User's Manual Table 8-2 sentence about the other fields
     // being cleared; this is the reading the runtime implements, and these
@@ -245,6 +245,49 @@ void report(const Row& row, const FpuResult& result, std::uint32_t fcsr) {
     return ok;
 }
 
+[[nodiscard]] bool check_helper_flag_clears() {
+    // check_flag_routing builds its FpuResult values by hand, so it proves
+    // apply_fpu_flags and nothing about the helpers themselves. These cases
+    // feed the helpers' own output: SQRT.S must name D as cleared,
+    // NEG.S/MAX.S/MIN.S O and U, and every form that names no clear must
+    // leave all four cause flags set.
+    using namespace reps2::runtime;
+    constexpr std::uint32_t all_flags = kFpuCauseInvalid | kFpuCauseDivideByZero
+        | kFpuCauseOverflow | kFpuCauseUnderflow | kFpuStickyInvalid
+        | kFpuStickyDivideByZero | kFpuStickyOverflow | kFpuStickyUnderflow;
+    const std::uint32_t preset = kFpuControlResetValue | all_flags | kFpuCondition;
+    const std::uint32_t no_o_u = preset & ~(kFpuCauseOverflow | kFpuCauseUnderflow);
+    const std::uint32_t no_d = preset & ~kFpuCauseDivideByZero;
+
+    struct Case {
+        const char* name;
+        FpuResult result;
+        std::uint32_t expected;
+    };
+    const Case cases[] = {
+        {"sqrt", fpu_sqrt(0x40800000U), no_d},
+        {"neg", fpu_neg(0x3F800000U), no_o_u},
+        {"max", fpu_max(0x3F800000U, 0x40000000U), no_o_u},
+        {"min", fpu_min(0x3F800000U, 0x40000000U), no_o_u},
+        {"add", fpu_add(0x3F800000U, 0x3F800000U), preset},
+        {"div", fpu_div(0x3F800000U, 0x3F800000U), preset},
+        {"mov", fpu_mov(0x3F800000U), preset},
+    };
+
+    bool ok = true;
+    for (const auto& item : cases) {
+        const auto actual = apply_fpu_flags(preset, item.result);
+        if (actual != item.expected) {
+            std::printf("helper clears after %s: got 0x%08X, want 0x%08X\n",
+                item.name,
+                static_cast<unsigned>(actual),
+                static_cast<unsigned>(item.expected));
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 [[nodiscard]] bool check_state_defaults() {
     // ACC is a register of its own, not FPR[32], and it starts at zero; FCR31
     // starts at the documented reset image.
@@ -298,6 +341,9 @@ auto main() -> int {
         ++failures;
     }
     if (!check_flag_routing()) {
+        ++failures;
+    }
+    if (!check_helper_flag_clears()) {
         ++failures;
     }
     if (!check_state_defaults()) {

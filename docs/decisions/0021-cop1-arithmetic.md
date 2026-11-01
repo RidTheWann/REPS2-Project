@@ -27,7 +27,8 @@ This increment covers the S-class and W-class arithmetic whose semantics are pin
 - `fpu_sub` cannot be expressed as `add(a, flip(b))` in one case: the zero-result sign follows the **minuend**, per Table 8-6, so `0 - 0` preserves the first operand's sign even though `0 + (-0)` would not.
 - Addition selects the larger-magnitude operand as the anchor and handles a difference wider than 24 bits explicitly, because that is where the align-and-truncate result stops agreeing with an exact rational computation.
 - `fpu_sqrt` scales the radicand so that a single integer square root is the only truncation, which is the largest representable `y` with `y*y <= x`.
-- `fpu_rsqrt` is `fpu_div(fs, fpu_sqrt(ft))`.
+- `fpu_div` returns a signed zero and names no flag when the dividend mantissa is zero and the divisor is non-zero: the exact quotient is zero, and neither the DIV.S box nor Table 8-4 names underflow for it. `fpu_mul` already treats a zero operand the same way.
+- `fpu_rsqrt` is `fpu_div(fs, fpu_sqrt(ft & 0x7FFFFFFF))`, because the instruction box defines it as `fs / SQRT(|ft|)` while still naming I when `ft` is negative. A zero divisor short-circuits before the square root: the box names D whenever `ft` is zero, and the result is `±Fmax` with the sign of `fs / SQRT(ft)`, so a `-0` divisor flips it. Table 8-5's `0/SQRT(0)` row instead names I; the conflict is recorded below.
 - `fpu_cvt_w_s` clamps when the biased exponent exceeds `0x9D`, producing `0x7FFFFFFF`/`0x80000000` and the invalid cause. Table 8-4's "conversion overflow -> ±Fmax, no cause" row is read as an FP-destination overflow, not this integer destination; the instruction box and Table 8-6 give the clamped integer with the invalid flag.
 - `fpu_cvt_s_w` interprets its 32-bit operand as a two's-complement integer.
 - `fpu_accumulate(acc, a, b, subtract)` computes `acc ± fs*ft`, merging the product's and the sum's flag sets. `fpu_madd`/`fpu_msub` are the two entry points; the `.A` forms (`ADDA/SUBA/MULA/MADDA/MSUBA`) reuse the same arithmetic with ACC as the destination.
@@ -38,16 +39,16 @@ ACC is a **separate 32-bit register**, not `FPR[32]`; section 8.2 gives it no CO
 
 ### FCR31 flags
 
-- `apply_fpu_flags(control, result)` implements the per-instruction flag model: causes named by the instruction are set, causes explicitly named as cleared are cleared, all other causes are left alone (Instruction Set Manual §7.4), sticky partners are ORed in and never cleared, and the hard-wired bits are restored.
-- The implementation follows the per-instruction boxes over Table 8-2's "otherwise cleared" wording, which cannot be reconciled with the boxes. NEG/MAX/MIN clear O and U; SQRT clears D; every other form leaves unnamed causes untouched.
+- `apply_fpu_flags(control, result)` implements the per-instruction flag model: causes named by the instruction are set, causes explicitly named as cleared are cleared, all other causes are left alone (the Instruction Set Manual's Ch.5 opening), sticky partners are ORed in and never cleared, and the hard-wired bits are restored.
+- The implementation follows the per-instruction boxes over Table 8-2's "otherwise cleared" wording, which cannot be reconciled with the boxes. NEG/MAX/MIN clear O and U; SQRT clears D; every other form leaves unnamed causes untouched. The same priority applies to RSQRT.S, whose box names D for a zero `ft` where Table 8-5 names I.
 - `CVT.W.S` sets I (and therefore SI) on a clamp; the Table 8-4/§8.8 conflict is recorded, not hidden.
 
 ### Evidence chain
 
-- `tools/ee_fpu_model.py` is an independent arbitrary-precision rational implementation of the same rules. `--self-check` runs 103 hand-derived expectations; `--emit-vectors` writes 423 differential rows.
-- `tests/cop1_arith_smoke.cpp` executes all 423 rows through the runtime and also checks FCR31 routing, ACC defaults and the control-write mask.
+- `tools/ee_fpu_model.py` is an independent arbitrary-precision rational implementation of the same rules. `--self-check` runs 106 hand-derived expectations; `--emit-vectors` writes 425 differential rows.
+- `tests/cop1_arith_smoke.cpp` executes all 425 rows through the runtime and also checks FCR31 routing, the cause clears produced by the helpers themselves when every flag is preset, ACC defaults and the control-write mask.
 - `tests/cop1_arith_codegen_smoke.cpp` executes a 27-instruction generated block whose expected values are hand-computed from the encodings, not from the oracle: it covers every operand shape, ACC routing, and a real divide-by-zero flag read back through CFC1.
-- Mutation evidence for this increment: 10 numeric-core mutants and 10 wiring mutants, all killed. The wiring set includes one mutant that only the native layer can see (`MOV.S` sign flip in the runtime); the Rust suite stays green on it while the vector table and the generated block fail.
+- Mutation evidence for this increment: 16 numeric-core mutants and 10 wiring mutants, all killed. The numeric set covers the overflow threshold, wide-spread addition, the renormalized difference, the Table 8-6 subtraction sign, the sqrt guard width, divide exponent scaling, the sticky shift, unnamed-cause clearing, the CVT.W.S clamp threshold, the NEG/SQRT/MAX/MIN cause clears, the zero-dividend flag, the RSQRT zero-divisor sign, and the CTC1 mask. The wiring set covers decoder field swaps and reserved-bit acceptance, IR operand order, ACC and FPR routing, the raw-result FCSR31 store, and the runtime `MOV.S` sign flip. Two groups are observable in only one layer: the `MOV.S` mutant leaves the Rust suite green and fails only natively, and the four clear-removal mutants are invisible to the vector rows (whose FCSR starts at reset) and fail only the preset-flag helper cases.
 
 ### Measured effect
 
@@ -58,7 +59,9 @@ ACC is a **separate 32-bit register**, not `FPR[32]`; section 8.2 gives it no CO
 These are implemented from the primary or best-available source but have not been confirmed on hardware, so they are listed rather than presented as settled:
 
 - `SUB.S`/`DIV.S` operand order (`fs op ft`). The manual's diagrams and PCSX2 agree; a silicon differential would be needed to prove it.
-- The MADD family's ACC convention (`ACC ± fs*ft`). The manual's wording and PCSX2's `FPU.cpp` agree; no silicon differential exists. If the opposite convention is ever proven, the oracle, the 423-row table, the runtime and the fixture change together, which is why the convention is stated once in `fpu_accumulate`.
+- The MADD family's ACC convention (`ACC ± fs*ft`). The manual's wording and PCSX2's `FPU.cpp` agree; no silicon differential exists. If the opposite convention is ever proven, the oracle, the 425-row table, the runtime and the fixture change together, which is why the convention is stated once in `fpu_accumulate`.
+- A zero dividend raising no flag in `DIV.S`. The DIV.S box names a flag only for a zero divisor, Table 8-4 reserves U for an exponent underflow, and PCSX2's `DIV_S` agrees; no silicon differential exists.
+- The RSQRT.S zero-divisor flag conflict. The instruction box names D/SD for any zero `ft`, while Table 8-5's `0/SQRT(0)` rows name I; the box wins, matching how the rest of this slice treats box-versus-table disagreements. The result sign for `fs / SQRT(-0)` is taken from the quotient, which PCSX2's `RSQRT_S` also does.
 - Exact toward-zero truncation versus an align-and-truncate implementation. The table already contains the falsifier `sub(1.0, 0.5 + 2^-24) -> 0x3EFFFFFE`; an align-truncate unit would produce `0x3F000000`.
 - FCR31 bit 24 as a documented constant-1 field, and `±Fmax` as `0x7FFFFFFF`/`0xFFFFFFFF` rather than the IEEE largest finite value. Both follow the manual and both disagree with some secondary sources.
 - The CVT.W.S clamp flag conflict between Table 8-4 and §8.8.
@@ -70,9 +73,9 @@ COP1 compares (`C.F`/`C.EQ`/`C.LT`/`C.LE` and the rest of funct `0x30..0x3F`), `
 
 ## References
 
-- Sony EE Core Instruction Set Manual v6.0 Ch.5 (COP1 format tables and per-instruction flag boxes) and §7.4 (flag scope).
-- Sony EE Core User's Manual v6.0 §8.1-§8.8 (data format, abnormal results, ACC, FCR31, conversion, fixed rounding, no FP exceptions).
+- Sony EE Core Instruction Set Manual v6.0 Ch.5 (its opening flag-scope note, the COP1 format tables, the DIV.S/RSQRT.S/J formats' per-instruction boxes) and §7.4 (COP1 class encodings).
+- Sony EE Core User's Manual v6.0 §8.1-§8.8 (data format, abnormal results including Tables 8-4 to 8-6, ACC, FCR31, conversion, fixed rounding, no FP exceptions).
 - GNU binutils 2.45 `opcodes/mips-opc.c` for the base/mask table cross-check.
 - `chaoticgd/ghidra-emotionengine-reloaded` `data/languages/cop1.sinc` for the field diagram (and the SQRT.S disagreement with binutils that the retail census resolves).
-- PCSX2 `pcsx2/FPU.cpp` as an independent implementation cross-check for `MSUB_S`/`MADD_S` ACC ordering.
+- PCSX2 `pcsx2/FPU.cpp` as an independent implementation cross-check for `MSUB_S`/`MADD_S` ACC ordering and for the `DIV_S` zero-dividend and `RSQRT_S` zero-divisor paths.
 - Related: `docs/decisions/0020-cop1-data-movement.md`, `docs/RESEARCH.md` "R5900 COP1 single-precision arithmetic" and "Measured decoder coverage over lawfully owned retail images".
