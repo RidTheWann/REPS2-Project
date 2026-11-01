@@ -49,11 +49,12 @@ jobs:
           git format-patch --output-directory "$RUNNER_TEMP/audit-patches" "$BASE_COMMIT"..refs/audit/replay-batch
           test "$(find "$RUNNER_TEMP/audit-patches" -maxdepth 1 -name '*.patch' | wc -l)" -eq 6
 
-      - name: Remove the workflow-file change from the replay patch
+      - name: Separate workflow permission-gated CI file from patch commit
         run: |
           set -euo pipefail
           patch3="$(find "$RUNNER_TEMP/audit-patches" -maxdepth 1 -name '0003-*.patch' -print -quit)"
           test -n "$patch3"
+          cp "$patch3" "$RUNNER_TEMP/0003-original.patch"
           python3 - "$patch3" <<'PY'
           import re
           import sys
@@ -98,23 +99,27 @@ jobs:
           test "$(git rev-list --count origin/main..HEAD)" -eq 6
           git log --oneline --decorate -6
 
+      - name: Stage the exact CI patch in the workspace for full verification
+        run: |
+          set -euo pipefail
+          git apply --include=.github/workflows/ci.yml "$RUNNER_TEMP/0003-original.patch"
+          git diff --check
+          grep -q 'dtolnay/rust-toolchain@1.88' .github/workflows/ci.yml
+          grep -q 'cargo fmt --all -- --check' .github/workflows/ci.yml
+
       - name: Install Rust 1.89
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.89.0
           components: clippy, rustfmt
 
-      - name: Verify formatting, lint, and Rust tests
+      - name: Verify formatting, lint, and the full Rust test suite
         working-directory: rust
         run: |
           set -euo pipefail
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets -- -D warnings
-          # The missing workflow permission prevents publishing ci.yml through
-          # this runner token. Run the entire suite except its one assertion
-          # that explicitly requires that not-yet-published file; the full
-          # unfiltered suite is re-run after it is added through repository-write.
-          cargo test --workspace --locked -- --skip readme_documents_the_declared_minimum_rust_version
+          cargo test --workspace --locked
 
       - name: Verify declared MSRV 1.88
         run: |
@@ -129,5 +134,5 @@ jobs:
           cmake --build build --config Release --parallel 2
           ctest --test-dir build -C Release --output-on-failure
 
-      - name: Publish the validated integration branch
+      - name: Publish the validated six-commit integration branch
         run: git push origin HEAD:refs/heads/chore/audit-batch-1
