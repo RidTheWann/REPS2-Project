@@ -391,6 +391,19 @@ mod tests {
     }
 
     #[test]
+    fn renders_native_toolchain_provenance_contract() {
+        let project = render("game", &sources(), Some("game.ram.bin"));
+        assert!(project.cmake_lists.contains("function(reps2_json_quote output value)"));
+        assert!(project.cmake_lists.contains("CMAKE_CXX_COMPILER_ID"));
+        assert!(project.cmake_lists.contains("CMAKE_CXX_COMPILER_VERSION"));
+        assert!(project.cmake_lists.contains("CMAKE_GENERATOR"));
+        assert!(project.cmake_lists.contains("CMAKE_CXX_FLAGS_RELEASE"));
+        assert!(project.cmake_lists.contains("target_options"));
+        assert!(project.cmake_lists.contains("reps2-native-toolchain-$<CONFIG>.json"));
+        assert!(!project.cmake_lists.contains("CMAKE_CXX_COMPILER\\\""));
+    }
+
+    #[test]
     fn rendering_is_deterministic() {
         let first = render("game", &sources(), Some("game.ram.bin"));
         let second = render("game", &sources(), Some("game.ram.bin"));
