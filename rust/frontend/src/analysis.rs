@@ -59,6 +59,9 @@ pub enum BranchCondition {
     GreaterThanZero { register: u8 },
     LessThanZero { register: u8 },
     GreaterThanOrEqualZero { register: u8 },
+    /// The FCR31 condition bit (bit 23) written by the preceding COP1 compare.
+    /// BC1F branches when it is clear and BC1T when it is set.
+    FpuCondition { when_set: bool },
 }
 
 /// The semantic role of an outgoing static edge.
@@ -874,6 +877,8 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
                 register: instruction.rs,
             })
         }
+        Opcode::Bc1f | Opcode::Bc1fl => Some(BranchCondition::FpuCondition { when_set: false }),
+        Opcode::Bc1t | Opcode::Bc1tl => Some(BranchCondition::FpuCondition { when_set: true }),
         _ => None,
     }
 }

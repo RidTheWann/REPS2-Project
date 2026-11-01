@@ -53,7 +53,7 @@ ACC is a **separate 32-bit register**, not `FPR[32]`; section 8.2 gives it no CO
 
 ### Measured effect
 
-`profile-elf` over the same eight images moves supported words from 6,771,673 (86.66%) to **7,056,375 (90.30%)**, a gain of 284,702 words. Remaining `cop1` drops from 385,468 to 100,766, dominated by the compare functs (`0x32`/`0x34`/`0x36`), `BC1` (format `0x08`), and reserved-field data patterns. `special` is now the largest unsupported family (381,245), followed by `cop1` (100,766) and `cop2` (87,297).
+`profile-elf` over the same eight images moves supported words from 6,771,673 (86.66%) to **7,056,375 (90.30%)**, a gain of 284,702 words. Remaining `cop1` drops from 385,468 to 100,766, dominated by the compare functs (`0x32`/`0x34`/`0x36`), `BC1` (format `0x08`), and reserved-field data patterns. `special` is now the largest unsupported family (381,245), followed by `cop1` (100,766) and `cop2` (87,297). ADR 0022 then moves those compare and BC1 populations and records the post-compare numbers in `docs/RESEARCH.md`.
 
 ## Open differential cases
 
@@ -72,7 +72,7 @@ These are implemented from the primary or best-available source but have not bee
 
 ## Out of scope
 
-COP1 compares (`C.F`/`C.EQ`/`C.LT`/`C.LE` and the rest of funct `0x30..0x3F`), `BC1F`/`BC1T` and their likely forms, and any scheduling use of the FPR/ACC dependency masks remain separate work. The compares set FCR31's condition bit, which needs a `BranchCondition` variant in the CFG layer, so they must land atomically with the branches that consume it.
+COP1 compares (`C.F`/`C.EQ`/`C.LT`/`C.LE` and the rest of funct `0x30..0x3F`), `BC1F`/`BC1T` and their likely forms, and any scheduling use of the FPR/ACC dependency masks were left as separate work by this decision. The compares and BC1 landed atomically in ADR 0022 because the compares set FCR31's condition bit and the branches consume it. The scheduling use of the FPR/ACC dependency masks remains separate work.
 
 ## References
 

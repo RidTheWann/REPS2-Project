@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Deterministic C++20 source generation for the verified scalar IR subset.
 
-use crate::ir::{Fpr, FpuControl, Gpr, Instruction, Operation, Program, VerifyError};
+use crate::ir::{Fpr, FpuComparison, FpuControl, Gpr, Instruction, Operation, Program, VerifyError};
 
 /// Generates one C++ translation unit exporting
 /// reps2::generated::execute(EeState&).
@@ -26,6 +26,9 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::store_fpu_control;\n\
              using reps2::runtime::apply_fpu_flags;\n\
+             using reps2::runtime::apply_fpu_condition;\n\
+             using reps2::runtime::fpu_compare;\n\
+             using reps2::runtime::FpuCompare;\n\
              using reps2::runtime::fpu_add;\n\
              using reps2::runtime::fpu_sub;\n\
              using reps2::runtime::fpu_mul;\n\
@@ -208,6 +211,23 @@ pub(crate) fn emit_instruction(output: &mut String, index: usize, instruction: I
         }
         Operation::FpuConvertWordToSingle { dst, src } => {
             emit_fpu_unary(output, index, dst, src, "fpu_cvt_s_w");
+        }
+        Operation::FpuCompareSingle {
+            lhs,
+            rhs,
+            comparison,
+        } => {
+            let comparison = match comparison {
+                FpuComparison::False => "FpuCompare::False",
+                FpuComparison::Equal => "FpuCompare::Equal",
+                FpuComparison::LessThan => "FpuCompare::LessThan",
+                FpuComparison::LessThanOrEqual => "FpuCompare::LessThanOrEqual",
+            };
+            output.push_str(&format!(
+                "    state.fcsr = apply_fpu_condition(state.fcsr, fpu_compare({comparison}, state.fpr[{}], state.fpr[{}]));\n",
+                lhs.index(),
+                rhs.index()
+            ));
         }
         Operation::FpuAddAccumulateSingle { lhs, rhs } => {
             emit_fpu_binary_to_acc(output, index, lhs, rhs, "fpu_add");
@@ -1509,6 +1529,44 @@ mod tests {
             "fpu_madd",
             "fpu_msub",
         ] {
+            assert!(
+                cpp.contains(&format!("using reps2::runtime::{helper};")),
+                "prologue must expose {helper}"
+            );
+        }
+    }
+
+    #[test]
+    fn emits_cop1_compares_as_a_condition_bit_update() {
+        let words = [
+            0x4602_0830, // c.f.s  $f1, $f2
+            0x4602_0832, // c.eq.s $f1, $f2
+            0x4602_0834, // c.lt.s $f1, $f2
+            0x4602_0836, // c.le.s $f1, $f2
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x1000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("COP1 compare IR");
+        let cpp = emit_cpp(&program).expect("COP1 compare C++");
+
+        // fs is the first argument and ft the second, and every form updates
+        // exactly the condition bit instead of an FPR.
+        for (index, comparison) in ["False", "Equal", "LessThan", "LessThanOrEqual"]
+            .into_iter()
+            .enumerate()
+        {
+            assert!(
+                cpp.contains(&format!(
+                    "state.fcsr = apply_fpu_condition(state.fcsr, fpu_compare(FpuCompare::{comparison}, state.fpr[1], state.fpr[2]));"
+                )),
+                "compare {index} must lower to apply_fpu_condition"
+            );
+        }
+        assert!(!cpp.contains("state.fpr[0] ="));
+        for helper in ["apply_fpu_condition", "fpu_compare", "FpuCompare"] {
             assert!(
                 cpp.contains(&format!("using reps2::runtime::{helper};")),
                 "prologue must expose {helper}"

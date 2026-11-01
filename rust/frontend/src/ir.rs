@@ -55,6 +55,16 @@ pub enum FpuControl {
     Fcsr,
 }
 
+/// The four C.<cc>.S predicates the EE defines. The condition is exact and
+/// treats +0 and -0 as equal; C.F ignores both operands and clears the bit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FpuComparison {
+    False,
+    Equal,
+    LessThan,
+    LessThanOrEqual,
+}
+
 /// Operations whose guest-visible behavior is explicitly represented by this
 /// initial IR. Scalar word operations write a sign-extended 32-bit result into
 /// the low 64 bits of a 128-bit EE GPR. Parallel word operations update all
@@ -104,6 +114,12 @@ pub enum Operation {
     FpuMinimumSingle { dst: Fpr, lhs: Fpr, rhs: Fpr },
     FpuConvertSingleToWord { dst: Fpr, src: Fpr },
     FpuConvertWordToSingle { dst: Fpr, src: Fpr },
+    /// C.<cc>.S writes only the FCR31 condition bit.
+    FpuCompareSingle {
+        lhs: Fpr,
+        rhs: Fpr,
+        comparison: FpuComparison,
+    },
     MultiplyWordSigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     MultiplyWordUnsigned { dst: Gpr, lhs: Gpr, rhs: Gpr },
     Nor64 { dst: Gpr, lhs: Gpr, rhs: Gpr },
@@ -550,6 +566,28 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             Opcode::FpuConvertWordToSingle => Operation::FpuConvertWordToSingle {
                 dst: fpr(instruction.shift_amount),
                 src: fpr(instruction.rd),
+            },
+            // C.<cc>.S compares fs (bits 15..11, decoder rd) with ft (bits
+            // 20..16, decoder rt) and writes no FPR.
+            Opcode::FpuCompareFalse => Operation::FpuCompareSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+                comparison: FpuComparison::False,
+            },
+            Opcode::FpuCompareEqual => Operation::FpuCompareSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+                comparison: FpuComparison::Equal,
+            },
+            Opcode::FpuCompareLessThan => Operation::FpuCompareSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+                comparison: FpuComparison::LessThan,
+            },
+            Opcode::FpuCompareLessThanOrEqual => Operation::FpuCompareSingle {
+                lhs: fpr(instruction.rd),
+                rhs: fpr(instruction.rt),
+                comparison: FpuComparison::LessThanOrEqual,
             },
             Opcode::Dadd => Operation::AddDoublewordSigned {
                 dst: gpr(instruction.rd),
@@ -1408,6 +1446,57 @@ mod tests {
             LiftError::UnsupportedOpcode {
                 pc: 0x1218,
                 mnemonic: "unknown"
+            }
+        );
+    }
+
+    #[test]
+    fn lifts_cop1_compares_with_fs_as_the_left_operand() {
+        // fs is bits 15..11 (decoder rd) and ft is 20..16 (decoder rt); the
+        // operands are distinct so a swapped mapping cannot pass.
+        let stream = [
+            mips::decode(0x4602_0830, 0x1300), // c.f.s  $f1, $f2
+            mips::decode(0x4602_0832, 0x1304), // c.eq.s $f1, $f2
+            mips::decode(0x4602_0834, 0x1308), // c.lt.s $f1, $f2
+            mips::decode(0x4602_0836, 0x130C), // c.le.s $f1, $f2
+        ];
+        let program = lift(&stream).expect("lift COP1 compares");
+        let operations: Vec<_> = program
+            .instructions()
+            .iter()
+            .map(|instruction| instruction.operation)
+            .collect();
+        for (index, comparison) in [
+            FpuComparison::False,
+            FpuComparison::Equal,
+            FpuComparison::LessThan,
+            FpuComparison::LessThanOrEqual,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                matches!(
+                    operations[index],
+                    Operation::FpuCompareSingle {
+                        lhs: Fpr(1),
+                        rhs: Fpr(2),
+                        comparison: actual
+                    } if actual == comparison
+                ),
+                "compare {index} must be {comparison:?}"
+            );
+        }
+        program.verify().expect("COP1 compares verify");
+
+        // BC1 is control flow, so the straight-line lifter must refuse it and
+        // leave it to the CFG path.
+        let branch = [mips::decode(0x4501_0002, 0x1310)]; // bc1t +2
+        assert_eq!(
+            lift(&branch).expect_err("BC1 is not straight-line IR"),
+            LiftError::UnsupportedOpcode {
+                pc: 0x1310,
+                mnemonic: "bc1t"
             }
         );
     }

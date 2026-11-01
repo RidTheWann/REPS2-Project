@@ -559,6 +559,201 @@ int main() {
         return fail(55);
     }
 
+    // COP1 compares write only FCR31 bit 23 (the condition bit) and the BC1
+    // family branches on it. Every block starts with the condition set and
+    // unrelated cause and sticky bits dirty, so a compare that clobbered any
+    // other field would be caught.
+    constexpr std::uint32_t fcsr_condition_set = 0x0181'0041U;
+    constexpr std::uint32_t fcsr_condition_clear = 0x0101'0041U;
+    constexpr std::uint32_t single_one = 0x3F80'0000U;
+    constexpr std::uint32_t single_two = 0x4000'0000U;
+
+    EeState fpu_bc1t_taken{};
+    fpu_bc1t_taken.pc = 0x7000U;
+    fpu_bc1t_taken.gpr[31].low = 0x9000U;
+    fpu_bc1t_taken.fpr[0] = single_one;
+    fpu_bc1t_taken.fpr[1] = single_two;
+    fpu_bc1t_taken.fcsr = fcsr_condition_set;
+    const auto bc1t_taken_status = reps2::generated::execute_cfg(fpu_bc1t_taken, 64U);
+    if (bc1t_taken_status != Status::external_control_flow || fpu_bc1t_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "taken BC1T status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1t_taken_status), fpu_bc1t_taken.pc);
+        return fail(64);
+    }
+    if (fpu_bc1t_taken.gpr[9].low != 7 || fpu_bc1t_taken.gpr[10].low != 0
+        || fpu_bc1t_taken.gpr[11].low != 9) {
+        std::fprintf(stderr, "taken BC1T executed the wrong path\n");
+        return fail(65);
+    }
+    if (fpu_bc1t_taken.fcsr != fcsr_condition_set
+        || fpu_bc1t_taken.fpr[0] != single_one || fpu_bc1t_taken.fpr[1] != single_two) {
+        std::fprintf(stderr, "C.LT.S disturbed state beyond the condition bit\n");
+        return fail(66);
+    }
+
+    EeState fpu_bc1t_not_taken{};
+    fpu_bc1t_not_taken.pc = 0x7000U;
+    fpu_bc1t_not_taken.gpr[31].low = 0x9000U;
+    fpu_bc1t_not_taken.fpr[0] = 0x4040'0000U; // 3.0
+    fpu_bc1t_not_taken.fpr[1] = single_two;
+    fpu_bc1t_not_taken.fcsr = fcsr_condition_set;
+    const auto bc1t_not_taken_status = reps2::generated::execute_cfg(fpu_bc1t_not_taken, 64U);
+    if (bc1t_not_taken_status != Status::external_control_flow || fpu_bc1t_not_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "not-taken BC1T status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1t_not_taken_status), fpu_bc1t_not_taken.pc);
+        return fail(67);
+    }
+    if (fpu_bc1t_not_taken.gpr[9].low != 7 || fpu_bc1t_not_taken.gpr[10].low != 5
+        || fpu_bc1t_not_taken.gpr[11].low != 9) {
+        std::fprintf(stderr, "not-taken BC1T did not run its delay slot and fallthrough\n");
+        return fail(68);
+    }
+    if (fpu_bc1t_not_taken.fcsr != fcsr_condition_clear) {
+        std::fprintf(stderr, "false C.LT.S did not clear only the condition bit: fcsr=0x%08X\n",
+            fpu_bc1t_not_taken.fcsr);
+        return fail(69);
+    }
+
+    EeState fpu_bc1f{};
+    fpu_bc1f.pc = 0x7100U;
+    fpu_bc1f.gpr[31].low = 0x9000U;
+    fpu_bc1f.fpr[0] = single_one;
+    fpu_bc1f.fpr[1] = single_one;
+    fpu_bc1f.fcsr = fcsr_condition_set;
+    const auto bc1f_status = reps2::generated::execute_cfg(fpu_bc1f, 64U);
+    if (bc1f_status != Status::external_control_flow || fpu_bc1f.pc != 0x9000U) {
+        std::fprintf(stderr, "BC1F status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1f_status), fpu_bc1f.pc);
+        return fail(70);
+    }
+    if (fpu_bc1f.gpr[9].low != 7 || fpu_bc1f.gpr[10].low != 0
+        || fpu_bc1f.gpr[11].low != 9) {
+        std::fprintf(stderr, "BC1F did not take the false branch after C.F.S\n");
+        return fail(71);
+    }
+    if (fpu_bc1f.fcsr != fcsr_condition_clear) {
+        std::fprintf(stderr, "C.F.S did not clear the condition bit: fcsr=0x%08X\n",
+            fpu_bc1f.fcsr);
+        return fail(72);
+    }
+
+    EeState fpu_bc1fl_taken{};
+    fpu_bc1fl_taken.pc = 0x7200U;
+    fpu_bc1fl_taken.gpr[31].low = 0x9000U;
+    fpu_bc1fl_taken.fpr[0] = single_one;
+    fpu_bc1fl_taken.fpr[1] = single_two;
+    fpu_bc1fl_taken.fcsr = fcsr_condition_set;
+    const auto bc1fl_taken_status = reps2::generated::execute_cfg(fpu_bc1fl_taken, 64U);
+    if (bc1fl_taken_status != Status::external_control_flow || fpu_bc1fl_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "taken BC1FL status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1fl_taken_status), fpu_bc1fl_taken.pc);
+        return fail(73);
+    }
+    if (fpu_bc1fl_taken.gpr[9].low != 7 || fpu_bc1fl_taken.gpr[10].low != 0
+        || fpu_bc1fl_taken.gpr[12].low != 9 || fpu_bc1fl_taken.gpr[13].low != 11
+        || fpu_bc1fl_taken.gpr[14].low != 0) {
+        std::fprintf(stderr, "taken BC1FL executed the wrong path\n");
+        return fail(74);
+    }
+    if (fpu_bc1fl_taken.fcsr != fcsr_condition_clear) {
+        std::fprintf(stderr, "false C.EQ.S did not clear the condition bit\n");
+        return fail(75);
+    }
+
+    EeState fpu_bc1fl_annulled{};
+    fpu_bc1fl_annulled.pc = 0x7200U;
+    fpu_bc1fl_annulled.gpr[31].low = 0x9000U;
+    fpu_bc1fl_annulled.fpr[0] = single_one;
+    fpu_bc1fl_annulled.fpr[1] = single_one;
+    fpu_bc1fl_annulled.fcsr = fcsr_condition_clear;
+    const auto bc1fl_annulled_status = reps2::generated::execute_cfg(fpu_bc1fl_annulled, 64U);
+    if (bc1fl_annulled_status != Status::external_control_flow || fpu_bc1fl_annulled.pc != 0x9000U) {
+        std::fprintf(stderr, "annulled BC1FL status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1fl_annulled_status), fpu_bc1fl_annulled.pc);
+        return fail(76);
+    }
+    if (fpu_bc1fl_annulled.gpr[9].low != 0 || fpu_bc1fl_annulled.gpr[10].low != 5
+        || fpu_bc1fl_annulled.gpr[12].low != 0 || fpu_bc1fl_annulled.gpr[13].low != 0
+        || fpu_bc1fl_annulled.gpr[14].low != 13) {
+        std::fprintf(stderr, "not-taken BC1FL did not annul its delay slot\n");
+        return fail(77);
+    }
+    if (fpu_bc1fl_annulled.fcsr != fcsr_condition_set) {
+        std::fprintf(stderr, "true C.EQ.S did not set the condition bit\n");
+        return fail(78);
+    }
+
+    // +0 and -0 compare equal even though their encodings differ.
+    EeState fpu_bc1fl_signed_zero{};
+    fpu_bc1fl_signed_zero.pc = 0x7200U;
+    fpu_bc1fl_signed_zero.gpr[31].low = 0x9000U;
+    fpu_bc1fl_signed_zero.fpr[0] = 0x0000'0000U;
+    fpu_bc1fl_signed_zero.fpr[1] = 0x8000'0000U;
+    fpu_bc1fl_signed_zero.fcsr = fcsr_condition_clear;
+    const auto bc1fl_signed_zero_status = reps2::generated::execute_cfg(fpu_bc1fl_signed_zero, 64U);
+    if (bc1fl_signed_zero_status != Status::external_control_flow
+        || fpu_bc1fl_signed_zero.pc != 0x9000U) {
+        std::fprintf(stderr, "signed-zero BC1FL status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1fl_signed_zero_status), fpu_bc1fl_signed_zero.pc);
+        return fail(79);
+    }
+    if (fpu_bc1fl_signed_zero.gpr[9].low != 0 || fpu_bc1fl_signed_zero.gpr[10].low != 5
+        || fpu_bc1fl_signed_zero.gpr[12].low != 0 || fpu_bc1fl_signed_zero.gpr[13].low != 0
+        || fpu_bc1fl_signed_zero.gpr[14].low != 13) {
+        std::fprintf(stderr, "C.EQ.S did not treat +0 and -0 as equal\n");
+        return fail(80);
+    }
+    if (fpu_bc1fl_signed_zero.fcsr != fcsr_condition_set) {
+        std::fprintf(stderr, "signed-zero equality did not set the condition bit\n");
+        return fail(81);
+    }
+
+    EeState fpu_bc1tl_taken{};
+    fpu_bc1tl_taken.pc = 0x7300U;
+    fpu_bc1tl_taken.gpr[31].low = 0x9000U;
+    fpu_bc1tl_taken.fpr[0] = single_two;
+    fpu_bc1tl_taken.fpr[1] = single_two;
+    fpu_bc1tl_taken.fcsr = fcsr_condition_clear;
+    const auto bc1tl_taken_status = reps2::generated::execute_cfg(fpu_bc1tl_taken, 64U);
+    if (bc1tl_taken_status != Status::external_control_flow || fpu_bc1tl_taken.pc != 0x9000U) {
+        std::fprintf(stderr, "taken BC1TL status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1tl_taken_status), fpu_bc1tl_taken.pc);
+        return fail(82);
+    }
+    if (fpu_bc1tl_taken.gpr[9].low != 7 || fpu_bc1tl_taken.gpr[10].low != 0
+        || fpu_bc1tl_taken.gpr[12].low != 9 || fpu_bc1tl_taken.gpr[13].low != 11
+        || fpu_bc1tl_taken.gpr[14].low != 0) {
+        std::fprintf(stderr, "taken BC1TL executed the wrong path\n");
+        return fail(83);
+    }
+    if (fpu_bc1tl_taken.fcsr != fcsr_condition_set) {
+        std::fprintf(stderr, "true C.LE.S did not set the condition bit\n");
+        return fail(84);
+    }
+
+    EeState fpu_bc1tl_annulled{};
+    fpu_bc1tl_annulled.pc = 0x7300U;
+    fpu_bc1tl_annulled.gpr[31].low = 0x9000U;
+    fpu_bc1tl_annulled.fpr[0] = 0x4040'0000U; // 3.0
+    fpu_bc1tl_annulled.fpr[1] = single_two;
+    fpu_bc1tl_annulled.fcsr = fcsr_condition_set;
+    const auto bc1tl_annulled_status = reps2::generated::execute_cfg(fpu_bc1tl_annulled, 64U);
+    if (bc1tl_annulled_status != Status::external_control_flow || fpu_bc1tl_annulled.pc != 0x9000U) {
+        std::fprintf(stderr, "annulled BC1TL status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc1tl_annulled_status), fpu_bc1tl_annulled.pc);
+        return fail(85);
+    }
+    if (fpu_bc1tl_annulled.gpr[9].low != 0 || fpu_bc1tl_annulled.gpr[10].low != 5
+        || fpu_bc1tl_annulled.gpr[12].low != 0 || fpu_bc1tl_annulled.gpr[13].low != 0
+        || fpu_bc1tl_annulled.gpr[14].low != 13) {
+        std::fprintf(stderr, "not-taken BC1TL did not annul its delay slot\n");
+        return fail(86);
+    }
+    if (fpu_bc1tl_annulled.fcsr != fcsr_condition_clear) {
+        std::fprintf(stderr, "false C.LE.S did not clear the condition bit\n");
+        return fail(87);
+    }
+
     // The generated module initializer accepts a complete 32 MiB image,
     // copies it into caller-owned RAM, clears architectural GPR state, and
     // selects the ELF entry point.

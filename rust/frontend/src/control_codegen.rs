@@ -27,6 +27,9 @@ pub fn emit_cpp(program: &ControlProgram) -> Result<String, ControlError> {
              using reps2::runtime::sign_extend_immediate;\n\
              using reps2::runtime::sign_extend_word;\n\
              using reps2::runtime::sign_extend_word_signed;\n\
+             using reps2::runtime::apply_fpu_condition;\n\
+             using reps2::runtime::fpu_compare;\n\
+             using reps2::runtime::FpuCompare;\n\
              using reps2::runtime::load_u8;\n\
              using reps2::runtime::load_u16;\n\
              using reps2::runtime::load_u32;\n\
@@ -260,6 +263,10 @@ fn condition_expression(condition: crate::analysis::BranchCondition) -> String {
         }
         BranchCondition::GreaterThanOrEqualZero { register } => {
             format!("std::bit_cast<std::int64_t>(state.gpr[{register}].low) >= 0")
+        }
+        BranchCondition::FpuCondition { when_set } => {
+            let relation = if when_set { "!=" } else { "==" };
+            format!("(state.fcsr & reps2::runtime::kFpuCondition) {relation} 0")
         }
     }
 }
