@@ -198,10 +198,10 @@ int main() {
     // ERET is executable control flow: it restores EPC, clears EXL, and the
     // dispatcher continues at that dynamic guest address.
     EeState eret_return{};
-    eret_return.pc = 0x9000U;
+    eret_return.pc = 0xF000U;
     eret_return.gpr[9].low = 0xDEADU;
     eret_return.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusExlMask;
-    eret_return.cop0[reps2::runtime::kCop0Epc] = 0x9004U;
+    eret_return.cop0[reps2::runtime::kCop0Epc] = 0xF004U;
     const auto eret_status = reps2::generated::execute_cfg(eret_return, 64U);
     if (eret_status != Status::external_control_flow || eret_return.pc != 0xDEADU
         || eret_return.gpr[8].low != 42U
@@ -212,7 +212,7 @@ int main() {
     }
 
     EeState invalid_eret{};
-    invalid_eret.pc = 0x9000U;
+    invalid_eret.pc = 0xF000U;
     const auto invalid_eret_status = reps2::generated::execute_cfg(invalid_eret, 64U);
     if (invalid_eret_status != Status::invalid_exception_return || invalid_eret.pc != 0x9000U) {
         return fail(95);
