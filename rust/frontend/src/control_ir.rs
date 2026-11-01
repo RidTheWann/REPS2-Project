@@ -54,10 +54,21 @@ pub enum ControlTerminator {
     Unsupported {
         guest_pc: u32,
         mnemonic: String,
+        /// Set when the stop is an architectural SYSCALL or BREAK trap rather
+        /// than an unrecognized or unsupported encoding. The block is still not
+        /// translated further because no HLE service layer exists yet.
+        trap: Option<TrapKind>,
     },
     SegmentEnd {
         next_pc: u32,
     },
+}
+
+/// Architectural trap kind carried by a stopped block.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrapKind {
+    Syscall,
+    Break,
 }
 
 impl ControlTerminator {
@@ -187,7 +198,11 @@ impl ControlProgram {
             }
 
             let terminator = if let Some((guest_pc, mnemonic)) = unsupported {
-                ControlTerminator::Unsupported { guest_pc, mnemonic }
+                ControlTerminator::Unsupported {
+                    guest_pc,
+                    mnemonic,
+                    trap: None,
+                }
             } else {
                 lift_terminator(&block.terminator)?
             };
@@ -318,6 +333,24 @@ impl ControlProgram {
             .filter(|block| matches!(&block.terminator, ControlTerminator::Unsupported { .. }))
             .count()
     }
+
+    /// Returns how many blocks stop on an architectural SYSCALL/BREAK trap.
+    ///
+    /// These blocks are still explicit stops (they also count toward
+    /// [`Self::unsupported_count`]) because no HLE service layer exists yet,
+    /// but the reason is a known guest trap rather than an unknown encoding.
+    #[must_use]
+    pub fn trap_count(&self) -> usize {
+        self.blocks
+            .values()
+            .filter(|block| {
+                matches!(
+                    &block.terminator,
+                    ControlTerminator::Unsupported { trap: Some(_), .. }
+                )
+            })
+            .count()
+    }
 }
 
 fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, ControlError> {
@@ -394,6 +427,11 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
         Terminator::Unsupported { instruction } => Ok(ControlTerminator::Unsupported {
             guest_pc: instruction.pc,
             mnemonic: instruction.opcode.mnemonic().to_owned(),
+            trap: match instruction.opcode {
+                crate::mips::Opcode::Syscall => Some(TrapKind::Syscall),
+                crate::mips::Opcode::Break => Some(TrapKind::Break),
+                _ => None,
+            },
         }),
         Terminator::SegmentEnd { next_pc } => {
             Ok(ControlTerminator::SegmentEnd { next_pc: *next_pc })
@@ -677,9 +715,46 @@ mod tests {
         let program = ControlProgram::lift(&graph).expect("unsupported remains explicit");
         assert!(matches!(
             &program.blocks[&0x2000].terminator,
-            ControlTerminator::Unsupported { guest_pc: 0x2000, mnemonic } if mnemonic == "unknown"
+            ControlTerminator::Unsupported { guest_pc: 0x2000, mnemonic, .. } if mnemonic == "unknown"
         ));
         assert_eq!(program.unsupported_count(), 1);
+        assert_eq!(program.trap_count(), 0);
+    }
+
+    #[test]
+    fn syscall_and_break_blocks_carry_guest_trap_kinds() {
+        let words = [
+            0x0000_000C, // syscall code 0
+            0x0000_004D, // break code 1
+        ];
+        let segments = [segment(0x2000, &words)];
+        let roots = [0x2000, 0x2004];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x2000), entry(0x2004)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic CFG");
+        let program = ControlProgram::lift(&graph).expect("traps remain explicit");
+        assert!(matches!(
+            &program.blocks[&0x2000].terminator,
+            ControlTerminator::Unsupported {
+                guest_pc: 0x2000,
+                trap: Some(TrapKind::Syscall),
+                ..
+            }
+        ));
+        assert!(matches!(
+            &program.blocks[&0x2004].terminator,
+            ControlTerminator::Unsupported {
+                guest_pc: 0x2004,
+                trap: Some(TrapKind::Break),
+                ..
+            }
+        ));
+        assert_eq!(program.trap_count(), 2);
+        assert_eq!(program.unsupported_count(), 2);
     }
 
     #[test]

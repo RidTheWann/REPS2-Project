@@ -91,7 +91,7 @@ int main() {
     EeState call{};
     call.pc = 0x2000;
     const auto call_status = reps2::generated::execute_cfg(call, 64);
-    if (call_status != Status::unsupported_instruction || call.pc != 0x2008) {
+    if (call_status != Status::syscall || call.pc != 0x2008) {
         return fail(11);
     }
     if (call.gpr[31].low != 0x2008) {
@@ -106,7 +106,7 @@ int main() {
     link_not_taken.pc = 0x3000;
     link_not_taken.gpr[8].low = 1;
     const auto link_not_taken_status = reps2::generated::execute_cfg(link_not_taken, 64);
-    if (link_not_taken_status != Status::unsupported_instruction || link_not_taken.pc != 0x3008) {
+    if (link_not_taken_status != Status::syscall || link_not_taken.pc != 0x3008) {
         return fail(14);
     }
     if (link_not_taken.gpr[31].low != 0x3008 || link_not_taken.gpr[9].low != 23) {
@@ -118,11 +118,28 @@ int main() {
     link_taken.pc = 0x3000;
     link_taken.gpr[8].low = 0xFFFFFFFFFFFFFFFFULL;
     const auto link_taken_status = reps2::generated::execute_cfg(link_taken, 64);
-    if (link_taken_status != Status::unsupported_instruction || link_taken.pc != 0x300C) {
+    if (link_taken_status != Status::syscall || link_taken.pc != 0x300C) {
         return fail(16);
     }
     if (link_taken.gpr[31].low != 0x3008 || link_taken.gpr[9].low != 23) {
         return fail(17);
+    }
+
+    // BREAK is an architectural guest trap, distinct from an unknown
+    // encoding. The PC stays on the trapping instruction.
+    EeState break_trap{};
+    break_trap.pc = 0x8000U;
+    const auto break_status = reps2::generated::execute_cfg(break_trap, 64U);
+    if (break_status != Status::breakpoint || break_trap.pc != 0x8000U) {
+        std::fprintf(stderr, "BREAK trap status mismatch: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(break_status), break_trap.pc);
+        return fail(88);
+    }
+    if (!reps2::runtime::is_guest_trap(Status::syscall)
+        || !reps2::runtime::is_guest_trap(Status::breakpoint)
+        || reps2::runtime::is_guest_trap(Status::unsupported_instruction)) {
+        std::fprintf(stderr, "guest-trap status classification mismatch\n");
+        return fail(89);
     }
 
     // A branch-likely executes its delay slot only on the taken path.

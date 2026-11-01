@@ -92,7 +92,16 @@ enum class Status : std::uint8_t {
     unmapped_memory,
     unsupported_memory_access,
     invalid_memory_image,
+    // Architectural traps, not unknown encodings. Execution stops with the PC
+    // pointing at the trapping instruction; the 20-bit code field is bits
+    // 25..6 of the word at that PC. HLE service delivery is a later layer.
+    syscall,
+    breakpoint,
 };
+
+[[nodiscard]] constexpr bool is_guest_trap(Status status) noexcept {
+    return status == Status::syscall || status == Status::breakpoint;
+}
 
 [[nodiscard]] constexpr bool is_unsupported_physical_region(std::uint32_t address) noexcept {
     // The physical 0x10000000..0x1FFFFFFF window contains EE registers,

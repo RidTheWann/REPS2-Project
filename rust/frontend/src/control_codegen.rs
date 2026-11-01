@@ -13,7 +13,7 @@
 //! be compiled in parallel.
 
 use crate::analysis::DelaySlotPolicy;
-use crate::control_ir::{ControlBlock, ControlError, ControlProgram, ControlTerminator};
+use crate::control_ir::{ControlBlock, ControlError, ControlProgram, ControlTerminator, TrapKind};
 
 /// Shared prelude for every emitted translation unit.
 ///
@@ -380,9 +380,17 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 "    state.pc = return_target_{guest_pc:08X};\n    return Status::ok;\n"
             ));
         }
-        ControlTerminator::Unsupported { guest_pc, .. } => {
+        ControlTerminator::Unsupported { guest_pc, trap, .. } => {
+            // A known SYSCALL/BREAK trap is reported distinctly from an
+            // unknown encoding so the caller can eventually deliver it to an
+            // HLE service layer. The PC stays on the trapping instruction.
+            let status = match trap {
+                Some(TrapKind::Syscall) => "Status::syscall",
+                Some(TrapKind::Break) => "Status::breakpoint",
+                None => "Status::unsupported_instruction",
+            };
             output.push_str(&format!(
-                "    state.pc = 0x{guest_pc:08X}U;\n    return Status::unsupported_instruction;\n"
+                "    state.pc = 0x{guest_pc:08X}U;\n    return {status};\n"
             ));
         }
         ControlTerminator::SegmentEnd { next_pc } => {
@@ -692,6 +700,29 @@ mod tests {
                 .count();
             assert_eq!(definitions, 1, "block 0x{pc:08X} must be defined once");
         }
+    }
+
+    #[test]
+    fn emits_distinct_status_for_syscall_and_break_traps() {
+        let words = [
+            0x0000_000C, // syscall code 0
+            0x0000_004D, // break code 1
+        ];
+        let segments = [segment(0x2000, &words)];
+        let roots = [0x2000, 0x2004];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x2000), entry(0x2004)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic trap CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("single unit");
+
+        assert!(cpp.contains("state.pc = 0x00002000U;\n    return Status::syscall;"));
+        assert!(cpp.contains("state.pc = 0x00002004U;\n    return Status::breakpoint;"));
+        assert!(!cpp.contains("return Status::unsupported_instruction;"));
     }
 
     #[test]
