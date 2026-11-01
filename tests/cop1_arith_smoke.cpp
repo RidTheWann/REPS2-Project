@@ -199,7 +199,7 @@ void report(const Row& row, const FpuResult& result, std::uint32_t fcsr) {
         {"add", {0x3F800000U, 0U, 0U}, keep_everything},
         {"mov", {0x3F800000U, 0U, 0U}, keep_everything},
         {"mul", {0x3F800000U, 0U, 0U}, keep_everything},
-        // SQRT.S names D; NEG.S, MAX.S and MIN.S name O and U.
+        // SQRT.S names D; ABS.S, NEG.S, MAX.S and MIN.S name O and U.
         {"sqrt", {0x3F800000U, 0U, kFpuCauseDivideByZero},
             preset & ~kFpuCauseDivideByZero},
         {"neg", {0xBF800000U, 0U, kFpuCauseOverflow | kFpuCauseUnderflow},
