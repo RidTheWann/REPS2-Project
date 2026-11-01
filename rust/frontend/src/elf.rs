@@ -1331,4 +1331,90 @@ mod tests {
         assert_eq!(loaded[1].file_size, 0);
         assert_eq!(loaded[1].bytes.len(), 32);
     }
+
+    /// Deterministic xorshift64 so mutation tests are reproducible without
+    /// pulling in a random-number crate.
+    fn next_random(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    fn mutate(seed: &[u8], rng: &mut u64) -> Vec<u8> {
+        let mut bytes = seed.to_vec();
+        for _ in 0..=(next_random(rng) % 8) {
+            // Half of the mutations target the headers, where the interesting
+            // offsets, counts and sizes live.
+            let span = if next_random(rng) & 1 == 0 {
+                bytes.len().min(128)
+            } else {
+                bytes.len()
+            };
+            let index = (next_random(rng) as usize) % span;
+            bytes[index] = next_random(rng) as u8;
+        }
+        bytes
+    }
+
+    #[test]
+    fn parser_never_panics_on_every_truncation_or_random_mutation() {
+        let limits = ParseLimits {
+            max_string_table_bytes: 1 << 16,
+            max_symbols: 1 << 10,
+            max_relocations: 1 << 10,
+        };
+        let mut rng = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut ram_images_built = 0;
+        for seed in [minimal_elf(), elf_with_symbol_and_rel()] {
+            for length in 0..=seed.len() {
+                let _ = parse(&seed[..length], limits);
+            }
+            for _ in 0..20_000 {
+                let bytes = mutate(&seed, &mut rng);
+                if let Ok(image) = parse(&bytes, limits) {
+                    let _ = load_segments(&bytes, &image, 1 << 20);
+                    // Each RAM image is 32 MiB, so only sample a few.
+                    if ram_images_built < 32 {
+                        ram_images_built += 1;
+                        let _ = build_main_ram_image(&bytes, &image);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn analysis_and_coverage_never_panic_on_mutated_executables() {
+        use crate::analysis::{AnalysisLimits, discover_elf, discover_elf_with_discovery};
+
+        let limits = ParseLimits {
+            max_string_table_bytes: 1 << 16,
+            max_symbols: 1 << 10,
+            max_relocations: 1 << 10,
+        };
+        let analysis_limits = AnalysisLimits {
+            max_loaded_memory: 1 << 20,
+            max_instructions: 10_000,
+            max_blocks: 1_000,
+            max_aliased_roots: 4,
+            max_function_roots: 1_000,
+        };
+        let mut rng = 0xD1B5_4A32_D192_ED03_u64;
+        let seed = minimal_elf();
+        let mut analyzed = 0;
+        for _ in 0..5_000 {
+            let bytes = mutate(&seed, &mut rng);
+            if let Ok(image) = parse(&bytes, limits) {
+                analyzed += 1;
+                let _ = crate::coverage::profile(&image, &bytes);
+                let _ = discover_elf(&image, &bytes, analysis_limits);
+                let _ = discover_elf_with_discovery(&image, &bytes, analysis_limits);
+            }
+        }
+        assert!(
+            analyzed > 100,
+            "mutations should still often parse: {analyzed}"
+        );
+    }
 }

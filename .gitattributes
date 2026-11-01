@@ -1,0 +1,12 @@
+# Keep line endings consistent with .editorconfig (end_of_line = lf).
+* text=auto eol=lf
+
+# Windows-only scripts, if any are added later, may opt back in to CRLF:
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary artifacts that must never be line-ending converted.
+*.bin binary
+*.elf binary
+*.iso binary

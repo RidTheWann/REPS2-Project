@@ -1,6 +1,7 @@
-# ADR 0006: PT_LOAD to default EE main-RAM image
+# ADR 0036: PT_LOAD to default EE main-RAM image
 
 - Status: Accepted
+- Renumbered: originally filed as a second `0006`; renumbered to 0036 to make ADR identifiers unique
 - Date: 2026-10-31
 - Scope: initial RAM image for eligible static ELF32 MIPS executables
 

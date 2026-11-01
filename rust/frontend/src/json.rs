@@ -49,4 +49,23 @@ mod tests {
         assert_eq!(json_optional_string(None), "null");
         assert_eq!(json_optional_string(Some("x")), "\"x\"");
     }
+
+    #[test]
+    fn every_control_character_is_escaped_and_output_has_no_raw_controls() {
+        for code in 0u32..=0x1F {
+            let character = char::from_u32(code).expect("control code point");
+            let rendered = json_string(&character.to_string());
+            assert!(
+                rendered.chars().all(|c| c > '\u{1F}'),
+                "raw control character leaked for U+{code:04X}: {rendered:?}"
+            );
+            assert!(rendered.starts_with('"') && rendered.ends_with('"'));
+        }
+        assert_eq!(json_string("\u{8}"), "\"\\u0008\"");
+    }
+
+    #[test]
+    fn non_ascii_text_is_passed_through_unchanged() {
+        assert_eq!(json_string("ゲーム 🎮"), "\"ゲーム 🎮\"");
+    }
 }

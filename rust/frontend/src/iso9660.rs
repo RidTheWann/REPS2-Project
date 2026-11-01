@@ -1074,4 +1074,59 @@ mod tests {
             .expect("boot path");
         assert_eq!(value, "NEW.ELF");
     }
+
+    #[test]
+    fn reader_never_panics_on_truncated_or_mutated_images() {
+        /// Returns true when the (possibly corrupted) image still opens.
+        fn exercise(bytes: Vec<u8>) -> bool {
+            let Ok(mut iso) = Iso9660::open(Cursor::new(bytes)) else {
+                return false;
+            };
+            let _ = iso.root_entries();
+            let _ = iso.find_entry("GAME.ELF");
+            let _ = iso.find_entry("A/B/../C");
+            let _ = iso.read_file("SYSTEM.CNF", 4096);
+            let _ = iso.boot_executable_path();
+            true
+        }
+
+        let seed = valid_image();
+        let block = LOGICAL_BLOCK_SIZE as usize;
+        // Every quarter-sector truncation, so cuts land inside descriptors.
+        for length in (0..=seed.len()).step_by(block / 4) {
+            exercise(seed[..length].to_vec());
+        }
+
+        let mut rng = 0xA076_1D64_78BD_642F_u64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        // (start offset, length) of the regions that actually hold metadata:
+        // primary volume descriptor, terminator, root directory and SYSTEM.CNF.
+        let regions = [
+            (16 * block, 256),
+            (17 * block, 8),
+            (ROOT_LBA * block, 160),
+            (SYSTEM_LBA * block, 64),
+        ];
+        let mut still_open = 0;
+        for _ in 0..10_000 {
+            let mut bytes = seed.clone();
+            for _ in 0..=(next() % 4) {
+                let (start, length) = regions[(next() as usize) % regions.len()];
+                let index = start + (next() as usize) % length;
+                bytes[index] = next() as u8;
+            }
+            if exercise(bytes) {
+                still_open += 1;
+            }
+        }
+        assert!(
+            still_open > 1_000,
+            "mutations should often keep the image openable: {still_open}"
+        );
+    }
 }
