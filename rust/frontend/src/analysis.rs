@@ -1975,4 +1975,40 @@ mod tests {
         );
         assert_eq!(analysis.graph.decoded_instruction_count, 10);
     }
+
+    #[test]
+    fn reports_configured_block_and_instruction_limits() {
+        let words = [
+            0x1100_0002, // beq $t0, $zero, 0x400C
+            0x0000_0000, // delay slot
+            0x0000_0000, // fallthrough block
+            0x03E0_0008, // jr $ra
+            0x0000_0000, // return delay slot
+        ];
+        let segments = [segment(0x4000, &words)];
+        let entries = vec![entry(0x4000)];
+        let roots = [0x4000];
+
+        let limits = AnalysisLimits {
+            max_blocks: 1,
+            ..AnalysisLimits::default()
+        };
+        let error = discover_cfg(&segments, entries.clone(), &roots, limits)
+            .expect_err("block limit is enforced");
+        assert!(matches!(
+            error,
+            AnalysisError::BlockLimitExceeded { limit: 1 }
+        ));
+
+        let limits = AnalysisLimits {
+            max_instructions: 1,
+            ..AnalysisLimits::default()
+        };
+        let error =
+            discover_cfg(&segments, entries, &roots, limits).expect_err("instruction limit");
+        assert!(matches!(
+            error,
+            AnalysisError::InstructionLimitExceeded { limit: 1 }
+        ));
+    }
 }
