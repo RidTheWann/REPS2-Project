@@ -1687,6 +1687,102 @@ mod tests {
         put_u32(bytes, base + 36, section.entry_size);
     }
 
+    fn elf_with_mips_abi_metadata() -> Vec<u8> {
+        let shstr = b"\0.shstrtab\0.reginfo\0.MIPS.abiflags\0";
+        let section_table_end = ELF_HEADER_SIZE + (4 * SECTION_HEADER_SIZE);
+        let shstr_offset = section_table_end;
+        let reginfo_offset = shstr_offset + shstr.len();
+        let abiflags_offset = reginfo_offset + MIPS_REGINFO_SIZE;
+        let mut bytes = vec![0; abiflags_offset + MIPS_ABIFLAGS_V0_SIZE];
+        let find_name = |name: &[u8]| -> u32 {
+            shstr
+                .windows(name.len())
+                .position(|window| window == name)
+                .expect("MIPS metadata section name exists") as u32
+        };
+
+        bytes[0..4].copy_from_slice(b"\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 24, 0x0010_0000);
+        put_u32(&mut bytes, 32, ELF_HEADER_SIZE as u32);
+        put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 48, 4);
+        put_u16(&mut bytes, 50, 1);
+
+        bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(shstr);
+        put_u32(&mut bytes, reginfo_offset, 0x8000_0002);
+        put_u32(&mut bytes, reginfo_offset + 4, 0x0000_0000);
+        put_u32(&mut bytes, reginfo_offset + 8, 0x1234_5678);
+        put_u32(&mut bytes, reginfo_offset + 12, 0x0000_0000);
+        put_u32(&mut bytes, reginfo_offset + 16, 0x8000_0000);
+        put_u32(&mut bytes, reginfo_offset + 20, 0x8012_3400);
+
+        put_u16(&mut bytes, abiflags_offset, 0); // ABI flags version 0
+        bytes[abiflags_offset + 2] = 3; // MIPS III
+        bytes[abiflags_offset + 3] = 0; // revision 0
+        bytes[abiflags_offset + 4] = 1; // 32-bit GPRs
+        bytes[abiflags_offset + 5] = 1; // 32-bit CPR1
+        bytes[abiflags_offset + 6] = 0; // no CPR2
+        bytes[abiflags_offset + 7] = 3; // soft-float ABI
+        put_u32(&mut bytes, abiflags_offset + 8, 6); // AFL_EXT_5900
+        put_u32(&mut bytes, abiflags_offset + 12, 0x0002_0001); // DSP + GINV ASEs
+        put_u32(&mut bytes, abiflags_offset + 16, 0xAABB_CCDD);
+        put_u32(&mut bytes, abiflags_offset + 20, 0x1122_3344);
+
+        write_section(
+            &mut bytes,
+            ELF_HEADER_SIZE + SECTION_HEADER_SIZE,
+            SectionSpec {
+                name: find_name(b".shstrtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: shstr_offset as u32,
+                size: shstr.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_section(
+            &mut bytes,
+            ELF_HEADER_SIZE + 2 * SECTION_HEADER_SIZE,
+            SectionSpec {
+                name: find_name(b".reginfo"),
+                kind: SHT_MIPS_REGINFO,
+                address: 0,
+                offset: reginfo_offset as u32,
+                size: MIPS_REGINFO_SIZE as u32,
+                link: 0,
+                info: 0,
+                alignment: 4,
+                entry_size: 0,
+            },
+        );
+        write_section(
+            &mut bytes,
+            ELF_HEADER_SIZE + 3 * SECTION_HEADER_SIZE,
+            SectionSpec {
+                name: find_name(b".MIPS.abiflags"),
+                kind: SHT_MIPS_ABIFLAGS,
+                address: 0,
+                offset: abiflags_offset as u32,
+                size: MIPS_ABIFLAGS_V0_SIZE as u32,
+                link: 0,
+                info: 0,
+                alignment: 4,
+                entry_size: 0,
+            },
+        );
+        bytes
+    }
+
     fn elf_with_symbol_and_rel() -> Vec<u8> {
         let shstr = b"\0.shstrtab\0.strtab\0.symtab\0.text\0.rel.text\0";
         let strtab = b"\0entry\0";
@@ -2118,6 +2214,90 @@ mod tests {
             ..ParseLimits::default()
         };
         assert!(parse(&seed, limited).is_err());
+    }
+
+    #[test]
+    fn parses_mips_reginfo_register_masks_and_global_pointer() {
+        let bytes = elf_with_mips_abi_metadata();
+        let image = parse(&bytes, ParseLimits::default()).expect("MIPS .reginfo fixture");
+        assert_eq!(image.mips_reginfo.len(), 1);
+        let reginfo = &image.mips_reginfo[0];
+        assert_eq!(reginfo.section_index, 2);
+        assert_eq!(reginfo.gpr_mask, 0x8000_0002);
+        assert_eq!(
+            reginfo.coprocessor_masks,
+            [0x0000_0000, 0x1234_5678, 0x0000_0000, 0x8000_0000]
+        );
+        assert_eq!(reginfo.gp_value, 0x8012_3400u32 as i32);
+    }
+
+    #[test]
+    fn parses_mips_abiflags_v0_and_identifies_the_r5900_extension() {
+        let bytes = elf_with_mips_abi_metadata();
+        let image = parse(&bytes, ParseLimits::default()).expect("MIPS ABI flags fixture");
+        assert_eq!(image.mips_abi_flags.len(), 1);
+        let flags = &image.mips_abi_flags[0];
+        assert_eq!(flags.section_index, 3);
+        assert_eq!(flags.section_size, MIPS_ABIFLAGS_V0_SIZE as u32);
+        assert_eq!(flags.version, 0);
+        let decoded = flags.version_zero.expect("version zero is decoded");
+        assert_eq!(decoded.isa_level, 3);
+        assert_eq!(decoded.isa_revision, 0);
+        assert_eq!(
+            MipsAbiFlagsV0::register_size_name(decoded.gpr_size),
+            "32-bit"
+        );
+        assert_eq!(decoded.fp_abi_name(), "soft-float");
+        assert_eq!(decoded.isa_extension, 6);
+        assert_eq!(decoded.isa_extension_name(), "R5900");
+        assert_eq!(decoded.ase_names(), vec!["DSP", "GINV"]);
+        assert_eq!(decoded.flags1, 0xAABB_CCDD);
+        assert_eq!(decoded.flags2, 0x1122_3344);
+    }
+
+    #[test]
+    fn retains_unknown_mips_abiflags_versions_without_interpreting_them_as_v0() {
+        let mut bytes = elf_with_mips_abi_metadata();
+        let abiflags_header = ELF_HEADER_SIZE + 3 * SECTION_HEADER_SIZE;
+        let abiflags_offset = read_u32(&bytes, abiflags_header + 16).expect("ABI flags offset");
+        put_u16(&mut bytes, abiflags_offset as usize, 7);
+        let image = parse(&bytes, ParseLimits::default()).expect("unknown ABI flags version");
+        assert_eq!(image.mips_abi_flags.len(), 1);
+        assert_eq!(image.mips_abi_flags[0].version, 7);
+        assert_eq!(image.mips_abi_flags[0].section_size, 24);
+        assert_eq!(image.mips_abi_flags[0].version_zero, None);
+    }
+
+    #[test]
+    fn rejects_malformed_mips_reginfo_and_version_zero_abiflags_sizes() {
+        let seed = elf_with_mips_abi_metadata();
+        let reginfo_header = ELF_HEADER_SIZE + 2 * SECTION_HEADER_SIZE;
+        let abiflags_header = ELF_HEADER_SIZE + 3 * SECTION_HEADER_SIZE;
+
+        let mut short_reginfo = seed.clone();
+        put_u32(&mut short_reginfo, reginfo_header + 20, 20);
+        assert!(parse(&short_reginfo, ParseLimits::default()).is_err());
+
+        let mut short_v0 = seed.clone();
+        put_u32(&mut short_v0, abiflags_header + 20, 20);
+        assert!(parse(&short_v0, ParseLimits::default()).is_err());
+
+        let mut truncated_reginfo = seed;
+        let reginfo_offset = read_u32(&truncated_reginfo, reginfo_header + 16)
+            .expect("reginfo file offset");
+        put_u32(&mut truncated_reginfo, reginfo_header + 16, u32::MAX);
+        assert!(parse(&truncated_reginfo, ParseLimits::default()).is_err());
+        assert_ne!(reginfo_offset, u32::MAX);
+    }
+
+    #[test]
+    fn ignores_mips_specific_section_payloads_for_non_mips_machine_ids() {
+        let mut bytes = elf_with_mips_abi_metadata();
+        put_u16(&mut bytes, 18, 3);
+        let image =
+            parse(&bytes, ParseLimits::default()).expect("non-MIPS ELF retains opaque sections");
+        assert!(image.mips_reginfo.is_empty());
+        assert!(image.mips_abi_flags.is_empty());
     }
 
     #[test]
