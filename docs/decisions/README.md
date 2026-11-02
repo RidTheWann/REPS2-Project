@@ -43,3 +43,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0036](0036-pt-load-ee-ram-image.md) | PT_LOAD to default EE main-RAM image | Accepted |
 | [0037](0037-ee-traps-in-delay-slots.md) | EE SYSCALL/BREAK delay-slot exception delivery and branch-likely annulment | Accepted |
 | [0038](0038-elf-symbol-table-validation.md) | ELF string, symbol-table and section cross-reference validation | Accepted |
+| [0039](0039-mips-elf-flag-diagnostics.md) | Diagnostic MIPS CPU, ABI and ISA decoding from ELF e_flags | Accepted |
