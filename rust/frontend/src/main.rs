@@ -1540,8 +1540,30 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x0120_0008, // jr t1: dynamically leave the handler-return fixture
         0x2408_002A, // delay slot: t0 = 42
     ];
+    let conditional_traps = [
+        (8 << 21) | (9 << 16) | (0x155 << 6) | 0x30, // tge t0, t1, code 0x155
+        (8 << 21) | (9 << 16) | (0x2AA << 6) | 0x31, // tgeu
+        (8 << 21) | (9 << 16) | (0x155 << 6) | 0x32, // tlt
+        (8 << 21) | (9 << 16) | (0x2AA << 6) | 0x33, // tltu
+        (8 << 21) | (9 << 16) | (0x155 << 6) | 0x34, // teq
+        (8 << 21) | (9 << 16) | (0x2AA << 6) | 0x36, // tne
+        (0x01 << 26) | (8 << 21) | (0x08 << 16) | 0xFFFE, // tgei -2
+        (0x01 << 26) | (8 << 21) | (0x09 << 16) | 0xFFFE, // tgeiu -2
+        (0x01 << 26) | (8 << 21) | (0x0A << 16) | 0xFFFE, // tlti -2
+        (0x01 << 26) | (8 << 21) | (0x0B << 16) | 0xFFFE, // tltiu -2
+        (0x01 << 26) | (8 << 21) | (0x0C << 16) | 0xFFFE, // teqi -2
+        (0x01 << 26) | (8 << 21) | (0x0E << 16) | 0xFFFE, // tnei -2
+    ];
+    let conditional_trap_delay = [
+        (0x14 << 26) | (8 << 21) | 2,                 // beql t0, zero, 0xC10C
+        (9 << 21) | (10 << 16) | (0x2AA << 6) | 0x34, // delay: teq t1, t2, code 0x2AA
+        0x240B_0005,                                  // fallthrough: addiu t3, zero, 5
+        0x240C_0006,                                  // target: addiu t4, zero, 6
+        0x03E0_0008,                                  // jr ra
+        0x0000_0000,                                  // return delay slot
+    ];
 
-    let segments = [
+    let mut segments = vec![
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
         segment(0x3000, &branch_and_link),
@@ -1568,8 +1590,16 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xB100, &break_in_branch_likely_delay),
         segment(0xB200, &break_in_jump_delay),
         segment(0xF000, &eret_return),
+        segment(0xCC00, &conditional_trap_delay),
     ];
-    let entries = vec![
+    // Each conditional trap is an independent one-instruction segment, so a
+    // false predicate retires to an untranslated boundary instead of flowing
+    // into the next trap fixture.
+    segments.extend(conditional_traps.iter().enumerate().map(|(index, word)| {
+        let base = 0xC000 + (index as u32 * 0x100);
+        segment(base, std::slice::from_ref(word))
+    }));
+    let mut entries = vec![
         entry(0x1000, "branch-fixture"),
         entry(0x2000, "call-fixture"),
         entry(0x3000, "branch-link-fixture"),
@@ -1598,11 +1628,18 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xF000, "eret-fixture"),
         entry(0xF004, "eret-return-continuation-fixture"),
     ];
-    let roots = [
+    entries.extend(
+        (0..conditional_traps.len())
+            .map(|index| entry(0xC000 + (index as u32 * 0x100), "conditional-trap-fixture")),
+    );
+    entries.push(entry(0xCC00, "conditional-trap-delay-slot-fixture"));
+    let mut roots = vec![
         0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200,
         0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
         0xB000, 0xB100, 0xB200, 0xF000, 0xF004,
     ];
+    roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
+    roots.push(0xCC00);
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;

@@ -2,7 +2,8 @@
 //! Deterministic C++20 source generation for the verified scalar IR subset.
 
 use crate::ir::{
-    Fpr, FpuComparison, FpuControl, Gpr, Instruction, Operation, Program, VerifyError,
+    Fpr, FpuComparison, FpuControl, Gpr, Instruction, Operation, Program, TrapComparison,
+    TrapOperand, VerifyError,
 };
 
 /// Generates one C++ translation unit exporting
@@ -288,6 +289,13 @@ pub(crate) fn emit_instruction(
         }
         Operation::FpuMultiplySubtractAccumulateSingle { lhs, rhs } => {
             emit_fpu_madd(output, index, None, lhs, rhs, "fpu_msub");
+        }
+        Operation::ConditionalTrap {
+            lhs,
+            rhs,
+            comparison,
+        } => {
+            emit_conditional_trap(output, lhs, rhs, comparison, in_branch_delay);
         }
         Operation::MultiplyWordSigned { dst, lhs, rhs } => {
             emit_multiply_word(output, index, dst, lhs, rhs, true)
@@ -852,6 +860,45 @@ fn emit_quadword_store(output: &mut String, index: usize, src: Gpr, base: Gpr, o
     output.push_str(&format!(
         "    const auto memory_status_{tag} = store_u128(state.memory, effective_address_{tag}, state.gpr[{}]);\n    if (memory_status_{tag} != Status::ok) return memory_status_{tag};\n",
         src.index()
+    ));
+}
+
+fn emit_conditional_trap(
+    output: &mut String,
+    lhs: Gpr,
+    rhs: TrapOperand,
+    comparison: TrapComparison,
+    in_branch_delay: bool,
+) {
+    let left = format!("state.gpr[{}].low", lhs.index());
+    let right_unsigned = match rhs {
+        TrapOperand::Register(register) => format!("state.gpr[{}].low", register.index()),
+        TrapOperand::SignedImmediate(immediate) => {
+            format!("static_cast<std::uint64_t>({immediate}LL)")
+        }
+    };
+    let signed_left = format!("std::bit_cast<std::int64_t>({left})");
+    let signed_right = match rhs {
+        TrapOperand::Register(register) => {
+            format!(
+                "std::bit_cast<std::int64_t>(state.gpr[{}].low)",
+                register.index()
+            )
+        }
+        TrapOperand::SignedImmediate(immediate) => {
+            format!("static_cast<std::int64_t>({immediate}LL)")
+        }
+    };
+    let predicate = match comparison {
+        TrapComparison::Equal => format!("{left} == {right_unsigned}"),
+        TrapComparison::NotEqual => format!("{left} != {right_unsigned}"),
+        TrapComparison::GreaterThanOrEqualSigned => format!("{signed_left} >= {signed_right}"),
+        TrapComparison::GreaterThanOrEqualUnsigned => format!("{left} >= {right_unsigned}"),
+        TrapComparison::LessThanSigned => format!("{signed_left} < {signed_right}"),
+        TrapComparison::LessThanUnsigned => format!("{left} < {right_unsigned}"),
+    };
+    output.push_str(&format!(
+        "    if ({predicate}) return reps2::runtime::raise_ee_exception(state, reps2::runtime::ExceptionCode::Trap, {in_branch_delay});\n"
     ));
 }
 
@@ -1813,6 +1860,51 @@ mod tests {
                 "prologue must expose {helper}"
             );
         }
+    }
+
+    #[test]
+    fn emits_all_conditional_traps_with_signed_and_unsigned_64_bit_semantics() {
+        let words = [
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x30,
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x31,
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x32,
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x33,
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x34,
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x36,
+            (0x01 << 26) | (8 << 21) | (0x08 << 16) | 0xFFFE,
+            (0x01 << 26) | (8 << 21) | (0x09 << 16) | 0xFFFE,
+            (0x01 << 26) | (8 << 21) | (0x0A << 16) | 0xFFFE,
+            (0x01 << 26) | (8 << 21) | (0x0B << 16) | 0xFFFE,
+            (0x01 << 26) | (8 << 21) | (0x0C << 16) | 0xFFFE,
+            (0x01 << 26) | (8 << 21) | (0x0E << 16) | 0xFFFE,
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xB000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("conditional trap IR");
+        let cpp = emit_cpp(&program).expect("conditional trap C++");
+
+        assert_eq!(cpp.matches("ExceptionCode::Trap").count(), 12);
+        assert!(cpp.contains("std::bit_cast<std::int64_t>(state.gpr[8].low) >= std::bit_cast<std::int64_t>(state.gpr[9].low)"));
+        assert!(cpp.contains("state.gpr[8].low >= state.gpr[9].low"));
+        assert!(cpp.contains("std::bit_cast<std::int64_t>(state.gpr[8].low) < std::bit_cast<std::int64_t>(state.gpr[9].low)"));
+        assert!(cpp.contains("state.gpr[8].low < state.gpr[9].low"));
+        assert!(cpp.contains("state.gpr[8].low == state.gpr[9].low"));
+        assert!(cpp.contains("state.gpr[8].low != state.gpr[9].low"));
+        assert!(cpp.contains("state.gpr[8].low >= static_cast<std::uint64_t>(-2LL)"));
+        assert!(cpp.contains("state.gpr[8].low < static_cast<std::uint64_t>(-2LL)"));
+        assert!(cpp.contains(
+            "std::bit_cast<std::int64_t>(state.gpr[8].low) >= static_cast<std::int64_t>(-2LL)"
+        ));
+        assert!(cpp.contains(
+            "std::bit_cast<std::int64_t>(state.gpr[8].low) < static_cast<std::int64_t>(-2LL)"
+        ));
+        assert!(cpp.contains("state.gpr[8].low == static_cast<std::uint64_t>(-2LL)"));
+        assert!(cpp.contains("state.gpr[8].low != static_cast<std::uint64_t>(-2LL)"));
+        assert!(cpp.contains("ExceptionCode::Trap, false"));
+        assert!(!cpp.contains("state.gpr[8].high"));
     }
 
     #[test]

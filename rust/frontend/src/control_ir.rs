@@ -363,19 +363,33 @@ impl ControlProgram {
             .count()
     }
 
-    /// Returns blocks carrying a known SYSCALL/BREAK in their terminator or delay slot.
+    /// Returns blocks carrying a known architectural exception instruction.
     ///
-    /// These are explicit architectural exceptions, not unknown encodings.
-    /// Generated code enters the Level-1 COP0 exception path only when executed.
+    /// This includes unconditional SYSCALL/BREAK terminators and conditional
+    /// traps in ordinary body instructions or delay slots. The count is by
+    /// basic block, not by individual instruction; exceptions are delivered
+    /// only when their instruction actually executes.
     #[must_use]
     pub fn trap_count(&self) -> usize {
         self.blocks
             .values()
             .filter(|block| {
                 matches!(&block.terminator, ControlTerminator::GuestException { .. })
-                    || block.terminator.delay_slot().is_some_and(|delay_slot| {
-                        matches!(delay_slot, ControlDelaySlot::GuestException { .. })
+                    || block.instructions.iter().any(|instruction| {
+                        matches!(instruction.operation, ir::Operation::ConditionalTrap { .. })
                     })
+                    || block
+                        .terminator
+                        .delay_slot()
+                        .is_some_and(|delay_slot| match delay_slot {
+                            ControlDelaySlot::GuestException { .. } => true,
+                            ControlDelaySlot::Instruction(instruction) => {
+                                matches!(
+                                    instruction.operation,
+                                    ir::Operation::ConditionalTrap { .. }
+                                )
+                            }
+                        })
             })
             .count()
     }
@@ -848,6 +862,47 @@ mod tests {
             assert_eq!(program.trap_count(), 1);
             assert_eq!(program.unsupported_count(), 0);
         }
+    }
+
+    #[test]
+    fn counts_conditional_traps_in_body_and_delay_slot_blocks() {
+        let body_words = [
+            (8 << 21) | (9 << 16) | 0x34, // teq t0, t1
+            0x240A_0001,                  // addiu t2, zero, 1
+        ];
+        let delay_words = [
+            (0x14 << 26) | (8 << 21) | 2,  // beql t0, zero, 0x500C
+            (9 << 21) | (10 << 16) | 0x34, // delay-slot teq t1, t2
+            0x240B_0001,
+            0x0000_0000,
+        ];
+        let segments = [segment(0x4000, &body_words), segment(0x5000, &delay_words)];
+        let roots = [0x4000, 0x5000];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x4000), entry(0x5000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("conditional trap CFG");
+        let program = ControlProgram::lift(&graph).expect("conditional trap typed IR");
+
+        assert!(matches!(
+            program.blocks[&0x4000].instructions[0].operation,
+            ir::Operation::ConditionalTrap { .. }
+        ));
+        assert!(matches!(
+            &program.blocks[&0x5000].terminator,
+            ControlTerminator::ConditionalBranch {
+                delay_slot: ControlDelaySlot::Instruction(ScalarInstruction {
+                    operation: ir::Operation::ConditionalTrap { .. },
+                    ..
+                }),
+                delay_slot_policy: DelaySlotPolicy::AnnulWhenNotTaken,
+                ..
+            }
+        ));
+        assert_eq!(program.trap_count(), 2);
     }
 
     #[test]

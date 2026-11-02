@@ -75,6 +75,7 @@ enum class ExceptionCode : std::uint8_t {
     SystemCall = 8,
     Breakpoint = 9,
     Overflow = 12,
+    Trap = 13,
 };
 
 /// Level-1 address errors for instruction fetches and data accesses.
