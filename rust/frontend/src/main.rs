@@ -131,7 +131,7 @@ fn elf_info(path: &Path) -> Result<(), String> {
                 reginfo.coprocessor_masks[1],
                 reginfo.coprocessor_masks[2],
                 reginfo.coprocessor_masks[3],
-                reginfo.gp_value as u32
+                u32::from_ne_bytes(reginfo.gp_value.to_ne_bytes())
             );
         }
         println!("  SHT_MIPS_ABIFLAGS sections: {}", image.mips_abi_flags.len());
