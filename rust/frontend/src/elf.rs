@@ -569,7 +569,7 @@ fn parse_symbols(
         let extended_indices = if let Some(extended_index) = extended_section_tables[section_index]
         {
             let extended = &sections[extended_index];
-            if extended.entry_size != 4 || extended.size % 4 != 0 {
+            if extended.entry_size != 4 || !extended.size.is_multiple_of(4) {
                 return Err(Error::new("SHT_SYMTAB_SHNDX must use four-byte entries"));
             }
             let extended_count = usize::try_from(extended.size / 4)
