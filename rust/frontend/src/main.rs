@@ -46,16 +46,8 @@ fn elf_info(path: &Path) -> Result<(), String> {
     let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
 
     println!("ELF32 little-endian image");
-    println!(
-        "  Type: {} ({})",
-        image.file_type,
-        image.file_type_name()
-    );
-    println!(
-        "  Machine: {} ({})",
-        image.machine,
-        image.machine_name()
-    );
+    println!("  Type: {} ({})", image.file_type, image.file_type_name());
+    println!("  Machine: {} ({})", image.machine, image.machine_name());
     println!(
         "  OS ABI: {} (code 0x{:02X})",
         image.os_abi_name(),
