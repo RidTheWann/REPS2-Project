@@ -26,7 +26,9 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::sign_extend_immediate;\n\
              using reps2::runtime::sign_extend_word;\n\
              using reps2::runtime::sign_extend_word_signed;\n\
-             using reps2::runtime::parallel_add_u32;\n\
+             using reps2::runtime::parallel_add_u32;             using reps2::runtime::parallel_add_word;\n\
+             using reps2::runtime::parallel_sub_word;\n\
+\n\
              using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::store_fpu_control;\n\
              using reps2::runtime::apply_fpu_flags;\n\
@@ -359,6 +361,12 @@ pub(crate) fn emit_instruction(
         }
         Operation::SubUnsignedWord { dst, lhs, rhs } => {
             emit_word_sub(output, index, dst, lhs, rhs, false, in_branch_delay)
+        }
+        Operation::ParallelAddWord { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_add_word");
+        }
+        Operation::ParallelSubWord { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_sub_word");
         }
         Operation::ParallelAddUnsignedWord { dst, lhs, rhs } => {
             emit_parallel_add_u32(output, dst, lhs, rhs);
@@ -1004,6 +1012,15 @@ fn emit_word_sub(
     }
 }
 
+fn emit_parallel_word(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr, helper: &str) {
+    let d = dst.index();
+    let a = lhs.index();
+    let b = rhs.index();
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}] = {helper}(state.gpr[{a}], state.gpr[{b}]);\n"
+    ));
+}
+
 fn emit_parallel_add_u32(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr) {
     let d = dst.index();
     let a = lhs.index();
@@ -1624,6 +1641,41 @@ mod tests {
         assert!(cpp.contains("if (6 != 0) state.gpr[6].low = state.hi1;"));
         assert!(cpp.contains("if (7 != 0) state.gpr[7].low = state.lo1;"));
         assert!(!cpp.contains("state.gpr[6] = state.hi1"));
+    }
+
+    #[test]
+    fn emits_mmi0_parallel_word_add_and_subtract_runtime_calls() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | (1 << 6) | 0x08,
+            (0x1C << 26) | (1 << 21) | (2 << 16) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x6F00 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PADDW/PSUBW IR");
+        let cpp = emit_cpp(&program).expect("PADDW/PSUBW C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_add_word;"));
+        assert!(cpp.contains("using reps2::runtime::parallel_sub_word;"));
+        assert!(
+            cpp.contains(
+                "if (3 != 0) state.gpr[3] = parallel_add_word(state.gpr[1], state.gpr[2]);"
+            )
+        );
+        assert!(
+            cpp.contains(
+                "if (6 != 0) state.gpr[6] = parallel_sub_word(state.gpr[4], state.gpr[5]);"
+            )
+        );
+        assert!(
+            cpp.contains(
+                "if (0 != 0) state.gpr[0] = parallel_add_word(state.gpr[1], state.gpr[2]);"
+            )
+        );
+        assert!(!cpp.contains("= parallel_add_u32("));
     }
 
     #[test]

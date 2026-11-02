@@ -632,6 +632,58 @@ inline void disable_interrupts(EeState& state) noexcept {
         : static_cast<std::uint64_t>(value);
 }
 
+// PADDW adds four corresponding 32-bit lanes modulo 2^32. Arithmetic
+// is performed on unsigned lane values, so wraparound is defined C++ behavior.
+[[nodiscard]] constexpr Gpr128 parallel_add_word(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    const auto lane0 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.low) + static_cast<std::uint32_t>(rhs.low)
+    );
+    const auto lane1 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.low >> 32U)
+        + static_cast<std::uint32_t>(rhs.low >> 32U)
+    );
+    const auto lane2 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.high) + static_cast<std::uint32_t>(rhs.high)
+    );
+    const auto lane3 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.high >> 32U)
+        + static_cast<std::uint32_t>(rhs.high >> 32U)
+    );
+    return Gpr128{
+        static_cast<std::uint64_t>(lane0) | (static_cast<std::uint64_t>(lane1) << 32U),
+        static_cast<std::uint64_t>(lane2) | (static_cast<std::uint64_t>(lane3) << 32U),
+    };
+}
+
+// PSUBW subtracts four corresponding 32-bit lanes modulo 2^32. No borrow
+// crosses a lane boundary; unsigned subtraction gives the defined bit result.
+[[nodiscard]] constexpr Gpr128 parallel_sub_word(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    const auto lane0 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.low) - static_cast<std::uint32_t>(rhs.low)
+    );
+    const auto lane1 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.low >> 32U)
+        - static_cast<std::uint32_t>(rhs.low >> 32U)
+    );
+    const auto lane2 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.high) - static_cast<std::uint32_t>(rhs.high)
+    );
+    const auto lane3 = static_cast<std::uint32_t>(
+        static_cast<std::uint32_t>(lhs.high >> 32U)
+        - static_cast<std::uint32_t>(rhs.high >> 32U)
+    );
+    return Gpr128{
+        static_cast<std::uint64_t>(lane0) | (static_cast<std::uint64_t>(lane1) << 32U),
+        static_cast<std::uint64_t>(lane2) | (static_cast<std::uint64_t>(lane3) << 32U),
+    };
+}
+
 [[nodiscard]] constexpr std::uint32_t saturating_add_u32(
     std::uint32_t lhs,
     std::uint32_t rhs

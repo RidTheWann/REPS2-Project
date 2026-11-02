@@ -350,6 +350,18 @@ pub enum Operation {
         src: Gpr,
         immediate: u16,
     },
+    /// PADDW: four independent modulo-2^32 additions over GPR[127:0].
+    ParallelAddWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// PSUBW: four independent modulo-2^32 subtractions over GPR[127:0].
+    ParallelSubWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     ParallelAddUnsignedWord {
         dst: Gpr,
         lhs: Gpr,
@@ -842,6 +854,16 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::Subu => Operation::SubUnsignedWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelAddWord => Operation::ParallelAddWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelSubWord => Operation::ParallelSubWord {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -1672,6 +1694,31 @@ mod tests {
             Operation::MultiplyWordSigned { dst, lhs, rhs } if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5));
         assert!(matches!(program.instructions()[5].operation,
             Operation::MultiplyWordUnsigned { dst, lhs, rhs } if dst.index() == 7 && lhs.index() == 4 && rhs.index() == 5));
+    }
+
+    #[test]
+    fn lifts_r5900_mmi0_parallel_word_add_and_subtract() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | (1 << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0x6F00 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("MMI0 parallel word IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelAddWord { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelSubWord { dst, lhs, rhs }
+                if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5
+        ));
     }
 
     #[test]
