@@ -1700,6 +1700,97 @@ mod tests {
         put_u32(bytes, base + 36, section.entry_size);
     }
 
+    fn elf_with_mips_abi_flags(data: &[u8], duplicate: bool) -> Vec<u8> {
+        let shstr = b"\0.shstrtab\0.MIPS.abiflags\0";
+        let section_count = if duplicate { 4usize } else { 3usize };
+        let section_table_end = 52 + section_count * SECTION_HEADER_SIZE;
+        let shstr_offset = section_table_end;
+        let data_offset = shstr_offset + shstr.len();
+        let duplicate_data_offset = data_offset + data.len();
+        let total_size = if duplicate {
+            duplicate_data_offset + data.len()
+        } else {
+            data_offset + data.len()
+        };
+        let find_name = |name: &[u8]| -> u32 {
+            shstr
+                .windows(name.len())
+                .position(|window| window == name)
+                .expect("ELF ABI-flags fixture section name") as u32
+        };
+        let mut bytes = vec![0; total_size];
+
+        bytes[0..4].copy_from_slice(b"\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 32, 52);
+        put_u16(&mut bytes, 40, 52);
+        put_u16(&mut bytes, 42, PROGRAM_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 48, section_count as u16);
+        put_u16(&mut bytes, 50, 1);
+
+        bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(shstr);
+        bytes[data_offset..data_offset + data.len()].copy_from_slice(data);
+        if duplicate {
+            bytes[duplicate_data_offset..duplicate_data_offset + data.len()]
+                .copy_from_slice(data);
+        }
+
+        write_section(
+            &mut bytes,
+            52 + SECTION_HEADER_SIZE,
+            SectionSpec {
+                name: find_name(b".shstrtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: shstr_offset as u32,
+                size: shstr.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_section(
+            &mut bytes,
+            52 + 2 * SECTION_HEADER_SIZE,
+            SectionSpec {
+                name: find_name(b".MIPS.abiflags"),
+                kind: SHT_MIPS_ABIFLAGS,
+                address: 0,
+                offset: data_offset as u32,
+                size: data.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 8,
+                entry_size: 0,
+            },
+        );
+        if duplicate {
+            write_section(
+                &mut bytes,
+                52 + 3 * SECTION_HEADER_SIZE,
+                SectionSpec {
+                    name: find_name(b".MIPS.abiflags"),
+                    kind: SHT_MIPS_ABIFLAGS,
+                    address: 0,
+                    offset: duplicate_data_offset as u32,
+                    size: data.len() as u32,
+                    link: 0,
+                    info: 0,
+                    alignment: 8,
+                    entry_size: 0,
+                },
+            );
+        }
+        bytes
+    }
+
     fn elf_with_symbol_and_rel() -> Vec<u8> {
         let shstr = b"\0.shstrtab\0.strtab\0.symtab\0.text\0.rel.text\0";
         let strtab = b"\0entry\0";
@@ -2131,6 +2222,78 @@ mod tests {
             ..ParseLimits::default()
         };
         assert!(parse(&seed, limited).is_err());
+    }
+
+    #[test]
+    fn parses_mips_abi_flags_v0_and_identifies_r5900_extension() {
+        let mut data = vec![0; MIPS_ABIFLAGS_V0_SIZE];
+        put_u16(&mut data, 0, 0);
+        data[2] = 3; // MIPS III
+        data[3] = 0; // ISA revision
+        data[4] = MIPS_AFL_REG_128;
+        data[5] = MIPS_AFL_REG_64;
+        data[6] = MIPS_AFL_REG_NONE;
+        data[7] = 0; // FP ABI ANY
+        put_u32(&mut data, 8, 6); // AFL_EXT_5900
+        put_u32(&mut data, 12, 0x0000_8003); // DSP, DSPR2, CRC
+        put_u32(&mut data, 16, MIPS_AFL_FLAGS1_ODDSPREG | 0x2);
+        put_u32(&mut data, 20, 0x8000_0000);
+
+        let bytes = elf_with_mips_abi_flags(&data, false);
+        let image = parse(&bytes, ParseLimits::default()).expect("MIPS ABI flags ELF");
+        let abi_flags = image.mips_abi_flags.expect("ABI flags section");
+        assert_eq!(abi_flags.section_index, 2);
+        assert_eq!(abi_flags.section_size, 24);
+        assert_eq!(abi_flags.version, 0);
+        let v0 = abi_flags.version0.expect("version zero payload");
+        assert_eq!(v0.isa_level_name(), "MIPS III");
+        assert_eq!(v0.isa_revision, 0);
+        assert_eq!(v0.gpr_size, MIPS_AFL_REG_128);
+        assert_eq!(MipsAbiFlagsV0::register_size_name(v0.gpr_size), "128-bit");
+        assert_eq!(MipsAbiFlagsV0::register_size_name(v0.cpr1_size), "64-bit");
+        assert_eq!(MipsAbiFlagsV0::register_size_name(v0.cpr2_size), "none");
+        assert_eq!(v0.fp_abi_name(), "any");
+        assert_eq!(v0.isa_extension, 6);
+        assert_eq!(v0.isa_extension_name(), "R5900");
+        assert_eq!(v0.ase_names(), vec!["DSP", "DSPR2", "CRC"]);
+        assert_eq!(v0.unknown_ases(), 0);
+        assert!(v0.has_odd_single_precision_registers());
+        assert_eq!(v0.unknown_flags1(), 0x2);
+        assert_eq!(v0.flags2, 0x8000_0000);
+    }
+
+    #[test]
+    fn preserves_unknown_mips_abi_flags_versions_without_v0_interpretation() {
+        let mut data = vec![0xA5; MIPS_ABIFLAGS_V0_SIZE];
+        put_u16(&mut data, 0, 1);
+        let bytes = elf_with_mips_abi_flags(&data, false);
+        let image = parse(&bytes, ParseLimits::default())
+            .expect("unknown ABI flags version remains parseable");
+        let abi_flags = image.mips_abi_flags.expect("ABI flags metadata");
+        assert_eq!(abi_flags.version, 1);
+        assert_eq!(abi_flags.section_size, 24);
+        assert_eq!(abi_flags.version0, None);
+    }
+
+    #[test]
+    fn rejects_malformed_mips_abi_flags_v0_size_and_duplicate_sections() {
+        let malformed = elf_with_mips_abi_flags(&[0; MIPS_ABIFLAGS_V0_SIZE - 1], false);
+        assert!(parse(&malformed, ParseLimits::default()).is_err());
+
+        let mut data = vec![0; MIPS_ABIFLAGS_V0_SIZE];
+        put_u16(&mut data, 0, 0);
+        let duplicate = elf_with_mips_abi_flags(&data, true);
+        assert!(parse(&duplicate, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn ignores_mips_abi_flags_section_for_non_mips_machine() {
+        let mut data = vec![0; MIPS_ABIFLAGS_V0_SIZE];
+        put_u16(&mut data, 0, 0);
+        let mut bytes = elf_with_mips_abi_flags(&data, false);
+        put_u16(&mut bytes, 18, 3); // EM_386
+        let image = parse(&bytes, ParseLimits::default()).expect("non-MIPS ELF");
+        assert_eq!(image.mips_abi_flags, None);
     }
 
     #[test]
