@@ -47,3 +47,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0040](0040-elf-extended-section-symbol-indices.md) | ELF extended section numbering and SHT_SYMTAB_SHNDX | Accepted |
 | [0041](0041-elf-extended-program-header-count.md) | ELF PN_XNUM extended program-header count | Accepted |
 | [0042](0042-elf-identification-and-type-diagnostics.md) | ELF OS ABI, ABI version, and object-type diagnostics | Accepted |
+| [0043](0043-mips-abi-flags-section.md) | MIPS SHT_MIPS_ABIFLAGS version-zero diagnostics | Accepted |
