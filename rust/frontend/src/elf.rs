@@ -510,6 +510,9 @@ fn parse_symbols(
                 "SHT_SYMTAB_SHNDX does not link to SHT_SYMTAB or SHT_DYNSYM",
             ));
         }
+        if extended.info != 0 {
+            return Err(Error::new("SHT_SYMTAB_SHNDX sh_info must be zero"));
+        }
         if extended_section_tables[symbol_table_index].replace(extended_index).is_some() {
             return Err(Error::new(
                 "Multiple SHT_SYMTAB_SHNDX sections link to one symbol table",
@@ -1638,6 +1641,11 @@ mod tests {
                 entry_size: 4,
             },
         );
+        for index in 6..EXTENDED_TARGET_INDEX {
+            let base = SECTION_TABLE_OFFSET + index * SECTION_HEADER_SIZE;
+            put_u32(&mut bytes, base + 4, SHT_NOBITS);
+            put_u32(&mut bytes, base + 32, 1);
+        }
         write_at(
             &mut bytes,
             EXTENDED_TARGET_INDEX,
@@ -1719,6 +1727,10 @@ mod tests {
         let mut wrong_entry_size = seed.clone();
         put_u32(&mut wrong_entry_size, shndx_header + 36, 8);
         assert!(parse(&wrong_entry_size, ParseLimits::default()).is_err());
+
+        let mut wrong_info = seed.clone();
+        put_u32(&mut wrong_info, shndx_header + 28, 1);
+        assert!(parse(&wrong_info, ParseLimits::default()).is_err());
 
         let mut wrong_count = seed;
         put_u32(&mut wrong_count, shndx_header + 20, 4);
