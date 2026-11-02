@@ -1793,8 +1793,10 @@ mod tests {
         put_u32(&mut duplicate, duplicate_header + 24, 2);
         assert!(parse(&duplicate, ParseLimits::default()).is_err());
 
-        let mut limited = ParseLimits::default();
-        limited.max_sections = 100;
+        let limited = ParseLimits {
+            max_sections: 100,
+            ..ParseLimits::default()
+        };
         assert!(parse(&seed, limited).is_err());
     }
 
