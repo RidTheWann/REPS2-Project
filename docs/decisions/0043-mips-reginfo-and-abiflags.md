@@ -27,7 +27,11 @@ ordering/uniqueness constraints.
 
 The version-zero MIPS ABI flags record is 24 bytes and contains a 16-bit
 version followed by the ISA level/revision, GPR/CPR1/CPR2 register-size
-codes, FP ABI, ISA extension, ASE mask, and two general flag words.
+codes, FP ABI, ISA extension, ASE mask, and two general flag words. Register
+size code 0 means no registers (not an unspecified 32-bit register class).
+The FP ABI values 0..7 are any, double, single, soft-float, old-64, FPXX,
+FP64, and FP64A. In flags1, bit 0 is AFL_FLAGS1_ODDSPREG, indicating odd
+single-precision registers.
 
 LLVM's R5900 target support uses AFL_EXT_5900 = 6 in the ISA extension field.
 This is distinct from the e_flags CPU subtype value 0x92.
@@ -62,14 +66,19 @@ it is metadata supplied by the object producer.
 
 The parser reads the structure version first. Version zero must be exactly
 24 bytes and is decoded into its documented fields. Register-size and FP ABI
-codes receive generic labels; the raw numeric fields remain available.
+codes receive generic labels; the raw numeric fields remain available. ISA
+levels 1..5, 32 and 64 receive generic MIPS ISA labels.
 
 AFL_EXT_5900 (value 6) is identified as the R5900 extension. ASE names are
-reported for recognized mask bits; flags1, flags2, unknown ASE bits and
-unknown extension values remain raw.
+reported for recognized mask bits and unclassified ASE bits are exposed as a
+separate raw mask. flags1 bit 0 is decoded as ODDSPREG; the remaining flags1
+bits and all flags2 bits are preserved numerically. Unknown extension values
+remain raw.
 
 Unknown nonzero structure versions are preserved as the section index, raw
 version and byte size, and are not decoded with the version-zero layout.
+For EM_MIPS objects, duplicate SHT_MIPS_ABIFLAGS sections are rejected as
+ambiguous instead of returning multiple potentially conflicting ABI records.
 
 ### 3. Keep format recognition separate from admission policy
 
@@ -91,9 +100,12 @@ or claim retail-title compatibility from these fields.
 Synthetic in-memory ELF32 fixtures cover:
 - all six ELF32_RegInfo words and signed gp_value;
 - version-zero MIPS ABI flags decoding;
-- AFL_EXT_5900 = 6;
-- recognized ASE mask names and preservation of flags1/flags2;
+- AFL_EXT_5900 = 6 and the standard ISA-level labels;
+- register-size code 0 as no registers and the FP ABI labels;
+- recognized ASE names plus unknown ASE-bit preservation;
+- ODDSPREG enabled/disabled and preservation of other flags1/flags2 bits;
 - unknown ABI flags version retention without version-zero misinterpretation;
+- duplicate ABI-flags section rejection;
 - malformed .reginfo size and malformed version-zero ABI flags size;
 - skipping processor-specific MIPS interpretations for non-EM_MIPS machines.
 
