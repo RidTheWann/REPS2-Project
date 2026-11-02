@@ -22,6 +22,7 @@ pub const SHT_NOBITS: u32 = 8;
 pub const SHT_REL: u32 = 9;
 pub const SHT_DYNSYM: u32 = 11;
 pub const SHT_SYMTAB_SHNDX: u32 = 18;
+pub const SHT_MIPS_ABIFLAGS: u32 = 0x7000_002A;
 
 const ELF_HEADER_SIZE: usize = 52;
 const PROGRAM_HEADER_SIZE: usize = 32;
@@ -37,6 +38,12 @@ const ET_HIOS: u16 = 0xFEFF;
 const ET_LOPROC: u16 = 0xFF00;
 const ET_HIPROC: u16 = 0xFFFF;
 const RELA_SIZE: usize = 12;
+const MIPS_ABIFLAGS_V0_SIZE: usize = 24;
+const MIPS_AFL_REG_NONE: u8 = 0;
+const MIPS_AFL_REG_32: u8 = 1;
+const MIPS_AFL_REG_64: u8 = 2;
+const MIPS_AFL_REG_128: u8 = 3;
+const MIPS_AFL_FLAGS1_ODDSPREG: u32 = 1;
 
 // MIPS ELF e_flags fields (processor-specific).
 const EF_MIPS_NOREORDER: u32 = 0x0000_0001;
@@ -273,6 +280,213 @@ pub const fn decode_mips_elf_flags(raw: u32) -> MipsElfFlags {
     }
 }
 
+/// The version-zero MIPS ABI flags payload stored in SHT_MIPS_ABIFLAGS.
+///
+/// All bitfields are retained numerically. Known names are descriptive
+/// diagnostics only and must not be treated as a loader-compatibility verdict.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MipsAbiFlagsV0 {
+    pub isa_level: u8,
+    pub isa_revision: u8,
+    pub gpr_size: u8,
+    pub cpr1_size: u8,
+    pub cpr2_size: u8,
+    pub fp_abi: u8,
+    pub isa_extension: u32,
+    pub ases: u32,
+    pub flags1: u32,
+    pub flags2: u32,
+}
+
+impl MipsAbiFlagsV0 {
+    #[must_use]
+    pub const fn isa_level_name(self) -> &'static str {
+        match self.isa_level {
+            1 => "MIPS I",
+            2 => "MIPS II",
+            3 => "MIPS III",
+            4 => "MIPS IV",
+            5 => "MIPS V",
+            32 => "MIPS32",
+            64 => "MIPS64",
+            _ => "unrecognized",
+        }
+    }
+
+    #[must_use]
+    pub const fn register_size_name(size: u8) -> &'static str {
+        match size {
+            MIPS_AFL_REG_NONE => "none",
+            MIPS_AFL_REG_32 => "32-bit",
+            MIPS_AFL_REG_64 => "64-bit",
+            MIPS_AFL_REG_128 => "128-bit",
+            _ => "unrecognized",
+        }
+    }
+
+    #[must_use]
+    pub const fn fp_abi_name(self) -> &'static str {
+        match self.fp_abi {
+            0 => "any",
+            1 => "double",
+            2 => "single",
+            3 => "soft-float",
+            4 => "old-64",
+            5 => "FPXX",
+            6 => "FP64",
+            7 => "FP64A",
+            _ => "unrecognized",
+        }
+    }
+
+    #[must_use]
+    pub const fn isa_extension_name(self) -> &'static str {
+        match self.isa_extension {
+            0 => "none",
+            1 => "XLR",
+            2 => "Octeon2",
+            3 => "OcteonP",
+            4 => "Loongson 3A",
+            5 => "Octeon",
+            6 => "R5900",
+            7 => "R4650",
+            8 => "R4010",
+            9 => "VR4100",
+            10 => "R3900",
+            11 => "R10000",
+            12 => "SB-1",
+            13 => "VR4111/VR4181",
+            14 => "VR4120",
+            15 => "VR5400",
+            16 => "VR5500",
+            17 => "Loongson 2E",
+            18 => "Loongson 2F",
+            19 => "Octeon3",
+            _ => "unrecognized",
+        }
+    }
+
+    /// Recognized ASE names in stable bit order.
+    #[must_use]
+    pub fn ase_names(self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        for (mask, name) in [
+            (0x0000_0001, "DSP"),
+            (0x0000_0002, "DSPR2"),
+            (0x0000_0004, "EVA"),
+            (0x0000_0008, "MCU"),
+            (0x0000_0010, "MDMX"),
+            (0x0000_0020, "MIPS3D"),
+            (0x0000_0040, "MT"),
+            (0x0000_0080, "SmartMIPS"),
+            (0x0000_0100, "VIRT"),
+            (0x0000_0200, "MSA"),
+            (0x0000_0400, "MIPS16"),
+            (0x0000_0800, "microMIPS"),
+            (0x0000_1000, "XPA"),
+            (0x0000_8000, "CRC"),
+            (0x0002_0000, "GINV"),
+        ] {
+            if self.ases & mask != 0 {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    #[must_use]
+    pub const fn unknown_ases(self) -> u32 {
+        let known = 0x0000_0001
+            | 0x0000_0002
+            | 0x0000_0004
+            | 0x0000_0008
+            | 0x0000_0010
+            | 0x0000_0020
+            | 0x0000_0040
+            | 0x0000_0080
+            | 0x0000_0100
+            | 0x0000_0200
+            | 0x0000_0400
+            | 0x0000_0800
+            | 0x0000_1000
+            | 0x0000_8000
+            | 0x0002_0000;
+        self.ases & !known
+    }
+
+    #[must_use]
+    pub const fn has_odd_single_precision_registers(self) -> bool {
+        self.flags1 & MIPS_AFL_FLAGS1_ODDSPREG != 0
+    }
+
+    #[must_use]
+    pub const fn unknown_flags1(self) -> u32 {
+        self.flags1 & !MIPS_AFL_FLAGS1_ODDSPREG
+    }
+}
+
+/// A MIPS ABI flags section. Unknown future versions are preserved as section
+/// metadata without interpreting their payload using the version-zero layout.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MipsAbiFlags {
+    pub section_index: usize,
+    pub section_size: u32,
+    pub version: u16,
+    pub version0: Option<MipsAbiFlagsV0>,
+}
+
+fn parse_mips_abi_flags(
+    bytes: &[u8],
+    machine: u16,
+    sections: &[SectionHeader],
+) -> Result<Option<MipsAbiFlags>, Error> {
+    if machine != EM_MIPS {
+        return Ok(None);
+    }
+
+    let mut parsed = None;
+    for (section_index, section) in sections.iter().enumerate() {
+        if section.kind != SHT_MIPS_ABIFLAGS {
+            continue;
+        }
+        if parsed.is_some() {
+            return Err(Error::new(
+                "ELF contains more than one SHT_MIPS_ABIFLAGS section",
+            ));
+        }
+        let data = section_data(bytes, section, "MIPS ABI flags section")?;
+        let version = read_u16(data, 0)?;
+        let version0 = if version == 0 {
+            if data.len() != MIPS_ABIFLAGS_V0_SIZE {
+                return Err(Error::new(
+                    "MIPS ABI flags version zero section must be exactly 24 bytes",
+                ));
+            }
+            Some(MipsAbiFlagsV0 {
+                isa_level: read_u8(data, 2)?,
+                isa_revision: read_u8(data, 3)?,
+                gpr_size: read_u8(data, 4)?,
+                cpr1_size: read_u8(data, 5)?,
+                cpr2_size: read_u8(data, 6)?,
+                fp_abi: read_u8(data, 7)?,
+                isa_extension: read_u32(data, 8)?,
+                ases: read_u32(data, 12)?,
+                flags1: read_u32(data, 16)?,
+                flags2: read_u32(data, 20)?,
+            })
+        } else {
+            None
+        };
+        parsed = Some(MipsAbiFlags {
+            section_index,
+            section_size: section.size,
+            version,
+            version0,
+        });
+    }
+    Ok(parsed)
+}
+
 /// Parsed ELF metadata. This is not yet a complete PS2 ABI loader.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Image {
@@ -289,6 +503,7 @@ pub struct Image {
     pub section_headers: Vec<SectionHeader>,
     pub symbols: Vec<Symbol>,
     pub relocations: Vec<Relocation>,
+    pub mips_abi_flags: Option<MipsAbiFlags>,
 }
 
 impl Image {
@@ -1162,6 +1377,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
 
     let symbols = parse_symbols(bytes, &section_headers, limits)?;
     let relocations = parse_relocations(bytes, &section_headers, limits)?;
+    let mips_abi_flags = parse_mips_abi_flags(bytes, machine, &section_headers)?;
     Ok(Image {
         file_type,
         os_abi,
@@ -1174,6 +1390,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         section_headers,
         symbols,
         relocations,
+        mips_abi_flags,
     })
 }
 
@@ -2177,6 +2394,7 @@ mod tests {
             section_headers: Vec::new(),
             symbols: Vec::new(),
             relocations: Vec::new(),
+            mips_abi_flags: None,
         };
         assert_eq!(image.mips_elf_flags(), None);
     }
