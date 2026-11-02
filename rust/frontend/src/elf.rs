@@ -2207,8 +2207,8 @@ mod tests {
         let mut unrecognized = minimal_elf();
         unrecognized[7] = 63;
         unrecognized[8] = 0xFE;
-        let image = parse(&unrecognized, ParseLimits::default())
-            .expect("unknown OS ABI remains parseable");
+        let image =
+            parse(&unrecognized, ParseLimits::default()).expect("unknown OS ABI remains parseable");
         assert_eq!(image.os_abi, 63);
         assert_eq!(image.abi_version, 0xFE);
         assert_eq!(image.os_abi_name(), "reserved/unrecognized");
