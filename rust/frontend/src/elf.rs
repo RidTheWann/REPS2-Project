@@ -513,7 +513,10 @@ fn parse_symbols(
         if extended.info != 0 {
             return Err(Error::new("SHT_SYMTAB_SHNDX sh_info must be zero"));
         }
-        if extended_section_tables[symbol_table_index].replace(extended_index).is_some() {
+        if extended_section_tables[symbol_table_index]
+            .replace(extended_index)
+            .is_some()
+        {
             return Err(Error::new(
                 "Multiple SHT_SYMTAB_SHNDX sections link to one symbol table",
             ));
@@ -567,9 +570,7 @@ fn parse_symbols(
         {
             let extended = &sections[extended_index];
             if extended.entry_size != 4 || extended.size % 4 != 0 {
-                return Err(Error::new(
-                    "SHT_SYMTAB_SHNDX must use four-byte entries",
-                ));
+                return Err(Error::new("SHT_SYMTAB_SHNDX must use four-byte entries"));
             }
             let extended_count = usize::try_from(extended.size / 4)
                 .map_err(|_| Error::new("Extended symbol-index count overflow"))?;
@@ -851,7 +852,12 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
                 }
                 u32::from(raw_section_name_table_index)
             };
-            (resolved_count, resolved_name_index, extended_count, extended_names)
+            (
+                resolved_count,
+                resolved_name_index,
+                extended_count,
+                extended_names,
+            )
         };
 
     let section_count_host = usize::try_from(section_count)
@@ -1502,7 +1508,8 @@ mod tests {
         const EXTENDED_TARGET_INDEX: usize = 0xFF00;
         const EXTENDED_SHSTRTAB_INDEX: usize = 0xFF01;
         const SECTION_TABLE_OFFSET: usize = ELF_HEADER_SIZE;
-        let shstr = b"\0.strtab\0.symtab\0.text\0.rel.text\0.symtab_shndx\0.extended_target\0.shstrtab\0";
+        let shstr =
+            b"\0.strtab\0.symtab\0.text\0.rel.text\0.symtab_shndx\0.extended_target\0.shstrtab\0";
         let strtab = b"\0extended\0";
         let find_name = |name: &[u8]| -> u32 {
             shstr
@@ -1548,11 +1555,7 @@ mod tests {
         bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(shstr);
 
         // The null section header carries both extended-numbering values.
-        put_u32(
-            &mut bytes,
-            SECTION_TABLE_OFFSET + 20,
-            SECTION_COUNT as u32,
-        );
+        put_u32(&mut bytes, SECTION_TABLE_OFFSET + 20, SECTION_COUNT as u32);
         put_u32(
             &mut bytes,
             SECTION_TABLE_OFFSET + 24,
@@ -1772,7 +1775,13 @@ mod tests {
             symbol_data + SYMBOL_SIZE + 14,
             3,
         );
-        assert!(parse(&non_extended_symbol_has_nonzero_slot, ParseLimits::default()).is_err());
+        assert!(
+            parse(
+                &non_extended_symbol_has_nonzero_slot,
+                ParseLimits::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]
