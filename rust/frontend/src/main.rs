@@ -64,6 +64,44 @@ fn elf_info(path: &Path) -> Result<(), String> {
             " (not MIPS)"
         }
     );
+    println!("  Header flags: 0x{:08X}", image.flags);
+    if let Some(mips_flags) = image.mips_elf_flags() {
+        println!(
+            "  MIPS CPU subtype: {} (code 0x{:02X})",
+            mips_flags.cpu_name(),
+            mips_flags.cpu_code
+        );
+        println!(
+            "  MIPS ABI flag: {} (0x{:04X})",
+            mips_flags.abi_name(),
+            mips_flags.abi_code
+        );
+        println!(
+            "  MIPS architecture flag: {} (code {})",
+            mips_flags.architecture_name(),
+            mips_flags.architecture_code
+        );
+        let features = mips_flags.feature_names();
+        println!(
+            "  MIPS feature flags: {}",
+            if features.is_empty() {
+                "none".to_owned()
+            } else {
+                features.join(", ")
+            }
+        );
+        if mips_flags.unknown_bits != 0 {
+            println!(
+                "  Unclassified MIPS e_flags bits: 0x{:08X}",
+                mips_flags.unknown_bits
+            );
+        }
+        if mips_flags.cpu_code == 0x92 {
+            println!(
+                "  PS2 EE CPU marker: R5900 (header metadata only; not a compatibility result)"
+            );
+        }
+    }
     println!("  Entry point: 0x{:08X}", image.entry_point);
     println!("  Program headers: {}", image.program_headers.len());
     println!("  Section headers: {}", image.section_headers.len());
