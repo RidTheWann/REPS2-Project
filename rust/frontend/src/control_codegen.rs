@@ -13,7 +13,9 @@
 //! be compiled in parallel.
 
 use crate::analysis::DelaySlotPolicy;
-use crate::control_ir::{ControlBlock, ControlError, ControlProgram, ControlTerminator, TrapKind};
+use crate::control_ir::{
+    ControlBlock, ControlDelaySlot, ControlError, ControlProgram, ControlTerminator, TrapKind,
+};
 
 /// Shared prelude for every emitted translation unit.
 ///
@@ -310,18 +312,32 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             delay_slot,
             delay_slot_policy,
         } => {
-            output.push_str(&format!(
-                "    state.pc = 0x{guest_pc:08X}U;\n\
-                 \x20   const bool branch_taken_{guest_pc:08X} = {};\n",
-                condition_expression(*condition)
-            ));
+            output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
+            let needs_branch_predicate = *delay_slot_policy == DelaySlotPolicy::AnnulWhenNotTaken
+                || !matches!(delay_slot, ControlDelaySlot::GuestException { .. });
+            if needs_branch_predicate {
+                output.push_str(&format!(
+                    "    const bool branch_taken_{guest_pc:08X} = {};\n",
+                    condition_expression(*condition)
+                ));
+            }
             emit_link_write(output, *link_register, guest_pc.wrapping_add(8));
             match delay_slot_policy {
-                DelaySlotPolicy::ExecuteAlways => emit_delay_slot(output, index, delay_slot),
+                DelaySlotPolicy::ExecuteAlways => {
+                    if emit_delay_slot(output, index, delay_slot) {
+                        return;
+                    }
+                }
                 DelaySlotPolicy::AnnulWhenNotTaken => {
                     output.push_str(&format!("    if (branch_taken_{guest_pc:08X}) {{\n"));
-                    emit_delay_slot(output, index, delay_slot);
+                    let is_exception = emit_delay_slot(output, index, delay_slot);
                     output.push_str("    }\n");
+                    if is_exception {
+                        output.push_str(&format!(
+                            "    state.pc = 0x{fallthrough_pc:08X}U;\n    return Status::ok;\n"
+                        ));
+                        return;
+                    }
                 }
             }
             output.push_str(&format!(
@@ -342,7 +358,9 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 *link_register,
                 return_pc.unwrap_or(guest_pc.wrapping_add(8)),
             );
-            emit_delay_slot(output, index, delay_slot);
+            if emit_delay_slot(output, index, delay_slot) {
+                return;
+            }
             output.push_str(&format!(
                 "    state.pc = 0x{target_pc:08X}U;\n    return Status::ok;\n"
             ));
@@ -364,7 +382,9 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 *link_register,
                 return_pc.unwrap_or(guest_pc.wrapping_add(8)),
             );
-            emit_delay_slot(output, index, delay_slot);
+            if emit_delay_slot(output, index, delay_slot) {
+                return;
+            }
             output.push_str(&format!(
                 "    state.pc = dynamic_target_{guest_pc:08X};\n    return Status::ok;\n"
             ));
@@ -378,7 +398,9 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 "    state.pc = 0x{guest_pc:08X}U;\n\
                  \x20   const std::uint32_t return_target_{guest_pc:08X} = static_cast<std::uint32_t>(state.gpr[{source_register}].low);\n"
             ));
-            emit_delay_slot(output, index, delay_slot);
+            if emit_delay_slot(output, index, delay_slot) {
+                return;
+            }
             output.push_str(&format!(
                 "    state.pc = return_target_{guest_pc:08X};\n    return Status::ok;\n"
             ));
@@ -420,9 +442,28 @@ fn emit_link_write(output: &mut String, register: Option<u8>, return_pc: u32) {
     }
 }
 
-fn emit_delay_slot(output: &mut String, index: usize, delay_slot: &crate::ir::Instruction) {
-    output.push_str(&format!("    state.pc = 0x{:08X}U;\n", delay_slot.guest_pc));
-    crate::codegen::emit_instruction(output, index, *delay_slot, true);
+fn emit_delay_slot(output: &mut String, index: usize, delay_slot: &ControlDelaySlot) -> bool {
+    match delay_slot {
+        ControlDelaySlot::Instruction(instruction) => {
+            output.push_str(&format!(
+                "    state.pc = 0x{:08X}U;\n",
+                instruction.guest_pc
+            ));
+            crate::codegen::emit_instruction(output, index, *instruction, true);
+            false
+        }
+        ControlDelaySlot::GuestException { guest_pc, trap } => {
+            output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
+            let exception = match trap {
+                TrapKind::Syscall => "ExceptionCode::SystemCall",
+                TrapKind::Break => "ExceptionCode::Breakpoint",
+            };
+            output.push_str(&format!(
+                "    return raise_ee_exception(state, {exception}, true);\n"
+            ));
+            true
+        }
+    }
 }
 
 fn condition_expression(condition: crate::analysis::BranchCondition) -> String {
@@ -736,6 +777,33 @@ mod tests {
             "state.pc = 0x00002004U;\n    return raise_ee_exception(state, ExceptionCode::Breakpoint);"
         ));
         assert!(!cpp.contains("return Status::unsupported_instruction;"));
+    }
+
+    #[test]
+    fn emits_level1_exception_entry_for_syscall_and_break_delay_slots() {
+        let words = [
+            0x5100_0002, // beql t0, zero, 0x500C
+            0x0000_004D, // break in the delay slot
+            0x0000_000C, // syscall on the fallthrough path
+            0x0000_000C, // syscall on the taken path
+        ];
+        let segments = [segment(0x5000, &words)];
+        let roots = [0x5000];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x5000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("trap delay-slot CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("single unit");
+        assert!(cpp.contains(
+            "state.pc = 0x00005004U;\n    return raise_ee_exception(state, ExceptionCode::Breakpoint, true);"
+        ));
+        assert!(cpp.contains("if (branch_taken_00005000) {"));
+        assert!(cpp.contains("state.pc = 0x00005008U;\n    return Status::ok;"));
+        assert!(!cpp.contains("state.pc = branch_taken_00005000 ?"));
     }
 
     #[test]
