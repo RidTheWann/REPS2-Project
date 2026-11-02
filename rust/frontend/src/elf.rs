@@ -809,89 +809,89 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             false,
         )
     } else {
-            if section_offset < u32::from(header_size) {
+        if section_offset < u32::from(header_size) {
+            return Err(Error::new(
+                "ELF section-header table overlaps the ELF header",
+            ));
+        }
+        validate_table(
+            bytes,
+            section_offset,
+            section_entry_size,
+            1,
+            SECTION_HEADER_SIZE,
+            "section-header zero",
+        )?;
+        let section_zero_offset = usize::try_from(section_offset)
+            .map_err(|_| Error::new("Section-header offset overflow"))?;
+        let section_zero = read_section_header(bytes, section_zero_offset)?;
+        if section_zero.kind != SHT_NULL {
+            return Err(Error::new(
+                "ELF section header zero is not the required null entry",
+            ));
+        }
+
+        let extended_count = raw_section_count == 0;
+        let resolved_count = if extended_count {
+            if section_zero.size < u32::from(SHN_LORESERVE) {
                 return Err(Error::new(
-                    "ELF section-header table overlaps the ELF header",
+                    "ELF extended section count is below SHN_LORESERVE",
                 ));
             }
-            validate_table(
-                bytes,
-                section_offset,
-                section_entry_size,
-                1,
-                SECTION_HEADER_SIZE,
-                "section-header zero",
-            )?;
-            let section_zero_offset = usize::try_from(section_offset)
-                .map_err(|_| Error::new("Section-header offset overflow"))?;
-            let section_zero = read_section_header(bytes, section_zero_offset)?;
-            if section_zero.kind != SHT_NULL {
+            section_zero.size
+        } else {
+            if raw_section_count >= SHN_LORESERVE {
                 return Err(Error::new(
-                    "ELF section header zero is not the required null entry",
+                    "ELF section count at or above SHN_LORESERVE must use extended numbering",
                 ));
             }
+            u32::from(raw_section_count)
+        };
+        if resolved_count == 0 {
+            return Err(Error::new("ELF section table has a zero section count"));
+        }
 
-            let extended_count = raw_section_count == 0;
-            let resolved_count = if extended_count {
-                if section_zero.size < u32::from(SHN_LORESERVE) {
-                    return Err(Error::new(
-                        "ELF extended section count is below SHN_LORESERVE",
-                    ));
-                }
-                section_zero.size
-            } else {
-                if raw_section_count >= SHN_LORESERVE {
-                    return Err(Error::new(
-                        "ELF section count at or above SHN_LORESERVE must use extended numbering",
-                    ));
-                }
-                u32::from(raw_section_count)
-            };
-            if resolved_count == 0 {
-                return Err(Error::new("ELF section table has a zero section count"));
+        let extended_programs = raw_program_count == PN_XNUM;
+        let resolved_program_count = if extended_programs {
+            if section_zero.info < u32::from(PN_XNUM) {
+                return Err(Error::new(
+                    "ELF PN_XNUM program-header count is below PN_XNUM",
+                ));
             }
+            section_zero.info
+        } else {
+            if section_zero.info != 0 {
+                return Err(Error::new(
+                    "ELF section header zero sh_info must be zero without PN_XNUM",
+                ));
+            }
+            u32::from(raw_program_count)
+        };
 
-            let extended_programs = raw_program_count == PN_XNUM;
-            let resolved_program_count = if extended_programs {
-                if section_zero.info < u32::from(PN_XNUM) {
-                    return Err(Error::new(
-                        "ELF PN_XNUM program-header count is below PN_XNUM",
-                    ));
-                }
-                section_zero.info
-            } else {
-                if section_zero.info != 0 {
-                    return Err(Error::new(
-                        "ELF section header zero sh_info must be zero without PN_XNUM",
-                    ));
-                }
-                u32::from(raw_program_count)
-            };
-
-            let extended_names = raw_section_name_table_index == SHN_XINDEX;
-            let resolved_name_index = if extended_names {
-                if section_zero.link < u32::from(SHN_LORESERVE) {
-                    return Err(Error::new(
-                        "ELF extended section-name table index is below SHN_LORESERVE",
-                    ));
-                }
-                section_zero.link
-            } else {
-                if raw_section_name_table_index >= SHN_LORESERVE {
-                    return Err(Error::new(
-                        "ELF section-name table index must use SHN_XINDEX when reserved",
-                    ));
-                }
-                u32::from(raw_section_name_table_index)
-            };
-            (
-                resolved_count,
-                resolved_name_index,
-                extended_count,
-                extended_names,
-                resolved_program_count,
-                extended_programs,
-            )
+        let extended_names = raw_section_name_table_index == SHN_XINDEX;
+        let resolved_name_index = if extended_names {
+            if section_zero.link < u32::from(SHN_LORESERVE) {
+                return Err(Error::new(
+                    "ELF extended section-name table index is below SHN_LORESERVE",
+                ));
+            }
+            section_zero.link
+        } else {
+            if raw_section_name_table_index >= SHN_LORESERVE {
+                return Err(Error::new(
+                    "ELF section-name table index must use SHN_XINDEX when reserved",
+                ));
+            }
+            u32::from(raw_section_name_table_index)
+        };
+        (
+            resolved_count,
+            resolved_name_index,
+            extended_count,
+            extended_names,
+            resolved_program_count,
+            extended_programs,
+        )
         };
 
     let section_count_host = usize::try_from(section_count)
@@ -1750,11 +1750,7 @@ mod tests {
         put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
         put_u16(&mut bytes, 48, 1);
         put_u16(&mut bytes, 50, 0);
-        put_u32(
-            &mut bytes,
-            SECTION_TABLE_OFFSET + 28,
-            PROGRAM_COUNT as u32,
-        );
+        put_u32(&mut bytes, SECTION_TABLE_OFFSET + 28, PROGRAM_COUNT as u32);
         bytes
     }
 
@@ -1772,9 +1768,11 @@ mod tests {
         let seed = elf_with_extended_program_header_count();
 
         let mut below_threshold = seed.clone();
+        let section_zero_info_offset =
+            ELF_HEADER_SIZE + PN_XNUM as usize * PROGRAM_HEADER_SIZE + 28;
         put_u32(
             &mut below_threshold,
-            ELF_HEADER_SIZE + 28,
+            section_zero_info_offset,
             u32::from(PN_XNUM) - 1,
         );
         assert!(parse(&below_threshold, ParseLimits::default()).is_err());
