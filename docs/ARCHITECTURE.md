@@ -165,6 +165,7 @@ Synthetic Rust tests, generated-code compilation/execution, instruction semantic
 - Default-map ET_EXEC PT_LOAD image construction with BSS zeroing, physical alias overlap rejection, and allocated-relocation refusal.
 - Generated ELF-entry RAM initializer, validated against synthetic 32 MiB image snapshots on Windows/MSVC and Linux/GCC.
 - Level-1 COP0 exception entry for SYSCALL/BREAK and a dynamic ERET control terminator, with Cause.ExcCode/EPC/BD/EXL and BEV vector selection verified in native C++ on Windows/Linux (ADR 0033).
+- Shared CFG dispatch detects word-misaligned instruction-fetch PCs before block lookup and raises AdEL with BadVAddr/EPC and BD-clear semantics for supplied, register-indirect, and ERET return targets; aligned targets outside the CFG remain external-control-flow boundaries (ADR 0047).
 - Generated memory code executed in CI for signed/unsigned extension, write widths, all implemented RAM aliases, address alignment, unaligned byte-lane merges, unsupported devices and backing-span bounds.
 - CMake-generated C++ smoke test executed on Windows and Linux CI.
 

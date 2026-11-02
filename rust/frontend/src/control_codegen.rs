@@ -88,7 +88,9 @@ using reps2::runtime::write_cop0;
 using reps2::runtime::enable_interrupts;
 using reps2::runtime::disable_interrupts;
 using reps2::runtime::ExceptionCode;
+using reps2::runtime::AddressErrorCode;
 using reps2::runtime::raise_ee_exception;
+using reps2::runtime::raise_ee_address_error;
 using reps2::runtime::return_from_ee_exception;
 
 ";
@@ -124,6 +126,11 @@ const EXECUTE_CFG_TAIL: &str = "\
     const BlockEntry* const begin = std::begin(kBlocks);
     const BlockEntry* const end = std::end(kBlocks);
     for (;;) {
+        // Check the next fetch PC on every dispatch, including post-transfer PCs.
+        if ((state.pc & 0x3U) != 0U) {
+            return raise_ee_address_error(
+                state, AddressErrorCode::InstructionFetch, state.pc, false);
+        }
         const BlockEntry* const found = std::lower_bound(
             begin, end, state.pc,
             [](const BlockEntry& entry, std::uint32_t pc) { return entry.pc < pc; });
@@ -720,6 +727,8 @@ mod tests {
 
         assert!(cpp.contains("constexpr BlockEntry kBlocks[]"));
         assert!(cpp.contains("std::lower_bound("));
+        assert!(cpp.contains("AddressErrorCode::InstructionFetch"));
+        assert!(cpp.contains("raise_ee_address_error("));
         assert!(cpp.contains("return Status::external_control_flow;"));
         for pc in program.blocks.keys() {
             assert!(
