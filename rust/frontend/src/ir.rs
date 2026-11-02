@@ -379,6 +379,13 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// PCPYLD: dst.low = rhs.low and dst.high = lhs.low. The high half is
+    /// sourced from the first operand and the low half from the second.
+    ParallelCopyLowDoubleword {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     SubWord {
         dst: Gpr,
         lhs: Gpr,
@@ -891,6 +898,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::ParallelAddUnsignedWord => Operation::ParallelAddUnsignedWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelCopyLowDoubleword => Operation::ParallelCopyLowDoubleword {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -1834,6 +1846,31 @@ mod tests {
                 if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2));
         assert!(matches!(program.instructions()[1].operation,
             Operation::ParallelAddUnsignedWord { dst, .. } if dst.is_zero()));
+    }
+
+    #[test]
+    fn lifts_r5900_mmi2_pcpyld() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x0E << 6) | 0x09,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x0E << 6) | 0x09,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xC100 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PCPYLD lifts into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelCopyLowDoubleword { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelCopyLowDoubleword { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PCPYLD verifies");
     }
 
     #[test]
