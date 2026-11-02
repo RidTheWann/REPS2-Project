@@ -3,7 +3,11 @@
 use std::{fmt, ops::Range};
 
 pub const EM_MIPS: u16 = 8;
+pub const ET_NONE: u16 = 0;
+pub const ET_REL: u16 = 1;
 pub const ET_EXEC: u16 = 2;
+pub const ET_DYN: u16 = 3;
+pub const ET_CORE: u16 = 4;
 pub const PT_LOAD: u32 = 1;
 pub const SHF_ALLOC: u32 = 0x2;
 pub const PF_R: u32 = 0x4;
@@ -28,6 +32,10 @@ const STB_LOCAL: u8 = 0;
 const SHN_LORESERVE: u16 = 0xFF00;
 const SHN_XINDEX: u16 = 0xFFFF;
 const PN_XNUM: u16 = 0xFFFF;
+const ET_LOOS: u16 = 0xFE00;
+const ET_HIOS: u16 = 0xFEFF;
+const ET_LOPROC: u16 = 0xFF00;
+const ET_HIPROC: u16 = 0xFFFF;
 const RELA_SIZE: usize = 12;
 
 // MIPS ELF e_flags fields (processor-specific).
@@ -269,6 +277,10 @@ pub const fn decode_mips_elf_flags(raw: u32) -> MipsElfFlags {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Image {
     pub file_type: u16,
+    /// Raw e_ident[EI_OSABI] byte; meaning may be machine-specific.
+    pub os_abi: u8,
+    /// Raw e_ident[EI_ABIVERSION] byte; interpreted in the context of os_abi.
+    pub abi_version: u8,
     pub machine: u16,
     pub entry_point: u32,
     pub flags: u32,
@@ -280,6 +292,46 @@ pub struct Image {
 }
 
 impl Image {
+    /// Returns a generic System V ABI label for the raw EI_OSABI byte.
+    ///
+    /// Processor supplements may assign machine-specific meanings in the
+    /// architecture-specific range. Unknown values are preserved in os_abi.
+    #[must_use]
+    pub const fn os_abi_name(&self) -> &'static str {
+        match self.os_abi {
+            0 => "System V / unspecified",
+            1 => "HP-UX",
+            2 => "NetBSD",
+            3 => "Linux",
+            6 => "Solaris",
+            7 => "AIX",
+            8 => "IRIX",
+            9 => "FreeBSD",
+            10 => "Tru64",
+            11 => "Novell Modesto",
+            12 => "OpenBSD",
+            13 => "OpenVMS",
+            14 => "NonStop Kernel",
+            64..=u8::MAX => "architecture-specific",
+            _ => "reserved/unrecognized",
+        }
+    }
+
+    /// Returns a generic ELF object type label while retaining the raw code.
+    #[must_use]
+    pub const fn file_type_name(&self) -> &'static str {
+        match self.file_type {
+            ET_NONE => "no file type",
+            ET_REL => "relocatable object",
+            ET_EXEC => "executable",
+            ET_DYN => "shared object",
+            ET_CORE => "core file",
+            ET_LOOS..=ET_HIOS => "OS-specific type",
+            ET_LOPROC..=ET_HIPROC => "processor-specific type",
+            _ => "reserved/unknown type",
+        }
+    }
+
     #[must_use]
     pub fn is_mips(&self) -> bool {
         self.machine == EM_MIPS
@@ -759,6 +811,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     if read_u8(bytes, 6)? != 1 {
         return Err(Error::new("Unsupported ELF identification version"));
     }
+    let os_abi = read_u8(bytes, 7)?;
+    let abi_version = read_u8(bytes, 8)?;
 
     let file_type = read_u16(bytes, 16)?;
     let machine = read_u16(bytes, 18)?;
@@ -1110,6 +1164,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     let relocations = parse_relocations(bytes, &section_headers, limits)?;
     Ok(Image {
         file_type,
+        os_abi,
+        abi_version,
         machine,
         entry_point,
         flags,
@@ -2111,6 +2167,8 @@ mod tests {
     fn does_not_decode_mips_flags_for_non_mips_machines() {
         let image = Image {
             file_type: ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
             machine: 3,
             entry_point: 0,
             flags: 0x2092_4001,
@@ -2121,6 +2179,64 @@ mod tests {
             relocations: Vec::new(),
         };
         assert_eq!(image.mips_elf_flags(), None);
+    }
+
+    #[test]
+    fn preserves_osabi_and_abi_version_bytes() {
+        let mut bytes = minimal_elf();
+        bytes[7] = 9; // FreeBSD
+        bytes[8] = 3; // raw ABI version, interpreted under OSABI 9
+        let image = parse(&bytes, ParseLimits::default()).expect("ELF with OS ABI metadata");
+        assert_eq!(image.os_abi, 9);
+        assert_eq!(image.abi_version, 3);
+        assert_eq!(image.os_abi_name(), "FreeBSD");
+        assert_eq!(image.file_type_name(), "executable");
+    }
+
+    #[test]
+    fn labels_architecture_specific_and_unrecognized_osabi_values_without_rejection() {
+        let mut architecture_specific = minimal_elf();
+        architecture_specific[7] = 97;
+        architecture_specific[8] = 0xA5;
+        let image = parse(&architecture_specific, ParseLimits::default())
+            .expect("architecture-specific OS ABI remains parseable");
+        assert_eq!(image.os_abi, 97);
+        assert_eq!(image.abi_version, 0xA5);
+        assert_eq!(image.os_abi_name(), "architecture-specific");
+
+        let mut unrecognized = minimal_elf();
+        unrecognized[7] = 63;
+        unrecognized[8] = 0xFE;
+        let image = parse(&unrecognized, ParseLimits::default())
+            .expect("unknown OS ABI remains parseable");
+        assert_eq!(image.os_abi, 63);
+        assert_eq!(image.abi_version, 0xFE);
+        assert_eq!(image.os_abi_name(), "reserved/unrecognized");
+    }
+
+    #[test]
+    fn classifies_standard_and_reserved_elf_object_type_ranges() {
+        let cases = [
+            (ET_NONE, "no file type"),
+            (ET_REL, "relocatable object"),
+            (ET_EXEC, "executable"),
+            (ET_DYN, "shared object"),
+            (ET_CORE, "core file"),
+            (0xFE00, "OS-specific type"),
+            (0xFEFF, "OS-specific type"),
+            (0xFF00, "processor-specific type"),
+            (0xFFFF, "processor-specific type"),
+            (0x1234, "reserved/unknown type"),
+        ];
+        for (file_type, expected) in cases {
+            let mut bytes = minimal_elf();
+            put_u16(&mut bytes, 16, file_type);
+            let image = parse(&bytes, ParseLimits::default())
+                .expect("unrecognized object type remains parseable");
+            assert_eq!(image.file_type, file_type);
+            assert_eq!(image.file_type_name(), expected);
+            assert_eq!(image.is_executable(), file_type == ET_EXEC);
+        }
     }
 
     #[test]
