@@ -1790,10 +1790,9 @@ mod tests {
 
     #[test]
     fn admits_syscall_and_break_as_architectural_delay_slot_traps() {
-        for (trap_word, expected_kind) in [
-            (0x0000_000C, Opcode::Syscall),
-            (0x0000_000D, Opcode::Break),
-        ] {
+        for (trap_word, expected_kind) in
+            [(0x0000_000C, Opcode::Syscall), (0x0000_000D, Opcode::Break)]
+        {
             let words = [
                 0x1100_0001, // beq $t0, $zero, 0x3008
                 trap_word,   // architectural trap in the delay slot
