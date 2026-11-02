@@ -968,7 +968,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             )
             .ok_or_else(|| Error::new("Section-header offset overflow"))?;
         let section = read_section_header(bytes, base)?;
-        if section.kind != SHT_NOBITS {
+        if section.kind != SHT_NOBITS && section.kind != SHT_NULL {
             checked_range(
                 bytes,
                 u64::from(section.offset),
