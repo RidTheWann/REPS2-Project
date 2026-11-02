@@ -1293,19 +1293,19 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x0000_004D, // break code 1: a guest trap, not an unknown encoding
     ];
     let syscall_in_branch_delay = [
-        (0x01 << 26) | (8 << 21) | (0x10 << 16) | 2, // bltzal t0, 0x900C
+        (0x01 << 26) | (8 << 21) | (0x10 << 16) | 2, // bltzal t0, 0xB00C
         0x0000_000C,                                 // delay slot: syscall
         0x0000_004D,                                 // fallthrough: break
         0x0000_000D,                                 // taken target: break
     ];
     let break_in_branch_likely_delay = [
-        (0x14 << 26) | (8 << 21) | 2, // beql t0, zero, 0x910C
+        (0x14 << 26) | (8 << 21) | 2, // beql t0, zero, 0xB10C
         0x0000_004D,                  // delay slot: break (taken only)
         0x0000_000C,                  // fallthrough: syscall (not a delay-slot trap)
         0x0000_000C,                  // taken target: syscall
     ];
     let break_in_jump_delay = [
-        0x0C00_2804, // jal 0xA010
+        0x0C00_2C84, // jal 0xB210
         0x0000_004D, // delay slot: break
         0x0000_000C, // return continuation: syscall
         0x0000_0000,
@@ -1340,9 +1340,9 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0x7200, &fpu_branch_likely),
         segment(0x7300, &fpu_branch_likely_true),
         segment(0x8000, &break_trap),
-        segment(0x9000, &syscall_in_branch_delay),
-        segment(0x9100, &break_in_branch_likely_delay),
-        segment(0xA000, &break_in_jump_delay),
+        segment(0xB000, &syscall_in_branch_delay),
+        segment(0xB100, &break_in_branch_likely_delay),
+        segment(0xB200, &break_in_jump_delay),
         segment(0xF000, &eret_return),
     ];
     let entries = vec![
@@ -1368,16 +1368,16 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0x7200, "fpu-branch-likely-fixture"),
         entry(0x7300, "fpu-branch-likely-true-fixture"),
         entry(0x8000, "break-trap-fixture"),
-        entry(0x9000, "syscall-delay-slot-fixture"),
-        entry(0x9100, "branch-likely-trap-delay-slot-fixture"),
-        entry(0xA000, "jump-trap-delay-slot-fixture"),
+        entry(0xB000, "syscall-delay-slot-fixture"),
+        entry(0xB100, "branch-likely-trap-delay-slot-fixture"),
+        entry(0xB200, "jump-trap-delay-slot-fixture"),
         entry(0xF000, "eret-fixture"),
         entry(0xF004, "eret-return-continuation-fixture"),
     ];
     let roots = [
         0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200,
         0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
-        0x9000, 0x9100, 0xA000, 0xF000, 0xF004,
+        0xB000, 0xB100, 0xB200, 0xF000, 0xF004,
     ];
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
