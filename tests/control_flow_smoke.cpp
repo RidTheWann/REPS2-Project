@@ -1114,14 +1114,14 @@ int main() {
     }
 
     EeState syscall_delay_taken{};
-    syscall_delay_taken.pc = 0x9000U;
+    syscall_delay_taken.pc = 0xB000U;
     syscall_delay_taken.gpr[8].low = 0xFFFF'FFFF'FFFF'FFFFULL;
     const auto syscall_delay_taken_status =
         reps2::generated::execute_cfg(syscall_delay_taken, 64U);
     if (syscall_delay_taken_status != Status::exception_delivered
         || syscall_delay_taken.pc != reps2::runtime::kEeCommonExceptionVector
-        || syscall_delay_taken.gpr[31].low != 0x9008U
-        || syscall_delay_taken.cop0[reps2::runtime::kCop0Epc] != 0x9000U
+        || syscall_delay_taken.gpr[31].low != 0xB008U
+        || syscall_delay_taken.cop0[reps2::runtime::kCop0Epc] != 0xB000U
         || (syscall_delay_taken.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
         || (syscall_delay_taken.cop0[reps2::runtime::kCop0Cause]
@@ -1131,13 +1131,13 @@ int main() {
     }
 
     EeState syscall_delay_not_taken{};
-    syscall_delay_not_taken.pc = 0x9000U;
+    syscall_delay_not_taken.pc = 0xB000U;
     syscall_delay_not_taken.gpr[8].low = 1U;
     const auto syscall_delay_not_taken_status =
         reps2::generated::execute_cfg(syscall_delay_not_taken, 64U);
     if (syscall_delay_not_taken_status != Status::exception_delivered
-        || syscall_delay_not_taken.gpr[31].low != 0x9008U
-        || syscall_delay_not_taken.cop0[reps2::runtime::kCop0Epc] != 0x9000U
+        || syscall_delay_not_taken.gpr[31].low != 0xB008U
+        || syscall_delay_not_taken.cop0[reps2::runtime::kCop0Epc] != 0xB000U
         || (syscall_delay_not_taken.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
         || (syscall_delay_not_taken.cop0[reps2::runtime::kCop0Cause]
@@ -1147,12 +1147,12 @@ int main() {
     }
 
     EeState likely_trap_taken{};
-    likely_trap_taken.pc = 0x9100U;
+    likely_trap_taken.pc = 0xB100U;
     likely_trap_taken.gpr[8].low = 0U;
     const auto likely_trap_taken_status =
         reps2::generated::execute_cfg(likely_trap_taken, 64U);
     if (likely_trap_taken_status != Status::exception_delivered
-        || likely_trap_taken.cop0[reps2::runtime::kCop0Epc] != 0x9100U
+        || likely_trap_taken.cop0[reps2::runtime::kCop0Epc] != 0xB100U
         || (likely_trap_taken.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)
         || (likely_trap_taken.cop0[reps2::runtime::kCop0Cause]
@@ -1162,12 +1162,12 @@ int main() {
     }
 
     EeState likely_trap_annulled{};
-    likely_trap_annulled.pc = 0x9100U;
+    likely_trap_annulled.pc = 0xB100U;
     likely_trap_annulled.gpr[8].low = 1U;
     const auto likely_trap_annulled_status =
         reps2::generated::execute_cfg(likely_trap_annulled, 64U);
     if (likely_trap_annulled_status != Status::exception_delivered
-        || likely_trap_annulled.cop0[reps2::runtime::kCop0Epc] != 0x9108U
+        || likely_trap_annulled.cop0[reps2::runtime::kCop0Epc] != 0xB108U
         || (likely_trap_annulled.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
         || (likely_trap_annulled.cop0[reps2::runtime::kCop0Cause]
@@ -1177,11 +1177,11 @@ int main() {
     }
 
     EeState jump_trap{};
-    jump_trap.pc = 0xA000U;
+    jump_trap.pc = 0xB200U;
     const auto jump_trap_status = reps2::generated::execute_cfg(jump_trap, 64U);
     if (jump_trap_status != Status::exception_delivered
-        || jump_trap.gpr[31].low != 0xA008U
-        || jump_trap.cop0[reps2::runtime::kCop0Epc] != 0xA000U
+        || jump_trap.gpr[31].low != 0xB208U
+        || jump_trap.cop0[reps2::runtime::kCop0Epc] != 0xB200U
         || (jump_trap.cop0[reps2::runtime::kCop0Cause]
             & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)
         || (jump_trap.cop0[reps2::runtime::kCop0Cause]
