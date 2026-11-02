@@ -356,6 +356,8 @@ mod tests {
     fn image(headers: Vec<ProgramHeader>) -> Image {
         Image {
             file_type: crate::elf::ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
             machine: crate::elf::EM_MIPS,
             entry_point: 0x0010_0000,
             flags: 0,
