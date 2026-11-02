@@ -1951,6 +1951,8 @@ mod tests {
         let image = Image {
             file_type: elf::ET_EXEC,
             machine: elf::EM_MIPS,
+            os_abi: 0,
+            abi_version: 0,
             entry_point: 0x0010_0000,
             flags: 0,
             section_name_table_index: 0,
