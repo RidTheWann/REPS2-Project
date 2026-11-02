@@ -2381,6 +2381,8 @@ mod tests {
             section_headers: Vec::new(),
             symbols: Vec::new(),
             relocations: Vec::new(),
+            mips_reginfo: Vec::new(),
+            mips_abi_flags: Vec::new(),
         };
         assert_eq!(image.mips_elf_flags(), None);
     }
