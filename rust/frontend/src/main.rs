@@ -67,8 +67,7 @@ fn elf_info(path: &Path) -> Result<(), String> {
     );
     println!(
         "  ABI version: {} (raw; interpreted under OS ABI {})",
-        image.abi_version,
-        image.os_abi
+        image.abi_version, image.os_abi
     );
     println!("  Header flags: 0x{:08X}", image.flags);
     if let Some(mips_flags) = image.mips_elf_flags() {
