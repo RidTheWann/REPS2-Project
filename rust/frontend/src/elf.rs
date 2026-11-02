@@ -1708,6 +1708,20 @@ mod tests {
     }
 
     #[test]
+    fn accepts_zero_extended_slots_for_symbols_with_regular_section_indices() {
+        let mut bytes = elf_with_extended_symbol_indices();
+        let image = parse(&bytes, ParseLimits::default()).expect("extended fixture");
+        let shndx_data = image.section_headers[5].offset as usize;
+        let symbol_data = image.section_headers[2].offset as usize;
+        put_u16(&mut bytes, symbol_data + SYMBOL_SIZE + 14, 3);
+        put_u32(&mut bytes, shndx_data + 4, 0);
+
+        let parsed = parse(&bytes, ParseLimits::default())
+            .expect("an unused extended-index table with zero slots is valid");
+        assert_eq!(parsed.symbols[1].section_index, 3);
+    }
+
+    #[test]
     fn rejects_shn_xindex_without_its_linked_table() {
         let mut bytes = elf_with_extended_symbol_indices();
         let section_header_base = ELF_HEADER_SIZE + 5 * SECTION_HEADER_SIZE;
