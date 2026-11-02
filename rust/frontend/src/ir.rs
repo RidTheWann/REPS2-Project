@@ -362,6 +362,18 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// PADDH: eight independent modulo-2^16 additions over GPR[127:0].
+    ParallelAddHalfword {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// PSUBH: eight independent modulo-2^16 subtractions over GPR[127:0].
+    ParallelSubHalfword {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     ParallelAddUnsignedWord {
         dst: Gpr,
         lhs: Gpr,
@@ -864,6 +876,16 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::ParallelSubWord => Operation::ParallelSubWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelAddHalfword => Operation::ParallelAddHalfword {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelSubHalfword => Operation::ParallelSubHalfword {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -1697,10 +1719,12 @@ mod tests {
     }
 
     #[test]
-    fn lifts_r5900_mmi0_parallel_word_add_and_subtract() {
+    fn lifts_r5900_mmi0_parallel_word_and_halfword_add_and_subtract() {
         let words = [
             (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | 0x08,
             (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | (1 << 6) | 0x08,
+            (0x1C << 26) | (7 << 21) | (8 << 16) | (9 << 11) | (0x04 << 6) | 0x08,
+            (0x1C << 26) | (10 << 21) | (11 << 16) | (12 << 11) | (0x05 << 6) | 0x08,
         ];
         let decoded_stream = words
             .iter()
@@ -1718,6 +1742,16 @@ mod tests {
             program.instructions()[1].operation,
             Operation::ParallelSubWord { dst, lhs, rhs }
                 if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::ParallelAddHalfword { dst, lhs, rhs }
+                if dst.index() == 9 && lhs.index() == 7 && rhs.index() == 8
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::ParallelSubHalfword { dst, lhs, rhs }
+                if dst.index() == 12 && lhs.index() == 10 && rhs.index() == 11
         ));
     }
 
