@@ -202,7 +202,7 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 - ADR 0033 moves the instructions into typed `GuestException` control terminators, separate from `Unsupported`. SYSCALL enters with Cause.ExcCode 8 and BREAK with code 9. When Status.EXL is clear, exception entry records EPC (the trapping PC, or branch PC for a delay-slot exception), writes Cause.BD, and sets EXL. If EXL is already set, the first EPC/BD frame is preserved while the new ExcCode is recorded.
 - BEV selects the bootstrap common vector `0xBFC00380`; otherwise the common vector is `0x80000180`. `Status::exception_delivered` is a host boundary that returns control with COP0 state and PC populated. It is not a BIOS/HLE system-call implementation and does not claim that the handler itself has executed.
 - ERET is represented by a typed exception-return terminator. It restores PC from EPC when EXL is set or ErrorEPC when ERL is set, then clears the corresponding level bit. A missing or ambiguous context (including EXL and ERL both set) returns `invalid_exception_return` rather than guessing. The dispatcher can continue at the restored PC only when that target is part of the translated block table.
-- The runtime helper's branch-delay EPC/BD rule, nested Level-1 behavior, BEV vector selection, EXL/ERL return selection, generated ERET continuation and invalid-return cases are covered by native C++ tests on Windows/MSVC and Linux/GCC. The static CFG still rejects SYSCALL/BREAK/ERET in a branch delay slot; generated data-memory operations can independently deliver AdEL/AdES from an admitted branch delay slot.
+- The runtime helper's branch-delay EPC/BD rule, nested Level-1 behavior, BEV vector selection, EXL/ERL return selection, generated ERET continuation and invalid-return cases are covered by native C++ tests on Windows/MSVC and Linux/GCC. CFG lowering admits SYSCALL/BREAK in delay slots as typed guest exceptions; ERET and other control transfers remain unsupported there. Generated data-memory operations can independently deliver AdEL/AdES from an admitted branch delay slot.
 - Build manifest schema v2 records `guest_exception_count` separately from `unsupported_stop_count`; the latter now counts only genuinely unsupported terminators. All generated manifests continue to record `playable: false`.
 
 ## EE data address errors (AdEL / AdES)
@@ -218,6 +218,17 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 - Supported, `SYSCALL`/`BREAK` trap, and unsupported words are counted separately. Unsupported words are grouped by the broad encoding family derived from primary opcode/MMI selector fields and by exact 32-bit encoding. This makes the next instruction-family investment measurable without overstating semantic coverage.
 - The entry scan is a separate bounded linear diagnostic. It stops at the first unsupported word or trap and reports the guest PC and raw word. It does not follow branches, and a clean scan does not establish CFG reachability or playability.
 
+
+## ELF table validation
+
+- ELF string tables are byte-indexed tables whose first and last bytes must be NUL when non-empty; an empty string table is permitted. Section and symbol names are resolved only after table bounds and sentinel checks (System V GABI, sections 3.4 and 3.6).
+- The first section header must be SHT_NULL. A symbol table's sh_info marks the first non-local symbol: the prefix must be STB_LOCAL and every later symbol must be non-local. Ordinary st_shndx values must resolve to section headers; reserved special indices such as SHN_ABS and SHN_COMMON remain valid. SHN_XINDEX stays an explicit unsupported case.
+- REL/RELA sh_link and sh_info cross-references are validated before relocation records are exposed. Relocation application remains separate and allocated relocations remain rejected by the default EE image builder.
+- These structural checks do not complete PS2 ABI metadata, dynamic linking, extended symbol indices, or R_MIPS relocation semantics.
+
+References:
+- System V Generic ABI, section headers and sh_link/sh_info: https://gabi.xinuos.com/v42/elf/03-sheader.html
+- System V ELF string-table rules: https://refspecs.linuxfoundation.org/elf/elfspec.pdf
 
 ## ELF load-image policy
 
