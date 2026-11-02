@@ -222,9 +222,12 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 ## ELF table validation
 
 - ELF string tables are byte-indexed tables whose first and last bytes must be NUL when non-empty; an empty string table is permitted. Section and symbol names are resolved only after table bounds and sentinel checks (System V GABI, sections 3.4 and 3.6).
-- The first section header must be SHT_NULL. A symbol table's sh_info marks the first non-local symbol: the prefix must be STB_LOCAL and every later symbol must be non-local. Ordinary st_shndx values must resolve to section headers; reserved special indices such as SHN_ABS and SHN_COMMON remain valid. SHN_XINDEX stays an explicit unsupported case.
+- The first section header must be SHT_NULL. For section counts at or above SHN_LORESERVE, e_shnum is zero and the actual count is read from section zero's sh_size; an e_shstrndx value of SHN_XINDEX resolves through section zero's sh_link. Section counts are bounded by ParseLimits.max_sections.
+- A symbol table's sh_info marks the first non-local symbol: the prefix must be STB_LOCAL and every later symbol must be non-local. Ordinary st_shndx values must resolve to section headers; reserved special indices such as SHN_ABS and SHN_COMMON remain valid.
+- SHT_SYMTAB_SHNDX links to exactly one SHT_SYMTAB/SHT_DYNSYM, uses four-byte Elf32_Word entries, has sh_info zero, and contains one entry per linked symbol. A SHN_XINDEX symbol resolves through its corresponding nonzero entry to a real section index at or above SHN_LORESERVE; every non-SHN_XINDEX slot must be zero. Duplicate/orphan tables, invalid links, count mismatches, malformed entries and out-of-range indices fail closed.
+- Extended program-header numbering (PN_XNUM) remains unsupported; this is separate from extended section/symbol indexing.
 - REL/RELA sh_link and sh_info cross-references are validated before relocation records are exposed. Relocation application remains separate and allocated relocations remain rejected by the default EE image builder.
-- These structural checks do not complete PS2 ABI metadata, dynamic linking, extended symbol indices, or R_MIPS relocation semantics.
+- These structural checks do not complete broader PS2 ABI metadata, dynamic linking, extended program-header numbering, or R_MIPS relocation semantics.
 
 References:
 - System V Generic ABI, section headers and sh_link/sh_info: https://gabi.xinuos.com/v42/elf/03-sheader.html

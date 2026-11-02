@@ -56,7 +56,8 @@ The library must distinguish these states; no state implies a later one:
 
 - [x] Validate ELF string-table leading/trailing null sentinels, the mandatory SHT_NULL section-header entry, local/non-local symbol ordering, ordinary symbol section indices, and cross-table symbol/relocation references.
 - [x] Decode MIPS e_flags CPU subtype, ABI, ISA-level and recognized feature bits; identify the R5900 CPU code (0x92) while preserving unclassified bits and treating the result as diagnostic metadata only.
-- [ ] Complete broader PS2 ABI metadata, extended symbol section-index support, and supported ELF variant diagnostics.
+- [x] Support ELF extended section counts and section-name table indices through section-header zero, plus SHT_SYMTAB_SHNDX extended symbol indices with strict link, shape, slot and target-range validation.
+- [ ] Complete broader PS2 ABI metadata, extended program-header numbering, and supported ELF variant diagnostics.
 - [x] Default EE main-RAM physical mapping for supported direct, uncached, accelerated and KSEG PT_LOAD aliases.
 - [x] PT_LOAD-to-32 MiB initial RAM image construction with BSS zeroing and physical alias overlap checks.
 - [x] Coalesce pure BSS PT_LOAD program headers and skip empty segments for SN Systems ProDG linker compatibility; verified against 100% of retail test ELFs (ADR 0024).

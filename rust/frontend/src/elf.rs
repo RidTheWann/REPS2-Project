@@ -17,6 +17,7 @@ pub const SHT_RELA: u32 = 4;
 pub const SHT_NOBITS: u32 = 8;
 pub const SHT_REL: u32 = 9;
 pub const SHT_DYNSYM: u32 = 11;
+pub const SHT_SYMTAB_SHNDX: u32 = 18;
 
 const ELF_HEADER_SIZE: usize = 52;
 const PROGRAM_HEADER_SIZE: usize = 32;
@@ -51,6 +52,7 @@ pub struct ParseLimits {
     pub max_string_table_bytes: usize,
     pub max_symbols: usize,
     pub max_relocations: usize,
+    pub max_sections: usize,
 }
 
 impl Default for ParseLimits {
@@ -59,6 +61,7 @@ impl Default for ParseLimits {
             max_string_table_bytes: 64 * 1024 * 1024,
             max_symbols: 1_000_000,
             max_relocations: 4_000_000,
+            max_sections: 100_000,
         }
     }
 }
@@ -122,7 +125,7 @@ pub struct Symbol {
     pub size: u32,
     pub table_section_index: usize,
     pub table_index: u32,
-    pub section_index: u16,
+    pub section_index: u32,
     pub binding: u8,
     pub kind: u8,
     pub visibility: u8,
@@ -266,7 +269,7 @@ pub struct Image {
     pub machine: u16,
     pub entry_point: u32,
     pub flags: u32,
-    pub section_name_table_index: u16,
+    pub section_name_table_index: u32,
     pub program_headers: Vec<ProgramHeader>,
     pub section_headers: Vec<SectionHeader>,
     pub symbols: Vec<Symbol>,
@@ -402,7 +405,7 @@ fn validate_table(
     bytes: &[u8],
     offset: u32,
     entry_size: u16,
-    count: u16,
+    count: u32,
     minimum_size: usize,
     label: &str,
 ) -> Result<(), Error> {
@@ -489,6 +492,37 @@ fn parse_symbols(
     sections: &[SectionHeader],
     limits: ParseLimits,
 ) -> Result<Vec<Symbol>, Error> {
+    // A SHT_SYMTAB_SHNDX section is associated with exactly one symbol table.
+    // Build the association once so malformed duplicate/orphan tables are not
+    // silently ignored and lookup remains linear in the section count.
+    let mut extended_section_tables = vec![None; sections.len()];
+    for (extended_index, extended) in sections.iter().enumerate() {
+        if extended.kind != SHT_SYMTAB_SHNDX {
+            continue;
+        }
+        let symbol_table_index = usize::try_from(extended.link)
+            .map_err(|_| Error::new("Extended symbol-index link does not fit host size"))?;
+        let symbol_table = sections
+            .get(symbol_table_index)
+            .ok_or_else(|| Error::new("SHT_SYMTAB_SHNDX links to an invalid section"))?;
+        if symbol_table.kind != SHT_SYMTAB && symbol_table.kind != SHT_DYNSYM {
+            return Err(Error::new(
+                "SHT_SYMTAB_SHNDX does not link to SHT_SYMTAB or SHT_DYNSYM",
+            ));
+        }
+        if extended.info != 0 {
+            return Err(Error::new("SHT_SYMTAB_SHNDX sh_info must be zero"));
+        }
+        if extended_section_tables[symbol_table_index]
+            .replace(extended_index)
+            .is_some()
+        {
+            return Err(Error::new(
+                "Multiple SHT_SYMTAB_SHNDX sections link to one symbol table",
+            ));
+        }
+    }
+
     let mut symbols = Vec::new();
     for (section_index, section) in sections.iter().enumerate() {
         if section.kind != SHT_SYMTAB && section.kind != SHT_DYNSYM {
@@ -531,6 +565,33 @@ fn parse_symbols(
                 "ELF symbol table entry zero is not the null symbol",
             ));
         }
+
+        let extended_indices = if let Some(extended_index) = extended_section_tables[section_index]
+        {
+            let extended = &sections[extended_index];
+            if extended.entry_size != 4 || !extended.size.is_multiple_of(4) {
+                return Err(Error::new("SHT_SYMTAB_SHNDX must use four-byte entries"));
+            }
+            let extended_count = usize::try_from(extended.size / 4)
+                .map_err(|_| Error::new("Extended symbol-index count overflow"))?;
+            if extended_count != count {
+                return Err(Error::new(
+                    "SHT_SYMTAB_SHNDX entry count does not match its symbol table",
+                ));
+            }
+            let data = section_data(bytes, extended, "ELF extended symbol-index table")?;
+            let mut values = Vec::with_capacity(extended_count);
+            for index in 0..extended_count {
+                let offset = index
+                    .checked_mul(4)
+                    .ok_or_else(|| Error::new("Extended symbol-index offset overflow"))?;
+                values.push(read_u32(data, offset)?);
+            }
+            Some(values)
+        } else {
+            None
+        };
+
         for index in 0..count {
             let base = index
                 .checked_mul(section.entry_size as usize)
@@ -538,15 +599,41 @@ fn parse_symbols(
             let name_offset = read_u32(table, base)?;
             let info = read_u8(table, base + 12)?;
             let other = read_u8(table, base + 13)?;
-            let symbol_section = read_u16(table, base + 14)?;
-            if symbol_section == SHN_XINDEX {
-                return Err(Error::new(
-                    "Extended ELF symbol section indices are not supported yet",
-                ));
-            }
-            if symbol_section < SHN_LORESERVE && usize::from(symbol_section) >= sections.len() {
-                return Err(Error::new("ELF symbol references an invalid section index"));
-            }
+            let raw_symbol_section = read_u16(table, base + 14)?;
+            let extended_value = extended_indices
+                .as_ref()
+                .map(|values| values[index])
+                .unwrap_or(0);
+            let symbol_section = if raw_symbol_section == SHN_XINDEX {
+                let resolved = extended_indices
+                    .as_ref()
+                    .map(|_| extended_value)
+                    .ok_or_else(|| {
+                        Error::new("SHN_XINDEX symbol has no linked SHT_SYMTAB_SHNDX table")
+                    })?;
+                if resolved < u32::from(SHN_LORESERVE)
+                    || usize::try_from(resolved)
+                        .ok()
+                        .is_none_or(|resolved_index| resolved_index >= sections.len())
+                {
+                    return Err(Error::new(
+                        "SHT_SYMTAB_SHNDX contains an invalid extended section index",
+                    ));
+                }
+                resolved
+            } else {
+                if extended_value != 0 {
+                    return Err(Error::new(
+                        "SHT_SYMTAB_SHNDX entry must be SHN_UNDEF for a non-SHN_XINDEX symbol",
+                    ));
+                }
+                if raw_symbol_section < SHN_LORESERVE
+                    && usize::from(raw_symbol_section) >= sections.len()
+                {
+                    return Err(Error::new("ELF symbol references an invalid section index"));
+                }
+                u32::from(raw_symbol_section)
+            };
             let binding = info >> 4;
             if (index < local_symbol_end) != (binding == STB_LOCAL) {
                 return Err(Error::new(
@@ -683,17 +770,102 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     let program_entry_size = read_u16(bytes, 42)?;
     let program_count = read_u16(bytes, 44)?;
     let section_entry_size = read_u16(bytes, 46)?;
-    let section_count = read_u16(bytes, 48)?;
-    let section_name_table_index = read_u16(bytes, 50)?;
+    let raw_section_count = read_u16(bytes, 48)?;
+    let raw_section_name_table_index = read_u16(bytes, 50)?;
 
     if usize::from(header_size) < ELF_HEADER_SIZE || usize::from(header_size) > bytes.len() {
         return Err(Error::new("Invalid ELF header size"));
     }
-    if program_count == u16::MAX
-        || section_name_table_index == u16::MAX
-        || (section_count == 0 && section_offset != 0)
-    {
-        return Err(Error::new("Extended ELF numbering is not supported yet"));
+    if program_count == u16::MAX {
+        return Err(Error::new(
+            "Extended ELF program-header numbering is not supported yet",
+        ));
+    }
+
+    // Resolve ELF extended section numbering using the reserved fields in
+    // section-header entry zero. An absent section table must use zero for
+    // both e_shnum and e_shstrndx.
+    let (section_count, section_name_table_index, extended_section_count, extended_name_index) =
+        if section_offset == 0 {
+            if raw_section_count != 0 || raw_section_name_table_index != 0 {
+                return Err(Error::new(
+                    "ELF section numbering references a missing section table",
+                ));
+            }
+            (0u32, 0u32, false, false)
+        } else {
+            if section_offset < u32::from(header_size) {
+                return Err(Error::new(
+                    "ELF section-header table overlaps the ELF header",
+                ));
+            }
+            validate_table(
+                bytes,
+                section_offset,
+                section_entry_size,
+                1,
+                SECTION_HEADER_SIZE,
+                "section-header zero",
+            )?;
+            let section_zero_offset = usize::try_from(section_offset)
+                .map_err(|_| Error::new("Section-header offset overflow"))?;
+            let section_zero = read_section_header(bytes, section_zero_offset)?;
+            if section_zero.kind != SHT_NULL {
+                return Err(Error::new(
+                    "ELF section header zero is not the required null entry",
+                ));
+            }
+
+            let extended_count = raw_section_count == 0;
+            let resolved_count = if extended_count {
+                if section_zero.size < u32::from(SHN_LORESERVE) {
+                    return Err(Error::new(
+                        "ELF extended section count is below SHN_LORESERVE",
+                    ));
+                }
+                section_zero.size
+            } else {
+                if raw_section_count >= SHN_LORESERVE {
+                    return Err(Error::new(
+                        "ELF section count at or above SHN_LORESERVE must use extended numbering",
+                    ));
+                }
+                u32::from(raw_section_count)
+            };
+            if resolved_count == 0 {
+                return Err(Error::new("ELF section table has a zero section count"));
+            }
+
+            let extended_names = raw_section_name_table_index == SHN_XINDEX;
+            let resolved_name_index = if extended_names {
+                if section_zero.link < u32::from(SHN_LORESERVE) {
+                    return Err(Error::new(
+                        "ELF extended section-name table index is below SHN_LORESERVE",
+                    ));
+                }
+                section_zero.link
+            } else {
+                if raw_section_name_table_index >= SHN_LORESERVE {
+                    return Err(Error::new(
+                        "ELF section-name table index must use SHN_XINDEX when reserved",
+                    ));
+                }
+                u32::from(raw_section_name_table_index)
+            };
+            (
+                resolved_count,
+                resolved_name_index,
+                extended_count,
+                extended_names,
+            )
+        };
+
+    let section_count_host = usize::try_from(section_count)
+        .map_err(|_| Error::new("ELF section count does not fit host size"))?;
+    if section_count_host > limits.max_sections {
+        return Err(Error::new(
+            "ELF section count exceeds configured parser limit",
+        ));
     }
     if section_count == 0 && section_name_table_index != 0 {
         return Err(Error::new(
@@ -711,16 +883,11 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             "ELF program-header table overlaps the ELF header",
         ));
     }
-    if section_count != 0 && section_offset < u32::from(header_size) {
-        return Err(Error::new(
-            "ELF section-header table overlaps the ELF header",
-        ));
-    }
     validate_table(
         bytes,
         program_offset,
         program_entry_size,
-        program_count,
+        u32::from(program_count),
         PROGRAM_HEADER_SIZE,
         "program-header",
     )?;
@@ -796,8 +963,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         program_headers.push(header);
     }
 
-    let mut section_headers = Vec::with_capacity(usize::from(section_count));
-    for index in 0..usize::from(section_count) {
+    let mut section_headers = Vec::with_capacity(section_count_host);
+    for index in 0..section_count_host {
         let base = usize::try_from(section_offset)
             .map_err(|_| Error::new("Section-header offset overflow"))?
             .checked_add(
@@ -807,7 +974,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             )
             .ok_or_else(|| Error::new("Section-header offset overflow"))?;
         let section = read_section_header(bytes, base)?;
-        if section.kind != SHT_NOBITS {
+        if section.kind != SHT_NOBITS && section.kind != SHT_NULL {
             checked_range(
                 bytes,
                 u64::from(section.offset),
@@ -818,14 +985,24 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         section_headers.push(section);
     }
 
+    let expected_null_size = if extended_section_count {
+        section_count
+    } else {
+        0
+    };
+    let expected_null_link = if extended_name_index {
+        section_name_table_index
+    } else {
+        0
+    };
     let null_section_is_invalid = section_headers.first().is_some_and(|null_section| {
         null_section.kind != SHT_NULL
             || null_section.name_offset != 0
             || null_section.flags != 0
             || null_section.virtual_address != 0
             || null_section.offset != 0
-            || null_section.size != 0
-            || null_section.link != 0
+            || null_section.size != expected_null_size
+            || null_section.link != expected_null_link
             || null_section.info != 0
             || null_section.alignment != 0
             || null_section.entry_size != 0
@@ -857,8 +1034,10 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     }
 
     if section_name_table_index != 0 {
+        let names_index = usize::try_from(section_name_table_index)
+            .map_err(|_| Error::new("ELF section-name table index does not fit host size"))?;
         let names = section_headers
-            .get(usize::from(section_name_table_index))
+            .get(names_index)
             .ok_or_else(|| Error::new("ELF section-name table index is invalid"))?;
         if names.kind != SHT_STRTAB {
             return Err(Error::new(
@@ -1324,6 +1503,185 @@ mod tests {
         bytes
     }
 
+    fn elf_with_extended_symbol_indices() -> Vec<u8> {
+        const SECTION_COUNT: usize = 0xFF02;
+        const EXTENDED_TARGET_INDEX: usize = 0xFF00;
+        const EXTENDED_SHSTRTAB_INDEX: usize = 0xFF01;
+        const SECTION_TABLE_OFFSET: usize = ELF_HEADER_SIZE;
+        let shstr =
+            b"\0.strtab\0.symtab\0.text\0.rel.text\0.symtab_shndx\0.extended_target\0.shstrtab\0";
+        let strtab = b"\0extended\0";
+        let find_name = |name: &[u8]| -> u32 {
+            shstr
+                .windows(name.len())
+                .position(|window| window == name)
+                .expect("section name exists in fixture table") as u32
+        };
+
+        let section_table_end = SECTION_TABLE_OFFSET + SECTION_COUNT * SECTION_HEADER_SIZE;
+        let strtab_offset = section_table_end;
+        let symtab_offset = strtab_offset + strtab.len();
+        let text_offset = symtab_offset + 2 * SYMBOL_SIZE;
+        let rel_offset = text_offset + 4;
+        let shndx_offset = rel_offset + REL_SIZE;
+        let shstr_offset = shndx_offset + 2 * 4;
+        let mut bytes = vec![0; shstr_offset + shstr.len()];
+
+        bytes[0..4].copy_from_slice(b"\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 24, 0x1000);
+        put_u32(&mut bytes, 32, SECTION_TABLE_OFFSET as u32);
+        put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 48, 0); // e_shnum: use section zero's sh_size
+        put_u16(&mut bytes, 50, SHN_XINDEX); // e_shstrndx: use section zero's sh_link
+
+        bytes[strtab_offset..strtab_offset + strtab.len()].copy_from_slice(strtab);
+        put_u32(&mut bytes, symtab_offset + SYMBOL_SIZE, 1);
+        put_u32(&mut bytes, symtab_offset + SYMBOL_SIZE + 4, 0x1000);
+        put_u32(&mut bytes, symtab_offset + SYMBOL_SIZE + 8, 4);
+        bytes[symtab_offset + SYMBOL_SIZE + 12] = 0x12; // STB_GLOBAL | STT_FUNC
+        put_u16(&mut bytes, symtab_offset + SYMBOL_SIZE + 14, SHN_XINDEX);
+        bytes[text_offset..text_offset + 4].copy_from_slice(&[0, 0, 0, 0]);
+        put_u32(&mut bytes, rel_offset, 0x1000);
+        put_u32(&mut bytes, rel_offset + 4, (1 << 8) | 2);
+        put_u32(&mut bytes, shndx_offset, 0);
+        put_u32(&mut bytes, shndx_offset + 4, EXTENDED_TARGET_INDEX as u32);
+        bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(shstr);
+
+        // The null section header carries both extended-numbering values.
+        put_u32(&mut bytes, SECTION_TABLE_OFFSET + 20, SECTION_COUNT as u32);
+        put_u32(
+            &mut bytes,
+            SECTION_TABLE_OFFSET + 24,
+            EXTENDED_SHSTRTAB_INDEX as u32,
+        );
+
+        let write_at = |bytes: &mut [u8], index: usize, section: SectionSpec| {
+            write_section(
+                bytes,
+                SECTION_TABLE_OFFSET + index * SECTION_HEADER_SIZE,
+                section,
+            );
+        };
+        write_at(
+            &mut bytes,
+            1,
+            SectionSpec {
+                name: find_name(b".strtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: strtab_offset as u32,
+                size: strtab.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_at(
+            &mut bytes,
+            2,
+            SectionSpec {
+                name: find_name(b".symtab"),
+                kind: SHT_SYMTAB,
+                address: 0,
+                offset: symtab_offset as u32,
+                size: (2 * SYMBOL_SIZE) as u32,
+                link: 1,
+                info: 1,
+                alignment: 4,
+                entry_size: SYMBOL_SIZE as u32,
+            },
+        );
+        write_at(
+            &mut bytes,
+            3,
+            SectionSpec {
+                name: find_name(b".text"),
+                kind: 1,
+                address: 0x1000,
+                offset: text_offset as u32,
+                size: 4,
+                link: 0,
+                info: 0,
+                alignment: 4,
+                entry_size: 0,
+            },
+        );
+        write_at(
+            &mut bytes,
+            4,
+            SectionSpec {
+                name: find_name(b".rel.text"),
+                kind: SHT_REL,
+                address: 0,
+                offset: rel_offset as u32,
+                size: REL_SIZE as u32,
+                link: 2,
+                info: 3,
+                alignment: 4,
+                entry_size: REL_SIZE as u32,
+            },
+        );
+        write_at(
+            &mut bytes,
+            5,
+            SectionSpec {
+                name: find_name(b".symtab_shndx"),
+                kind: SHT_SYMTAB_SHNDX,
+                address: 0,
+                offset: shndx_offset as u32,
+                size: 8,
+                link: 2,
+                info: 0,
+                alignment: 4,
+                entry_size: 4,
+            },
+        );
+        for index in 6..EXTENDED_TARGET_INDEX {
+            let base = SECTION_TABLE_OFFSET + index * SECTION_HEADER_SIZE;
+            put_u32(&mut bytes, base + 4, SHT_NOBITS);
+            put_u32(&mut bytes, base + 32, 1);
+        }
+        write_at(
+            &mut bytes,
+            EXTENDED_TARGET_INDEX,
+            SectionSpec {
+                name: find_name(b".extended_target"),
+                kind: SHT_NOBITS,
+                address: 0,
+                offset: 0,
+                size: 0,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_at(
+            &mut bytes,
+            EXTENDED_SHSTRTAB_INDEX,
+            SectionSpec {
+                name: find_name(b".shstrtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: shstr_offset as u32,
+                size: shstr.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        bytes
+    }
+
     #[test]
     fn resolves_section_names_symbols_and_rel_entries() {
         let bytes = elf_with_symbol_and_rel();
@@ -1336,6 +1694,126 @@ mod tests {
         assert_eq!(image.relocations[0].symbol_index, 1);
         assert_eq!(image.relocations[0].relocation_type, 2);
         assert_eq!(image.relocations[0].addend, None);
+    }
+
+    #[test]
+    fn resolves_extended_symbol_indices_and_extended_section_names() {
+        let bytes = elf_with_extended_symbol_indices();
+        let image = parse(&bytes, ParseLimits::default()).expect("extended-numbering ELF");
+        assert_eq!(image.section_headers.len(), 0xFF02);
+        assert_eq!(image.section_name_table_index, 0xFF01);
+        assert_eq!(image.section_headers[0xFF00].name, ".extended_target");
+        assert_eq!(image.section_headers[0xFF01].name, ".shstrtab");
+        assert_eq!(image.symbols.len(), 2);
+        assert_eq!(image.symbols[1].section_index, 0xFF00);
+        assert_eq!(image.relocations.len(), 1);
+        assert_eq!(image.relocations[0].target_section_index, 3);
+    }
+
+    #[test]
+    fn accepts_zero_extended_slots_for_symbols_with_regular_section_indices() {
+        let mut bytes = elf_with_extended_symbol_indices();
+        let image = parse(&bytes, ParseLimits::default()).expect("extended fixture");
+        let shndx_data = image.section_headers[5].offset as usize;
+        let symbol_data = image.section_headers[2].offset as usize;
+        put_u16(&mut bytes, symbol_data + SYMBOL_SIZE + 14, 3);
+        put_u32(&mut bytes, shndx_data + 4, 0);
+
+        let parsed = parse(&bytes, ParseLimits::default())
+            .expect("an unused extended-index table with zero slots is valid");
+        assert_eq!(parsed.symbols[1].section_index, 3);
+    }
+
+    #[test]
+    fn rejects_shn_xindex_without_its_linked_table() {
+        let mut bytes = elf_with_extended_symbol_indices();
+        let section_header_base = ELF_HEADER_SIZE + 5 * SECTION_HEADER_SIZE;
+        put_u32(&mut bytes, section_header_base + 4, SHT_NOBITS);
+        assert!(parse(&bytes, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_symtab_shndx_links_and_entry_shapes() {
+        let seed = elf_with_extended_symbol_indices();
+        let shndx_header = ELF_HEADER_SIZE + 5 * SECTION_HEADER_SIZE;
+
+        let mut wrong_link = seed.clone();
+        put_u32(&mut wrong_link, shndx_header + 24, 1); // .strtab, not .symtab
+        assert!(parse(&wrong_link, ParseLimits::default()).is_err());
+
+        let mut wrong_entry_size = seed.clone();
+        put_u32(&mut wrong_entry_size, shndx_header + 36, 8);
+        assert!(parse(&wrong_entry_size, ParseLimits::default()).is_err());
+
+        let mut wrong_info = seed.clone();
+        put_u32(&mut wrong_info, shndx_header + 28, 1);
+        assert!(parse(&wrong_info, ParseLimits::default()).is_err());
+
+        let mut wrong_count = seed;
+        put_u32(&mut wrong_count, shndx_header + 20, 4);
+        assert!(parse(&wrong_count, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_or_inconsistent_extended_symbol_index_entries() {
+        let seed = elf_with_extended_symbol_indices();
+        let image = parse(&seed, ParseLimits::default()).expect("extended fixture");
+        let shndx_data = image.section_headers[5].offset as usize;
+        let symbol_data = image.section_headers[2].offset as usize;
+
+        let mut out_of_range = seed.clone();
+        put_u32(&mut out_of_range, shndx_data + 4, 0xFF02);
+        assert!(parse(&out_of_range, ParseLimits::default()).is_err());
+
+        let mut below_reserved_range = seed.clone();
+        put_u32(&mut below_reserved_range, shndx_data + 4, 3);
+        assert!(parse(&below_reserved_range, ParseLimits::default()).is_err());
+
+        let mut non_extended_symbol_has_nonzero_slot = seed;
+        put_u16(
+            &mut non_extended_symbol_has_nonzero_slot,
+            symbol_data + SYMBOL_SIZE + 14,
+            3,
+        );
+        assert!(
+            parse(
+                &non_extended_symbol_has_nonzero_slot,
+                ParseLimits::default()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_symtab_shndx_tables_and_extended_section_count_over_limit() {
+        let seed = elf_with_extended_symbol_indices();
+        let mut duplicate = seed.clone();
+        let duplicate_header = ELF_HEADER_SIZE + 7 * SECTION_HEADER_SIZE;
+        put_u32(&mut duplicate, duplicate_header + 4, SHT_SYMTAB_SHNDX);
+        put_u32(&mut duplicate, duplicate_header + 24, 2);
+        assert!(parse(&duplicate, ParseLimits::default()).is_err());
+
+        let limited = ParseLimits {
+            max_sections: 100,
+            ..ParseLimits::default()
+        };
+        assert!(parse(&seed, limited).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_extended_section_numbering_sentinels() {
+        let seed = elf_with_extended_symbol_indices();
+        let mut small_count = seed.clone();
+        put_u32(&mut small_count, ELF_HEADER_SIZE + 20, 6);
+        assert!(parse(&small_count, ParseLimits::default()).is_err());
+
+        let mut small_name_index = seed.clone();
+        put_u32(&mut small_name_index, ELF_HEADER_SIZE + 24, 1);
+        assert!(parse(&small_name_index, ParseLimits::default()).is_err());
+
+        let mut nonextended_reserved_count = seed;
+        put_u16(&mut nonextended_reserved_count, 48, 0xFF02);
+        assert!(parse(&nonextended_reserved_count, ParseLimits::default()).is_err());
     }
 
     #[test]
@@ -1702,6 +2180,7 @@ mod tests {
             max_string_table_bytes: 1 << 16,
             max_symbols: 1 << 10,
             max_relocations: 1 << 10,
+            max_sections: 1 << 10,
         };
         let mut rng = 0x9E37_79B9_7F4A_7C15_u64;
         let mut ram_images_built = 0;
@@ -1731,6 +2210,7 @@ mod tests {
             max_string_table_bytes: 1 << 16,
             max_symbols: 1 << 10,
             max_relocations: 1 << 10,
+            max_sections: 1 << 10,
         };
         let analysis_limits = AnalysisLimits {
             max_loaded_memory: 1 << 20,
