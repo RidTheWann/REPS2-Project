@@ -219,6 +219,19 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 - The entry scan is a separate bounded linear diagnostic. It stops at the first unsupported word or trap and reports the guest PC and raw word. It does not follow branches, and a clean scan does not establish CFG reachability or playability.
 
 
+## ELF identity and variant diagnostics
+
+- ELF `e_ident[EI_OSABI]` identifies the target OS/ABI and `EI_ABIVERSION` is interpreted in the context of that OSABI. The parser preserves both bytes exactly, reports common names in `elf-info`, and keeps unknown values inspectable; it does not use OSABI as a target-acceptance gate.
+- The generic `e_type` values ET_NONE, ET_REL, ET_EXEC, ET_DYN and ET_CORE receive display labels. OS-specific and processor-specific ranges are identified separately; unknown values remain numeric and parseable as metadata.
+- The parser reports common `e_machine` names but does not claim every parsed machine is an EE target. The default initial EE RAM image builder remains restricted to the currently supported MIPS ET_EXEC path and rejects ET_REL/ET_DYN until relocation/dynamic-loading semantics are implemented.
+- These diagnostics improve identification and failure reporting only; they do not add a new loadable ELF variant or prove retail PS2 compatibility.
+
+References:
+- Linux man-pages, elf(5), EI_OSABI/EI_ABIVERSION and e_type:
+  https://www.man7.org/linux/man-pages/man5/elf.5.html
+- Oracle Linker and Libraries Guide, ELF identification fields:
+  https://docs.oracle.com/cd/E23824_01/html/819-0690/chapter6-35342.html
+
 ## ELF table validation
 
 - ELF string tables are byte-indexed tables whose first and last bytes must be NUL when non-empty; an empty string table is permitted. Section and symbol names are resolved only after table bounds and sentinel checks (System V GABI, sections 3.4 and 3.6).
