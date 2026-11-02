@@ -253,6 +253,8 @@ mod tests {
         Image {
             file_type: ET_EXEC,
             machine: EM_MIPS,
+            os_abi: 0,
+            abi_version: 0,
             entry_point: entry,
             flags: 0,
             section_name_table_index: 0,
