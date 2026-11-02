@@ -77,8 +77,8 @@ enum class ExceptionCode : std::uint8_t {
     Overflow = 12,
 };
 
-/// Level-1 data-address exceptions raised by naturally misaligned accesses.
-enum class AddressErrorCode : std::uint8_t { Load = 4, Store = 5 };
+/// Level-1 address errors for instruction fetches and data accesses.
+enum class AddressErrorCode : std::uint8_t { InstructionFetch = 4, Load = 4, Store = 5 };
 
 struct EeState {
     std::uint32_t pc{};
