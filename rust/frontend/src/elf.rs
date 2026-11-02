@@ -17,6 +17,7 @@ pub const SHT_RELA: u32 = 4;
 pub const SHT_NOBITS: u32 = 8;
 pub const SHT_REL: u32 = 9;
 pub const SHT_DYNSYM: u32 = 11;
+pub const SHT_SYMTAB_SHNDX: u32 = 18;
 
 const ELF_HEADER_SIZE: usize = 52;
 const PROGRAM_HEADER_SIZE: usize = 32;
@@ -51,6 +52,7 @@ pub struct ParseLimits {
     pub max_string_table_bytes: usize,
     pub max_symbols: usize,
     pub max_relocations: usize,
+    pub max_sections: usize,
 }
 
 impl Default for ParseLimits {
@@ -59,6 +61,7 @@ impl Default for ParseLimits {
             max_string_table_bytes: 64 * 1024 * 1024,
             max_symbols: 1_000_000,
             max_relocations: 4_000_000,
+            max_sections: 100_000,
         }
     }
 }
@@ -122,7 +125,7 @@ pub struct Symbol {
     pub size: u32,
     pub table_section_index: usize,
     pub table_index: u32,
-    pub section_index: u16,
+    pub section_index: u32,
     pub binding: u8,
     pub kind: u8,
     pub visibility: u8,
@@ -266,7 +269,7 @@ pub struct Image {
     pub machine: u16,
     pub entry_point: u32,
     pub flags: u32,
-    pub section_name_table_index: u16,
+    pub section_name_table_index: u32,
     pub program_headers: Vec<ProgramHeader>,
     pub section_headers: Vec<SectionHeader>,
     pub symbols: Vec<Symbol>,
@@ -402,7 +405,7 @@ fn validate_table(
     bytes: &[u8],
     offset: u32,
     entry_size: u16,
-    count: u16,
+    count: u32,
     minimum_size: usize,
     label: &str,
 ) -> Result<(), Error> {
@@ -489,6 +492,31 @@ fn parse_symbols(
     sections: &[SectionHeader],
     limits: ParseLimits,
 ) -> Result<Vec<Symbol>, Error> {
+    // A SHT_SYMTAB_SHNDX section is associated with exactly one symbol table.
+    // Build the association once so malformed duplicate/orphan tables are not
+    // silently ignored and lookup remains linear in the section count.
+    let mut extended_section_tables = vec![None; sections.len()];
+    for (extended_index, extended) in sections.iter().enumerate() {
+        if extended.kind != SHT_SYMTAB_SHNDX {
+            continue;
+        }
+        let symbol_table_index = usize::try_from(extended.link)
+            .map_err(|_| Error::new("Extended symbol-index link does not fit host size"))?;
+        let symbol_table = sections
+            .get(symbol_table_index)
+            .ok_or_else(|| Error::new("SHT_SYMTAB_SHNDX links to an invalid section"))?;
+        if symbol_table.kind != SHT_SYMTAB && symbol_table.kind != SHT_DYNSYM {
+            return Err(Error::new(
+                "SHT_SYMTAB_SHNDX does not link to SHT_SYMTAB or SHT_DYNSYM",
+            ));
+        }
+        if extended_section_tables[symbol_table_index].replace(extended_index).is_some() {
+            return Err(Error::new(
+                "Multiple SHT_SYMTAB_SHNDX sections link to one symbol table",
+            ));
+        }
+    }
+
     let mut symbols = Vec::new();
     for (section_index, section) in sections.iter().enumerate() {
         if section.kind != SHT_SYMTAB && section.kind != SHT_DYNSYM {
@@ -531,6 +559,35 @@ fn parse_symbols(
                 "ELF symbol table entry zero is not the null symbol",
             ));
         }
+
+        let extended_indices = if let Some(extended_index) = extended_section_tables[section_index]
+        {
+            let extended = &sections[extended_index];
+            if extended.entry_size != 4 || extended.size % 4 != 0 {
+                return Err(Error::new(
+                    "SHT_SYMTAB_SHNDX must use four-byte entries",
+                ));
+            }
+            let extended_count = usize::try_from(extended.size / 4)
+                .map_err(|_| Error::new("Extended symbol-index count overflow"))?;
+            if extended_count != count {
+                return Err(Error::new(
+                    "SHT_SYMTAB_SHNDX entry count does not match its symbol table",
+                ));
+            }
+            let data = section_data(bytes, extended, "ELF extended symbol-index table")?;
+            let mut values = Vec::with_capacity(extended_count);
+            for index in 0..extended_count {
+                let offset = index
+                    .checked_mul(4)
+                    .ok_or_else(|| Error::new("Extended symbol-index offset overflow"))?;
+                values.push(read_u32(data, offset)?);
+            }
+            Some(values)
+        } else {
+            None
+        };
+
         for index in 0..count {
             let base = index
                 .checked_mul(section.entry_size as usize)
@@ -538,15 +595,41 @@ fn parse_symbols(
             let name_offset = read_u32(table, base)?;
             let info = read_u8(table, base + 12)?;
             let other = read_u8(table, base + 13)?;
-            let symbol_section = read_u16(table, base + 14)?;
-            if symbol_section == SHN_XINDEX {
-                return Err(Error::new(
-                    "Extended ELF symbol section indices are not supported yet",
-                ));
-            }
-            if symbol_section < SHN_LORESERVE && usize::from(symbol_section) >= sections.len() {
-                return Err(Error::new("ELF symbol references an invalid section index"));
-            }
+            let raw_symbol_section = read_u16(table, base + 14)?;
+            let extended_value = extended_indices
+                .as_ref()
+                .map(|values| values[index])
+                .unwrap_or(0);
+            let symbol_section = if raw_symbol_section == SHN_XINDEX {
+                let resolved = extended_indices
+                    .as_ref()
+                    .map(|_| extended_value)
+                    .ok_or_else(|| {
+                        Error::new("SHN_XINDEX symbol has no linked SHT_SYMTAB_SHNDX table")
+                    })?;
+                if resolved < u32::from(SHN_LORESERVE)
+                    || usize::try_from(resolved)
+                        .ok()
+                        .is_none_or(|resolved_index| resolved_index >= sections.len())
+                {
+                    return Err(Error::new(
+                        "SHT_SYMTAB_SHNDX contains an invalid extended section index",
+                    ));
+                }
+                resolved
+            } else {
+                if extended_value != 0 {
+                    return Err(Error::new(
+                        "SHT_SYMTAB_SHNDX entry must be SHN_UNDEF for a non-SHN_XINDEX symbol",
+                    ));
+                }
+                if raw_symbol_section < SHN_LORESERVE
+                    && usize::from(raw_symbol_section) >= sections.len()
+                {
+                    return Err(Error::new("ELF symbol references an invalid section index"));
+                }
+                u32::from(raw_symbol_section)
+            };
             let binding = info >> 4;
             if (index < local_symbol_end) != (binding == STB_LOCAL) {
                 return Err(Error::new(
