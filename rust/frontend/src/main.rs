@@ -147,6 +147,52 @@ fn elf_info(path: &Path) -> Result<(), String> {
             );
         }
         println!(
+            "  PT_MIPS_ABIFLAGS segments: {}",
+            image.mips_abi_flags_segments.len()
+        );
+        for segment in &image.mips_abi_flags_segments {
+            if let Some(flags) = segment.version_zero {
+                let ase_names = flags.ase_names();
+                println!(
+                    "    program header [{}] file=0x{:08X} vaddr=0x{:08X}: v0, ISA {} rev {}, GPR {}, CPR1 {}, CPR2 {}, FP ABI {}",
+                    segment.program_header_index,
+                    segment.file_offset,
+                    segment.virtual_address,
+                    flags.isa_level_name(),
+                    flags.isa_revision,
+                    elf::MipsAbiFlagsV0::register_size_name(flags.gpr_size),
+                    elf::MipsAbiFlagsV0::register_size_name(flags.cpr1_size),
+                    elf::MipsAbiFlagsV0::register_size_name(flags.cpr2_size),
+                    flags.fp_abi_name()
+                );
+                println!(
+                    "      ISA extension: {} (code {}), ASEs: {} (mask 0x{:08X}), flags1=0x{:08X}, flags2=0x{:08X}",
+                    flags.isa_extension_name(),
+                    flags.isa_extension,
+                    if ase_names.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        ase_names.join(", ")
+                    },
+                    flags.ases,
+                    flags.flags1,
+                    flags.flags2
+                );
+                if flags.unknown_ases() != 0 || flags.unknown_flags1() != 0 {
+                    println!(
+                        "      Unclassified ASE bits=0x{:08X}, flags1 bits=0x{:08X}",
+                        flags.unknown_ases(),
+                        flags.unknown_flags1()
+                    );
+                }
+            } else {
+                println!(
+                    "    program header [{}]: unsupported ABI flags version {} ({} bytes; raw segment retained in source ELF)",
+                    segment.program_header_index, segment.version, segment.segment_size
+                );
+            }
+        }
+        println!(
             "  SHT_MIPS_ABIFLAGS sections: {}",
             image.mips_abi_flags.len()
         );
