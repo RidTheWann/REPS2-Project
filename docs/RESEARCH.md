@@ -233,6 +233,18 @@ References:
 - System V Generic ABI, section headers and sh_link/sh_info: https://gabi.xinuos.com/v42/elf/03-sheader.html
 - System V ELF string-table rules: https://refspecs.linuxfoundation.org/elf/elfspec.pdf
 
+## ELF identification and object-type diagnostics
+
+- ELF identification stores EI_OSABI in e_ident[7] and EI_ABIVERSION in e_ident[8]. OSABI identifies extensions/conventions, while the ABI-version byte is interpreted in the context of that OSABI; REPS2 therefore preserves both raw values and labels the version as raw metadata.
+- Generic System V OSABI labels include NONE/unspecified (0), HP-UX (1), NetBSD (2), Linux (3), Solaris (6), AIX (7), IRIX (8), FreeBSD (9), Tru64 (10), Modesto (11), OpenBSD (12), OpenVMS (13), and NonStop Kernel (14). Values 64-255 are an architecture-specific range whose meaning depends on e_machine and its processor supplement. Other unassigned values remain reserved/unrecognized and are not rejected.
+- e_type values 0-4 identify no file type, relocatable object, executable, shared object, and core file. ET_LOOS..ET_HIOS (0xFE00..0xFEFF) are OS-specific; ET_LOPROC..ET_HIPROC (0xFF00..0xFFFF) are processor-specific. Other values are reserved/unknown. The parser preserves the numeric e_type and reports a generic label only.
+- These are diagnostics, not a broader loader: the current EE main-RAM image builder continues to require ET_EXEC and its existing static/PT_LOAD constraints. No OSABI or e_type label proves PS2 ABI compatibility or title bootability.
+
+References:
+- System V ABI, ELF Header / ELF Identification, including EI_OSABI, EI_ABIVERSION and e_type: https://web.stanford.edu/~ouster/cgi-bin/cs140-spring18/pintos/specs/sysv-abi-update.html/ch4.eheader.html
+- Oracle Linkers and Libraries Guide, EI_ABIVERSION is interpreted in the context of EI_OSABI: https://docs.oracle.com/cd/E19683-01/817-1974/817-1974.pdf
+- Binutils ELF constants for OSABI and e_type: https://gnu.googlesource.com/binutils-gdb/+/b4812cfe4dc394392e47e0489f38521da4a0b7ce/include/elf/common.h
+
 ## MIPS ELF header flags and PS2 EE identification
 
 - ELF e_machine = EM_MIPS identifies the MIPS family but does not by itself distinguish a PlayStation 2 Emotion Engine executable from other MIPS objects.

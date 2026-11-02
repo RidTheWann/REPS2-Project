@@ -1950,6 +1950,8 @@ mod tests {
 
         let image = Image {
             file_type: elf::ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
             machine: elf::EM_MIPS,
             entry_point: 0x0010_0000,
             flags: 0,
