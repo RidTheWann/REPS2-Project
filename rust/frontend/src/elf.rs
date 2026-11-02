@@ -677,8 +677,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         section_headers.push(section);
     }
 
-    if let Some(null_section) = section_headers.first() {
-        if null_section.kind != SHT_NULL
+    let null_section_is_invalid = section_headers.first().is_some_and(|null_section| {
+        null_section.kind != SHT_NULL
             || null_section.name_offset != 0
             || null_section.flags != 0
             || null_section.virtual_address != 0
@@ -688,11 +688,11 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             || null_section.info != 0
             || null_section.alignment != 0
             || null_section.entry_size != 0
-        {
-            return Err(Error::new(
-                "ELF section header zero is not the required null entry",
-            ));
-        }
+    });
+    if null_section_is_invalid {
+        return Err(Error::new(
+            "ELF section header zero is not the required null entry",
+        ));
     }
 
     let string_table_bytes = section_headers
