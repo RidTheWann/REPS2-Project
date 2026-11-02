@@ -2206,8 +2206,8 @@ mod tests {
         assert_eq!(image.abi_version, 7);
 
         bytes[7] = 0xAB; // unassigned OSABI code
-        let unknown = parse(&bytes, ParseLimits::default())
-            .expect("unknown OSABI remains inspectable");
+        let unknown =
+            parse(&bytes, ParseLimits::default()).expect("unknown OSABI remains inspectable");
         assert_eq!(unknown.os_abi, 0xAB);
         assert_eq!(unknown.os_abi_name(), "unrecognized");
     }
