@@ -1969,6 +1969,7 @@ mod tests {
             section_headers: Vec::new(),
             symbols: Vec::new(),
             relocations: Vec::new(),
+            mips_abi_flags: None,
         };
 
         let analysis = discover_elf_with_discovery(&image, &file_bytes, AnalysisLimits::default())
