@@ -766,17 +766,97 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     let program_entry_size = read_u16(bytes, 42)?;
     let program_count = read_u16(bytes, 44)?;
     let section_entry_size = read_u16(bytes, 46)?;
-    let section_count = read_u16(bytes, 48)?;
-    let section_name_table_index = read_u16(bytes, 50)?;
+    let raw_section_count = read_u16(bytes, 48)?;
+    let raw_section_name_table_index = read_u16(bytes, 50)?;
 
     if usize::from(header_size) < ELF_HEADER_SIZE || usize::from(header_size) > bytes.len() {
         return Err(Error::new("Invalid ELF header size"));
     }
-    if program_count == u16::MAX
-        || section_name_table_index == u16::MAX
-        || (section_count == 0 && section_offset != 0)
-    {
-        return Err(Error::new("Extended ELF numbering is not supported yet"));
+    if program_count == u16::MAX {
+        return Err(Error::new(
+            "Extended ELF program-header numbering is not supported yet",
+        ));
+    }
+
+    // Resolve ELF extended section numbering using the reserved fields in
+    // section-header entry zero. An absent section table must use zero for
+    // both e_shnum and e_shstrndx.
+    let (section_count, section_name_table_index, extended_section_count, extended_name_index) =
+        if section_offset == 0 {
+            if raw_section_count != 0 || raw_section_name_table_index != 0 {
+                return Err(Error::new(
+                    "ELF section numbering references a missing section table",
+                ));
+            }
+            (0u32, 0u32, false, false)
+        } else {
+            if section_offset < u32::from(header_size) {
+                return Err(Error::new(
+                    "ELF section-header table overlaps the ELF header",
+                ));
+            }
+            validate_table(
+                bytes,
+                section_offset,
+                section_entry_size,
+                1,
+                SECTION_HEADER_SIZE,
+                "section-header zero",
+            )?;
+            let section_zero_offset = usize::try_from(section_offset)
+                .map_err(|_| Error::new("Section-header offset overflow"))?;
+            let section_zero = read_section_header(bytes, section_zero_offset)?;
+            if section_zero.kind != SHT_NULL {
+                return Err(Error::new(
+                    "ELF section header zero is not the required null entry",
+                ));
+            }
+
+            let extended_count = raw_section_count == 0;
+            let resolved_count = if extended_count {
+                if section_zero.size < u32::from(SHN_LORESERVE) {
+                    return Err(Error::new(
+                        "ELF extended section count is below SHN_LORESERVE",
+                    ));
+                }
+                section_zero.size
+            } else {
+                if raw_section_count >= SHN_LORESERVE {
+                    return Err(Error::new(
+                        "ELF section count at or above SHN_LORESERVE must use extended numbering",
+                    ));
+                }
+                u32::from(raw_section_count)
+            };
+            if resolved_count == 0 {
+                return Err(Error::new("ELF section table has a zero section count"));
+            }
+
+            let extended_names = raw_section_name_table_index == SHN_XINDEX;
+            let resolved_name_index = if extended_names {
+                if section_zero.link < u32::from(SHN_LORESERVE) {
+                    return Err(Error::new(
+                        "ELF extended section-name table index is below SHN_LORESERVE",
+                    ));
+                }
+                section_zero.link
+            } else {
+                if raw_section_name_table_index >= SHN_LORESERVE {
+                    return Err(Error::new(
+                        "ELF section-name table index must use SHN_XINDEX when reserved",
+                    ));
+                }
+                u32::from(raw_section_name_table_index)
+            };
+            (resolved_count, resolved_name_index, extended_count, extended_names)
+        };
+
+    let section_count_host = usize::try_from(section_count)
+        .map_err(|_| Error::new("ELF section count does not fit host size"))?;
+    if section_count_host > limits.max_sections {
+        return Err(Error::new(
+            "ELF section count exceeds configured parser limit",
+        ));
     }
     if section_count == 0 && section_name_table_index != 0 {
         return Err(Error::new(
@@ -794,16 +874,11 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             "ELF program-header table overlaps the ELF header",
         ));
     }
-    if section_count != 0 && section_offset < u32::from(header_size) {
-        return Err(Error::new(
-            "ELF section-header table overlaps the ELF header",
-        ));
-    }
     validate_table(
         bytes,
         program_offset,
         program_entry_size,
-        program_count,
+        u32::from(program_count),
         PROGRAM_HEADER_SIZE,
         "program-header",
     )?;
@@ -879,8 +954,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         program_headers.push(header);
     }
 
-    let mut section_headers = Vec::with_capacity(usize::from(section_count));
-    for index in 0..usize::from(section_count) {
+    let mut section_headers = Vec::with_capacity(section_count_host);
+    for index in 0..section_count_host {
         let base = usize::try_from(section_offset)
             .map_err(|_| Error::new("Section-header offset overflow"))?
             .checked_add(
@@ -901,14 +976,24 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         section_headers.push(section);
     }
 
+    let expected_null_size = if extended_section_count {
+        section_count
+    } else {
+        0
+    };
+    let expected_null_link = if extended_name_index {
+        section_name_table_index
+    } else {
+        0
+    };
     let null_section_is_invalid = section_headers.first().is_some_and(|null_section| {
         null_section.kind != SHT_NULL
             || null_section.name_offset != 0
             || null_section.flags != 0
             || null_section.virtual_address != 0
             || null_section.offset != 0
-            || null_section.size != 0
-            || null_section.link != 0
+            || null_section.size != expected_null_size
+            || null_section.link != expected_null_link
             || null_section.info != 0
             || null_section.alignment != 0
             || null_section.entry_size != 0
@@ -940,8 +1025,10 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     }
 
     if section_name_table_index != 0 {
+        let names_index = usize::try_from(section_name_table_index)
+            .map_err(|_| Error::new("ELF section-name table index does not fit host size"))?;
         let names = section_headers
-            .get(usize::from(section_name_table_index))
+            .get(names_index)
             .ok_or_else(|| Error::new("ELF section-name table index is invalid"))?;
         if names.kind != SHT_STRTAB {
             return Err(Error::new(
