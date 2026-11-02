@@ -999,7 +999,18 @@ fn parse_symbols(
             .map_err(|_| Error::new("ELF symbol count does not fit host size"))?;
         let local_symbol_end = usize::try_from(section.info)
             .map_err(|_| Error::new("ELF local-symbol boundary does not fit host size"))?;
-        if count == 0 || local_symbol_end == 0 || local_symbol_end > count {
+        if count == 0 {
+            // A symbol table with sh_size zero has no entries. ELF defines
+            // sh_info as one greater than the index of the last local symbol,
+            // so an empty table requires zero, and there is no null symbol at
+            // index zero to validate. Production MIPS linkers emit this shape
+            // for stripped retail images.
+            if local_symbol_end != 0 {
+                return Err(Error::new(
+                    "ELF symbol table has an invalid local-symbol boundary",
+                ));
+            }
+        } else if local_symbol_end == 0 || local_symbol_end > count {
             return Err(Error::new(
                 "ELF symbol table has an invalid local-symbol boundary",
             ));
@@ -1007,16 +1018,6 @@ fn parse_symbols(
         if count > limits.max_symbols.saturating_sub(symbols.len()) {
             return Err(Error::new(
                 "ELF symbol count exceeds configured parser limit",
-            ));
-        }
-        let string_data = section_data(bytes, strings, "ELF symbol string table")?;
-        let table = section_data(bytes, section, "ELF symbol table")?;
-        if table
-            .get(..SYMBOL_SIZE)
-            .is_none_or(|undefined_symbol| undefined_symbol.iter().any(|byte| *byte != 0))
-        {
-            return Err(Error::new(
-                "ELF symbol table entry zero is not the null symbol",
             ));
         }
 
@@ -1045,6 +1046,21 @@ fn parse_symbols(
         } else {
             None
         };
+
+        if count == 0 {
+            continue;
+        }
+
+        let string_data = section_data(bytes, strings, "ELF symbol string table")?;
+        let table = section_data(bytes, section, "ELF symbol table")?;
+        if table
+            .get(..SYMBOL_SIZE)
+            .is_none_or(|undefined_symbol| undefined_symbol.iter().any(|byte| *byte != 0))
+        {
+            return Err(Error::new(
+                "ELF symbol table entry zero is not the null symbol",
+            ));
+        }
 
         for index in 0..count {
             let base = index
@@ -3378,6 +3394,39 @@ mod tests {
             2,
         );
         assert!(parse(&boundary_misclassifies_global, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn accepts_an_empty_symbol_table_with_zero_local_boundary() {
+        // Stripped retail MIPS images can carry a SHT_SYMTAB whose sh_size is
+        // zero. ELF requires sh_info to be zero for such a table and there is
+        // no null symbol entry to validate.
+        let seed = elf_with_symbol_and_rel();
+        let mut empty = seed;
+        let symbol_table_header = 52 + 3 * SECTION_HEADER_SIZE;
+        put_u32(&mut empty, symbol_table_header + 20, 0);
+        put_u32(&mut empty, symbol_table_header + 28, 0);
+        let relocation_header = 52 + 5 * SECTION_HEADER_SIZE;
+        put_u32(&mut empty, relocation_header + 20, 0);
+
+        let image = parse(&empty, ParseLimits::default())
+            .expect("an empty SHT_SYMTAB with sh_info zero is well formed");
+        assert!(image.symbols.is_empty());
+        assert!(image.relocations.is_empty());
+        assert_eq!(image.section_headers[3].size, 0);
+    }
+
+    #[test]
+    fn rejects_an_empty_symbol_table_with_nonzero_local_boundary() {
+        let seed = elf_with_symbol_and_rel();
+        let mut malformed = seed;
+        let symbol_table_header = 52 + 3 * SECTION_HEADER_SIZE;
+        put_u32(&mut malformed, symbol_table_header + 20, 0);
+        put_u32(&mut malformed, symbol_table_header + 28, 1);
+        let relocation_header = 52 + 5 * SECTION_HEADER_SIZE;
+        put_u32(&mut malformed, relocation_header + 20, 0);
+
+        assert!(parse(&malformed, ParseLimits::default()).is_err());
     }
 
     #[test]
