@@ -13,7 +13,8 @@ Detailed status and capability list, moved out of the README. The roadmap in [RO
 - Inspect raw 2048-byte-sector ISO 9660 images without loading the entire disc; validate the descriptor sequence and single-volume PVD, list root entries, resolve nested paths, and parse SYSTEM.CNF with BOOT2 preferred over BOOT.
 - Extract the SYSTEM.CNF boot target only after validating it as a MIPS ET_EXEC ELF; use create-new output semantics so an existing file or source image is never overwritten.
 - Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries.
-- Validate file-backed ranges, table bounds, cross-table references, entry sizes, address overflow, and parser resource limits.
+- Validate file-backed ranges, table bounds, leading/trailing null bytes in non-empty string tables, the required SHT_NULL section zero, symbol-table local/global partitioning, regular symbol section indices, relocation symbol/target links, entry sizes, address overflow, and parser resource limits.
+- Preserve ELF special symbol section indices such as SHN_ABS/SHN_COMMON; reject SHN_XINDEX explicitly until its companion extended-index table is implemented.
 - Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges.
 - Decode an explicitly scoped base-MIPS integer subset, including BEQ/BNE/BLEZ/BGTZ and REGIMM BLTZ/BGEZ branch families.
 - Expose conservative per-instruction GPR/HI-LO dependencies, memory/control-flow effects, and possible synchronous exceptions; unsupported encodings remain explicitly opaque.

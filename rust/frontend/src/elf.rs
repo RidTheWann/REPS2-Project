@@ -358,6 +358,14 @@ fn parse_symbols(
         }
         let string_data = section_data(bytes, strings, "ELF symbol string table")?;
         let table = section_data(bytes, section, "ELF symbol table")?;
+        if table
+            .get(..SYMBOL_SIZE)
+            .is_none_or(|undefined_symbol| undefined_symbol.iter().any(|byte| *byte != 0))
+        {
+            return Err(Error::new(
+                "ELF symbol table entry zero is not the null symbol",
+            ));
+        }
         for index in 0..count {
             let base = index
                 .checked_mul(section.entry_size as usize)
@@ -1126,6 +1134,15 @@ mod tests {
         assert_eq!(image.relocations[0].symbol_index, 1);
         assert_eq!(image.relocations[0].relocation_type, 2);
         assert_eq!(image.relocations[0].addend, None);
+    }
+
+    #[test]
+    fn rejects_a_nonzero_undefined_symbol_entry() {
+        let mut malformed = elf_with_symbol_and_rel();
+        let image = parse(&malformed, ParseLimits::default()).expect("symbol fixture");
+        let table_offset = image.section_headers[3].offset as usize;
+        put_u32(&mut malformed, table_offset + 4, 1);
+        assert!(parse(&malformed, ParseLimits::default()).is_err());
     }
 
     #[test]
