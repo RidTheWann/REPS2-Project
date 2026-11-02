@@ -2178,6 +2178,7 @@ mod tests {
             max_string_table_bytes: 1 << 16,
             max_symbols: 1 << 10,
             max_relocations: 1 << 10,
+            max_sections: 1 << 10,
         };
         let mut rng = 0x9E37_79B9_7F4A_7C15_u64;
         let mut ram_images_built = 0;
