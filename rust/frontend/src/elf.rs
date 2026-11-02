@@ -796,9 +796,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             ));
         }
         if raw_program_count == PN_XNUM {
-            return Err(Error::new(
-                "ELF PN_XNUM requires section-header entry zero",
-            ));
+            return Err(Error::new("ELF PN_XNUM requires section-header entry zero"));
         }
         (
             0u32,
@@ -892,7 +890,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             resolved_program_count,
             extended_programs,
         )
-        };
+    };
 
     let section_count_host = usize::try_from(section_count)
         .map_err(|_| Error::new("ELF section count does not fit host size"))?;
