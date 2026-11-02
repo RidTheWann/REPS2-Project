@@ -142,9 +142,9 @@ fn elf_info(path: &Path) -> Result<(), String> {
             if let Some(flags) = abi_flags.version_zero {
                 let ase_names = flags.ase_names();
                 println!(
-                    "    section [{}]: v0, ISA MIPS{} rev {}, GPR {}, CPR1 {}, CPR2 {}, FP ABI {}",
+                    "    section [{}]: v0, ISA {} rev {}, GPR {}, CPR1 {}, CPR2 {}, FP ABI {}",
                     abi_flags.section_index,
-                    flags.isa_level,
+                    flags.isa_level_name(),
                     flags.isa_revision,
                     elf::MipsAbiFlagsV0::register_size_name(flags.gpr_size),
                     elf::MipsAbiFlagsV0::register_size_name(flags.cpr1_size),
@@ -162,6 +162,26 @@ fn elf_info(path: &Path) -> Result<(), String> {
                     },
                     flags.ases
                 );
+                if flags.unknown_ases() != 0 {
+                    println!(
+                        "      Unclassified ASE bits: 0x{:08X}",
+                        flags.unknown_ases()
+                    );
+                }
+                println!(
+                    "      Odd single-precision registers: {}",
+                    if flags.has_odd_single_precision_registers() {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                );
+                if flags.unknown_flags1() != 0 {
+                    println!(
+                        "      Unclassified flags1 bits: 0x{:08X}",
+                        flags.unknown_flags1()
+                    );
+                }
                 println!(
                     "      ABI flags: flags1=0x{:08X}, flags2=0x{:08X}",
                     flags.flags1, flags.flags2

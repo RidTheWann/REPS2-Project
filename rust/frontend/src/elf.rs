@@ -33,6 +33,7 @@ const SYMBOL_SIZE: usize = 16;
 const REL_SIZE: usize = 8;
 const MIPS_REGINFO_SIZE: usize = 24;
 const MIPS_ABIFLAGS_V0_SIZE: usize = 24;
+const MIPS_AFL_FLAGS1_ODDSPREG: u32 = 1;
 const STB_LOCAL: u8 = 0;
 const SHN_LORESERVE: u16 = 0xFF00;
 const SHN_XINDEX: u16 = 0xFFFF;
@@ -186,9 +187,23 @@ pub struct MipsAbiFlagsV0 {
 
 impl MipsAbiFlagsV0 {
     #[must_use]
+    pub const fn isa_level_name(self) -> &'static str {
+        match self.isa_level {
+            1 => "MIPS I",
+            2 => "MIPS II",
+            3 => "MIPS III",
+            4 => "MIPS IV",
+            5 => "MIPS V",
+            32 => "MIPS32",
+            64 => "MIPS64",
+            _ => "unrecognized",
+        }
+    }
+
+    #[must_use]
     pub const fn register_size_name(code: u8) -> &'static str {
         match code {
-            0 => "unspecified",
+            0 => "none",
             1 => "32-bit",
             2 => "64-bit",
             3 => "128-bit",
@@ -203,7 +218,7 @@ impl MipsAbiFlagsV0 {
             1 => "double",
             2 => "single",
             3 => "soft-float",
-            4 => "historic-64",
+            4 => "old-64",
             5 => "FPXX",
             6 => "FP64",
             7 => "FP64A",
@@ -223,14 +238,14 @@ impl MipsAbiFlagsV0 {
             6 => "R5900",
             7 => "R4650",
             8 => "R4010",
-            9 => "R4100",
+            9 => "VR4100",
             10 => "R3900",
             11 => "R10000",
             12 => "SB-1",
-            13 => "R4111",
-            14 => "R4120",
-            15 => "R5400",
-            16 => "R5500",
+            13 => "VR4111/VR4181",
+            14 => "VR4120",
+            15 => "VR5400",
+            16 => "VR5500",
             17 => "Loongson 2E",
             18 => "Loongson 2F",
             19 => "Octeon3",
@@ -264,6 +279,39 @@ impl MipsAbiFlagsV0 {
             }
         }
         names
+    }
+
+    /// Return ASE bits not named by this generic decoder.
+    #[must_use]
+    pub const fn unknown_ases(self) -> u32 {
+        const KNOWN_ASES: u32 = 0x0000_0001
+            | 0x0000_0002
+            | 0x0000_0004
+            | 0x0000_0008
+            | 0x0000_0010
+            | 0x0000_0020
+            | 0x0000_0040
+            | 0x0000_0080
+            | 0x0000_0100
+            | 0x0000_0200
+            | 0x0000_0400
+            | 0x0000_0800
+            | 0x0000_1000
+            | 0x0000_8000
+            | 0x0002_0000;
+        self.ases & !KNOWN_ASES
+    }
+
+    /// Whether flags1 marks odd single-precision floating-point registers.
+    #[must_use]
+    pub const fn has_odd_single_precision_registers(self) -> bool {
+        self.flags1 & MIPS_AFL_FLAGS1_ODDSPREG != 0
+    }
+
+    /// Return flags1 bits not named by this generic decoder.
+    #[must_use]
+    pub const fn unknown_flags1(self) -> u32 {
+        self.flags1 & !MIPS_AFL_FLAGS1_ODDSPREG
     }
 }
 
@@ -875,6 +923,11 @@ fn parse_mips_abi_sections(
                 });
             }
             SHT_MIPS_ABIFLAGS => {
+                if !abi_flags.is_empty() {
+                    return Err(Error::new(
+                        "ELF contains more than one SHT_MIPS_ABIFLAGS section",
+                    ));
+                }
                 if section.size < 2 {
                     return Err(Error::new(
                         "SHT_MIPS_ABIFLAGS is too small to contain its version field",
@@ -2244,17 +2297,31 @@ mod tests {
         assert_eq!(flags.version, 0);
         let decoded = flags.version_zero.expect("version zero is decoded");
         assert_eq!(decoded.isa_level, 3);
+        assert_eq!(decoded.isa_level_name(), "MIPS III");
         assert_eq!(decoded.isa_revision, 0);
         assert_eq!(
             MipsAbiFlagsV0::register_size_name(decoded.gpr_size),
             "32-bit"
         );
+        assert_eq!(MipsAbiFlagsV0::register_size_name(0), "none");
         assert_eq!(decoded.fp_abi_name(), "soft-float");
         assert_eq!(decoded.isa_extension, 6);
         assert_eq!(decoded.isa_extension_name(), "R5900");
         assert_eq!(decoded.ase_names(), vec!["DSP", "GINV"]);
+        assert_eq!(decoded.unknown_ases(), 0);
         assert_eq!(decoded.flags1, 0xAABB_CCDD);
+        assert!(decoded.has_odd_single_precision_registers());
+        assert_eq!(decoded.unknown_flags1(), 0xAABB_CCDC);
         assert_eq!(decoded.flags2, 0x1122_3344);
+
+        let mut no_odd_single_registers = decoded;
+        no_odd_single_registers.flags1 = 0;
+        assert!(!no_odd_single_registers.has_odd_single_precision_registers());
+        assert_eq!(no_odd_single_registers.unknown_flags1(), 0);
+
+        let mut unknown_ase = decoded;
+        unknown_ase.ases |= 0x8000_0000;
+        assert_eq!(unknown_ase.unknown_ases(), 0x8000_0000);
     }
 
     #[test]
@@ -2283,6 +2350,21 @@ mod tests {
         let mut short_v0 = seed.clone();
         put_u32(&mut short_v0, abiflags_header + 20, 20);
         assert!(parse(&short_v0, ParseLimits::default()).is_err());
+
+        let mut duplicate_abi_flags = seed.clone();
+        let reginfo_header = ELF_HEADER_SIZE + 2 * SECTION_HEADER_SIZE;
+        put_u32(
+            &mut duplicate_abi_flags,
+            reginfo_header + 4,
+            SHT_MIPS_ABIFLAGS,
+        );
+        let duplicate_error = parse(&duplicate_abi_flags, ParseLimits::default())
+            .expect_err("duplicate ABI flags sections are ambiguous");
+        assert!(
+            duplicate_error
+                .to_string()
+                .contains("more than one SHT_MIPS_ABIFLAGS")
+        );
 
         let mut truncated_reginfo = seed;
         let reginfo_offset =
