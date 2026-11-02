@@ -107,6 +107,55 @@ fn elf_info(path: &Path) -> Result<(), String> {
             );
         }
     }
+    if let Some(abi_flags) = image.mips_abi_flags {
+        println!(
+            "  MIPS ABI flags: version {} (section {}, {} bytes)",
+            abi_flags.version,
+            abi_flags.section_index,
+            abi_flags.section_size
+        );
+        if let Some(v0) = abi_flags.version0 {
+            let ase_names = v0.ase_names();
+            println!(
+                "    ISA: {} revision {}",
+                v0.isa_level_name(),
+                v0.isa_revision
+            );
+            println!(
+                "    Register sizes: GPR {}, CPR1 {}, CPR2 {}",
+                elf::MipsAbiFlagsV0::register_size_name(v0.gpr_size),
+                elf::MipsAbiFlagsV0::register_size_name(v0.cpr1_size),
+                elf::MipsAbiFlagsV0::register_size_name(v0.cpr2_size)
+            );
+            println!("    FP ABI: {}", v0.fp_abi_name());
+            println!(
+                "    ISA extension: {} (code {})",
+                v0.isa_extension_name(),
+                v0.isa_extension
+            );
+            println!(
+                "    ASEs: {}",
+                if ase_names.is_empty() {
+                    "none".to_owned()
+                } else {
+                    ase_names.join(", ")
+                }
+            );
+            if v0.unknown_ases() != 0 {
+                println!("    Unclassified ASE bits: 0x{:08X}", v0.unknown_ases());
+            }
+            println!(
+                "    ABI flag words: flags1=0x{:08X}, flags2=0x{:08X}",
+                v0.flags1,
+                v0.flags2
+            );
+            println!(
+                "    Interpretation is metadata only; it does not establish PS2 title compatibility."
+            );
+        } else {
+            println!("    ABI flags version is unknown; payload left uninterpreted.");
+        }
+    }
     println!("  Entry point: 0x{:08X}", image.entry_point);
     println!("  Program headers: {}", image.program_headers.len());
     println!("  Section headers: {}", image.section_headers.len());
