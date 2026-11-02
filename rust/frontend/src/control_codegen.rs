@@ -312,11 +312,15 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             delay_slot,
             delay_slot_policy,
         } => {
-            output.push_str(&format!(
-                "    state.pc = 0x{guest_pc:08X}U;\n\
-                 \x20   const bool branch_taken_{guest_pc:08X} = {};\n",
-                condition_expression(*condition)
-            ));
+            output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
+            let needs_branch_predicate = *delay_slot_policy == DelaySlotPolicy::AnnulWhenNotTaken
+                || !matches!(delay_slot, ControlDelaySlot::GuestException { .. });
+            if needs_branch_predicate {
+                output.push_str(&format!(
+                    "    const bool branch_taken_{guest_pc:08X} = {};\n",
+                    condition_expression(*condition)
+                ));
+            }
             emit_link_write(output, *link_register, guest_pc.wrapping_add(8));
             match delay_slot_policy {
                 DelaySlotPolicy::ExecuteAlways => {
