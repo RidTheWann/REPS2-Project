@@ -65,6 +65,24 @@ pub enum FpuComparison {
     LessThanOrEqual,
 }
 
+/// Comparison predicate used by the EE's conditional integer trap family.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrapComparison {
+    Equal,
+    NotEqual,
+    GreaterThanOrEqualSigned,
+    GreaterThanOrEqualUnsigned,
+    LessThanSigned,
+    LessThanUnsigned,
+}
+
+/// RHS operand for a conditional trap; immediate fields are retained as signed i16.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrapOperand {
+    Register(Gpr),
+    SignedImmediate(i16),
+}
+
 /// Operations whose guest-visible behavior is explicitly represented by this
 /// initial IR. Scalar word operations write a sign-extended 32-bit result into
 /// the low 64 bits of a 128-bit EE GPR. Parallel word operations update all
@@ -248,6 +266,12 @@ pub enum Operation {
         lhs: Fpr,
         rhs: Fpr,
         comparison: FpuComparison,
+    },
+    /// Conditional integer traps compare GPR[63:0] and may enter Level-1 Trap.
+    ConditionalTrap {
+        lhs: Gpr,
+        rhs: TrapOperand,
+        comparison: TrapComparison,
     },
     MultiplyWordSigned {
         dst: Gpr,
@@ -1009,6 +1033,66 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: fpr(instruction.rt),
                 comparison: FpuComparison::LessThanOrEqual,
             },
+            Opcode::Tge => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::Register(gpr(instruction.rt)),
+                comparison: TrapComparison::GreaterThanOrEqualSigned,
+            },
+            Opcode::Tgeu => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::Register(gpr(instruction.rt)),
+                comparison: TrapComparison::GreaterThanOrEqualUnsigned,
+            },
+            Opcode::Tlt => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::Register(gpr(instruction.rt)),
+                comparison: TrapComparison::LessThanSigned,
+            },
+            Opcode::Tltu => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::Register(gpr(instruction.rt)),
+                comparison: TrapComparison::LessThanUnsigned,
+            },
+            Opcode::Teq => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::Register(gpr(instruction.rt)),
+                comparison: TrapComparison::Equal,
+            },
+            Opcode::Tne => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::Register(gpr(instruction.rt)),
+                comparison: TrapComparison::NotEqual,
+            },
+            Opcode::Tgei => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::SignedImmediate(instruction.immediate as i16),
+                comparison: TrapComparison::GreaterThanOrEqualSigned,
+            },
+            Opcode::Tgeiu => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::SignedImmediate(instruction.immediate as i16),
+                comparison: TrapComparison::GreaterThanOrEqualUnsigned,
+            },
+            Opcode::Tlti => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::SignedImmediate(instruction.immediate as i16),
+                comparison: TrapComparison::LessThanSigned,
+            },
+            Opcode::Tltiu => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::SignedImmediate(instruction.immediate as i16),
+                comparison: TrapComparison::LessThanUnsigned,
+            },
+            Opcode::Teqi => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::SignedImmediate(instruction.immediate as i16),
+                comparison: TrapComparison::Equal,
+            },
+            Opcode::Tnei => Operation::ConditionalTrap {
+                lhs: gpr(instruction.rs),
+                rhs: TrapOperand::SignedImmediate(instruction.immediate as i16),
+                comparison: TrapComparison::NotEqual,
+            },
             Opcode::Dadd => Operation::AddDoublewordSigned {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
@@ -1455,6 +1539,73 @@ mod tests {
             Operation::ShiftRightArithmeticDoublewordVariable { dst, src, amount }
                 if dst.index() == 22 && src.index() == 5 && amount.index() == 4
         ));
+    }
+
+    #[test]
+    fn lifts_all_twelve_conditional_traps_with_typed_operands() {
+        let register_words = [
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x30,
+            (8 << 21) | (9 << 16) | (0x2AA << 6) | 0x31,
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x32,
+            (8 << 21) | (9 << 16) | (0x2AA << 6) | 0x33,
+            (8 << 21) | (9 << 16) | (0x155 << 6) | 0x34,
+            (8 << 21) | (9 << 16) | (0x2AA << 6) | 0x36,
+        ];
+        let comparisons = [
+            TrapComparison::GreaterThanOrEqualSigned,
+            TrapComparison::GreaterThanOrEqualUnsigned,
+            TrapComparison::LessThanSigned,
+            TrapComparison::LessThanUnsigned,
+            TrapComparison::Equal,
+            TrapComparison::NotEqual,
+        ];
+        let register_stream = register_words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xA000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let register_program = lift(&register_stream).expect("register trap IR");
+        for (index, comparison) in comparisons.into_iter().enumerate() {
+            assert!(matches!(
+                register_program.instructions()[index].operation,
+                Operation::ConditionalTrap {
+                    lhs,
+                    rhs: TrapOperand::Register(rhs),
+                    comparison: actual,
+                } if lhs.index() == 8 && rhs.index() == 9 && actual == comparison
+            ));
+        }
+
+        let immediate_selectors: [u8; 6] = [0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0E];
+        let immediate_comparisons = [
+            TrapComparison::GreaterThanOrEqualSigned,
+            TrapComparison::GreaterThanOrEqualUnsigned,
+            TrapComparison::LessThanSigned,
+            TrapComparison::LessThanUnsigned,
+            TrapComparison::Equal,
+            TrapComparison::NotEqual,
+        ];
+        let immediate_stream = immediate_selectors
+            .iter()
+            .enumerate()
+            .map(|(index, selector)| {
+                decoded(
+                    (0x01 << 26) | (8 << 21) | (u32::from(*selector) << 16) | 0xFFFE,
+                    0xA100 + index as u32 * 4,
+                )
+            })
+            .collect::<Vec<_>>();
+        let immediate_program = lift(&immediate_stream).expect("immediate trap IR");
+        for (index, comparison) in immediate_comparisons.into_iter().enumerate() {
+            assert!(matches!(
+                immediate_program.instructions()[index].operation,
+                Operation::ConditionalTrap {
+                    lhs,
+                    rhs: TrapOperand::SignedImmediate(-2),
+                    comparison: actual,
+                } if lhs.index() == 8 && actual == comparison
+            ));
+        }
     }
 
     #[test]

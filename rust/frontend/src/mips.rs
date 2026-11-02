@@ -13,6 +13,18 @@ pub enum Opcode {
     Jalr,
     Syscall,
     Break,
+    Teq,
+    Tne,
+    Tge,
+    Tgeu,
+    Tlt,
+    Tltu,
+    Teqi,
+    Tnei,
+    Tgei,
+    Tgeiu,
+    Tlti,
+    Tltiu,
     Mfhi,
     Mthi,
     Mflo,
@@ -265,6 +277,18 @@ impl Opcode {
             Self::Jalr => "jalr",
             Self::Syscall => "syscall",
             Self::Break => "break",
+            Self::Teq => "teq",
+            Self::Tne => "tne",
+            Self::Tge => "tge",
+            Self::Tgeu => "tgeu",
+            Self::Tlt => "tlt",
+            Self::Tltu => "tltu",
+            Self::Teqi => "teqi",
+            Self::Tnei => "tnei",
+            Self::Tgei => "tgei",
+            Self::Tgeiu => "tgeiu",
+            Self::Tlti => "tlti",
+            Self::Tltiu => "tltiu",
             Self::Mfhi => "mfhi",
             Self::Mthi => "mthi",
             Self::Mflo => "mflo",
@@ -974,6 +998,20 @@ impl Instruction {
                 effects.may_raise_exception = true;
             }
 
+            Opcode::Teq | Opcode::Tne | Opcode::Tge | Opcode::Tgeu | Opcode::Tlt | Opcode::Tltu => {
+                effects.gpr_read_mask = rs | rt;
+                effects.may_raise_exception = true;
+            }
+            Opcode::Teqi
+            | Opcode::Tnei
+            | Opcode::Tgei
+            | Opcode::Tgeiu
+            | Opcode::Tlti
+            | Opcode::Tltiu => {
+                effects.gpr_read_mask = rs;
+                effects.may_raise_exception = true;
+            }
+
             // SYNC is a memory barrier. It has no data-flow effects that the
             // static compiler needs to track, but it acts as a scheduling
             // fence.
@@ -1174,6 +1212,13 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x09 if rt == 0 && shift_amount == 0 => Opcode::Jalr,
             0x0C => Opcode::Syscall,
             0x0D => Opcode::Break,
+            // SPECIAL trap forms use bits 15..6 as an optional 10-bit code field.
+            0x30 => Opcode::Tge,
+            0x31 => Opcode::Tgeu,
+            0x32 => Opcode::Tlt,
+            0x33 => Opcode::Tltu,
+            0x34 => Opcode::Teq,
+            0x36 => Opcode::Tne,
             0x10 if rs == 0 && rt == 0 && shift_amount == 0 => Opcode::Mfhi,
             0x11 if rt == 0 && rd == 0 && shift_amount == 0 => Opcode::Mthi,
             0x12 if rs == 0 && rt == 0 && shift_amount == 0 => Opcode::Mflo,
@@ -1236,6 +1281,12 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                     0x01 => Opcode::Bgez,
                     0x02 => Opcode::Bltzl,
                     0x03 => Opcode::Bgezl,
+                    0x08 => Opcode::Tgei,
+                    0x09 => Opcode::Tgeiu,
+                    0x0A => Opcode::Tlti,
+                    0x0B => Opcode::Tltiu,
+                    0x0C => Opcode::Teqi,
+                    0x0E => Opcode::Tnei,
                     0x10 => Opcode::Bltzal,
                     0x11 => Opcode::Bgezal,
                     0x12 => Opcode::Bltzall,
@@ -1408,6 +1459,53 @@ mod tests {
         let max_code = decode(0x03FF_FFCD, 0x1000);
         assert_eq!(max_code.opcode, Opcode::Break);
         assert_eq!(max_code.trap_code(), 0x000F_FFFF);
+    }
+
+    #[test]
+    fn decodes_all_r5900_conditional_traps_and_optional_code_fields() {
+        let register_cases = [
+            ((8 << 21) | (9 << 16) | (0x155 << 6) | 0x30, Opcode::Tge),
+            ((8 << 21) | (9 << 16) | (0x2AA << 6) | 0x31, Opcode::Tgeu),
+            ((8 << 21) | (9 << 16) | (0x155 << 6) | 0x32, Opcode::Tlt),
+            ((8 << 21) | (9 << 16) | (0x2AA << 6) | 0x33, Opcode::Tltu),
+            ((8 << 21) | (9 << 16) | (0x155 << 6) | 0x34, Opcode::Teq),
+            ((8 << 21) | (9 << 16) | (0x2AA << 6) | 0x36, Opcode::Tne),
+        ];
+        for (word, expected) in register_cases {
+            let instruction = decode(word, 0xA000);
+            assert_eq!(instruction.opcode, expected, "word 0x{word:08X}");
+            assert_eq!((instruction.rs, instruction.rt), (8, 9));
+            assert_eq!((instruction.raw >> 6) & 0x3FF, (word >> 6) & 0x3FF);
+            assert!(!instruction.has_delay_slot);
+            assert!(!instruction.is_control_transfer());
+            let effects = instruction.effects();
+            assert_eq!(effects.gpr_read_mask, (1 << 8) | (1 << 9));
+            assert_eq!(effects.gpr_write_mask, 0);
+            assert!(effects.may_raise_exception);
+        }
+
+        let immediate_cases = [
+            (0x08, Opcode::Tgei),
+            (0x09, Opcode::Tgeiu),
+            (0x0A, Opcode::Tlti),
+            (0x0B, Opcode::Tltiu),
+            (0x0C, Opcode::Teqi),
+            (0x0E, Opcode::Tnei),
+        ];
+        for (selector, expected) in immediate_cases {
+            let word = (0x01 << 26) | (8 << 21) | (selector << 16) | 0xFFFE;
+            let instruction = decode(word, 0xA100);
+            assert_eq!(instruction.opcode, expected, "selector 0x{selector:02X}");
+            assert_eq!(instruction.rs, 8);
+            assert_eq!(instruction.immediate, 0xFFFE);
+            assert_eq!(instruction.signed_immediate(), -2);
+            assert!(!instruction.has_delay_slot);
+            assert!(!instruction.is_control_transfer());
+            let effects = instruction.effects();
+            assert_eq!(effects.gpr_read_mask, 1 << 8);
+            assert_eq!(effects.gpr_write_mask, 0);
+            assert!(effects.may_raise_exception);
+        }
     }
 
     #[test]
