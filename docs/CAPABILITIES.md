@@ -12,7 +12,7 @@ Detailed status and capability list, moved out of the README. The roadmap in [RO
 
 - Inspect raw 2048-byte-sector ISO 9660 images without loading the entire disc; validate the descriptor sequence and single-volume PVD, list root entries, resolve nested paths, and parse SYSTEM.CNF with BOOT2 preferred over BOOT.
 - Extract the SYSTEM.CNF boot target only after validating it as a MIPS ET_EXEC ELF; use create-new output semantics so an existing file or source image is never overwritten.
-- Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries.
+- Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries; preserve EI_OSABI/EI_ABIVERSION and diagnose common file-type and machine identifiers.
 - Validate file-backed ranges, table bounds, leading/trailing null bytes in non-empty string tables, the required SHT_NULL section zero, symbol-table local/global partitioning, regular symbol section indices, relocation symbol/target links, entry sizes, address overflow, and parser resource limits.
 - Decode MIPS e_flags diagnostically: report the CPU subtype, ABI and ISA-level fields, recognized feature bits and any unclassified bits. The R5900 CPU marker is exposed without treating a header flag alone as proof of title compatibility.
 - Preserve ELF special symbol section indices such as SHN_ABS/SHN_COMMON and resolve SHN_XINDEX through a validated SHT_SYMTAB_SHNDX table. Resolve e_shnum/e_shstrndx and PN_XNUM extended values through section-header zero, with configurable section and program-header count limits.
@@ -39,7 +39,7 @@ Detailed status and capability list, moved out of the README. The roadmap in [RO
 - Perform checked byte/halfword/word/doubleword accesses without unaligned pointer casts; doubleword transfers require 8-byte alignment; report address errors, unmapped ranges, and unimplemented device/MMIO accesses as distinct statuses.
 - Materialize eligible ET_EXEC PT_LOAD segments into a 32 MiB initial EE RAM image, including zero-filled BSS and supported RAM aliases; reject physical alias overlap and out-of-RAM segments.
 - Emit a generated initialize_ee_state entry-point wrapper that installs the companion RAM image into caller-owned EE RAM and sets the ELF entry PC.
-- Reject ET_DYN/relocatable ELFs and relocations targeting allocated sections until a verified relocation engine is implemented.
+- Inspect ET_REL/ET_DYN metadata without rejecting it at parse time; the default EE initial RAM image builder still rejects non-ET_EXEC inputs and allocated relocations until a verified relocation/dynamic loader is implemented.
 - Lift a supported straight-line instruction subset into typed Rust IR with guest-PC provenance and verification.
 - Emit deterministic C++20 for supported scalar operations: NOP, ADD/ADDI/ADDU/ADDIU, SUB/SUBU, AND/OR/XOR, immediate logical operations, LUI, and word shifts.
 - Keep a 128-bit EE GPR state shape in the runtime ABI; scalar instructions update only the low 64-bit lane and preserve the high lane.
