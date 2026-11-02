@@ -2228,7 +2228,7 @@ mod tests {
             reginfo.coprocessor_masks,
             [0x0000_0000, 0x1234_5678, 0x0000_0000, 0x8000_0000]
         );
-        assert_eq!(reginfo.gp_value, 0x8012_3400u32 as i32);
+        assert_eq!(reginfo.gp_value, i32::from_ne_bytes(0x8012_3400u32.to_ne_bytes()));
     }
 
     #[test]
