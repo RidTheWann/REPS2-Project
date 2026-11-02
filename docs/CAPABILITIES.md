@@ -22,7 +22,7 @@ Detailed status and capability list, moved out of the README. The roadmap in [RO
 - Decode, lift and AOT-lower trapping 64-bit DADD, DSUB and DADDI with defined overflow checks; preserve destination atomicity, GPR[0] trap behavior and upper-lane state.
 - Discover entry points and STT_FUNC roots, then build a reachability-guided CFG for the currently supported control-transfer subset.
 - Recover function-entry candidates in stripped executables with opt-in `--discover`: `JAL` targets backed by executable file bytes and canonical `addiu $sp, $sp, -N` prologues. Candidates are labeled and are not reachability claims; heuristic-only blocks that cannot decode are skipped and reported, while authoritative roots still fail hard.
-- Preserve control instructions and delay slots as explicit terminators; record direct taken/fallthrough/call/return-continuation edges and unresolved indirect targets.
+- Preserve control instructions and delay slots as explicit terminators; record direct taken/fallthrough/call/return-continuation edges and unresolved indirect targets. SYSCALL/BREAK in an executed delay slot enter the Level-1 exception vector with EPC pointing at the owning branch and Cause.BD set; branch-likely annulment suppresses the exception when the branch is not taken.
 - Read executable instructions only from file-backed PT_LOAD bytes; zero-filled BSS is never misinterpreted as code.
 - Lift discovered blocks into a CFG-aware typed IR with explicit fallthroughs, branch conditions, direct/indirect jumps, returns, and delay-slot operations.
 - Lower the supported CFG subset to a C++20 PC dispatcher; preserve branch/link/delay-slot ordering and stop explicitly at unsupported operations or unmapped control flow.
