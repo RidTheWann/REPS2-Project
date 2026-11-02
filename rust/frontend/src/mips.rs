@@ -121,6 +121,7 @@ pub enum Opcode {
     ParallelAddHalfword,
     ParallelSubHalfword,
     ParallelAddUnsignedWord,
+    ParallelCopyLowDoubleword,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
     MoveToFpuRegister,
@@ -389,6 +390,7 @@ impl Opcode {
             Self::ParallelAddHalfword => "paddh",
             Self::ParallelSubHalfword => "psubh",
             Self::ParallelAddUnsignedWord => "padduw",
+            Self::ParallelCopyLowDoubleword => "pcpyld",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
             Self::MoveToFpuRegister => "mtc1",
@@ -849,7 +851,8 @@ impl Instruction {
             | Opcode::ParallelSubWord
             | Opcode::ParallelAddHalfword
             | Opcode::ParallelSubHalfword
-            | Opcode::ParallelAddUnsignedWord => {
+            | Opcode::ParallelAddUnsignedWord
+            | Opcode::ParallelCopyLowDoubleword => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
@@ -1376,6 +1379,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x01 => Opcode::ParallelSubWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x04 => Opcode::ParallelAddHalfword,
                 0x08 if ((word >> 6) & 0x1F) == 0x05 => Opcode::ParallelSubHalfword,
+                0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
@@ -1703,6 +1707,42 @@ mod tests {
         assert_eq!(decode(mmi0, 0).opcode, Opcode::Unknown);
         let other_mmi1 = (word & !(0x1F << 6)) | (0x11 << 6);
         assert_eq!(decode(other_mmi1, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi2_pcpyld_and_rejects_other_selectors() {
+        // PCPYLD is MMI2 (low six bits 0x09) with operation selector 0x0E in
+        // bits 10..6. It has no reserved register fields.
+        let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x0E << 6) | 0x09;
+        let decoded = decode(word, 0x7000);
+        assert_eq!(decoded.opcode, Opcode::ParallelCopyLowDoubleword);
+        assert_eq!(decoded.opcode.mnemonic(), "pcpyld");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+        assert_eq!(encoding_family(word), EncodingFamily::Mmi2);
+        assert!(!decoded.has_delay_slot);
+        assert!(!decoded.is_control_transfer());
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.reads_sa);
+        assert!(!effects.writes_sa);
+        assert!(!effects.may_raise_exception);
+        assert!(!effects.unknown);
+
+        // Selector 0x0E also names MMI3 PCPYUD, so the group selector must
+        // stay part of the match. The same selector in MMI0 or MMI1 and a
+        // neighboring MMI2 selector must also stay unknown.
+        for other_group in [0x08, 0x28, 0x29] {
+            let word = (word & !0x3F) | other_group;
+            assert_eq!(
+                decode(word, 0).opcode,
+                Opcode::Unknown,
+                "funct 0x{other_group:02X}"
+            );
+        }
+        let other_mmi2 = (word & !(0x1F << 6)) | (0x0F << 6);
+        assert_eq!(decode(other_mmi2, 0).opcode, Opcode::Unknown);
     }
 
     #[test]
