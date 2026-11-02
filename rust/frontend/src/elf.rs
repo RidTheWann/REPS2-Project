@@ -371,7 +371,9 @@ fn parse_symbols(
         let local_symbol_end = usize::try_from(section.info)
             .map_err(|_| Error::new("ELF local-symbol boundary does not fit host size"))?;
         if count == 0 || local_symbol_end == 0 || local_symbol_end > count {
-            return Err(Error::new("ELF symbol table has an invalid local-symbol boundary"));
+            return Err(Error::new(
+                "ELF symbol table has an invalid local-symbol boundary",
+            ));
         }
         if count > limits.max_symbols.saturating_sub(symbols.len()) {
             return Err(Error::new(
@@ -401,9 +403,7 @@ fn parse_symbols(
                     "Extended ELF symbol section indices are not supported yet",
                 ));
             }
-            if symbol_section < SHN_LORESERVE
-                && usize::from(symbol_section) >= sections.len()
-            {
+            if symbol_section < SHN_LORESERVE && usize::from(symbol_section) >= sections.len() {
                 return Err(Error::new("ELF symbol references an invalid section index"));
             }
             let binding = info >> 4;
@@ -733,7 +733,10 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
                 read_string(name_data, section.name_offset, "ELF section name")?
             };
         }
-    } else if section_headers.iter().any(|section| section.name_offset != 0) {
+    } else if section_headers
+        .iter()
+        .any(|section| section.name_offset != 0)
+    {
         return Err(Error::new(
             "ELF section names are present but no section-name string table is declared",
         ));
@@ -1247,7 +1250,11 @@ mod tests {
         let symbol_table_header = 52 + 3 * SECTION_HEADER_SIZE;
 
         let mut bad_section_index = seed.clone();
-        put_u16(&mut bad_section_index, symbol_table_offset + SYMBOL_SIZE + 14, 6);
+        put_u16(
+            &mut bad_section_index,
+            symbol_table_offset + SYMBOL_SIZE + 14,
+            6,
+        );
         assert!(parse(&bad_section_index, ParseLimits::default()).is_err());
 
         let mut special_section_index = seed.clone();
@@ -1265,7 +1272,11 @@ mod tests {
         assert!(parse(&boundary_out_of_range, ParseLimits::default()).is_err());
 
         let mut boundary_misclassifies_global = seed;
-        put_u32(&mut boundary_misclassifies_global, symbol_table_header + 28, 2);
+        put_u32(
+            &mut boundary_misclassifies_global,
+            symbol_table_header + 28,
+            2,
+        );
         assert!(parse(&boundary_misclassifies_global, ParseLimits::default()).is_err());
     }
 
