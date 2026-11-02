@@ -759,6 +759,17 @@ inline void disable_interrupts(EeState& state) noexcept {
     };
 }
 
+// PCPYLD builds a 128-bit value from the low doubleword of each source:
+// result.low is rt.low (the second operand) and result.high is rs.low (the
+// first operand). The value is formed before assignment, so a destination that
+// aliases either source observes the complete result.
+[[nodiscard]] constexpr Gpr128 parallel_copy_low_doubleword(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    return Gpr128{rhs.low, lhs.low};
+}
+
 // QFSRV shifts the 256-bit funnel formed by GPR[rs]:GPR[rt] right by the SA
 // bit count and keeps the low 128 bits, so result bit i is funnel bit i + sa.
 // Counts above 127 therefore still draw bits from the rs operand.

@@ -56,3 +56,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0049](0049-ee-mmi0-parallel-word-add-sub.md) | EE MMI0 PADDW/PSUBW modulo lane arithmetic | Accepted |
 | [0050](0050-ee-mmi0-parallel-halfword-add-sub.md) | EE MMI0 PADDH/PSUBH modulo lane arithmetic | Accepted |
 | [0051](0051-elf-empty-symbol-table.md) | Accept empty ELF symbol tables | Accepted |
+| [0052](0052-ee-mmi2-pcpyld.md) | EE MMI2 PCPYLD low-doubleword copy | Accepted |
