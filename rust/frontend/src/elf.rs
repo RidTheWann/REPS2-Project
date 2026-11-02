@@ -187,6 +187,17 @@ pub struct MipsRegInfo {
     pub gp_value: i32,
 }
 
+/// MIPS register-use metadata decoded from a PT_MIPS_REGINFO program header.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MipsRegInfoSegment {
+    pub program_header_index: usize,
+    pub file_offset: u32,
+    pub virtual_address: u32,
+    pub gpr_mask: u32,
+    pub coprocessor_masks: [u32; 4],
+    pub gp_value: i32,
+}
+
 /// Register metadata carried by an ODK_REGINFO SHT_MIPS_OPTIONS descriptor.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MipsOptionRegInfo {
@@ -392,6 +403,65 @@ pub struct MipsAbiFlags {
     pub version_zero: Option<MipsAbiFlagsV0>,
 }
 
+fn parse_mips_reginfo_segments(
+    bytes: &[u8],
+    machine: u16,
+    program_headers: &[ProgramHeader],
+) -> Result<Vec<MipsRegInfoSegment>, Error> {
+    if machine != EM_MIPS {
+        return Ok(Vec::new());
+    }
+
+    let mut result = Vec::new();
+    let mut saw_loadable_segment = false;
+    for (program_header_index, header) in program_headers.iter().enumerate() {
+        if header.kind == PT_LOAD {
+            saw_loadable_segment = true;
+            continue;
+        }
+        if header.kind != PT_MIPS_REGINFO {
+            continue;
+        }
+        if !result.is_empty() {
+            return Err(Error::new(
+                "ELF contains more than one PT_MIPS_REGINFO program header",
+            ));
+        }
+        if saw_loadable_segment {
+            return Err(Error::new(
+                "PT_MIPS_REGINFO must precede every PT_LOAD program header",
+            ));
+        }
+        if header.file_size != MIPS_REGINFO_SIZE as u32 {
+            return Err(Error::new(
+                "PT_MIPS_REGINFO must identify one 24-byte ELF32_RegInfo record",
+            ));
+        }
+
+        let range = checked_range(
+            bytes,
+            u64::from(header.offset),
+            u64::from(header.file_size),
+            "PT_MIPS_REGINFO segment",
+        )?;
+        let data = &bytes[range];
+        result.push(MipsRegInfoSegment {
+            program_header_index,
+            file_offset: header.offset,
+            virtual_address: header.virtual_address,
+            gpr_mask: read_u32(data, 0)?,
+            coprocessor_masks: [
+                read_u32(data, 4)?,
+                read_u32(data, 8)?,
+                read_u32(data, 12)?,
+                read_u32(data, 16)?,
+            ],
+            gp_value: read_i32(data, 20)?,
+        });
+    }
+    Ok(result)
+}
+
 /// Diagnostic interpretation of the MIPS-specific e_flags word.
 ///
 /// Unknown field values and unclassified bits are retained. This object is
@@ -528,6 +598,8 @@ pub struct Image {
     pub relocations: Vec<Relocation>,
     /// MIPS register masks and $gp values decoded from SHT_MIPS_REGINFO.
     pub mips_reginfo: Vec<MipsRegInfo>,
+    /// Register-use metadata decoded from PT_MIPS_REGINFO program headers.
+    pub mips_reginfo_segments: Vec<MipsRegInfoSegment>,
     /// MIPS ISA, register-size and FP ABI metadata decoded from SHT_MIPS_ABIFLAGS.
     pub mips_abi_flags: Vec<MipsAbiFlags>,
     /// Variable-length MIPS option descriptors decoded from SHT_MIPS_OPTIONS.
@@ -1477,6 +1549,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         program_headers.push(header);
     }
 
+    let mips_reginfo_segments = parse_mips_reginfo_segments(bytes, machine, &program_headers)?;
+
     let mut section_headers = Vec::with_capacity(section_count_host);
     for index in 0..section_count_host {
         let base = usize::try_from(section_offset)
@@ -1598,6 +1672,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         symbols,
         relocations,
         mips_reginfo,
+        mips_reginfo_segments,
         mips_abi_flags,
         mips_options,
     })
@@ -2002,6 +2077,74 @@ mod tests {
                 entry_size: 0,
             },
         );
+        bytes
+    }
+
+    fn elf_with_mips_reginfo_program_headers(
+        reginfo_after_load: bool,
+        duplicate_reginfo: bool,
+    ) -> Vec<u8> {
+        let program_header_count = if duplicate_reginfo { 3usize } else { 2usize };
+        let program_header_table_end = ELF_HEADER_SIZE + program_header_count * PROGRAM_HEADER_SIZE;
+        let reginfo_offset = program_header_table_end;
+        let load_offset = reginfo_offset + MIPS_REGINFO_SIZE;
+        let mut bytes = vec![0; load_offset + 4];
+
+        bytes[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 24, 0x0010_0000);
+        put_u32(&mut bytes, 28, ELF_HEADER_SIZE as u32);
+        put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 42, PROGRAM_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 44, program_header_count as u16);
+
+        let mut reginfo = vec![0; MIPS_REGINFO_SIZE];
+        put_u32(&mut reginfo, 0, 0x8000_0002);
+        put_u32(&mut reginfo, 4, 0x0000_0001);
+        put_u32(&mut reginfo, 8, 0x1234_5678);
+        put_u32(&mut reginfo, 12, 0x0000_0004);
+        put_u32(&mut reginfo, 16, 0x8000_0000);
+        put_u32(&mut reginfo, 20, 0x8012_3400);
+        bytes[reginfo_offset..load_offset].copy_from_slice(&reginfo);
+        bytes[load_offset..load_offset + 4].copy_from_slice(&[0, 0, 0, 0]);
+
+        let write_reginfo_header = |bytes: &mut [u8], index: usize| {
+            let base = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
+            put_u32(bytes, base, PT_MIPS_REGINFO);
+            put_u32(bytes, base + 4, reginfo_offset as u32);
+            put_u32(bytes, base + 16, MIPS_REGINFO_SIZE as u32);
+            put_u32(bytes, base + 20, MIPS_REGINFO_SIZE as u32);
+            put_u32(bytes, base + 28, 4);
+        };
+        let write_load_header = |bytes: &mut [u8], index: usize| {
+            let base = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
+            put_u32(bytes, base, PT_LOAD);
+            put_u32(bytes, base + 4, load_offset as u32);
+            put_u32(bytes, base + 8, 0x0010_0000);
+            put_u32(bytes, base + 12, 0x0010_0000);
+            put_u32(bytes, base + 16, 4);
+            put_u32(bytes, base + 20, 4);
+            put_u32(bytes, base + 24, PF_R | PF_X);
+            put_u32(bytes, base + 28, 4);
+        };
+
+        if reginfo_after_load {
+            write_load_header(&mut bytes, 0);
+            write_reginfo_header(&mut bytes, 1);
+        } else {
+            write_reginfo_header(&mut bytes, 0);
+            if duplicate_reginfo {
+                write_reginfo_header(&mut bytes, 1);
+                write_load_header(&mut bytes, 2);
+            } else {
+                write_load_header(&mut bytes, 1);
+            }
+        }
         bytes
     }
 
@@ -2532,6 +2675,77 @@ mod tests {
     }
 
     #[test]
+    fn parses_pt_mips_reginfo_payload_before_loadable_segments() {
+        let bytes = elf_with_mips_reginfo_program_headers(false, false);
+        let image = parse(&bytes, ParseLimits::default()).expect("PT_MIPS_REGINFO ELF");
+        assert_eq!(image.mips_reginfo_segments.len(), 1);
+
+        let reginfo = &image.mips_reginfo_segments[0];
+        assert_eq!(reginfo.program_header_index, 0);
+        assert_eq!(
+            reginfo.file_offset as usize,
+            ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE
+        );
+        assert_eq!(reginfo.virtual_address, 0);
+        assert_eq!(reginfo.gpr_mask, 0x8000_0002);
+        assert_eq!(
+            reginfo.coprocessor_masks,
+            [0x0000_0001, 0x1234_5678, 0x0000_0004, 0x8000_0000]
+        );
+        assert_eq!(reginfo.gp_value, 0x8012_3400u32 as i32);
+    }
+
+    #[test]
+    fn rejects_duplicate_late_and_malformed_pt_mips_reginfo_segments() {
+        let duplicate = elf_with_mips_reginfo_program_headers(false, true);
+        let duplicate_error =
+            parse(&duplicate, ParseLimits::default()).expect_err("PT_MIPS_REGINFO is unique");
+        assert!(
+            duplicate_error
+                .to_string()
+                .contains("more than one PT_MIPS_REGINFO")
+        );
+
+        let late = elf_with_mips_reginfo_program_headers(true, false);
+        let late_error =
+            parse(&late, ParseLimits::default()).expect_err("REGINFO precedes PT_LOAD");
+        assert!(
+            late_error
+                .to_string()
+                .contains("must precede every PT_LOAD")
+        );
+
+        let mut short = elf_with_mips_reginfo_program_headers(false, false);
+        let first_header = ELF_HEADER_SIZE;
+        put_u32(
+            &mut short,
+            first_header + 16,
+            (MIPS_REGINFO_SIZE - 1) as u32,
+        );
+        let short_error =
+            parse(&short, ParseLimits::default()).expect_err("REGINFO is exactly 24 bytes");
+        assert!(
+            short_error
+                .to_string()
+                .contains("one 24-byte ELF32_RegInfo")
+        );
+    }
+
+    #[test]
+    fn ignores_mips_reginfo_program_header_payload_for_non_mips_objects() {
+        let mut bytes = elf_with_mips_reginfo_program_headers(false, false);
+        put_u16(&mut bytes, 18, 3); // EM_386
+        put_u32(
+            &mut bytes,
+            ELF_HEADER_SIZE + 16,
+            1, // Deliberately not an ELF32_RegInfo-sized payload.
+        );
+        let image = parse(&bytes, ParseLimits::default())
+            .expect("non-MIPS ELF leaves PT_MIPS_REGINFO opaque");
+        assert!(image.mips_reginfo_segments.is_empty());
+    }
+
+    #[test]
     fn parses_mips_options_descriptors_and_elf32_reginfo_payload() {
         let bytes = elf_with_mips_options();
         let image = parse(&bytes, ParseLimits::default()).expect("MIPS options fixture");
@@ -3014,6 +3228,7 @@ mod tests {
             symbols: Vec::new(),
             relocations: Vec::new(),
             mips_reginfo: Vec::new(),
+            mips_reginfo_segments: Vec::new(),
             mips_abi_flags: Vec::new(),
             mips_options: Vec::new(),
         };

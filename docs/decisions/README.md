@@ -49,3 +49,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0042](0042-elf-identification-and-type-diagnostics.md) | ELF OS ABI, ABI version, and object-type diagnostics | Accepted |
 | [0043](0043-mips-reginfo-and-abiflags.md) | MIPS .reginfo and .MIPS.abiflags metadata diagnostics | Accepted |
 | [0044](0044-mips-options-section-diagnostics.md) | MIPS SHT_MIPS_OPTIONS descriptor diagnostics | Accepted |
+| [0045](0045-mips-pt-reginfo-segment-diagnostics.md) | MIPS PT_MIPS_REGINFO program-header diagnostics | Accepted |

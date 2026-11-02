@@ -83,9 +83,10 @@ ambiguous instead of returning multiple potentially conflicting ABI records.
 ### 3. Keep format recognition separate from admission policy
 
 The metadata is interpreted only for EM_MIPS files. An absent .reginfo section
-is not a parse error. The MIPS ABI supplement specifies PT_MIPS_REGINFO
-uniqueness/ordering for its executable/shared-object ABI, but REPS2 reports
-the number of such headers rather than enforcing that requirement globally.
+or PT_MIPS_REGINFO segment is not a parse error. When a PT_MIPS_REGINFO
+segment is present, REPS2 decodes its single 24-byte ELF32_RegInfo payload,
+rejects duplicates, and requires the segment to precede PT_LOAD. It does not
+make the segment's presence a universal acceptance gate.
 
 This is deliberate: PS2SDK's EE ERL documentation shows a relocatable-module
 workflow where .reginfo is removed. REPS2 is still cataloguing real toolchain
