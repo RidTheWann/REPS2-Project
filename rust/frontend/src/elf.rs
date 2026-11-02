@@ -1732,8 +1732,7 @@ mod tests {
             usize::try_from(read_u32(&original, 32).expect("section-header offset"))
                 .expect("section-header offset fits host size");
         let section_count = usize::try_from(
-            read_u32(&original, original_section_offset + 20)
-                .expect("extended section count"),
+            read_u32(&original, original_section_offset + 20).expect("extended section count"),
         )
         .expect("extended section count fits host size");
         let program_table_bytes = PN_XNUM as usize * PROGRAM_HEADER_SIZE;
@@ -1756,8 +1755,7 @@ mod tests {
 
         for index in 0..section_count {
             let original_header = original_section_offset + index * SECTION_HEADER_SIZE;
-            let section_kind =
-                read_u32(&original, original_header + 4).expect("section kind");
+            let section_kind = read_u32(&original, original_header + 4).expect("section kind");
             if section_kind == SHT_NULL || section_kind == SHT_NOBITS {
                 continue;
             }
@@ -1777,11 +1775,7 @@ mod tests {
 
         // The null section header now carries all three independent extended
         // values: sh_size (e_shnum), sh_link (e_shstrndx), and sh_info (e_phnum).
-        put_u32(
-            &mut bytes,
-            shifted_section_offset + 28,
-            u32::from(PN_XNUM),
-        );
+        put_u32(&mut bytes, shifted_section_offset + 28, u32::from(PN_XNUM));
         bytes
     }
 
@@ -1814,8 +1808,7 @@ mod tests {
     #[test]
     fn resolves_all_extended_numbering_fields_together() {
         let bytes = elf_with_all_extended_numbering_fields();
-        let image =
-            parse(&bytes, ParseLimits::default()).expect("combined extended-numbering ELF");
+        let image = parse(&bytes, ParseLimits::default()).expect("combined extended-numbering ELF");
 
         assert_eq!(image.program_headers.len(), PN_XNUM as usize);
         assert_eq!(image.section_headers.len(), 0xFF02);
