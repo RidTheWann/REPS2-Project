@@ -116,6 +116,8 @@ pub enum Opcode {
     Sd,
     Lq,
     Sq,
+    ParallelAddWord,
+    ParallelSubWord,
     ParallelAddUnsignedWord,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
@@ -380,6 +382,8 @@ impl Opcode {
             Self::Sd => "sd",
             Self::Lq => "lq",
             Self::Sq => "sq",
+            Self::ParallelAddWord => "paddw",
+            Self::ParallelSubWord => "psubw",
             Self::ParallelAddUnsignedWord => "padduw",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
@@ -837,7 +841,7 @@ impl Instruction {
             Opcode::Lui => {
                 effects.gpr_write_mask = rt;
             }
-            Opcode::ParallelAddUnsignedWord => {
+            Opcode::ParallelAddWord | Opcode::ParallelSubWord | Opcode::ParallelAddUnsignedWord => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
@@ -1360,6 +1364,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x1A => Opcode::Ldl,
             0x1B => Opcode::Ldr,
             0x1C => match (word & 0x3F) as u8 {
+                0x08 if ((word >> 6) & 0x1F) == 0x00 => Opcode::ParallelAddWord,
+                0x08 if ((word >> 6) & 0x1F) == 0x01 => Opcode::ParallelSubWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
@@ -1631,6 +1637,33 @@ mod tests {
         for (word, expected) in cases {
             assert_eq!(decode(word, 0x6000).opcode, expected, "word 0x{word:08X}");
         }
+    }
+
+    #[test]
+    fn decodes_r5900_mmi0_parallel_word_add_and_subtract() {
+        for (selector, expected, mnemonic) in [
+            (0x00, Opcode::ParallelAddWord, "paddw"),
+            (0x01, Opcode::ParallelSubWord, "psubw"),
+        ] {
+            let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (selector << 6) | 0x08;
+            let decoded = decode(word, 0x6F00);
+            assert_eq!(decoded.opcode, expected);
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+            assert_eq!(encoding_family(word), EncodingFamily::Mmi0);
+            assert!(!decoded.has_delay_slot);
+            assert!(!decoded.is_control_transfer());
+            let effects = decoded.effects();
+            assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+            assert_eq!(effects.gpr_write_mask, 1 << 3);
+            assert!(!effects.may_raise_exception);
+            assert!(!effects.unknown);
+        }
+
+        let base = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11);
+        assert_eq!(decode(base | (2 << 6) | 0x08, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(base | 0x09, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(base | 0x28, 0).opcode, Opcode::Unknown);
     }
 
     #[test]
