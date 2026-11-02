@@ -53,3 +53,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0046](0046-mips-pt-abiflags-segment-diagnostics.md) | MIPS PT_MIPS_ABIFLAGS program-header diagnostics | Accepted |
 | [0047](0047-ee-instruction-fetch-address-error.md) | EE instruction-fetch address error on misaligned PCs | Accepted |
 | [0048](0048-ee-conditional-trap-instructions.md) | EE conditional trap instruction lowering and precise exceptions | Accepted |
+| [0049](0049-ee-mmi0-parallel-word-add-sub.md) | EE MMI0 PADDW/PSUBW modulo lane arithmetic | Accepted |
