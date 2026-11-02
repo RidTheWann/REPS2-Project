@@ -28,6 +28,24 @@ const SHN_LORESERVE: u16 = 0xFF00;
 const SHN_XINDEX: u16 = 0xFFFF;
 const RELA_SIZE: usize = 12;
 
+// MIPS ELF e_flags fields (processor-specific).
+const EF_MIPS_NOREORDER: u32 = 0x0000_0001;
+const EF_MIPS_PIC: u32 = 0x0000_0002;
+const EF_MIPS_CPIC: u32 = 0x0000_0004;
+const EF_MIPS_XGOT: u32 = 0x0000_0008;
+const EF_MIPS_64BIT_WHIRL: u32 = 0x0000_0010;
+const EF_MIPS_ABI2: u32 = 0x0000_0020;
+const EF_MIPS_ABI_ON32: u32 = 0x0000_0040;
+const EF_MIPS_OPTIONS_FIRST: u32 = 0x0000_0080;
+const EF_MIPS_32BITMODE: u32 = 0x0000_0100;
+const EF_MIPS_FP64: u32 = 0x0000_0200;
+const EF_MIPS_NAN2008: u32 = 0x0000_0400;
+const EF_MIPS_FEATURE_MASK: u32 = 0x0000_07FF;
+const EF_MIPS_ABI_MASK: u32 = 0x0000_F000;
+const EF_MIPS_CPU_MASK: u32 = 0x00FF_0000;
+const EF_MIPS_ARCH_MASK: u32 = 0xF000_0000;
+
+
 /// Limits untrusted ELF-derived allocations and table processing.
 #[derive(Clone, Copy, Debug)]
 pub struct ParseLimits {
@@ -124,6 +142,125 @@ pub struct Relocation {
     pub symbol_table_section_index: usize,
 }
 
+/// Diagnostic interpretation of the MIPS-specific e_flags word.
+///
+/// Unknown field values and unclassified bits are retained. This object is
+/// informational only: it does not accept/reject a target or imply that every
+/// flag is implemented by the REPS2 execution model.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MipsElfFlags {
+    pub raw: u32,
+    /// Eight-bit processor subtype stored in bits 23..16.
+    pub cpu_code: u8,
+    /// Four-bit MIPS ABI identifier stored in bits 15..12.
+    pub abi_code: u16,
+    /// Four-bit MIPS architecture level stored in bits 31..28.
+    pub architecture_code: u8,
+    /// Named low-order feature flags.
+    pub features: u32,
+    /// Bits not classified by this parser; never silently discarded.
+    pub unknown_bits: u32,
+}
+
+impl MipsElfFlags {
+    #[must_use]
+    pub const fn cpu_name(self) -> &'static str {
+        match self.cpu_code {
+            0x00 => "generic MIPS",
+            0x81 => "R3900",
+            0x82 => "R4010",
+            0x83 => "R4100",
+            0x85 => "R4650",
+            0x87 => "R4120",
+            0x88 => "R4111",
+            0x8A => "SB-1",
+            0x8B => "Octeon",
+            0x8C => "XLR",
+            0x8D => "Octeon2",
+            0x8E => "Octeon3",
+            0x91 => "R5400",
+            0x92 => "R5900",
+            0x93 => "IAMR2",
+            0x98 => "R5500",
+            0x99 => "R9000",
+            0xA0 => "Loongson 2E",
+            0xA1 => "Loongson 2F",
+            0xA2 => "GS464",
+            0xA3 => "GS464E",
+            0xA4 => "GS264E",
+            _ => "unrecognized",
+        }
+    }
+
+    #[must_use]
+    pub const fn abi_name(self) -> &'static str {
+        match self.abi_code {
+            0x0000 => "unspecified",
+            0x1000 => "O32",
+            0x2000 => "O64",
+            0x3000 => "EABI32",
+            0x4000 => "EABI64",
+            _ => "unrecognized",
+        }
+    }
+
+    #[must_use]
+    pub const fn architecture_name(self) -> &'static str {
+        match self.architecture_code {
+            0 => "MIPS I",
+            1 => "MIPS II",
+            2 => "MIPS III",
+            3 => "MIPS IV",
+            4 => "MIPS V",
+            5 => "MIPS32",
+            6 => "MIPS64",
+            7 => "MIPS32r2",
+            8 => "MIPS64r2",
+            _ => "unrecognized",
+        }
+    }
+
+    /// Returns the recognized low-order feature names in stable order.
+    #[must_use]
+    pub fn feature_names(self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        for (mask, name) in [
+            (EF_MIPS_NOREORDER, "noreorder"),
+            (EF_MIPS_PIC, "pic"),
+            (EF_MIPS_CPIC, "cpic"),
+            (EF_MIPS_XGOT, "xgot"),
+            (EF_MIPS_64BIT_WHIRL, "64bit-whirl"),
+            (EF_MIPS_ABI2, "abi2"),
+            (EF_MIPS_ABI_ON32, "abi-on32"),
+            (EF_MIPS_OPTIONS_FIRST, "options-first"),
+            (EF_MIPS_32BITMODE, "32bit-mode"),
+            (EF_MIPS_FP64, "fp64"),
+            (EF_MIPS_NAN2008, "nan2008"),
+        ] {
+            if self.features & mask != 0 {
+                names.push(name);
+            }
+        }
+        names
+    }
+}
+
+/// Decodes the MIPS-specific processor flags without interpreting unknown
+/// fields as a failure. The caller must establish EM_MIPS separately.
+#[must_use]
+pub const fn decode_mips_elf_flags(raw: u32) -> MipsElfFlags {
+    let known_mask =
+        EF_MIPS_FEATURE_MASK | EF_MIPS_ABI_MASK | EF_MIPS_CPU_MASK | EF_MIPS_ARCH_MASK;
+    MipsElfFlags {
+        raw,
+        cpu_code: ((raw & EF_MIPS_CPU_MASK) >> 16) as u8,
+        abi_code: (raw & EF_MIPS_ABI_MASK) as u16,
+        architecture_code: ((raw & EF_MIPS_ARCH_MASK) >> 28) as u8,
+        features: raw & EF_MIPS_FEATURE_MASK,
+        unknown_bits: raw & !known_mask,
+    }
+}
+
 /// Parsed ELF metadata. This is not yet a complete PS2 ABI loader.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Image {
@@ -147,6 +284,12 @@ impl Image {
     #[must_use]
     pub fn is_executable(&self) -> bool {
         self.file_type == ET_EXEC
+    }
+
+    /// Returns processor-specific header diagnostics only for EM_MIPS files.
+    #[must_use]
+    pub fn mips_elf_flags(&self) -> Option<MipsElfFlags> {
+        self.is_mips().then(|| decode_mips_elf_flags(self.flags))
     }
 
     #[must_use]
@@ -1278,6 +1421,52 @@ mod tests {
             2,
         );
         assert!(parse(&boundary_misclassifies_global, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn decodes_the_r5900_ee_header_flag_example() {
+        // PCSX2's ELF_HEADER comment records 0x20924001 as a common example.
+        // This is an e_flags decode fixture, not a retail-game compatibility claim.
+        let decoded = decode_mips_elf_flags(0x2092_4001);
+        assert_eq!(decoded.cpu_code, 0x92);
+        assert_eq!(decoded.cpu_name(), "R5900");
+        assert_eq!(decoded.abi_code, 0x4000);
+        assert_eq!(decoded.abi_name(), "EABI64");
+        assert_eq!(decoded.architecture_code, 2);
+        assert_eq!(decoded.architecture_name(), "MIPS III");
+        assert_eq!(decoded.feature_names(), vec!["noreorder"]);
+        assert_eq!(decoded.unknown_bits, 0);
+    }
+
+    #[test]
+    fn preserves_unrecognized_mips_flag_fields_and_bits() {
+        let raw = 0x9000_0000 | (0xAA << 16) | 0xD000 | 0x0000_0801;
+        let decoded = decode_mips_elf_flags(raw);
+        assert_eq!(decoded.cpu_code, 0xAA);
+        assert_eq!(decoded.cpu_name(), "unrecognized");
+        assert_eq!(decoded.abi_code, 0xD000);
+        assert_eq!(decoded.abi_name(), "unrecognized");
+        assert_eq!(decoded.architecture_code, 9);
+        assert_eq!(decoded.architecture_name(), "unrecognized");
+        assert_eq!(decoded.feature_names(), vec!["noreorder"]);
+        assert_eq!(decoded.unknown_bits, 0x0000_0800);
+        assert_eq!(decoded.raw, raw);
+    }
+
+    #[test]
+    fn does_not_decode_mips_flags_for_non_mips_machines() {
+        let image = Image {
+            file_type: ET_EXEC,
+            machine: 3,
+            entry_point: 0,
+            flags: 0x2092_4001,
+            section_name_table_index: 0,
+            program_headers: Vec::new(),
+            section_headers: Vec::new(),
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+        };
+        assert_eq!(image.mips_elf_flags(), None);
     }
 
     #[test]
