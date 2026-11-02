@@ -2208,6 +2208,7 @@ mod tests {
             max_string_table_bytes: 1 << 16,
             max_symbols: 1 << 10,
             max_relocations: 1 << 10,
+            max_sections: 1 << 10,
         };
         let analysis_limits = AnalysisLimits {
             max_loaded_memory: 1 << 20,
