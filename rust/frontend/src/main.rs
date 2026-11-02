@@ -115,12 +115,24 @@ fn elf_info(path: &Path) -> Result<(), String> {
     println!("  Relocations: {}", image.relocations.len());
 
     if image.is_mips() {
-        let reginfo_segments = image
-            .program_headers
-            .iter()
-            .filter(|header| header.kind == elf::PT_MIPS_REGINFO)
-            .count();
-        println!("  PT_MIPS_REGINFO segments: {}", reginfo_segments);
+        println!(
+            "  PT_MIPS_REGINFO segments: {}",
+            image.mips_reginfo_segments.len()
+        );
+        for reginfo in &image.mips_reginfo_segments {
+            println!(
+                "    program header [{}] file=0x{:08X} vaddr=0x{:08X}: GPR mask=0x{:08X}, CPR masks=[0x{:08X}, 0x{:08X}, 0x{:08X}, 0x{:08X}], GP=0x{:08X}",
+                reginfo.program_header_index,
+                reginfo.file_offset,
+                reginfo.virtual_address,
+                reginfo.gpr_mask,
+                reginfo.coprocessor_masks[0],
+                reginfo.coprocessor_masks[1],
+                reginfo.coprocessor_masks[2],
+                reginfo.coprocessor_masks[3],
+                reginfo.gp_value as u32
+            );
+        }
         println!("  SHT_MIPS_REGINFO sections: {}", image.mips_reginfo.len());
         for reginfo in &image.mips_reginfo {
             println!(
