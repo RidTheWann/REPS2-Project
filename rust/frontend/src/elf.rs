@@ -3,7 +3,11 @@
 use std::{fmt, ops::Range};
 
 pub const EM_MIPS: u16 = 8;
+pub const ET_NONE: u16 = 0;
+pub const ET_REL: u16 = 1;
 pub const ET_EXEC: u16 = 2;
+pub const ET_DYN: u16 = 3;
+pub const ET_CORE: u16 = 4;
 pub const PT_LOAD: u32 = 1;
 pub const SHF_ALLOC: u32 = 0x2;
 pub const PF_R: u32 = 0x4;
@@ -270,6 +274,10 @@ pub const fn decode_mips_elf_flags(raw: u32) -> MipsElfFlags {
 pub struct Image {
     pub file_type: u16,
     pub machine: u16,
+    /// Raw e_ident[EI_OSABI]. Retained even when the value is not recognized.
+    pub os_abi: u8,
+    /// Raw e_ident[EI_ABIVERSION], interpreted according to os_abi.
+    pub abi_version: u8,
     pub entry_point: u32,
     pub flags: u32,
     pub section_name_table_index: u32,
@@ -280,6 +288,64 @@ pub struct Image {
 }
 
 impl Image {
+    /// Describes the generic ELF object type without implying loadability.
+    #[must_use]
+    pub const fn file_type_name(&self) -> &'static str {
+        match self.file_type {
+            ET_NONE => "ET_NONE (no file type)",
+            ET_REL => "ET_REL (relocatable object)",
+            ET_EXEC => "ET_EXEC (executable)",
+            ET_DYN => "ET_DYN (shared object or PIE)",
+            ET_CORE => "ET_CORE (core file)",
+            0xFE00..=0xFEFF => "OS-specific type",
+            0xFF00..=0xFFFF => "processor-specific type",
+            _ => "reserved or unrecognized type",
+        }
+    }
+
+    /// Describes common generic ELF OSABI codes; unknown codes remain available
+    /// through the raw os_abi field and are never rejected by this diagnostic.
+    #[must_use]
+    pub const fn os_abi_name(&self) -> &'static str {
+        match self.os_abi {
+            0 => "System V / unspecified",
+            1 => "HP-UX",
+            2 => "NetBSD",
+            3 => "GNU/Linux",
+            4 => "GNU/Hurd",
+            5 => "86Open",
+            6 => "Solaris",
+            7 => "AIX",
+            8 => "IRIX",
+            9 => "FreeBSD",
+            10 => "Tru64",
+            11 => "Novell Modesto",
+            12 => "OpenBSD",
+            13 => "OpenVMS",
+            14 => "HP NonStop Kernel",
+            15 => "AROS",
+            16 => "FenixOS",
+            17 => "CloudABI",
+            18 => "OpenVOS",
+            64 => "ARM EABI",
+            255 => "Standalone",
+            _ => "unrecognized",
+        }
+    }
+
+    /// Returns a display name for common ELF machine identifiers.
+    #[must_use]
+    pub const fn machine_name(&self) -> &'static str {
+        match self.machine {
+            3 => "Intel 80386",
+            EM_MIPS => "MIPS",
+            40 => "ARM",
+            62 => "AMD x86-64",
+            183 => "AArch64",
+            _ => "unrecognized",
+        }
+    }
+
     #[must_use]
     pub fn is_mips(&self) -> bool {
         self.machine == EM_MIPS
@@ -760,6 +826,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         return Err(Error::new("Unsupported ELF identification version"));
     }
 
+    let os_abi = read_u8(bytes, 7)?;
+    let abi_version = read_u8(bytes, 8)?;
     let file_type = read_u16(bytes, 16)?;
     let machine = read_u16(bytes, 18)?;
     if read_u32(bytes, 20)? != 1 {
@@ -1111,6 +1179,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     Ok(Image {
         file_type,
         machine,
+        os_abi,
+        abi_version,
         entry_point,
         flags,
         section_name_table_index,
@@ -2112,6 +2182,8 @@ mod tests {
         let image = Image {
             file_type: ET_EXEC,
             machine: 3,
+            os_abi: 0,
+            abi_version: 0,
             entry_point: 0,
             flags: 0x2092_4001,
             section_name_table_index: 0,
@@ -2121,6 +2193,56 @@ mod tests {
             relocations: Vec::new(),
         };
         assert_eq!(image.mips_elf_flags(), None);
+    }
+
+    #[test]
+    fn preserves_osabi_and_abi_version_as_diagnostic_metadata() {
+        let mut bytes = minimal_elf();
+        bytes[7] = 3; // ELFOSABI_LINUX
+        bytes[8] = 7; // raw ABI version, interpreted by the OSABI
+        let image = parse(&bytes, ParseLimits::default()).expect("ELF identity metadata");
+        assert_eq!(image.os_abi, 3);
+        assert_eq!(image.os_abi_name(), "GNU/Linux");
+        assert_eq!(image.abi_version, 7);
+
+        bytes[7] = 0xAB; // unassigned OSABI code
+        let unknown = parse(&bytes, ParseLimits::default())
+            .expect("unknown OSABI remains inspectable");
+        assert_eq!(unknown.os_abi, 0xAB);
+        assert_eq!(unknown.os_abi_name(), "unrecognized");
+    }
+
+    #[test]
+    fn classifies_elf_object_types_without_accepting_them_as_loadable() {
+        for (raw_type, expected_name) in [
+            (ET_NONE, "ET_NONE (no file type)"),
+            (ET_REL, "ET_REL (relocatable object)"),
+            (ET_EXEC, "ET_EXEC (executable)"),
+            (ET_DYN, "ET_DYN (shared object or PIE)"),
+            (ET_CORE, "ET_CORE (core file)"),
+            (0xFE00, "OS-specific type"),
+            (0xFF00, "processor-specific type"),
+            (0x7777, "reserved or unrecognized type"),
+        ] {
+            let mut bytes = minimal_elf();
+            put_u16(&mut bytes, 16, raw_type);
+            let image = parse(&bytes, ParseLimits::default()).expect("ELF type stays inspectable");
+            assert_eq!(image.file_type_name(), expected_name);
+            assert_eq!(image.is_executable(), raw_type == ET_EXEC);
+        }
+    }
+
+    #[test]
+    fn labels_common_machine_identifiers_and_preserves_unknown_codes() {
+        let mut bytes = minimal_elf();
+        put_u16(&mut bytes, 18, 3);
+        let x86 = parse(&bytes, ParseLimits::default()).expect("i386 ELF");
+        assert_eq!(x86.machine_name(), "Intel 80386");
+
+        put_u16(&mut bytes, 18, 0xCAFE);
+        let unknown = parse(&bytes, ParseLimits::default()).expect("unknown machine ELF");
+        assert_eq!(unknown.machine, 0xCAFE);
+        assert_eq!(unknown.machine_name(), "unrecognized");
     }
 
     #[test]
