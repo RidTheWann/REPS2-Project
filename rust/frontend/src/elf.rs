@@ -1362,8 +1362,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
 
     let symbols = parse_symbols(bytes, &section_headers, limits)?;
     let relocations = parse_relocations(bytes, &section_headers, limits)?;
-    let (mips_reginfo, mips_abi_flags) =
-        parse_mips_abi_sections(bytes, machine, &section_headers)?;
+    let (mips_reginfo, mips_abi_flags) = parse_mips_abi_sections(bytes, machine, &section_headers)?;
     Ok(Image {
         file_type,
         os_abi,
@@ -2228,7 +2227,10 @@ mod tests {
             reginfo.coprocessor_masks,
             [0x0000_0000, 0x1234_5678, 0x0000_0000, 0x8000_0000]
         );
-        assert_eq!(reginfo.gp_value, i32::from_ne_bytes(0x8012_3400u32.to_ne_bytes()));
+        assert_eq!(
+            reginfo.gp_value,
+            i32::from_ne_bytes(0x8012_3400u32.to_ne_bytes())
+        );
     }
 
     #[test]
@@ -2283,8 +2285,8 @@ mod tests {
         assert!(parse(&short_v0, ParseLimits::default()).is_err());
 
         let mut truncated_reginfo = seed;
-        let reginfo_offset = read_u32(&truncated_reginfo, reginfo_header + 16)
-            .expect("reginfo file offset");
+        let reginfo_offset =
+            read_u32(&truncated_reginfo, reginfo_header + 16).expect("reginfo file offset");
         put_u32(&mut truncated_reginfo, reginfo_header + 16, u32::MAX);
         assert!(parse(&truncated_reginfo, ParseLimits::default()).is_err());
         assert_ne!(reginfo_offset, u32::MAX);
