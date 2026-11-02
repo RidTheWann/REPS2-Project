@@ -54,7 +54,7 @@ The library must distinguish these states; no state implies a later one:
 
 ## M1 — Executable intelligence
 
-- [x] Validate ELF string-table leading/trailing null sentinels, the mandatory SHT_NULL section-header entry, local/non-local symbol ordering, ordinary symbol section indices, and cross-table symbol/relocation references.
+- [x] Validate ELF string-table leading/trailing null sentinels, the mandatory SHT_NULL section-header entry, local/non-local symbol ordering, ordinary symbol section indices, and cross-table symbol/relocation references. Accept zero-size symbol tables with a zero local-symbol boundary (ADR 0051), which stripped retail linkers emit.
 - [x] Decode MIPS e_flags CPU subtype, ABI, ISA-level and recognized feature bits; identify the R5900 CPU code (0x92) while preserving unclassified bits and treating the result as diagnostic metadata only.
 - [x] Support ELF extended section and program-header counts, plus extended section-name table indices through section-header zero; resolve SHT_SYMTAB_SHNDX symbol indices with strict link, shape, slot and target-range validation and bounded allocations.
 - [x] Preserve and diagnose EI_OSABI/EI_ABIVERSION bytes, classify standard ELF object types and OS-/processor-specific e_type ranges, and retain unknown metadata without changing parser admission.
