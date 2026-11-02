@@ -363,10 +363,10 @@ impl ControlProgram {
             .count()
     }
 
-    /// Returns the number of blocks ending in a known SYSCALL/BREAK exception.
+    /// Returns blocks carrying a known SYSCALL/BREAK in their terminator or delay slot.
     ///
-    /// These are explicit architectural control-flow terminators, not unknown
-    /// encodings. Their generated blocks perform a Level-1 COP0 exception entry.
+    /// These are explicit architectural exceptions, not unknown encodings.
+    /// Generated code enters the Level-1 COP0 exception path only when executed.
     #[must_use]
     pub fn trap_count(&self) -> usize {
         self.blocks
@@ -394,8 +394,8 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
                     trap: TrapKind::Break,
                 }),
                 _ => {
-                    let program =
-                        ir::lift(std::slice::from_ref(decoded)).map_err(ControlError::ScalarLift)?;
+                    let program = ir::lift(std::slice::from_ref(decoded))
+                        .map_err(ControlError::ScalarLift)?;
                     program
                         .instructions()
                         .first()
@@ -704,14 +704,17 @@ mod tests {
                 assert_eq!(*target_pc, 0x100C);
                 assert_eq!(*fallthrough_pc, 0x1008);
                 assert_eq!(delay_slot.guest_pc(), 0x1004);
-                assert_eq!(
-                    delay_slot.operation,
-                    ir::Operation::AddImmediateUnsignedWord {
-                        dst: ir::Gpr::new(9).unwrap(),
-                        src: ir::Gpr::new(0).unwrap(),
-                        immediate: 7,
-                    }
-                );
+                match delay_slot {
+                    ControlDelaySlot::Instruction(instruction) => assert_eq!(
+                        instruction.operation,
+                        ir::Operation::AddImmediateUnsignedWord {
+                            dst: ir::Gpr::new(9).unwrap(),
+                            src: ir::Gpr::new(0).unwrap(),
+                            immediate: 7,
+                        }
+                    ),
+                    other => panic!("expected scalar delay-slot instruction, got {other:?}"),
+                }
             }
             other => panic!("expected conditional branch terminator, got {other:?}"),
         }
