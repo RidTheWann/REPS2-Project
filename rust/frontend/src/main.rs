@@ -47,23 +47,21 @@ fn elf_info(path: &Path) -> Result<(), String> {
 
     println!("ELF32 little-endian image");
     println!(
-        "  Type: {}{}",
+        "  Type: {} ({})",
         image.file_type,
-        if image.is_executable() {
-            " (executable)"
-        } else {
-            ""
-        }
+        image.file_type_name()
     );
     println!(
-        "  Machine: {}{}",
+        "  Machine: {} ({})",
         image.machine,
-        if image.is_mips() {
-            " (MIPS)"
-        } else {
-            " (not MIPS)"
-        }
+        image.machine_name()
     );
+    println!(
+        "  OS ABI: {} (code 0x{:02X})",
+        image.os_abi_name(),
+        image.os_abi
+    );
+    println!("  OS ABI version: {}", image.abi_version);
     println!("  Header flags: 0x{:08X}", image.flags);
     if let Some(mips_flags) = image.mips_elf_flags() {
         println!(
@@ -118,6 +116,11 @@ fn elf_info(path: &Path) -> Result<(), String> {
 
     if !image.is_mips() {
         eprintln!("Warning: ELF machine is not EM_MIPS; this is not a supported PS2 EE target.");
+    }
+    if !image.is_executable() {
+        eprintln!(
+            "Warning: the default EE initial RAM image builder accepts ET_EXEC only; ET_REL/ET_DYN loading and relocation are not implemented."
+        );
     }
     Ok(())
 }
