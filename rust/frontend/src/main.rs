@@ -145,6 +145,20 @@ fn elf_info(path: &Path) -> Result<(), String> {
                 println!("    Unclassified ASE bits: 0x{:08X}", v0.unknown_ases());
             }
             println!(
+                "    Odd single-precision registers: {}",
+                if v0.has_odd_single_precision_registers() {
+                    "yes"
+                } else {
+                    "no"
+                }
+            );
+            if v0.unknown_flags1() != 0 {
+                println!(
+                    "    Unclassified flags1 bits: 0x{:08X}",
+                    v0.unknown_flags1()
+                );
+            }
+            println!(
                 "    ABI flag words: flags1=0x{:08X}, flags2=0x{:08X}",
                 v0.flags1,
                 v0.flags2
