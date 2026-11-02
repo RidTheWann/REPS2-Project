@@ -193,6 +193,48 @@ fn elf_info(path: &Path) -> Result<(), String> {
                 );
             }
         }
+
+        println!("  SHT_MIPS_OPTIONS sections: {}", image.mips_options.len());
+        for options in &image.mips_options {
+            println!(
+                "    section [{}]: {} descriptor(s)",
+                options.section_index,
+                options.descriptors.len()
+            );
+            for (index, descriptor) in options.descriptors.iter().take(64).enumerate() {
+                let target = if descriptor.section_index == 0 {
+                    "global".to_owned()
+                } else {
+                    format!("section {}", descriptor.section_index)
+                };
+                println!(
+                    "      [{index:>3}] {} (kind={}, size={}): target={}, info=0x{:08X}, payload={} byte(s)",
+                    descriptor.kind_name(),
+                    descriptor.kind,
+                    descriptor.size,
+                    target,
+                    descriptor.info,
+                    descriptor.payload_size
+                );
+                if let Some(registers) = &descriptor.register_info {
+                    println!(
+                        "        REGINFO: GPR=0x{:08X}, CPR=[0x{:08X}, 0x{:08X}, 0x{:08X}, 0x{:08X}], GP=0x{:08X}",
+                        registers.gpr_mask,
+                        registers.coprocessor_masks[0],
+                        registers.coprocessor_masks[1],
+                        registers.coprocessor_masks[2],
+                        registers.coprocessor_masks[3],
+                        registers.gp_value as u32
+                    );
+                }
+            }
+            if options.descriptors.len() > 64 {
+                println!(
+                    "      ... {} descriptor(s) omitted from preview",
+                    options.descriptors.len() - 64
+                );
+            }
+        }
     }
 
     for (index, section) in image.section_headers.iter().enumerate() {

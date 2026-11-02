@@ -368,6 +368,7 @@ mod tests {
             relocations: Vec::new(),
             mips_reginfo: Vec::new(),
             mips_abi_flags: Vec::new(),
+            mips_options: Vec::new(),
         }
     }
 
