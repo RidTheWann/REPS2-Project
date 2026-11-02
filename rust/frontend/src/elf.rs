@@ -1379,7 +1379,7 @@ mod tests {
 
     fn minimal_elf() -> Vec<u8> {
         let mut bytes = vec![0; 112];
-        bytes[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
+        bytes[0..4].copy_from_slice(b"\x7FELF");
         bytes[4] = 1;
         bytes[5] = 1;
         bytes[6] = 1;
@@ -1735,7 +1735,7 @@ mod tests {
             PROGRAM_TABLE_OFFSET + PROGRAM_COUNT * PROGRAM_HEADER_SIZE;
         let mut bytes = vec![0; SECTION_TABLE_OFFSET + SECTION_HEADER_SIZE];
 
-        bytes[0..4].copy_from_slice(b"\\x7FELF");
+        bytes[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
         bytes[4] = 1;
         bytes[5] = 1;
         bytes[6] = 1;
