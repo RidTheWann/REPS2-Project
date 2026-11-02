@@ -27,6 +27,7 @@ const REL_SIZE: usize = 8;
 const STB_LOCAL: u8 = 0;
 const SHN_LORESERVE: u16 = 0xFF00;
 const SHN_XINDEX: u16 = 0xFFFF;
+const PN_XNUM: u16 = 0xFFFF;
 const RELA_SIZE: usize = 12;
 
 // MIPS ELF e_flags fields (processor-specific).
@@ -53,6 +54,7 @@ pub struct ParseLimits {
     pub max_symbols: usize,
     pub max_relocations: usize,
     pub max_sections: usize,
+    pub max_program_headers: usize,
 }
 
 impl Default for ParseLimits {
@@ -62,6 +64,7 @@ impl Default for ParseLimits {
             max_symbols: 1_000_000,
             max_relocations: 4_000_000,
             max_sections: 100_000,
+            max_program_headers: 100_000,
         }
     }
 }
@@ -768,7 +771,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     let flags = read_u32(bytes, 36)?;
     let header_size = read_u16(bytes, 40)?;
     let program_entry_size = read_u16(bytes, 42)?;
-    let program_count = read_u16(bytes, 44)?;
+    let raw_program_count = read_u16(bytes, 44)?;
     let section_entry_size = read_u16(bytes, 46)?;
     let raw_section_count = read_u16(bytes, 48)?;
     let raw_section_name_table_index = read_u16(bytes, 50)?;
@@ -776,24 +779,36 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     if usize::from(header_size) < ELF_HEADER_SIZE || usize::from(header_size) > bytes.len() {
         return Err(Error::new("Invalid ELF header size"));
     }
-    if program_count == u16::MAX {
-        return Err(Error::new(
-            "Extended ELF program-header numbering is not supported yet",
-        ));
-    }
-
-    // Resolve ELF extended section numbering using the reserved fields in
-    // section-header entry zero. An absent section table must use zero for
-    // both e_shnum and e_shstrndx.
-    let (section_count, section_name_table_index, extended_section_count, extended_name_index) =
-        if section_offset == 0 {
-            if raw_section_count != 0 || raw_section_name_table_index != 0 {
-                return Err(Error::new(
-                    "ELF section numbering references a missing section table",
-                ));
-            }
-            (0u32, 0u32, false, false)
-        } else {
+    // Resolve ELF extended section and program-header numbering through
+    // section-header entry zero. An absent section table cannot carry either
+    // extended count.
+    let (
+        section_count,
+        section_name_table_index,
+        extended_section_count,
+        extended_name_index,
+        program_count,
+        extended_program_count,
+    ) = if section_offset == 0 {
+        if raw_section_count != 0 || raw_section_name_table_index != 0 {
+            return Err(Error::new(
+                "ELF section numbering references a missing section table",
+            ));
+        }
+        if raw_program_count == PN_XNUM {
+            return Err(Error::new(
+                "ELF PN_XNUM requires section-header entry zero",
+            ));
+        }
+        (
+            0u32,
+            0u32,
+            false,
+            false,
+            u32::from(raw_program_count),
+            false,
+        )
+    } else {
             if section_offset < u32::from(header_size) {
                 return Err(Error::new(
                     "ELF section-header table overlaps the ELF header",
@@ -836,6 +851,23 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
                 return Err(Error::new("ELF section table has a zero section count"));
             }
 
+            let extended_programs = raw_program_count == PN_XNUM;
+            let resolved_program_count = if extended_programs {
+                if section_zero.info < u32::from(PN_XNUM) {
+                    return Err(Error::new(
+                        "ELF PN_XNUM program-header count is below PN_XNUM",
+                    ));
+                }
+                section_zero.info
+            } else {
+                if section_zero.info != 0 {
+                    return Err(Error::new(
+                        "ELF section header zero sh_info must be zero without PN_XNUM",
+                    ));
+                }
+                u32::from(raw_program_count)
+            };
+
             let extended_names = raw_section_name_table_index == SHN_XINDEX;
             let resolved_name_index = if extended_names {
                 if section_zero.link < u32::from(SHN_LORESERVE) {
@@ -857,11 +889,20 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
                 resolved_name_index,
                 extended_count,
                 extended_names,
+                resolved_program_count,
+                extended_programs,
             )
         };
 
     let section_count_host = usize::try_from(section_count)
         .map_err(|_| Error::new("ELF section count does not fit host size"))?;
+    let program_count_host = usize::try_from(program_count)
+        .map_err(|_| Error::new("ELF program-header count does not fit host size"))?;
+    if program_count_host > limits.max_program_headers {
+        return Err(Error::new(
+            "ELF program-header count exceeds configured parser limit",
+        ));
+    }
     if section_count_host > limits.max_sections {
         return Err(Error::new(
             "ELF section count exceeds configured parser limit",
@@ -887,7 +928,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         bytes,
         program_offset,
         program_entry_size,
-        u32::from(program_count),
+        program_count,
         PROGRAM_HEADER_SIZE,
         "program-header",
     )?;
@@ -912,8 +953,8 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         }
     }
 
-    let mut program_headers = Vec::with_capacity(usize::from(program_count));
-    for index in 0..usize::from(program_count) {
+    let mut program_headers = Vec::with_capacity(program_count_host);
+    for index in 0..program_count_host {
         let base = usize::try_from(program_offset)
             .map_err(|_| Error::new("Program-header offset overflow"))?
             .checked_add(
@@ -995,6 +1036,11 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     } else {
         0
     };
+    let expected_null_info = if extended_program_count {
+        program_count
+    } else {
+        0
+    };
     let null_section_is_invalid = section_headers.first().is_some_and(|null_section| {
         null_section.kind != SHT_NULL
             || null_section.name_offset != 0
@@ -1003,7 +1049,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             || null_section.offset != 0
             || null_section.size != expected_null_size
             || null_section.link != expected_null_link
-            || null_section.info != 0
+            || null_section.info != expected_null_info
             || null_section.alignment != 0
             || null_section.entry_size != 0
     });
@@ -1682,6 +1728,74 @@ mod tests {
         bytes
     }
 
+    fn elf_with_extended_program_header_count() -> Vec<u8> {
+        const PROGRAM_COUNT: usize = PN_XNUM as usize;
+        const PROGRAM_TABLE_OFFSET: usize = ELF_HEADER_SIZE;
+        const SECTION_TABLE_OFFSET: usize =
+            PROGRAM_TABLE_OFFSET + PROGRAM_COUNT * PROGRAM_HEADER_SIZE;
+        let mut bytes = vec![0; SECTION_TABLE_OFFSET + SECTION_HEADER_SIZE];
+
+        bytes[0..4].copy_from_slice(b"\\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 28, PROGRAM_TABLE_OFFSET as u32);
+        put_u32(&mut bytes, 32, SECTION_TABLE_OFFSET as u32);
+        put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 42, PROGRAM_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 44, PN_XNUM);
+        put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 48, 1);
+        put_u16(&mut bytes, 50, 0);
+        put_u32(
+            &mut bytes,
+            SECTION_TABLE_OFFSET + 28,
+            PROGRAM_COUNT as u32,
+        );
+        bytes
+    }
+
+    #[test]
+    fn resolves_pn_xnum_through_section_header_zero() {
+        let bytes = elf_with_extended_program_header_count();
+        let image = parse(&bytes, ParseLimits::default()).expect("PN_XNUM fixture");
+        assert_eq!(image.program_headers.len(), PN_XNUM as usize);
+        assert_eq!(image.section_headers.len(), 1);
+        assert_eq!(image.section_headers[0].info, u32::from(PN_XNUM));
+    }
+
+    #[test]
+    fn rejects_invalid_pn_xnum_metadata_and_resource_limits() {
+        let seed = elf_with_extended_program_header_count();
+
+        let mut below_threshold = seed.clone();
+        put_u32(
+            &mut below_threshold,
+            ELF_HEADER_SIZE + 28,
+            u32::from(PN_XNUM) - 1,
+        );
+        assert!(parse(&below_threshold, ParseLimits::default()).is_err());
+
+        let mut non_extended_with_sh_info = seed.clone();
+        put_u16(&mut non_extended_with_sh_info, 44, 1);
+        assert!(parse(&non_extended_with_sh_info, ParseLimits::default()).is_err());
+
+        let mut no_section_table = seed.clone();
+        put_u32(&mut no_section_table, 32, 0);
+        put_u16(&mut no_section_table, 48, 0);
+        put_u16(&mut no_section_table, 50, 0);
+        assert!(parse(&no_section_table, ParseLimits::default()).is_err());
+
+        let limited = ParseLimits {
+            max_program_headers: 100,
+            ..ParseLimits::default()
+        };
+        assert!(parse(&seed, limited).is_err());
+    }
+
     #[test]
     fn resolves_section_names_symbols_and_rel_entries() {
         let bytes = elf_with_symbol_and_rel();
@@ -2181,6 +2295,7 @@ mod tests {
             max_symbols: 1 << 10,
             max_relocations: 1 << 10,
             max_sections: 1 << 10,
+            max_program_headers: 1 << 10,
         };
         let mut rng = 0x9E37_79B9_7F4A_7C15_u64;
         let mut ram_images_built = 0;
@@ -2211,6 +2326,7 @@ mod tests {
             max_symbols: 1 << 10,
             max_relocations: 1 << 10,
             max_sections: 1 << 10,
+            max_program_headers: 1 << 10,
         };
         let analysis_limits = AnalysisLimits {
             max_loaded_memory: 1 << 20,
