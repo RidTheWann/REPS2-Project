@@ -1494,6 +1494,183 @@ mod tests {
         bytes
     }
 
+    fn elf_with_extended_symbol_indices() -> Vec<u8> {
+        const SECTION_COUNT: usize = 0xFF02;
+        const EXTENDED_TARGET_INDEX: usize = 0xFF00;
+        const EXTENDED_SHSTRTAB_INDEX: usize = 0xFF01;
+        const SECTION_TABLE_OFFSET: usize = ELF_HEADER_SIZE;
+        let shstr = b"\0.strtab\0.symtab\0.text\0.rel.text\0.symtab_shndx\0.extended_target\0.shstrtab\0";
+        let strtab = b"\0extended\0";
+        let find_name = |name: &[u8]| -> u32 {
+            shstr
+                .windows(name.len())
+                .position(|window| window == name)
+                .expect("section name exists in fixture table") as u32
+        };
+
+        let section_table_end = SECTION_TABLE_OFFSET + SECTION_COUNT * SECTION_HEADER_SIZE;
+        let strtab_offset = section_table_end;
+        let symtab_offset = strtab_offset + strtab.len();
+        let text_offset = symtab_offset + 2 * SYMBOL_SIZE;
+        let rel_offset = text_offset + 4;
+        let shndx_offset = rel_offset + REL_SIZE;
+        let shstr_offset = shndx_offset + 2 * 4;
+        let mut bytes = vec![0; shstr_offset + shstr.len()];
+
+        bytes[0..4].copy_from_slice(b"\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 24, 0x1000);
+        put_u32(&mut bytes, 32, SECTION_TABLE_OFFSET as u32);
+        put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 48, 0); // e_shnum: use section zero's sh_size
+        put_u16(&mut bytes, 50, SHN_XINDEX); // e_shstrndx: use section zero's sh_link
+
+        bytes[strtab_offset..strtab_offset + strtab.len()].copy_from_slice(strtab);
+        put_u32(&mut bytes, symtab_offset + SYMBOL_SIZE, 1);
+        put_u32(&mut bytes, symtab_offset + SYMBOL_SIZE + 4, 0x1000);
+        put_u32(&mut bytes, symtab_offset + SYMBOL_SIZE + 8, 4);
+        bytes[symtab_offset + SYMBOL_SIZE + 12] = 0x12; // STB_GLOBAL | STT_FUNC
+        put_u16(&mut bytes, symtab_offset + SYMBOL_SIZE + 14, SHN_XINDEX);
+        bytes[text_offset..text_offset + 4].copy_from_slice(&[0, 0, 0, 0]);
+        put_u32(&mut bytes, rel_offset, 0x1000);
+        put_u32(&mut bytes, rel_offset + 4, (1 << 8) | 2);
+        put_u32(&mut bytes, shndx_offset, 0);
+        put_u32(&mut bytes, shndx_offset + 4, EXTENDED_TARGET_INDEX as u32);
+        bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(shstr);
+
+        // The null section header carries both extended-numbering values.
+        put_u32(
+            &mut bytes,
+            SECTION_TABLE_OFFSET + 20,
+            SECTION_COUNT as u32,
+        );
+        put_u32(
+            &mut bytes,
+            SECTION_TABLE_OFFSET + 24,
+            EXTENDED_SHSTRTAB_INDEX as u32,
+        );
+
+        let write_at = |bytes: &mut [u8], index: usize, section: SectionSpec| {
+            write_section(
+                bytes,
+                SECTION_TABLE_OFFSET + index * SECTION_HEADER_SIZE,
+                section,
+            );
+        };
+        write_at(
+            &mut bytes,
+            1,
+            SectionSpec {
+                name: find_name(b".strtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: strtab_offset as u32,
+                size: strtab.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_at(
+            &mut bytes,
+            2,
+            SectionSpec {
+                name: find_name(b".symtab"),
+                kind: SHT_SYMTAB,
+                address: 0,
+                offset: symtab_offset as u32,
+                size: (2 * SYMBOL_SIZE) as u32,
+                link: 1,
+                info: 1,
+                alignment: 4,
+                entry_size: SYMBOL_SIZE as u32,
+            },
+        );
+        write_at(
+            &mut bytes,
+            3,
+            SectionSpec {
+                name: find_name(b".text"),
+                kind: 1,
+                address: 0x1000,
+                offset: text_offset as u32,
+                size: 4,
+                link: 0,
+                info: 0,
+                alignment: 4,
+                entry_size: 0,
+            },
+        );
+        write_at(
+            &mut bytes,
+            4,
+            SectionSpec {
+                name: find_name(b".rel.text"),
+                kind: SHT_REL,
+                address: 0,
+                offset: rel_offset as u32,
+                size: REL_SIZE as u32,
+                link: 2,
+                info: 3,
+                alignment: 4,
+                entry_size: REL_SIZE as u32,
+            },
+        );
+        write_at(
+            &mut bytes,
+            5,
+            SectionSpec {
+                name: find_name(b".symtab_shndx"),
+                kind: SHT_SYMTAB_SHNDX,
+                address: 0,
+                offset: shndx_offset as u32,
+                size: 8,
+                link: 2,
+                info: 0,
+                alignment: 4,
+                entry_size: 4,
+            },
+        );
+        write_at(
+            &mut bytes,
+            EXTENDED_TARGET_INDEX,
+            SectionSpec {
+                name: find_name(b".extended_target"),
+                kind: SHT_NOBITS,
+                address: 0,
+                offset: 0,
+                size: 0,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_at(
+            &mut bytes,
+            EXTENDED_SHSTRTAB_INDEX,
+            SectionSpec {
+                name: find_name(b".shstrtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: shstr_offset as u32,
+                size: shstr.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        bytes
+    }
+
     #[test]
     fn resolves_section_names_symbols_and_rel_entries() {
         let bytes = elf_with_symbol_and_rel();
@@ -1506,6 +1683,100 @@ mod tests {
         assert_eq!(image.relocations[0].symbol_index, 1);
         assert_eq!(image.relocations[0].relocation_type, 2);
         assert_eq!(image.relocations[0].addend, None);
+    }
+
+    #[test]
+    fn resolves_extended_symbol_indices_and_extended_section_names() {
+        let bytes = elf_with_extended_symbol_indices();
+        let image = parse(&bytes, ParseLimits::default()).expect("extended-numbering ELF");
+        assert_eq!(image.section_headers.len(), 0xFF02);
+        assert_eq!(image.section_name_table_index, 0xFF01);
+        assert_eq!(image.section_headers[0xFF00].name, ".extended_target");
+        assert_eq!(image.section_headers[0xFF01].name, ".shstrtab");
+        assert_eq!(image.symbols.len(), 2);
+        assert_eq!(image.symbols[1].section_index, 0xFF00);
+        assert_eq!(image.relocations.len(), 1);
+        assert_eq!(image.relocations[0].target_section_index, 3);
+    }
+
+    #[test]
+    fn rejects_shn_xindex_without_its_linked_table() {
+        let mut bytes = elf_with_extended_symbol_indices();
+        let section_header_base = ELF_HEADER_SIZE + 5 * SECTION_HEADER_SIZE;
+        put_u32(&mut bytes, section_header_base + 4, SHT_NOBITS);
+        assert!(parse(&bytes, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_symtab_shndx_links_and_entry_shapes() {
+        let seed = elf_with_extended_symbol_indices();
+        let shndx_header = ELF_HEADER_SIZE + 5 * SECTION_HEADER_SIZE;
+
+        let mut wrong_link = seed.clone();
+        put_u32(&mut wrong_link, shndx_header + 24, 1); // .strtab, not .symtab
+        assert!(parse(&wrong_link, ParseLimits::default()).is_err());
+
+        let mut wrong_entry_size = seed.clone();
+        put_u32(&mut wrong_entry_size, shndx_header + 36, 8);
+        assert!(parse(&wrong_entry_size, ParseLimits::default()).is_err());
+
+        let mut wrong_count = seed;
+        put_u32(&mut wrong_count, shndx_header + 20, 4);
+        assert!(parse(&wrong_count, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_or_inconsistent_extended_symbol_index_entries() {
+        let seed = elf_with_extended_symbol_indices();
+        let image = parse(&seed, ParseLimits::default()).expect("extended fixture");
+        let shndx_data = image.section_headers[5].offset as usize;
+        let symbol_data = image.section_headers[2].offset as usize;
+
+        let mut out_of_range = seed.clone();
+        put_u32(&mut out_of_range, shndx_data + 4, 0xFF02);
+        assert!(parse(&out_of_range, ParseLimits::default()).is_err());
+
+        let mut below_reserved_range = seed.clone();
+        put_u32(&mut below_reserved_range, shndx_data + 4, 3);
+        assert!(parse(&below_reserved_range, ParseLimits::default()).is_err());
+
+        let mut non_extended_symbol_has_nonzero_slot = seed;
+        put_u16(
+            &mut non_extended_symbol_has_nonzero_slot,
+            symbol_data + SYMBOL_SIZE + 14,
+            3,
+        );
+        assert!(parse(&non_extended_symbol_has_nonzero_slot, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_symtab_shndx_tables_and_extended_section_count_over_limit() {
+        let seed = elf_with_extended_symbol_indices();
+        let mut duplicate = seed.clone();
+        let duplicate_header = ELF_HEADER_SIZE + 7 * SECTION_HEADER_SIZE;
+        put_u32(&mut duplicate, duplicate_header + 4, SHT_SYMTAB_SHNDX);
+        put_u32(&mut duplicate, duplicate_header + 24, 2);
+        assert!(parse(&duplicate, ParseLimits::default()).is_err());
+
+        let mut limited = ParseLimits::default();
+        limited.max_sections = 100;
+        assert!(parse(&seed, limited).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_extended_section_numbering_sentinels() {
+        let seed = elf_with_extended_symbol_indices();
+        let mut small_count = seed.clone();
+        put_u32(&mut small_count, ELF_HEADER_SIZE + 20, 6);
+        assert!(parse(&small_count, ParseLimits::default()).is_err());
+
+        let mut small_name_index = seed.clone();
+        put_u32(&mut small_name_index, ELF_HEADER_SIZE + 24, 1);
+        assert!(parse(&small_name_index, ParseLimits::default()).is_err());
+
+        let mut nonextended_reserved_count = seed;
+        put_u16(&mut nonextended_reserved_count, 48, 0xFF02);
+        assert!(parse(&nonextended_reserved_count, ParseLimits::default()).is_err());
     }
 
     #[test]
