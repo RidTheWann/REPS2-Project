@@ -114,6 +114,64 @@ fn elf_info(path: &Path) -> Result<(), String> {
     println!("  Symbols: {}", image.symbols.len());
     println!("  Relocations: {}", image.relocations.len());
 
+    if image.is_mips() {
+        let reginfo_segments = image
+            .program_headers
+            .iter()
+            .filter(|header| header.kind == elf::PT_MIPS_REGINFO)
+            .count();
+        println!("  PT_MIPS_REGINFO segments: {}", reginfo_segments);
+        println!("  SHT_MIPS_REGINFO sections: {}", image.mips_reginfo.len());
+        for reginfo in &image.mips_reginfo {
+            println!(
+                "    section [{}]: GPR mask=0x{:08X}, CPR masks=[0x{:08X}, 0x{:08X}, 0x{:08X}, 0x{:08X}], GP=0x{:08X}",
+                reginfo.section_index,
+                reginfo.gpr_mask,
+                reginfo.coprocessor_masks[0],
+                reginfo.coprocessor_masks[1],
+                reginfo.coprocessor_masks[2],
+                reginfo.coprocessor_masks[3],
+                reginfo.gp_value as u32
+            );
+        }
+        println!("  SHT_MIPS_ABIFLAGS sections: {}", image.mips_abi_flags.len());
+        for abi_flags in &image.mips_abi_flags {
+            if let Some(flags) = abi_flags.version_zero {
+                let ase_names = flags.ase_names();
+                println!(
+                    "    section [{}]: v0, ISA MIPS{} rev {}, GPR {}, CPR1 {}, CPR2 {}, FP ABI {}",
+                    abi_flags.section_index,
+                    flags.isa_level,
+                    flags.isa_revision,
+                    elf::MipsAbiFlagsV0::register_size_name(flags.gpr_size),
+                    elf::MipsAbiFlagsV0::register_size_name(flags.cpr1_size),
+                    elf::MipsAbiFlagsV0::register_size_name(flags.cpr2_size),
+                    flags.fp_abi_name()
+                );
+                println!(
+                    "      ISA extension: {} (code {}), ASEs: {} (mask 0x{:08X})",
+                    flags.isa_extension_name(),
+                    flags.isa_extension,
+                    if ase_names.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        ase_names.join(", ")
+                    },
+                    flags.ases
+                );
+                println!(
+                    "      ABI flags: flags1=0x{:08X}, flags2=0x{:08X}",
+                    flags.flags1, flags.flags2
+                );
+            } else {
+                println!(
+                    "    section [{}]: unsupported ABI flags version {} ({} bytes; raw section retained in source ELF)",
+                    abi_flags.section_index, abi_flags.version, abi_flags.section_size
+                );
+            }
+        }
+    }
+
     for (index, section) in image.section_headers.iter().enumerate() {
         println!(
             "  [{index:>3}] {:<20} type={:<3} addr=0x{:08X} size=0x{:X}",
