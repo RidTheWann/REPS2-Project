@@ -47,13 +47,9 @@ fn elf_info(path: &Path) -> Result<(), String> {
 
     println!("ELF32 little-endian image");
     println!(
-        "  Type: {}{}",
-        image.file_type,
-        if image.is_executable() {
-            " (executable)"
-        } else {
-            ""
-        }
+        "  Type: {} (0x{:04X})",
+        image.file_type_name(),
+        image.file_type
     );
     println!(
         "  Machine: {}{}",
@@ -63,6 +59,15 @@ fn elf_info(path: &Path) -> Result<(), String> {
         } else {
             " (not MIPS)"
         }
+    );
+    println!(
+        "  OS ABI: {} (code 0x{:02X})",
+        image.os_abi_name(),
+        image.os_abi
+    );
+    println!(
+        "  ABI version: {} (raw; interpreted under OS ABI {})",
+        image.abi_version, image.os_abi
     );
     println!("  Header flags: 0x{:08X}", image.flags);
     if let Some(mips_flags) = image.mips_elf_flags() {

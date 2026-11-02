@@ -252,6 +252,8 @@ mod tests {
     ) -> Image {
         Image {
             file_type: ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
             machine: EM_MIPS,
             entry_point: entry,
             flags: 0,
