@@ -53,6 +53,56 @@ int main() {
         return fail(4);
     }
 
+    // An externally supplied, word-misaligned entry PC faults before block lookup.
+    EeState misaligned_initial_fetch{};
+    misaligned_initial_fetch.pc = 0x1001U;
+    const auto initial_fetch_status =
+        reps2::generated::execute_cfg(misaligned_initial_fetch, 64U);
+    if (initial_fetch_status != Status::exception_delivered
+        || misaligned_initial_fetch.pc != reps2::runtime::kEeCommonExceptionVector
+        || misaligned_initial_fetch.cop0[reps2::runtime::kCop0BadVAddr] != 0x1001U
+        || misaligned_initial_fetch.cop0[reps2::runtime::kCop0Epc] != 0x1001U
+        || (misaligned_initial_fetch.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (misaligned_initial_fetch.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || (misaligned_initial_fetch.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusExlMask) == 0U) {
+        return fail(120);
+    }
+
+    // A register-indirect JR target is checked after its delay slot retires.
+    EeState misaligned_jr_target{};
+    misaligned_jr_target.pc = 0x1000U;
+    misaligned_jr_target.gpr[8].low = 1U;
+    misaligned_jr_target.gpr[31].low = 0x1021U;
+    const auto misaligned_jr_status =
+        reps2::generated::execute_cfg(misaligned_jr_target, 64U);
+    if (misaligned_jr_status != Status::exception_delivered
+        || misaligned_jr_target.pc != reps2::runtime::kEeCommonExceptionVector
+        || misaligned_jr_target.cop0[reps2::runtime::kCop0BadVAddr] != 0x1021U
+        || misaligned_jr_target.cop0[reps2::runtime::kCop0Epc] != 0x1021U
+        || (misaligned_jr_target.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (misaligned_jr_target.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || (misaligned_jr_target.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusExlMask) == 0U) {
+        std::fprintf(stderr,
+            "misaligned JR: status=%u pc=0x%08X epc=0x%08X bad=0x%08X cause=0x%08X cop0_status=0x%08X ra=0x%llX t1=0x%llX t2=0x%llX t3=0x%llX t5=0x%llX\\n",
+            static_cast<unsigned>(misaligned_jr_status), misaligned_jr_target.pc,
+            misaligned_jr_target.cop0[reps2::runtime::kCop0Epc],
+            misaligned_jr_target.cop0[reps2::runtime::kCop0BadVAddr],
+            misaligned_jr_target.cop0[reps2::runtime::kCop0Cause],
+            misaligned_jr_target.cop0[reps2::runtime::kCop0Status],
+            static_cast<unsigned long long>(misaligned_jr_target.gpr[31].low),
+            static_cast<unsigned long long>(misaligned_jr_target.gpr[9].low),
+            static_cast<unsigned long long>(misaligned_jr_target.gpr[10].low),
+            static_cast<unsigned long long>(misaligned_jr_target.gpr[11].low),
+            static_cast<unsigned long long>(misaligned_jr_target.gpr[13].low));
+        return fail(121);
+    }
+
     // Conditional branch taken: delay slot still runs, the fallthrough block
     // is skipped, and the target block reaches the same return.
     EeState taken{};
@@ -284,11 +334,17 @@ int main() {
     eret_return.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusExlMask;
     eret_return.cop0[reps2::runtime::kCop0Epc] = 0xF004U;
     const auto eret_status = reps2::generated::execute_cfg(eret_return, 64U);
-    if (eret_status != Status::external_control_flow || eret_return.pc != 0xDEADU
+    if (eret_status != Status::exception_delivered
+        || eret_return.pc != reps2::runtime::kEeCommonExceptionVector
         || eret_return.gpr[8].low != 42U
-        || eret_return.cop0[reps2::runtime::kCop0Epc] != 0xF004U
+        || eret_return.cop0[reps2::runtime::kCop0Epc] != 0xDEADU
+        || eret_return.cop0[reps2::runtime::kCop0BadVAddr] != 0xDEADU
+        || (eret_return.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (eret_return.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
         || (eret_return.cop0[reps2::runtime::kCop0Status]
-            & reps2::runtime::kCop0StatusExlMask) != 0U) {
+            & reps2::runtime::kCop0StatusExlMask) == 0U) {
         std::fprintf(stderr,
             "ERET smoke: status=%u pc=0x%08X t0=0x%llX t1=0x%llX epc=0x%08X cop0_status=0x%08X\\n",
             static_cast<unsigned>(eret_status), eret_return.pc,
@@ -297,6 +353,28 @@ int main() {
             eret_return.cop0[reps2::runtime::kCop0Epc],
             eret_return.cop0[reps2::runtime::kCop0Status]);
         return fail(94);
+    }
+
+    // ERET clears EXL and restores EPC; a misaligned return PC then faults
+    // at the next fetch with AdEL, not external-control-flow.
+    EeState misaligned_eret_target{};
+    misaligned_eret_target.pc = 0xF000U;
+    misaligned_eret_target.cop0[reps2::runtime::kCop0Status] =
+        reps2::runtime::kCop0StatusExlMask;
+    misaligned_eret_target.cop0[reps2::runtime::kCop0Epc] = 0xF005U;
+    const auto misaligned_eret_status =
+        reps2::generated::execute_cfg(misaligned_eret_target, 64U);
+    if (misaligned_eret_status != Status::exception_delivered
+        || misaligned_eret_target.pc != reps2::runtime::kEeCommonExceptionVector
+        || misaligned_eret_target.cop0[reps2::runtime::kCop0BadVAddr] != 0xF005U
+        || misaligned_eret_target.cop0[reps2::runtime::kCop0Epc] != 0xF005U
+        || (misaligned_eret_target.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (misaligned_eret_target.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || (misaligned_eret_target.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusExlMask) == 0U) {
+        return fail(122);
     }
 
     EeState invalid_eret{};
@@ -408,6 +486,28 @@ int main() {
     }
     if (jalr_alias.gpr[8].low != 0x4008 || jalr_alias.gpr[9].low != 31) {
         return fail(19);
+    }
+
+    // A misaligned JALR target faults after the delay slot; rd == rs still
+    // captures the old target before the link overwrites the source GPR.
+    EeState misaligned_jalr_target{};
+    misaligned_jalr_target.pc = 0x4000U;
+    misaligned_jalr_target.gpr[8].low = 0x6001U;
+    const auto misaligned_jalr_status =
+        reps2::generated::execute_cfg(misaligned_jalr_target, 64U);
+    if (misaligned_jalr_status != Status::exception_delivered
+        || misaligned_jalr_target.pc != reps2::runtime::kEeCommonExceptionVector
+        || misaligned_jalr_target.cop0[reps2::runtime::kCop0BadVAddr] != 0x6001U
+        || misaligned_jalr_target.cop0[reps2::runtime::kCop0Epc] != 0x6001U
+        || (misaligned_jalr_target.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (4U << 2U)
+        || (misaligned_jalr_target.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U
+        || (misaligned_jalr_target.cop0[reps2::runtime::kCop0Status]
+            & reps2::runtime::kCop0StatusExlMask) == 0U
+        || misaligned_jalr_target.gpr[8].low != 0x4008U
+        || misaligned_jalr_target.gpr[9].low != 31U) {
+        return fail(123);
     }
 
     // Load/store operations execute against caller-owned 32 MiB EE RAM.
