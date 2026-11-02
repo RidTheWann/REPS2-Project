@@ -1168,6 +1168,114 @@ int main() {
         return fail(87);
     }
 
+    // All twelve EE conditional traps compare GPR[63:0]. Immediate forms
+    // sign-extend the 16-bit constant before applying signed/unsigned semantics.
+    struct ConditionalTrapCase {
+        std::uint64_t trap_lhs;
+        std::uint64_t trap_rhs;
+        std::uint64_t pass_lhs;
+        std::uint64_t pass_rhs;
+    };
+    constexpr std::array<ConditionalTrapCase, 12> conditional_trap_cases{{
+        {0x7FFF'FFFF'FFFF'FFFFULL, 0x8000'0000'0000'0000ULL,
+         0x8000'0000'0000'0000ULL, 0x7FFF'FFFF'FFFF'FFFFULL}, // TGE
+        {0x8000'0000'0000'0000ULL, 0x7FFF'FFFF'FFFF'FFFFULL,
+         0x7FFF'FFFF'FFFF'FFFFULL, 0x8000'0000'0000'0000ULL}, // TGEU
+        {0x8000'0000'0000'0000ULL, 0x7FFF'FFFF'FFFF'FFFFULL,
+         0x7FFF'FFFF'FFFF'FFFFULL, 0x8000'0000'0000'0000ULL}, // TLT
+        {0x7FFF'FFFF'FFFF'FFFFULL, 0x8000'0000'0000'0000ULL,
+         0x8000'0000'0000'0000ULL, 0x7FFF'FFFF'FFFF'FFFFULL}, // TLTU
+        {0x1122'3344'5566'7788ULL, 0x1122'3344'5566'7788ULL,
+         0x1122'3344'5566'7788ULL, 0x1122'3344'5566'7789ULL}, // TEQ
+        {0x1122'3344'5566'7788ULL, 0x1122'3344'5566'7789ULL,
+         0x1122'3344'5566'7788ULL, 0x1122'3344'5566'7788ULL}, // TNE
+        {0xFFFF'FFFF'FFFF'FFFFULL, 0ULL, 0xFFFF'FFFF'FFFF'FFFDULL, 0ULL}, // TGEI -2
+        {0xFFFF'FFFF'FFFF'FFFFULL, 0ULL, 1ULL, 0ULL}, // TGEIU -2
+        {0xFFFF'FFFF'FFFF'FFFDULL, 0ULL, 0xFFFF'FFFF'FFFF'FFFFULL, 0ULL}, // TLTI -2
+        {1ULL, 0ULL, 0xFFFF'FFFF'FFFF'FFFFULL, 0ULL}, // TLTIU -2
+        {0xFFFF'FFFF'FFFF'FFFEULL, 0ULL, 0xFFFF'FFFF'FFFF'FFFFULL, 0ULL}, // TEQI -2
+        {0xFFFF'FFFF'FFFF'FFFFULL, 0ULL, 0xFFFF'FFFF'FFFF'FFFEULL, 0ULL}, // TNEI -2
+    }};
+    const auto run_conditional_trap = [](std::uint32_t guest_pc, std::uint64_t lhs,
+                                         std::uint64_t rhs, bool should_trap) {
+        EeState state{};
+        state.pc = guest_pc;
+        state.gpr[8].low = lhs;
+        state.gpr[9].low = rhs;
+        state.gpr[8].high = 0x1122'3344'5566'7788ULL;
+        state.gpr[9].high = 0x8877'6655'4433'2211ULL;
+        const auto status = reps2::generated::execute_cfg(state, 64U);
+        if (state.gpr[8].low != lhs || state.gpr[9].low != rhs
+            || state.gpr[8].high != 0x1122'3344'5566'7788ULL
+            || state.gpr[9].high != 0x8877'6655'4433'2211ULL) {
+            return false;
+        }
+        if (should_trap) {
+            return status == Status::exception_delivered
+                && state.pc == reps2::runtime::kEeCommonExceptionVector
+                && state.cop0[reps2::runtime::kCop0Epc] == guest_pc
+                && (state.cop0[reps2::runtime::kCop0Cause]
+                    & reps2::runtime::kCop0CauseExcCodeMask) == (13U << 2U)
+                && (state.cop0[reps2::runtime::kCop0Cause]
+                    & reps2::runtime::kCop0CauseBranchDelayMask) == 0U
+                && (state.cop0[reps2::runtime::kCop0Status]
+                    & reps2::runtime::kCop0StatusExlMask) != 0U;
+        }
+        return status == Status::external_control_flow
+            && state.pc == guest_pc + 4U
+            && state.cop0[reps2::runtime::kCop0Cause] == 0U
+            && (state.cop0[reps2::runtime::kCop0Status]
+                & reps2::runtime::kCop0StatusExlMask) == 0U;
+    };
+    for (std::size_t index = 0; index < conditional_trap_cases.size(); ++index) {
+        const auto& test = conditional_trap_cases[index];
+        const auto pc = 0xC000U + static_cast<std::uint32_t>(index * 0x100U);
+        if (!run_conditional_trap(pc, test.trap_lhs, test.trap_rhs, true)) {
+            std::fprintf(stderr, "conditional trap %zu failed to deliver ExcCode 13\n", index);
+            return fail(130 + static_cast<int>(index * 2U));
+        }
+        if (!run_conditional_trap(pc, test.pass_lhs, test.pass_rhs, false)) {
+            std::fprintf(stderr, "conditional trap %zu false predicate did not retire\n", index);
+            return fail(131 + static_cast<int>(index * 2U));
+        }
+    }
+
+    // The delay-slot conditional trap records its owning branch and BD=1.
+    // BEQL's not-taken path must annul a delay-slot TEQ whose predicate is true.
+    EeState conditional_trap_delay_taken{};
+    conditional_trap_delay_taken.pc = 0xCC00U;
+    conditional_trap_delay_taken.gpr[8].low = 0U;
+    conditional_trap_delay_taken.gpr[9].low = 0xCAFEU;
+    conditional_trap_delay_taken.gpr[10].low = 0xCAFEU;
+    const auto conditional_trap_delay_status =
+        reps2::generated::execute_cfg(conditional_trap_delay_taken, 64U);
+    if (conditional_trap_delay_status != Status::exception_delivered
+        || conditional_trap_delay_taken.pc != reps2::runtime::kEeCommonExceptionVector
+        || conditional_trap_delay_taken.cop0[reps2::runtime::kCop0Epc] != 0xCC00U
+        || (conditional_trap_delay_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (13U << 2U)
+        || (conditional_trap_delay_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U
+        || conditional_trap_delay_taken.gpr[11].low != 0U
+        || conditional_trap_delay_taken.gpr[12].low != 0U) {
+        return fail(154);
+    }
+    EeState conditional_trap_delay_annulled{};
+    conditional_trap_delay_annulled.pc = 0xCC00U;
+    conditional_trap_delay_annulled.gpr[8].low = 1U;
+    conditional_trap_delay_annulled.gpr[9].low = 0xCAFEU;
+    conditional_trap_delay_annulled.gpr[10].low = 0xCAFEU;
+    conditional_trap_delay_annulled.gpr[31].low = 0x9000U;
+    const auto conditional_trap_annulled_status =
+        reps2::generated::execute_cfg(conditional_trap_delay_annulled, 64U);
+    if (conditional_trap_annulled_status != Status::external_control_flow
+        || conditional_trap_delay_annulled.pc != 0x9000U
+        || conditional_trap_delay_annulled.cop0[reps2::runtime::kCop0Cause] != 0U
+        || conditional_trap_delay_annulled.gpr[11].low != 5U
+        || conditional_trap_delay_annulled.gpr[12].low != 6U) {
+        return fail(155);
+    }
+
     // The generated module initializer accepts a complete 32 MiB image,
     // copies it into caller-owned RAM, clears architectural GPR state, and
     // selects the ELF entry point.
