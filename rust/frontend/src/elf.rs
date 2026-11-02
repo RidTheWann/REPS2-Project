@@ -25,6 +25,7 @@ pub const SHT_DYNSYM: u32 = 11;
 pub const SHT_SYMTAB_SHNDX: u32 = 18;
 pub const SHT_MIPS_REGINFO: u32 = 0x7000_0006;
 pub const SHT_MIPS_ABIFLAGS: u32 = 0x7000_002A;
+pub const SHT_MIPS_OPTIONS: u32 = 0x7000_000D;
 
 const ELF_HEADER_SIZE: usize = 52;
 const PROGRAM_HEADER_SIZE: usize = 32;
@@ -33,6 +34,20 @@ const SYMBOL_SIZE: usize = 16;
 const REL_SIZE: usize = 8;
 const MIPS_REGINFO_SIZE: usize = 24;
 const MIPS_ABIFLAGS_V0_SIZE: usize = 24;
+const MIPS_OPTIONS_HEADER_SIZE: usize = 8;
+const MIPS_OPTION_REGINFO_SIZE: usize = 24;
+const ODK_NULL: u8 = 0;
+const ODK_REGINFO: u8 = 1;
+const ODK_EXCEPTIONS: u8 = 2;
+const ODK_PAD: u8 = 3;
+const ODK_HWPATCH: u8 = 4;
+const ODK_FILL: u8 = 5;
+const ODK_TAGS: u8 = 6;
+const ODK_HWAND: u8 = 7;
+const ODK_HWOR: u8 = 8;
+const ODK_GP_GROUP: u8 = 9;
+const ODK_IDENT: u8 = 10;
+const ODK_PAGESIZE: u8 = 11;
 const MIPS_AFL_FLAGS1_ODDSPREG: u32 = 1;
 const STB_LOCAL: u8 = 0;
 const SHN_LORESERVE: u16 = 0xFF00;
@@ -69,6 +84,7 @@ pub struct ParseLimits {
     pub max_relocations: usize,
     pub max_sections: usize,
     pub max_program_headers: usize,
+    pub max_mips_option_descriptors: usize,
 }
 
 impl Default for ParseLimits {
@@ -79,6 +95,7 @@ impl Default for ParseLimits {
             max_relocations: 4_000_000,
             max_sections: 100_000,
             max_program_headers: 100_000,
+            max_mips_option_descriptors: 100_000,
         }
     }
 }
@@ -168,6 +185,56 @@ pub struct MipsRegInfo {
     pub gpr_mask: u32,
     pub coprocessor_masks: [u32; 4],
     pub gp_value: i32,
+}
+
+/// Register metadata carried by an ODK_REGINFO SHT_MIPS_OPTIONS descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MipsOptionRegInfo {
+    pub gpr_mask: u32,
+    pub coprocessor_masks: [u32; 4],
+    pub gp_value: i32,
+}
+
+/// One variable-length descriptor from a SHT_MIPS_OPTIONS section.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MipsOptionDescriptor {
+    pub kind: u8,
+    pub size: u8,
+    /// Zero means global options; nonzero values are raw section indices.
+    pub section_index: u16,
+    pub info: u32,
+    /// Number of bytes following the fixed eight-byte descriptor header.
+    pub payload_size: u8,
+    /// Present only for an ODK_REGINFO descriptor in ELF32.
+    pub register_info: Option<MipsOptionRegInfo>,
+}
+
+impl MipsOptionDescriptor {
+    #[must_use]
+    pub const fn kind_name(&self) -> &'static str {
+        match self.kind {
+            ODK_NULL => "NULL",
+            ODK_REGINFO => "REGINFO",
+            ODK_EXCEPTIONS => "EXCEPTIONS",
+            ODK_PAD => "PAD",
+            ODK_HWPATCH => "HWPATCH",
+            ODK_FILL => "FILL",
+            ODK_TAGS => "TAGS",
+            ODK_HWAND => "HWAND",
+            ODK_HWOR => "HWOR",
+            ODK_GP_GROUP => "GP_GROUP",
+            ODK_IDENT => "IDENT",
+            ODK_PAGESIZE => "PAGESIZE",
+            _ => "unknown",
+        }
+    }
+}
+
+/// Decoded descriptor list from one SHT_MIPS_OPTIONS section.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MipsOptionsSection {
+    pub section_index: usize,
+    pub descriptors: Vec<MipsOptionDescriptor>,
 }
 
 /// Decoded version-zero payload from a SHT_MIPS_ABIFLAGS section.
@@ -463,6 +530,8 @@ pub struct Image {
     pub mips_reginfo: Vec<MipsRegInfo>,
     /// MIPS ISA, register-size and FP ABI metadata decoded from SHT_MIPS_ABIFLAGS.
     pub mips_abi_flags: Vec<MipsAbiFlags>,
+    /// Variable-length MIPS option descriptors decoded from SHT_MIPS_OPTIONS.
+    pub mips_options: Vec<MipsOptionsSection>,
 }
 
 impl Image {
@@ -969,6 +1038,105 @@ fn parse_mips_abi_sections(
     Ok((register_info, abi_flags))
 }
 
+fn parse_mips_options_sections(
+    bytes: &[u8],
+    machine: u16,
+    sections: &[SectionHeader],
+    limits: ParseLimits,
+) -> Result<Vec<MipsOptionsSection>, Error> {
+    if machine != EM_MIPS {
+        return Ok(Vec::new());
+    }
+
+    let mut result = Vec::new();
+    let mut descriptor_count = 0usize;
+    for (section_index, section) in sections.iter().enumerate() {
+        if section.kind != SHT_MIPS_OPTIONS {
+            continue;
+        }
+        let data = section_data(bytes, section, "MIPS options")?;
+        let mut descriptors = Vec::new();
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let remaining = data.len() - offset;
+            if remaining < MIPS_OPTIONS_HEADER_SIZE {
+                return Err(Error::new(
+                    "SHT_MIPS_OPTIONS ends with a truncated descriptor header",
+                ));
+            }
+
+            let kind = read_u8(data, offset)?;
+            let size = read_u8(data, offset + 1)?;
+            let descriptor_size = usize::from(size);
+            if descriptor_size < MIPS_OPTIONS_HEADER_SIZE {
+                return Err(Error::new(
+                    "SHT_MIPS_OPTIONS descriptor size is smaller than its eight-byte header",
+                ));
+            }
+            let descriptor_end = offset
+                .checked_add(descriptor_size)
+                .ok_or_else(|| Error::new("SHT_MIPS_OPTIONS descriptor end overflows"))?;
+            if descriptor_end > data.len() {
+                return Err(Error::new(
+                    "SHT_MIPS_OPTIONS descriptor extends beyond its section",
+                ));
+            }
+
+            let section_target = read_u16(data, offset + 2)?;
+            if section_target != 0 && usize::from(section_target) >= sections.len() {
+                return Err(Error::new(
+                    "SHT_MIPS_OPTIONS descriptor references an invalid section index",
+                ));
+            }
+            let info = read_u32(data, offset + 4)?;
+            let register_info = if kind == ODK_REGINFO {
+                if descriptor_size < MIPS_OPTIONS_HEADER_SIZE + MIPS_OPTION_REGINFO_SIZE {
+                    return Err(Error::new(
+                        "ODK_REGINFO descriptor is too small for an ELF32_RegInfo payload",
+                    ));
+                }
+                let base = offset + MIPS_OPTIONS_HEADER_SIZE;
+                Some(MipsOptionRegInfo {
+                    gpr_mask: read_u32(data, base)?,
+                    coprocessor_masks: [
+                        read_u32(data, base + 4)?,
+                        read_u32(data, base + 8)?,
+                        read_u32(data, base + 12)?,
+                        read_u32(data, base + 16)?,
+                    ],
+                    gp_value: read_i32(data, base + 20)?,
+                })
+            } else {
+                None
+            };
+
+            descriptor_count = descriptor_count
+                .checked_add(1)
+                .ok_or_else(|| Error::new("SHT_MIPS_OPTIONS descriptor count overflows"))?;
+            if descriptor_count > limits.max_mips_option_descriptors {
+                return Err(Error::new(
+                    "MIPS option descriptors exceed configured parser limit",
+                ));
+            }
+            descriptors.push(MipsOptionDescriptor {
+                kind,
+                size,
+                section_index: section_target,
+                info,
+                payload_size: u8::try_from(descriptor_size - MIPS_OPTIONS_HEADER_SIZE)
+                    .map_err(|_| Error::new("MIPS option payload size overflow"))?,
+                register_info,
+            });
+            offset = descriptor_end;
+        }
+        result.push(MipsOptionsSection {
+            section_index,
+            descriptors,
+        });
+    }
+    Ok(result)
+}
+
 fn parse_relocations(
     bytes: &[u8],
     sections: &[SectionHeader],
@@ -1416,6 +1584,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     let symbols = parse_symbols(bytes, &section_headers, limits)?;
     let relocations = parse_relocations(bytes, &section_headers, limits)?;
     let (mips_reginfo, mips_abi_flags) = parse_mips_abi_sections(bytes, machine, &section_headers)?;
+    let mips_options = parse_mips_options_sections(bytes, machine, &section_headers, limits)?;
     Ok(Image {
         file_type,
         os_abi,
@@ -1430,6 +1599,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         relocations,
         mips_reginfo,
         mips_abi_flags,
+        mips_options,
     })
 }
 
@@ -1826,6 +1996,99 @@ mod tests {
                 address: 0,
                 offset: abiflags_offset as u32,
                 size: MIPS_ABIFLAGS_V0_SIZE as u32,
+                link: 0,
+                info: 0,
+                alignment: 4,
+                entry_size: 0,
+            },
+        );
+        bytes
+    }
+
+    fn elf_with_mips_options() -> Vec<u8> {
+        let shstr = b"\0.shstrtab\0.MIPS.options\0";
+        const REGINFO_DESCRIPTOR_SIZE: usize = MIPS_OPTIONS_HEADER_SIZE + MIPS_OPTION_REGINFO_SIZE;
+        const EXCEPTIONS_DESCRIPTOR_SIZE: usize = MIPS_OPTIONS_HEADER_SIZE;
+        const UNKNOWN_DESCRIPTOR_SIZE: usize = MIPS_OPTIONS_HEADER_SIZE + 2;
+        let options_size =
+            REGINFO_DESCRIPTOR_SIZE + EXCEPTIONS_DESCRIPTOR_SIZE + UNKNOWN_DESCRIPTOR_SIZE;
+        let section_table_end = ELF_HEADER_SIZE + 3 * SECTION_HEADER_SIZE;
+        let shstr_offset = section_table_end;
+        let options_offset = shstr_offset + shstr.len();
+        let mut bytes = vec![0; options_offset + options_size];
+        let find_name = |name: &[u8]| -> u32 {
+            shstr
+                .windows(name.len())
+                .position(|window| window == name)
+                .expect("MIPS options section name exists") as u32
+        };
+
+        bytes[0..4].copy_from_slice(b"\x7FELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 24, 0x0010_0000);
+        put_u32(&mut bytes, 32, ELF_HEADER_SIZE as u32);
+        put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 48, 3);
+        put_u16(&mut bytes, 50, 1);
+
+        bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(shstr);
+
+        // ODK_REGINFO consists of the fixed eight-byte Elf_Options header
+        // followed by the 24-byte ELF32_RegInfo payload.
+        bytes[options_offset] = ODK_REGINFO;
+        bytes[options_offset + 1] = REGINFO_DESCRIPTOR_SIZE as u8;
+        put_u16(&mut bytes, options_offset + 2, 0); // global options
+        put_u32(&mut bytes, options_offset + 4, 0xAABB_CCDD);
+        put_u32(&mut bytes, options_offset + 8, 0x8000_0002);
+        put_u32(&mut bytes, options_offset + 12, 0x0000_0000);
+        put_u32(&mut bytes, options_offset + 16, 0x1234_5678);
+        put_u32(&mut bytes, options_offset + 20, 0x0000_0000);
+        put_u32(&mut bytes, options_offset + 24, 0x8000_0000);
+        put_u32(&mut bytes, options_offset + 28, 0x8012_3400);
+
+        let exceptions_offset = options_offset + REGINFO_DESCRIPTOR_SIZE;
+        bytes[exceptions_offset] = ODK_EXCEPTIONS;
+        bytes[exceptions_offset + 1] = EXCEPTIONS_DESCRIPTOR_SIZE as u8;
+        put_u16(&mut bytes, exceptions_offset + 2, 2);
+        put_u32(&mut bytes, exceptions_offset + 4, 0x0001_001F);
+
+        let unknown_offset = exceptions_offset + EXCEPTIONS_DESCRIPTOR_SIZE;
+        bytes[unknown_offset] = 0xFE;
+        bytes[unknown_offset + 1] = UNKNOWN_DESCRIPTOR_SIZE as u8;
+        put_u16(&mut bytes, unknown_offset + 2, 0);
+        put_u32(&mut bytes, unknown_offset + 4, 0x1122_3344);
+        bytes[unknown_offset + 8..unknown_offset + 10].copy_from_slice(&[0xDE, 0xAD]);
+
+        write_section(
+            &mut bytes,
+            ELF_HEADER_SIZE + SECTION_HEADER_SIZE,
+            SectionSpec {
+                name: find_name(b".shstrtab"),
+                kind: SHT_STRTAB,
+                address: 0,
+                offset: shstr_offset as u32,
+                size: shstr.len() as u32,
+                link: 0,
+                info: 0,
+                alignment: 1,
+                entry_size: 0,
+            },
+        );
+        write_section(
+            &mut bytes,
+            ELF_HEADER_SIZE + 2 * SECTION_HEADER_SIZE,
+            SectionSpec {
+                name: find_name(b".MIPS.options"),
+                kind: SHT_MIPS_OPTIONS,
+                address: 0,
+                offset: options_offset as u32,
+                size: options_size as u32,
                 link: 0,
                 info: 0,
                 alignment: 4,
@@ -2269,6 +2532,111 @@ mod tests {
     }
 
     #[test]
+    fn parses_mips_options_descriptors_and_elf32_reginfo_payload() {
+        let bytes = elf_with_mips_options();
+        let image = parse(&bytes, ParseLimits::default()).expect("MIPS options fixture");
+        assert_eq!(image.mips_options.len(), 1);
+
+        let section = &image.mips_options[0];
+        assert_eq!(section.section_index, 2);
+        assert_eq!(section.descriptors.len(), 3);
+
+        let reginfo = &section.descriptors[0];
+        assert_eq!(reginfo.kind, ODK_REGINFO);
+        assert_eq!(reginfo.kind_name(), "REGINFO");
+        assert_eq!(
+            reginfo.size as usize,
+            MIPS_OPTIONS_HEADER_SIZE + MIPS_OPTION_REGINFO_SIZE
+        );
+        assert_eq!(reginfo.section_index, 0);
+        assert_eq!(reginfo.info, 0xAABB_CCDD);
+        assert_eq!(reginfo.payload_size as usize, MIPS_OPTION_REGINFO_SIZE);
+        let registers = reginfo.register_info.as_ref().expect("ODK_REGINFO payload");
+        assert_eq!(registers.gpr_mask, 0x8000_0002);
+        assert_eq!(
+            registers.coprocessor_masks,
+            [0, 0x1234_5678, 0, 0x8000_0000]
+        );
+        assert_eq!(registers.gp_value, 0x8012_3400u32 as i32);
+
+        let exceptions = &section.descriptors[1];
+        assert_eq!(exceptions.kind, ODK_EXCEPTIONS);
+        assert_eq!(exceptions.kind_name(), "EXCEPTIONS");
+        assert_eq!(exceptions.section_index, 2);
+        assert_eq!(exceptions.info, 0x0001_001F);
+        assert_eq!(exceptions.payload_size, 0);
+        assert!(exceptions.register_info.is_none());
+
+        let unknown = &section.descriptors[2];
+        assert_eq!(unknown.kind, 0xFE);
+        assert_eq!(unknown.kind_name(), "unknown");
+        assert_eq!(unknown.size, 10);
+        assert_eq!(unknown.section_index, 0);
+        assert_eq!(unknown.info, 0x1122_3344);
+        assert_eq!(unknown.payload_size, 2);
+        assert!(unknown.register_info.is_none());
+    }
+
+    #[test]
+    fn rejects_malformed_mips_options_descriptor_boundaries_and_links() {
+        let seed = elf_with_mips_options();
+        let options_header = ELF_HEADER_SIZE + 2 * SECTION_HEADER_SIZE;
+        let options_offset =
+            read_u32(&seed, options_header + 16).expect("MIPS options file offset") as usize;
+
+        let mut too_small = seed.clone();
+        too_small[options_offset + 1] = (MIPS_OPTIONS_HEADER_SIZE - 1) as u8;
+        assert!(parse(&too_small, ParseLimits::default()).is_err());
+
+        let mut extends_past_section = seed.clone();
+        extends_past_section[options_offset + 1] = u8::MAX;
+        assert!(parse(&extends_past_section, ParseLimits::default()).is_err());
+
+        let mut short_reginfo = seed.clone();
+        short_reginfo[options_offset + 1] =
+            (MIPS_OPTIONS_HEADER_SIZE + MIPS_OPTION_REGINFO_SIZE - 1) as u8;
+        assert!(parse(&short_reginfo, ParseLimits::default()).is_err());
+
+        let mut invalid_target_section = seed.clone();
+        put_u16(&mut invalid_target_section, options_offset + 2, 3);
+        assert!(parse(&invalid_target_section, ParseLimits::default()).is_err());
+
+        let mut truncated_header = seed;
+        put_u32(
+            &mut truncated_header,
+            options_header + 20,
+            (MIPS_OPTIONS_HEADER_SIZE + MIPS_OPTION_REGINFO_SIZE + MIPS_OPTIONS_HEADER_SIZE + 5)
+                as u32,
+        );
+        assert!(parse(&truncated_header, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn applies_mips_options_descriptor_limit_and_ignores_non_mips_payloads() {
+        let seed = elf_with_mips_options();
+        let limited = ParseLimits {
+            max_mips_option_descriptors: 2,
+            ..ParseLimits::default()
+        };
+        let error = parse(&seed, limited).expect_err("descriptor limit");
+        assert!(
+            error
+                .to_string()
+                .contains("MIPS option descriptors exceed configured parser limit")
+        );
+
+        let mut non_mips = seed;
+        put_u16(&mut non_mips, 18, 3);
+        let options_header = ELF_HEADER_SIZE + 2 * SECTION_HEADER_SIZE;
+        let options_offset =
+            read_u32(&non_mips, options_header + 16).expect("MIPS options offset") as usize;
+        non_mips[options_offset + 1] = 0;
+        let image = parse(&non_mips, ParseLimits::default())
+            .expect("non-MIPS file does not interpret MIPS option descriptors");
+        assert!(image.mips_options.is_empty());
+    }
+
+    #[test]
     fn parses_mips_reginfo_register_masks_and_global_pointer() {
         let bytes = elf_with_mips_abi_metadata();
         let image = parse(&bytes, ParseLimits::default()).expect("MIPS .reginfo fixture");
@@ -2647,6 +3015,7 @@ mod tests {
             relocations: Vec::new(),
             mips_reginfo: Vec::new(),
             mips_abi_flags: Vec::new(),
+            mips_options: Vec::new(),
         };
         assert_eq!(image.mips_elf_flags(), None);
     }
@@ -2946,6 +3315,7 @@ mod tests {
             max_relocations: 1 << 10,
             max_sections: 1 << 10,
             max_program_headers: 1 << 10,
+            max_mips_option_descriptors: 1 << 10,
         };
         let mut rng = 0x9E37_79B9_7F4A_7C15_u64;
         let mut ram_images_built = 0;
@@ -2977,6 +3347,7 @@ mod tests {
             max_relocations: 1 << 10,
             max_sections: 1 << 10,
             max_program_headers: 1 << 10,
+            max_mips_option_descriptors: 1 << 10,
         };
         let analysis_limits = AnalysisLimits {
             max_loaded_memory: 1 << 20,
