@@ -684,6 +684,45 @@ inline void disable_interrupts(EeState& state) noexcept {
     };
 }
 
+// PADDH adds eight corresponding 16-bit lanes modulo 2^16. Arithmetic is
+// performed on unsigned lane values so wraparound is defined C++ behavior.
+// No carry crosses a halfword boundary.
+[[nodiscard]] constexpr Gpr128 parallel_add_halfword(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    auto pack = [](std::uint64_t a, std::uint64_t b) noexcept -> std::uint64_t {
+        std::uint64_t result = 0;
+        for (unsigned shift = 0; shift < 64; shift += 16) {
+            const auto lane = static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(a >> shift) + static_cast<std::uint16_t>(b >> shift)
+            );
+            result |= static_cast<std::uint64_t>(lane) << shift;
+        }
+        return result;
+    };
+    return Gpr128{pack(lhs.low, rhs.low), pack(lhs.high, rhs.high)};
+}
+
+// PSUBH subtracts eight corresponding 16-bit lanes modulo 2^16. No borrow
+// crosses a halfword boundary; unsigned subtraction gives the defined bit result.
+[[nodiscard]] constexpr Gpr128 parallel_sub_halfword(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    auto pack = [](std::uint64_t a, std::uint64_t b) noexcept -> std::uint64_t {
+        std::uint64_t result = 0;
+        for (unsigned shift = 0; shift < 64; shift += 16) {
+            const auto lane = static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(a >> shift) - static_cast<std::uint16_t>(b >> shift)
+            );
+            result |= static_cast<std::uint64_t>(lane) << shift;
+        }
+        return result;
+    };
+    return Gpr128{pack(lhs.low, rhs.low), pack(lhs.high, rhs.high)};
+}
+
 [[nodiscard]] constexpr std::uint32_t saturating_add_u32(
     std::uint32_t lhs,
     std::uint32_t rhs

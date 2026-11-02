@@ -118,6 +118,8 @@ pub enum Opcode {
     Sq,
     ParallelAddWord,
     ParallelSubWord,
+    ParallelAddHalfword,
+    ParallelSubHalfword,
     ParallelAddUnsignedWord,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
@@ -384,6 +386,8 @@ impl Opcode {
             Self::Sq => "sq",
             Self::ParallelAddWord => "paddw",
             Self::ParallelSubWord => "psubw",
+            Self::ParallelAddHalfword => "paddh",
+            Self::ParallelSubHalfword => "psubh",
             Self::ParallelAddUnsignedWord => "padduw",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
@@ -841,7 +845,11 @@ impl Instruction {
             Opcode::Lui => {
                 effects.gpr_write_mask = rt;
             }
-            Opcode::ParallelAddWord | Opcode::ParallelSubWord | Opcode::ParallelAddUnsignedWord => {
+            Opcode::ParallelAddWord
+            | Opcode::ParallelSubWord
+            | Opcode::ParallelAddHalfword
+            | Opcode::ParallelSubHalfword
+            | Opcode::ParallelAddUnsignedWord => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
@@ -1366,6 +1374,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x1C => match (word & 0x3F) as u8 {
                 0x08 if ((word >> 6) & 0x1F) == 0x00 => Opcode::ParallelAddWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x01 => Opcode::ParallelSubWord,
+                0x08 if ((word >> 6) & 0x1F) == 0x04 => Opcode::ParallelAddHalfword,
+                0x08 if ((word >> 6) & 0x1F) == 0x05 => Opcode::ParallelSubHalfword,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
@@ -1640,10 +1650,12 @@ mod tests {
     }
 
     #[test]
-    fn decodes_r5900_mmi0_parallel_word_add_and_subtract() {
+    fn decodes_r5900_mmi0_parallel_word_and_halfword_add_and_subtract() {
         for (selector, expected, mnemonic) in [
             (0x00, Opcode::ParallelAddWord, "paddw"),
             (0x01, Opcode::ParallelSubWord, "psubw"),
+            (0x04, Opcode::ParallelAddHalfword, "paddh"),
+            (0x05, Opcode::ParallelSubHalfword, "psubh"),
         ] {
             let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (selector << 6) | 0x08;
             let decoded = decode(word, 0x6F00);

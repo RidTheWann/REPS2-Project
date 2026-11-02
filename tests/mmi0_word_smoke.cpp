@@ -31,10 +31,23 @@ constexpr Gpr128 kSubExpected{
     0x8000'0000'8000'0001ULL,
 };
 
+constexpr Gpr128 kHalfAddExpected{
+    0x7FFE'FFFE'FFFF'0000ULL,
+    0x8000'0000'7FFF'FFFFULL,
+};
+constexpr Gpr128 kHalfSubExpected{
+    0x8000'0000'FFFF'FFFEULL,
+    0x8000'0000'8001'0001ULL,
+};
+
 static_assert(reps2::runtime::parallel_add_word(kLhs, kRhs).low == kAddExpected.low);
 static_assert(reps2::runtime::parallel_add_word(kLhs, kRhs).high == kAddExpected.high);
 static_assert(reps2::runtime::parallel_sub_word(kLhs, kRhs).low == kSubExpected.low);
 static_assert(reps2::runtime::parallel_sub_word(kLhs, kRhs).high == kSubExpected.high);
+static_assert(reps2::runtime::parallel_add_halfword(kLhs, kRhs).low == kHalfAddExpected.low);
+static_assert(reps2::runtime::parallel_add_halfword(kLhs, kRhs).high == kHalfAddExpected.high);
+static_assert(reps2::runtime::parallel_sub_halfword(kLhs, kRhs).low == kHalfSubExpected.low);
+static_assert(reps2::runtime::parallel_sub_halfword(kLhs, kRhs).high == kHalfSubExpected.high);
 
 } // namespace
 
@@ -47,6 +60,10 @@ int main() {
     state.gpr[6] = kRhs;
     state.gpr[8] = kLhs;
     state.gpr[7] = kRhs;
+    state.gpr[11] = kLhs;
+    state.gpr[12] = kRhs;
+    state.gpr[14] = kLhs;
+    state.gpr[13] = kRhs;
 
     if (reps2::generated::execute(state) != Status::ok) return 1;
 
@@ -64,6 +81,18 @@ int main() {
 
     // The generated guard suppresses writes to the architecturally-zero GPR.
     if (state.gpr[0].low != 0U || state.gpr[0].high != 0U) return 10;
+
+    // PADDH and PSUBH wrap each of the eight 16-bit lanes independently.
+    if (state.gpr[9].low != kHalfAddExpected.low) return 11;
+    if (state.gpr[9].high != kHalfAddExpected.high) return 12;
+    if (state.gpr[10].low != kHalfSubExpected.low) return 13;
+    if (state.gpr[10].high != kHalfSubExpected.high) return 14;
+
+    // Halfword destination aliasing must also preserve the complete result.
+    if (state.gpr[11].low != kHalfAddExpected.low) return 15;
+    if (state.gpr[11].high != kHalfAddExpected.high) return 16;
+    if (state.gpr[13].low != kHalfSubExpected.low) return 17;
+    if (state.gpr[13].high != kHalfSubExpected.high) return 18;
 
     return 0;
 }

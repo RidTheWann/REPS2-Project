@@ -28,6 +28,8 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::sign_extend_word_signed;\n\
              using reps2::runtime::parallel_add_u32;             using reps2::runtime::parallel_add_word;\n\
              using reps2::runtime::parallel_sub_word;\n\
+             using reps2::runtime::parallel_add_halfword;\n\
+             using reps2::runtime::parallel_sub_halfword;\n\
 \n\
              using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::store_fpu_control;\n\
@@ -367,6 +369,12 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelSubWord { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_sub_word");
+        }
+        Operation::ParallelAddHalfword { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_add_halfword");
+        }
+        Operation::ParallelSubHalfword { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_sub_halfword");
         }
         Operation::ParallelAddUnsignedWord { dst, lhs, rhs } => {
             emit_parallel_add_u32(output, dst, lhs, rhs);
@@ -1676,6 +1684,34 @@ mod tests {
             )
         );
         assert!(!cpp.contains("= parallel_add_u32("));
+    }
+
+    #[test]
+    fn emits_mmi0_parallel_halfword_add_and_subtract_runtime_calls() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x04 << 6) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | (0x05 << 6) | 0x08,
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (0x04 << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x6F00 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PADDH/PSUBH IR");
+        let cpp = emit_cpp(&program).expect("PADDH/PSUBH C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_add_halfword;"));
+        assert!(cpp.contains("using reps2::runtime::parallel_sub_halfword;"));
+        assert!(cpp.contains(
+            "if (3 != 0) state.gpr[3] = parallel_add_halfword(state.gpr[1], state.gpr[2]);"
+        ));
+        assert!(cpp.contains(
+            "if (6 != 0) state.gpr[6] = parallel_sub_halfword(state.gpr[4], state.gpr[5]);"
+        ));
+        assert!(cpp.contains(
+            "if (0 != 0) state.gpr[0] = parallel_add_halfword(state.gpr[1], state.gpr[2]);"
+        ));
     }
 
     #[test]
