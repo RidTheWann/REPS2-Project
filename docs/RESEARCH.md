@@ -233,6 +233,21 @@ References:
 - System V Generic ABI, section headers and sh_link/sh_info: https://gabi.xinuos.com/v42/elf/03-sheader.html
 - System V ELF string-table rules: https://refspecs.linuxfoundation.org/elf/elfspec.pdf
 
+## MIPS ABI metadata: .reginfo and .MIPS.abiflags
+
+- The MIPS ABI supplement defines SHT_MIPS_REGINFO (0x70000006) as a 24-byte ELF32_RegInfo record: one GPR mask, four coprocessor masks, and a signed 32-bit gp value. It describes register usage for an object and the global pointer value used by GP-relative relocations in relocatable objects.
+- PT_MIPS_REGINFO (0x70000000) is the corresponding program-header type in the MIPS ABI supplement. The standard supplement specifies at most one, before PT_LOAD, and links it to one .reginfo section. REPS2 reports its count but deliberately does not make its presence an unconditional parser gate, because PS2SDK's ERL workflow documents stripping .reginfo from relocatable modules.
+- SHT_MIPS_ABIFLAGS (0x7000002a) uses a 24-byte version-zero record with ISA level/revision, GPR/CPR1/CPR2 register sizes, FP ABI, ISA extension, ASE mask, and two general flag words. Unknown structure versions are retained as version/size metadata and are not interpreted as version zero.
+- LLVM's R5900 target support assigns AFL_EXT_5900 the value 6. This is distinct from the e_flags CPU field value 0x92: the fields complement one another, but neither alone proves that a game ELF is playable or fully compatible.
+- The parser decodes these processor-specific sections only when e_machine is EM_MIPS. Unrecognized ASE bits and flags1/flags2 are retained numerically; no ABI mask or register-use mask is treated as enforcement policy.
+
+References:
+- System V MIPS ABI Supplement, section 4.14 Register Information and section 5.4 Program Header: https://refspecs.linuxfoundation.org/elf/mipsabi.pdf
+- Linux MIPS ELF definitions for SHT_MIPS_REGINFO/SHT_MIPS_ABIFLAGS and Elf32_RegInfo/ABI flags: https://android.googlesource.com/kernel/common/+/b83b3fa78445387f351cef477a112e503d72b9f0/arch/mips/include/asm/elf.h
+- LLVM MIPS ABI flags definitions, including AFL_EXT_5900=6: https://www.llvm.org/docs/doxygen/MipsABIFlags_8h.html
+- LLVM R5900 target support discussion explaining AFL_EXT_5900: https://lists.llvm.org/pipermail/llvm-commits/Week-of-Mon-20260119/1826509.html
+- PS2SDK EE ERL documentation describes .reginfo as removable from relocatable modules: https://github.com/ps2dev/ps2sdk/blob/master/ee/erl/README
+
 ## ELF identification and object-type diagnostics
 
 - ELF identification stores EI_OSABI in e_ident[7] and EI_ABIVERSION in e_ident[8]. OSABI identifies extensions/conventions, while the ABI-version byte is interpreted in the context of that OSABI; REPS2 therefore preserves both raw values and labels the version as raw metadata.
