@@ -45,7 +45,6 @@ const EF_MIPS_ABI_MASK: u32 = 0x0000_F000;
 const EF_MIPS_CPU_MASK: u32 = 0x00FF_0000;
 const EF_MIPS_ARCH_MASK: u32 = 0xF000_0000;
 
-
 /// Limits untrusted ELF-derived allocations and table processing.
 #[derive(Clone, Copy, Debug)]
 pub struct ParseLimits {
@@ -249,8 +248,7 @@ impl MipsElfFlags {
 /// fields as a failure. The caller must establish EM_MIPS separately.
 #[must_use]
 pub const fn decode_mips_elf_flags(raw: u32) -> MipsElfFlags {
-    let known_mask =
-        EF_MIPS_FEATURE_MASK | EF_MIPS_ABI_MASK | EF_MIPS_CPU_MASK | EF_MIPS_ARCH_MASK;
+    let known_mask = EF_MIPS_FEATURE_MASK | EF_MIPS_ABI_MASK | EF_MIPS_CPU_MASK | EF_MIPS_ARCH_MASK;
     MipsElfFlags {
         raw,
         cpu_code: ((raw & EF_MIPS_CPU_MASK) >> 16) as u8,
