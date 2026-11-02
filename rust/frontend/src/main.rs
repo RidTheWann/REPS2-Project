@@ -134,7 +134,10 @@ fn elf_info(path: &Path) -> Result<(), String> {
                 u32::from_ne_bytes(reginfo.gp_value.to_ne_bytes())
             );
         }
-        println!("  SHT_MIPS_ABIFLAGS sections: {}", image.mips_abi_flags.len());
+        println!(
+            "  SHT_MIPS_ABIFLAGS sections: {}",
+            image.mips_abi_flags.len()
+        );
         for abi_flags in &image.mips_abi_flags {
             if let Some(flags) = abi_flags.version_zero {
                 let ase_names = flags.ase_names();
