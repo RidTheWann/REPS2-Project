@@ -10,6 +10,7 @@ pub const ET_DYN: u16 = 3;
 pub const ET_CORE: u16 = 4;
 pub const PT_LOAD: u32 = 1;
 pub const PT_MIPS_REGINFO: u32 = 0x7000_0000;
+pub const PT_MIPS_ABIFLAGS: u32 = 0x7000_0003;
 pub const SHF_ALLOC: u32 = 0x2;
 pub const PF_R: u32 = 0x4;
 pub const PF_W: u32 = 0x2;
@@ -403,6 +404,87 @@ pub struct MipsAbiFlags {
     pub version_zero: Option<MipsAbiFlagsV0>,
 }
 
+/// MIPS ABI flags metadata carried by a PT_MIPS_ABIFLAGS program header.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MipsAbiFlagsSegment {
+    pub program_header_index: usize,
+    pub file_offset: u32,
+    pub virtual_address: u32,
+    pub segment_size: u32,
+    pub version: u16,
+    pub version_zero: Option<MipsAbiFlagsV0>,
+}
+
+fn decode_mips_abi_flags_payload(data: &[u8]) -> Result<(u16, Option<MipsAbiFlagsV0>), Error> {
+    if data.len() < 2 {
+        return Err(Error::new(
+            "MIPS ABI flags payload is too small to contain its version field",
+        ));
+    }
+    let version = read_u16(data, 0)?;
+    let version_zero = if version == 0 {
+        if data.len() != MIPS_ABIFLAGS_V0_SIZE {
+            return Err(Error::new(
+                "version-zero MIPS ABI flags payload must be exactly 24 bytes",
+            ));
+        }
+        Some(MipsAbiFlagsV0 {
+            isa_level: read_u8(data, 2)?,
+            isa_revision: read_u8(data, 3)?,
+            gpr_size: read_u8(data, 4)?,
+            cpr1_size: read_u8(data, 5)?,
+            cpr2_size: read_u8(data, 6)?,
+            fp_abi: read_u8(data, 7)?,
+            isa_extension: read_u32(data, 8)?,
+            ases: read_u32(data, 12)?,
+            flags1: read_u32(data, 16)?,
+            flags2: read_u32(data, 20)?,
+        })
+    } else {
+        None
+    };
+    Ok((version, version_zero))
+}
+
+fn parse_mips_abi_flags_segments(
+    bytes: &[u8],
+    machine: u16,
+    program_headers: &[ProgramHeader],
+) -> Result<Vec<MipsAbiFlagsSegment>, Error> {
+    if machine != EM_MIPS {
+        return Ok(Vec::new());
+    }
+
+    let mut result = Vec::new();
+    for (program_header_index, header) in program_headers.iter().enumerate() {
+        if header.kind != PT_MIPS_ABIFLAGS {
+            continue;
+        }
+        if !result.is_empty() {
+            return Err(Error::new(
+                "ELF contains more than one PT_MIPS_ABIFLAGS program header",
+            ));
+        }
+        let range = checked_range(
+            bytes,
+            u64::from(header.offset),
+            u64::from(header.file_size),
+            "PT_MIPS_ABIFLAGS segment",
+        )?;
+        let data = &bytes[range];
+        let (version, version_zero) = decode_mips_abi_flags_payload(data)?;
+        result.push(MipsAbiFlagsSegment {
+            program_header_index,
+            file_offset: header.offset,
+            virtual_address: header.virtual_address,
+            segment_size: header.file_size,
+            version,
+            version_zero,
+        });
+    }
+    Ok(result)
+}
+
 fn parse_mips_reginfo_segments(
     bytes: &[u8],
     machine: u16,
@@ -600,6 +682,8 @@ pub struct Image {
     pub mips_reginfo: Vec<MipsRegInfo>,
     /// Register-use metadata decoded from PT_MIPS_REGINFO program headers.
     pub mips_reginfo_segments: Vec<MipsRegInfoSegment>,
+    /// MIPS ABI flags decoded from PT_MIPS_ABIFLAGS program headers.
+    pub mips_abi_flags_segments: Vec<MipsAbiFlagsSegment>,
     /// MIPS ISA, register-size and FP ABI metadata decoded from SHT_MIPS_ABIFLAGS.
     pub mips_abi_flags: Vec<MipsAbiFlags>,
     /// Variable-length MIPS option descriptors decoded from SHT_MIPS_OPTIONS.
@@ -1069,34 +1153,8 @@ fn parse_mips_abi_sections(
                         "ELF contains more than one SHT_MIPS_ABIFLAGS section",
                     ));
                 }
-                if section.size < 2 {
-                    return Err(Error::new(
-                        "SHT_MIPS_ABIFLAGS is too small to contain its version field",
-                    ));
-                }
                 let data = section_data(bytes, section, "MIPS ABI flags")?;
-                let version = read_u16(data, 0)?;
-                let version_zero = if version == 0 {
-                    if section.size != MIPS_ABIFLAGS_V0_SIZE as u32 {
-                        return Err(Error::new(
-                            "version-zero SHT_MIPS_ABIFLAGS must be exactly 24 bytes",
-                        ));
-                    }
-                    Some(MipsAbiFlagsV0 {
-                        isa_level: read_u8(data, 2)?,
-                        isa_revision: read_u8(data, 3)?,
-                        gpr_size: read_u8(data, 4)?,
-                        cpr1_size: read_u8(data, 5)?,
-                        cpr2_size: read_u8(data, 6)?,
-                        fp_abi: read_u8(data, 7)?,
-                        isa_extension: read_u32(data, 8)?,
-                        ases: read_u32(data, 12)?,
-                        flags1: read_u32(data, 16)?,
-                        flags2: read_u32(data, 20)?,
-                    })
-                } else {
-                    None
-                };
+                let (version, version_zero) = decode_mips_abi_flags_payload(data)?;
                 abi_flags.push(MipsAbiFlags {
                     section_index,
                     section_size: section.size,
@@ -1550,6 +1608,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
     }
 
     let mips_reginfo_segments = parse_mips_reginfo_segments(bytes, machine, &program_headers)?;
+    let mips_abi_flags_segments = parse_mips_abi_flags_segments(bytes, machine, &program_headers)?;
 
     let mut section_headers = Vec::with_capacity(section_count_host);
     for index in 0..section_count_host {
@@ -1673,6 +1732,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         relocations,
         mips_reginfo,
         mips_reginfo_segments,
+        mips_abi_flags_segments,
         mips_abi_flags,
         mips_options,
     })
@@ -2077,6 +2137,78 @@ mod tests {
                 entry_size: 0,
             },
         );
+        bytes
+    }
+
+    fn elf_with_mips_abi_flags_program_header(
+        version: u16,
+        payload_size: usize,
+        duplicate: bool,
+    ) -> Vec<u8> {
+        let program_header_count = if duplicate { 3usize } else { 2usize };
+        let program_header_table_end = ELF_HEADER_SIZE + program_header_count * PROGRAM_HEADER_SIZE;
+        let flags_offset = program_header_table_end;
+        let load_offset = flags_offset + payload_size;
+        let mut bytes = vec![0; load_offset + 4];
+
+        bytes[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        put_u16(&mut bytes, 16, ET_EXEC);
+        put_u16(&mut bytes, 18, EM_MIPS);
+        put_u32(&mut bytes, 20, 1);
+        put_u32(&mut bytes, 24, 0x0010_0000);
+        put_u32(&mut bytes, 28, ELF_HEADER_SIZE as u32);
+        put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 42, PROGRAM_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 44, program_header_count as u16);
+
+        put_u16(&mut bytes, flags_offset, version);
+        if version == 0 && payload_size >= MIPS_ABIFLAGS_V0_SIZE {
+            bytes[flags_offset + 2] = 3; // MIPS III
+            bytes[flags_offset + 3] = 0;
+            bytes[flags_offset + 4] = 1; // GPR32
+            bytes[flags_offset + 5] = 1; // CPR1 32-bit
+            bytes[flags_offset + 6] = 0; // CPR2 unused
+            bytes[flags_offset + 7] = 3; // soft-float
+            put_u32(&mut bytes, flags_offset + 8, 6); // AFL_EXT_5900
+            put_u32(&mut bytes, flags_offset + 12, 1); // DSP ASE
+            put_u32(&mut bytes, flags_offset + 16, 0xAABB_CCDD);
+            put_u32(&mut bytes, flags_offset + 20, 0x1122_3344);
+        }
+
+        let write_abiflags_header = |bytes: &mut [u8], index: usize| {
+            let base = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
+            put_u32(bytes, base, PT_MIPS_ABIFLAGS);
+            put_u32(bytes, base + 4, flags_offset as u32);
+            put_u32(bytes, base + 8, 0x0010_0000);
+            put_u32(bytes, base + 12, 0x0010_0000);
+            put_u32(bytes, base + 16, payload_size as u32);
+            put_u32(bytes, base + 20, payload_size as u32);
+            put_u32(bytes, base + 24, PF_R);
+            put_u32(bytes, base + 28, 4);
+        };
+        let write_load_header = |bytes: &mut [u8], index: usize| {
+            let base = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
+            put_u32(bytes, base, PT_LOAD);
+            put_u32(bytes, base + 4, load_offset as u32);
+            put_u32(bytes, base + 8, 0x0020_0000);
+            put_u32(bytes, base + 12, 0x0020_0000);
+            put_u32(bytes, base + 16, 4);
+            put_u32(bytes, base + 20, 4);
+            put_u32(bytes, base + 24, PF_R | PF_X);
+            put_u32(bytes, base + 28, 4);
+        };
+
+        if duplicate {
+            write_abiflags_header(&mut bytes, 0);
+            write_abiflags_header(&mut bytes, 1);
+            write_load_header(&mut bytes, 2);
+        } else {
+            write_abiflags_header(&mut bytes, 0);
+            write_load_header(&mut bytes, 1);
+        }
         bytes
     }
 
@@ -2675,6 +2807,71 @@ mod tests {
     }
 
     #[test]
+    fn parses_pt_mips_abiflags_v0_and_identifies_the_r5900_extension() {
+        let bytes = elf_with_mips_abi_flags_program_header(0, MIPS_ABIFLAGS_V0_SIZE, false);
+        let image = parse(&bytes, ParseLimits::default()).expect("PT_MIPS_ABIFLAGS ELF");
+        assert_eq!(image.mips_abi_flags_segments.len(), 1);
+
+        let flags = &image.mips_abi_flags_segments[0];
+        assert_eq!(flags.program_header_index, 0);
+        assert_eq!(
+            flags.file_offset as usize,
+            ELF_HEADER_SIZE + 2 * PROGRAM_HEADER_SIZE
+        );
+        assert_eq!(flags.virtual_address, 0x0010_0000);
+        assert_eq!(flags.segment_size, MIPS_ABIFLAGS_V0_SIZE as u32);
+        assert_eq!(flags.version, 0);
+        let decoded = flags.version_zero.expect("version zero is decoded");
+        assert_eq!(decoded.isa_level_name(), "MIPS III");
+        assert_eq!(decoded.isa_extension, 6);
+        assert_eq!(decoded.isa_extension_name(), "R5900");
+        assert_eq!(decoded.fp_abi_name(), "soft-float");
+        assert_eq!(decoded.ase_names(), vec!["DSP"]);
+        assert_eq!(decoded.flags1, 0xAABB_CCDD);
+        assert_eq!(decoded.flags2, 0x1122_3344);
+    }
+
+    #[test]
+    fn preserves_unknown_pt_mips_abiflags_versions_and_rejects_malformed_records() {
+        let unknown = elf_with_mips_abi_flags_program_header(2, 4, false);
+        let image = parse(&unknown, ParseLimits::default()).expect("unknown version is retained");
+        assert_eq!(image.mips_abi_flags_segments.len(), 1);
+        assert_eq!(image.mips_abi_flags_segments[0].version, 2);
+        assert_eq!(image.mips_abi_flags_segments[0].segment_size, 4);
+        assert!(image.mips_abi_flags_segments[0].version_zero.is_none());
+
+        let mut short = elf_with_mips_abi_flags_program_header(0, 20, false);
+        let flags_header = ELF_HEADER_SIZE;
+        let short_error =
+            parse(&short, ParseLimits::default()).expect_err("v0 is exactly 24 bytes");
+        assert!(short_error.to_string().contains("exactly 24 bytes"));
+        put_u32(&mut short, flags_header + 16, 1);
+        let too_small = parse(&short, ParseLimits::default())
+            .expect_err("payload cannot omit the version-zero record");
+        assert!(too_small.to_string().contains("too small"));
+    }
+
+    #[test]
+    fn rejects_duplicate_pt_mips_abiflags_and_ignores_non_mips_payloads() {
+        let duplicate = elf_with_mips_abi_flags_program_header(0, MIPS_ABIFLAGS_V0_SIZE, true);
+        let duplicate_error =
+            parse(&duplicate, ParseLimits::default()).expect_err("PT_MIPS_ABIFLAGS is unique");
+        assert!(
+            duplicate_error
+                .to_string()
+                .contains("more than one PT_MIPS_ABIFLAGS")
+        );
+
+        let mut non_mips = elf_with_mips_abi_flags_program_header(0, MIPS_ABIFLAGS_V0_SIZE, false);
+        put_u16(&mut non_mips, 18, 3);
+        let flags_header = ELF_HEADER_SIZE;
+        put_u32(&mut non_mips, flags_header + 16, 1);
+        let image = parse(&non_mips, ParseLimits::default())
+            .expect("non-MIPS ELF leaves the MIPS flags segment opaque");
+        assert!(image.mips_abi_flags_segments.is_empty());
+    }
+
+    #[test]
     fn parses_pt_mips_reginfo_payload_before_loadable_segments() {
         let bytes = elf_with_mips_reginfo_program_headers(false, false);
         let image = parse(&bytes, ParseLimits::default()).expect("PT_MIPS_REGINFO ELF");
@@ -3229,6 +3426,7 @@ mod tests {
             relocations: Vec::new(),
             mips_reginfo: Vec::new(),
             mips_reginfo_segments: Vec::new(),
+            mips_abi_flags_segments: Vec::new(),
             mips_abi_flags: Vec::new(),
             mips_options: Vec::new(),
         };
