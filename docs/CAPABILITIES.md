@@ -15,7 +15,7 @@ Detailed status and capability list, moved out of the README. The roadmap in [RO
 - Parse ELF32 little-endian headers, program headers, section headers and section names, symbol tables, and REL/RELA entries.
 - Validate file-backed ranges, table bounds, leading/trailing null bytes in non-empty string tables, the required SHT_NULL section zero, symbol-table local/global partitioning, regular symbol section indices, relocation symbol/target links, entry sizes, address overflow, and parser resource limits.
 - Decode MIPS e_flags diagnostically: report the CPU subtype, ABI and ISA-level fields, recognized feature bits and any unclassified bits. The R5900 CPU marker is exposed without treating a header flag alone as proof of title compatibility.
-- Preserve ELF special symbol section indices such as SHN_ABS/SHN_COMMON; reject SHN_XINDEX explicitly until its companion extended-index table is implemented.
+- Preserve ELF special symbol section indices such as SHN_ABS/SHN_COMMON and resolve SHN_XINDEX through a validated SHT_SYMTAB_SHNDX table. Resolve e_shnum/e_shstrndx extended values through section-header zero, with a configurable section-count resource limit. Extended program-header numbering (PN_XNUM) remains explicitly unsupported.
 - Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges.
 - Decode an explicitly scoped base-MIPS integer subset, including BEQ/BNE/BLEZ/BGTZ and REGIMM BLTZ/BGEZ branch families.
 - Expose conservative per-instruction GPR/HI-LO dependencies, memory/control-flow effects, and possible synchronous exceptions; unsupported encodings remain explicitly opaque.
