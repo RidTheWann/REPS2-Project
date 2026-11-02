@@ -1737,8 +1737,7 @@ mod tests {
         bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(shstr);
         bytes[data_offset..data_offset + data.len()].copy_from_slice(data);
         if duplicate {
-            bytes[duplicate_data_offset..duplicate_data_offset + data.len()]
-                .copy_from_slice(data);
+            bytes[duplicate_data_offset..duplicate_data_offset + data.len()].copy_from_slice(data);
         }
 
         write_section(
