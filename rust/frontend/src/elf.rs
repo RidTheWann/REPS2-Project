@@ -2259,6 +2259,10 @@ mod tests {
         assert_eq!(v0.unknown_ases(), 0);
         assert!(v0.has_odd_single_precision_registers());
         assert_eq!(v0.unknown_flags1(), 0x2);
+        let mut even_register_flags = v0;
+        even_register_flags.flags1 = 0;
+        assert!(!even_register_flags.has_odd_single_precision_registers());
+        assert_eq!(even_register_flags.unknown_flags1(), 0);
         assert_eq!(v0.flags2, 0x8000_0000);
     }
 
