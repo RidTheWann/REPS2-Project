@@ -1726,6 +1726,65 @@ mod tests {
         bytes
     }
 
+    fn elf_with_all_extended_numbering_fields() -> Vec<u8> {
+        let original = elf_with_extended_symbol_indices();
+        let original_section_offset =
+            usize::try_from(read_u32(&original, 32).expect("section-header offset"))
+                .expect("section-header offset fits host size");
+        let section_count = usize::try_from(
+            read_u32(&original, original_section_offset + 20)
+                .expect("extended section count"),
+        )
+        .expect("extended section count fits host size");
+        let program_table_bytes = PN_XNUM as usize * PROGRAM_HEADER_SIZE;
+        let program_table_shift =
+            u32::try_from(program_table_bytes).expect("program-header table shift fits ELF32");
+        let shifted_section_offset = original_section_offset + program_table_bytes;
+        let mut bytes = vec![0; original.len() + program_table_bytes];
+        bytes[..ELF_HEADER_SIZE].copy_from_slice(&original[..ELF_HEADER_SIZE]);
+        bytes[ELF_HEADER_SIZE + program_table_bytes..]
+            .copy_from_slice(&original[ELF_HEADER_SIZE..]);
+
+        put_u32(&mut bytes, 28, ELF_HEADER_SIZE as u32);
+        put_u32(
+            &mut bytes,
+            32,
+            u32::try_from(shifted_section_offset).expect("section table fits ELF32"),
+        );
+        put_u16(&mut bytes, 42, PROGRAM_HEADER_SIZE as u16);
+        put_u16(&mut bytes, 44, PN_XNUM);
+
+        for index in 0..section_count {
+            let original_header = original_section_offset + index * SECTION_HEADER_SIZE;
+            let section_kind =
+                read_u32(&original, original_header + 4).expect("section kind");
+            if section_kind == SHT_NULL || section_kind == SHT_NOBITS {
+                continue;
+            }
+            let old_data_offset =
+                read_u32(&original, original_header + 16).expect("section data offset");
+            if old_data_offset != 0 {
+                let new_header = shifted_section_offset + index * SECTION_HEADER_SIZE;
+                put_u32(
+                    &mut bytes,
+                    new_header + 16,
+                    old_data_offset
+                        .checked_add(program_table_shift)
+                        .expect("shifted section offset fits ELF32"),
+                );
+            }
+        }
+
+        // The null section header now carries all three independent extended
+        // values: sh_size (e_shnum), sh_link (e_shstrndx), and sh_info (e_phnum).
+        put_u32(
+            &mut bytes,
+            shifted_section_offset + 28,
+            u32::from(PN_XNUM),
+        );
+        bytes
+    }
+
     fn elf_with_extended_program_header_count() -> Vec<u8> {
         const PROGRAM_COUNT: usize = PN_XNUM as usize;
         const PROGRAM_TABLE_OFFSET: usize = ELF_HEADER_SIZE;
@@ -1750,6 +1809,22 @@ mod tests {
         put_u16(&mut bytes, 50, 0);
         put_u32(&mut bytes, SECTION_TABLE_OFFSET + 28, PROGRAM_COUNT as u32);
         bytes
+    }
+
+    #[test]
+    fn resolves_all_extended_numbering_fields_together() {
+        let bytes = elf_with_all_extended_numbering_fields();
+        let image =
+            parse(&bytes, ParseLimits::default()).expect("combined extended-numbering ELF");
+
+        assert_eq!(image.program_headers.len(), PN_XNUM as usize);
+        assert_eq!(image.section_headers.len(), 0xFF02);
+        assert_eq!(image.section_name_table_index, 0xFF01);
+        assert_eq!(image.section_headers[0].size, 0xFF02);
+        assert_eq!(image.section_headers[0].link, 0xFF01);
+        assert_eq!(image.section_headers[0].info, u32::from(PN_XNUM));
+        assert_eq!(image.symbols[1].section_index, 0xFF00);
+        assert_eq!(image.section_headers[0xFF00].name, ".extended_target");
     }
 
     #[test]
