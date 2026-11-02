@@ -29,7 +29,7 @@ pub enum ControlTerminator {
         target_pc: u32,
         fallthrough_pc: u32,
         link_register: Option<u8>,
-        delay_slot: ScalarInstruction,
+        delay_slot: ControlDelaySlot,
         delay_slot_policy: DelaySlotPolicy,
     },
     DirectJump {
@@ -37,19 +37,19 @@ pub enum ControlTerminator {
         target_pc: u32,
         link_register: Option<u8>,
         return_pc: Option<u32>,
-        delay_slot: ScalarInstruction,
+        delay_slot: ControlDelaySlot,
     },
     IndirectJump {
         guest_pc: u32,
         source_register: u8,
         link_register: Option<u8>,
         return_pc: Option<u32>,
-        delay_slot: ScalarInstruction,
+        delay_slot: ControlDelaySlot,
     },
     Return {
         guest_pc: u32,
         source_register: u8,
-        delay_slot: ScalarInstruction,
+        delay_slot: ControlDelaySlot,
     },
     /// Architectural SYSCALL/BREAK exception entry.
     GuestException {
@@ -76,6 +76,24 @@ pub enum TrapKind {
     Break,
 }
 
+/// A delay-slot instruction is either a scalar operation or an architectural
+/// guest exception. Traps remain distinct from unsupported scalar operations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlDelaySlot {
+    Instruction(ScalarInstruction),
+    GuestException { guest_pc: u32, trap: TrapKind },
+}
+
+impl ControlDelaySlot {
+    #[must_use]
+    pub const fn guest_pc(self) -> u32 {
+        match self {
+            Self::Instruction(instruction) => instruction.guest_pc,
+            Self::GuestException { guest_pc, .. } => guest_pc,
+        }
+    }
+}
+
 impl ControlTerminator {
     fn guest_pc(&self) -> Option<u32> {
         match self {
@@ -90,7 +108,7 @@ impl ControlTerminator {
         }
     }
 
-    fn delay_slot(&self) -> Option<&ScalarInstruction> {
+    fn delay_slot(&self) -> Option<&ControlDelaySlot> {
         match self {
             Self::ConditionalBranch { delay_slot, .. }
             | Self::DirectJump { delay_slot, .. }
@@ -300,22 +318,24 @@ impl ControlProgram {
             }
 
             if let Some(delay_slot) = block.terminator.delay_slot() {
-                ir::Program::new(vec![*delay_slot]).map_err(ControlError::ScalarVerify)?;
+                if let ControlDelaySlot::Instruction(instruction) = delay_slot {
+                    ir::Program::new(vec![*instruction]).map_err(ControlError::ScalarVerify)?;
+                }
                 let control_pc =
                     block
                         .terminator
                         .guest_pc()
                         .ok_or(ControlError::TerminatorPcMismatch {
                             expected: expected_pc,
-                            actual: delay_slot.guest_pc,
+                            actual: delay_slot.guest_pc(),
                         })?;
                 let expected_delay_pc = control_pc
                     .checked_add(4)
                     .ok_or(ControlError::GuestPcOverflow(control_pc))?;
-                if delay_slot.guest_pc != expected_delay_pc {
+                if delay_slot.guest_pc() != expected_delay_pc {
                     return Err(ControlError::DelaySlotPcMismatch {
                         expected: expected_delay_pc,
-                        actual: delay_slot.guest_pc,
+                        actual: delay_slot.guest_pc(),
                     });
                 }
             }
@@ -351,24 +371,42 @@ impl ControlProgram {
     pub fn trap_count(&self) -> usize {
         self.blocks
             .values()
-            .filter(|block| matches!(&block.terminator, ControlTerminator::GuestException { .. }))
+            .filter(|block| {
+                matches!(&block.terminator, ControlTerminator::GuestException { .. })
+                    || block.terminator.delay_slot().is_some_and(|delay_slot| {
+                        matches!(delay_slot, ControlDelaySlot::GuestException { .. })
+                    })
+            })
             .count()
     }
 }
 
 fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, ControlError> {
     let lift_delay_slot =
-        |decoded: &crate::mips::Instruction| -> Result<ScalarInstruction, ControlError> {
-            let program =
-                ir::lift(std::slice::from_ref(decoded)).map_err(ControlError::ScalarLift)?;
-            program
-                .instructions()
-                .first()
-                .copied()
-                .ok_or(ControlError::TerminatorPcMismatch {
-                    expected: decoded.pc,
-                    actual: decoded.pc.wrapping_add(4),
-                })
+        |decoded: &crate::mips::Instruction| -> Result<ControlDelaySlot, ControlError> {
+            match decoded.opcode {
+                crate::mips::Opcode::Syscall => Ok(ControlDelaySlot::GuestException {
+                    guest_pc: decoded.pc,
+                    trap: TrapKind::Syscall,
+                }),
+                crate::mips::Opcode::Break => Ok(ControlDelaySlot::GuestException {
+                    guest_pc: decoded.pc,
+                    trap: TrapKind::Break,
+                }),
+                _ => {
+                    let program =
+                        ir::lift(std::slice::from_ref(decoded)).map_err(ControlError::ScalarLift)?;
+                    program
+                        .instructions()
+                        .first()
+                        .copied()
+                        .map(ControlDelaySlot::Instruction)
+                        .ok_or(ControlError::TerminatorPcMismatch {
+                            expected: decoded.pc,
+                            actual: decoded.pc.wrapping_add(4),
+                        })
+                }
+            }
         };
 
     match terminator {
@@ -665,7 +703,7 @@ mod tests {
                 assert_eq!(*guest_pc, 0x1000);
                 assert_eq!(*target_pc, 0x100C);
                 assert_eq!(*fallthrough_pc, 0x1008);
-                assert_eq!(delay_slot.guest_pc, 0x1004);
+                assert_eq!(delay_slot.guest_pc(), 0x1004);
                 assert_eq!(
                     delay_slot.operation,
                     ir::Operation::AddImmediateUnsignedWord {
@@ -706,7 +744,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*delay_slot_policy, DelaySlotPolicy::AnnulWhenNotTaken);
-                assert_eq!(delay_slot.guest_pc, 0x2004);
+                assert_eq!(delay_slot.guest_pc(), 0x2004);
             }
             other => panic!("expected conditional branch, got {other:?}"),
         }
@@ -769,6 +807,44 @@ mod tests {
         ));
         assert_eq!(program.trap_count(), 2);
         assert_eq!(program.unsupported_count(), 0);
+    }
+
+    #[test]
+    fn lifts_syscall_and_break_as_typed_delay_slot_exceptions() {
+        for (trap_word, expected_trap) in [
+            (0x0000_000C, TrapKind::Syscall),
+            (0x0000_000D, TrapKind::Break),
+        ] {
+            let words = [
+                0x1100_0002, // beq t0, zero, 0x300C
+                trap_word,   // delay slot
+                0x2401_0001,
+                0x03E0_0008,
+                0x0000_0000,
+            ];
+            let segments = [segment(0x3000, &words)];
+            let roots = [0x3000];
+            let graph = analysis::discover_cfg(
+                &segments,
+                vec![entry(0x3000)],
+                &roots,
+                AnalysisLimits::default(),
+            )
+            .expect("trap delay-slot CFG");
+            let program = ControlProgram::lift(&graph).expect("typed trap delay slot");
+            match &program.blocks[&0x3000].terminator {
+                ControlTerminator::ConditionalBranch {
+                    delay_slot: ControlDelaySlot::GuestException { guest_pc, trap },
+                    ..
+                } => {
+                    assert_eq!(*guest_pc, 0x3004);
+                    assert_eq!(*trap, expected_trap);
+                }
+                other => panic!("expected typed guest exception delay slot, got {other:?}"),
+            }
+            assert_eq!(program.trap_count(), 1);
+            assert_eq!(program.unsupported_count(), 0);
+        }
     }
 
     #[test]
