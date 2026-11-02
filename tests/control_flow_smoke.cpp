@@ -1113,5 +1113,82 @@ int main() {
         return fail(34);
     }
 
+    EeState syscall_delay_taken{};
+    syscall_delay_taken.pc = 0xB000U;
+    syscall_delay_taken.gpr[8].low = 0xFFFF'FFFF'FFFF'FFFFULL;
+    const auto syscall_delay_taken_status =
+        reps2::generated::execute_cfg(syscall_delay_taken, 64U);
+    if (syscall_delay_taken_status != Status::exception_delivered
+        || syscall_delay_taken.pc != reps2::runtime::kEeCommonExceptionVector
+        || syscall_delay_taken.gpr[31].low != 0xB008U
+        || syscall_delay_taken.cop0[reps2::runtime::kCop0Epc] != 0xB000U
+        || (syscall_delay_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
+        || (syscall_delay_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U) {
+        std::fprintf(stderr, "taken BLTZAL/SYSCALL delay-slot exception mismatch\n");
+        return fail(110);
+    }
+
+    EeState syscall_delay_not_taken{};
+    syscall_delay_not_taken.pc = 0xB000U;
+    syscall_delay_not_taken.gpr[8].low = 1U;
+    const auto syscall_delay_not_taken_status =
+        reps2::generated::execute_cfg(syscall_delay_not_taken, 64U);
+    if (syscall_delay_not_taken_status != Status::exception_delivered
+        || syscall_delay_not_taken.gpr[31].low != 0xB008U
+        || syscall_delay_not_taken.cop0[reps2::runtime::kCop0Epc] != 0xB000U
+        || (syscall_delay_not_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
+        || (syscall_delay_not_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U) {
+        std::fprintf(stderr, "not-taken BLTZAL/SYSCALL delay-slot exception mismatch\n");
+        return fail(111);
+    }
+
+    EeState likely_trap_taken{};
+    likely_trap_taken.pc = 0xB100U;
+    likely_trap_taken.gpr[8].low = 0U;
+    const auto likely_trap_taken_status =
+        reps2::generated::execute_cfg(likely_trap_taken, 64U);
+    if (likely_trap_taken_status != Status::exception_delivered
+        || likely_trap_taken.cop0[reps2::runtime::kCop0Epc] != 0xB100U
+        || (likely_trap_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)
+        || (likely_trap_taken.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U) {
+        std::fprintf(stderr, "taken BEQL/BREAK delay-slot exception mismatch\n");
+        return fail(112);
+    }
+
+    EeState likely_trap_annulled{};
+    likely_trap_annulled.pc = 0xB100U;
+    likely_trap_annulled.gpr[8].low = 1U;
+    const auto likely_trap_annulled_status =
+        reps2::generated::execute_cfg(likely_trap_annulled, 64U);
+    if (likely_trap_annulled_status != Status::exception_delivered
+        || likely_trap_annulled.cop0[reps2::runtime::kCop0Epc] != 0xB108U
+        || (likely_trap_annulled.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (8U << 2U)
+        || (likely_trap_annulled.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) != 0U) {
+        std::fprintf(stderr, "not-taken BEQL failed to annul BREAK delay-slot exception\n");
+        return fail(113);
+    }
+
+    EeState jump_trap{};
+    jump_trap.pc = 0xB200U;
+    const auto jump_trap_status = reps2::generated::execute_cfg(jump_trap, 64U);
+    if (jump_trap_status != Status::exception_delivered
+        || jump_trap.gpr[31].low != 0xB208U
+        || jump_trap.cop0[reps2::runtime::kCop0Epc] != 0xB200U
+        || (jump_trap.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseExcCodeMask) != (9U << 2U)
+        || (jump_trap.cop0[reps2::runtime::kCop0Cause]
+            & reps2::runtime::kCop0CauseBranchDelayMask) == 0U) {
+        std::fprintf(stderr, "JAL/BREAK delay-slot exception mismatch\n");
+        return fail(114);
+    }
+
     return 0;
 }

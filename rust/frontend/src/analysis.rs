@@ -1191,21 +1191,19 @@ fn fetch_delay_slot(
         });
     };
     let delay_slot = mips::decode(word, delay_pc);
-    // A trap in a delay slot has no scalar-IR representation. Rejecting it here
-    // turns the owning block into an explicit unsupported stop instead of
-    // allowing a graph that cannot be lowered to control IR.
-    if !delay_slot.is_supported()
-        || matches!(
-            delay_slot.opcode,
-            Opcode::Syscall | Opcode::Break | Opcode::Eret
-        )
-    {
+    // SYSCALL and BREAK are legal trap instructions in a delay slot. The
+    // control IR carries them as architectural exception nodes; the native
+    // emitter enters the exception vector only on paths that execute the slot.
+    // ERET and other control transfers remain unsupported in delay slots.
+    if !delay_slot.is_supported() || delay_slot.opcode == Opcode::Eret {
         return Err(AnalysisError::UnsupportedDelaySlot {
             control_pc: control.pc,
             delay_pc,
         });
     }
-    if delay_slot.is_control_transfer() {
+    if delay_slot.is_control_transfer()
+        && !matches!(delay_slot.opcode, Opcode::Syscall | Opcode::Break)
+    {
         return Err(AnalysisError::ControlTransferInDelaySlot {
             control_pc: control.pc,
             delay_pc,
@@ -1791,12 +1789,41 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_trap_instruction_in_a_delay_slot() {
+    fn admits_syscall_and_break_as_architectural_delay_slot_traps() {
+        for (trap_word, expected_kind) in
+            [(0x0000_000C, Opcode::Syscall), (0x0000_000D, Opcode::Break)]
+        {
+            let words = [
+                0x1100_0001, // beq $t0, $zero, 0x3008
+                trap_word,   // architectural trap in the delay slot
+                0x03E0_0008, // jr $ra
+                0x0000_0000, // return delay slot
+            ];
+            let segments = [segment(0x3000, &words)];
+            let graph = discover_cfg(
+                &segments,
+                vec![entry(0x3000)],
+                &[0x3000],
+                AnalysisLimits::default(),
+            )
+            .expect("SYSCALL/BREAK are representable delay-slot traps");
+            match &graph.blocks[&0x3000].terminator {
+                Terminator::ConditionalBranch { delay_slot, .. } => {
+                    assert_eq!(delay_slot.opcode, expected_kind);
+                    assert_eq!(delay_slot.pc, 0x3004);
+                }
+                other => panic!("expected branch terminator, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn continues_to_reject_eret_in_a_delay_slot() {
         let words = [
             0x1100_0001, // beq $t0, $zero, 0x3008
-            0x0000_000D, // delay slot: break, which scalar IR cannot represent
-            0x03E0_0008, // jr $ra
-            0x0000_0000, // return delay slot
+            0x4200_0018, // delay slot: eret is a control transfer
+            0x03E0_0008,
+            0x0000_0000,
         ];
         let segments = [segment(0x3000, &words)];
         let error = discover_cfg(
@@ -1805,7 +1832,7 @@ mod tests {
             &[0x3000],
             AnalysisLimits::default(),
         )
-        .expect_err("trap delay slot is an explicit unsupported stop");
+        .expect_err("ERET remains unsupported in a delay slot");
         assert!(matches!(
             error,
             AnalysisError::UnsupportedDelaySlot {
