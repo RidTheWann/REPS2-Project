@@ -10,6 +10,7 @@ pub const PF_R: u32 = 0x4;
 pub const PF_W: u32 = 0x2;
 pub const PF_X: u32 = 0x1;
 pub const EE_MAIN_RAM_SIZE: usize = 32 * 1024 * 1024;
+pub const SHT_NULL: u32 = 0;
 pub const SHT_SYMTAB: u32 = 2;
 pub const SHT_STRTAB: u32 = 3;
 pub const SHT_RELA: u32 = 4;
@@ -22,6 +23,9 @@ const PROGRAM_HEADER_SIZE: usize = 32;
 const SECTION_HEADER_SIZE: usize = 40;
 const SYMBOL_SIZE: usize = 16;
 const REL_SIZE: usize = 8;
+const STB_LOCAL: u8 = 0;
+const SHN_LORESERVE: u16 = 0xFF00;
+const SHN_XINDEX: u16 = 0xFFFF;
 const RELA_SIZE: usize = 12;
 
 /// Limits untrusted ELF-derived allocations and table processing.
@@ -294,6 +298,19 @@ fn section_data<'a>(
     Ok(&bytes[range])
 }
 
+fn validate_string_table(table: &[u8], label: &str) -> Result<(), Error> {
+    if table.is_empty() {
+        return Ok(());
+    }
+    if table.first() != Some(&0) {
+        return Err(Error::new(format!("{label} must begin with a null byte")));
+    }
+    if table.last() != Some(&0) {
+        return Err(Error::new(format!("{label} must end with a null byte")));
+    }
+    Ok(())
+}
+
 fn read_string(table: &[u8], offset: u32, label: &str) -> Result<String, Error> {
     let start = usize::try_from(offset)
         .map_err(|_| Error::new(format!("{label} offset does not fit host size")))?;
@@ -351,6 +368,13 @@ fn parse_symbols(
         }
         let count = usize::try_from(section.size / section.entry_size)
             .map_err(|_| Error::new("ELF symbol count does not fit host size"))?;
+        let local_symbol_end = usize::try_from(section.info)
+            .map_err(|_| Error::new("ELF local-symbol boundary does not fit host size"))?;
+        if count == 0 || local_symbol_end == 0 || local_symbol_end > count {
+            return Err(Error::new(
+                "ELF symbol table has an invalid local-symbol boundary",
+            ));
+        }
         if count > limits.max_symbols.saturating_sub(symbols.len()) {
             return Err(Error::new(
                 "ELF symbol count exceeds configured parser limit",
@@ -358,6 +382,14 @@ fn parse_symbols(
         }
         let string_data = section_data(bytes, strings, "ELF symbol string table")?;
         let table = section_data(bytes, section, "ELF symbol table")?;
+        if table
+            .get(..SYMBOL_SIZE)
+            .is_none_or(|undefined_symbol| undefined_symbol.iter().any(|byte| *byte != 0))
+        {
+            return Err(Error::new(
+                "ELF symbol table entry zero is not the null symbol",
+            ));
+        }
         for index in 0..count {
             let base = index
                 .checked_mul(section.entry_size as usize)
@@ -366,9 +398,18 @@ fn parse_symbols(
             let info = read_u8(table, base + 12)?;
             let other = read_u8(table, base + 13)?;
             let symbol_section = read_u16(table, base + 14)?;
-            if symbol_section == u16::MAX {
+            if symbol_section == SHN_XINDEX {
                 return Err(Error::new(
                     "Extended ELF symbol section indices are not supported yet",
+                ));
+            }
+            if symbol_section < SHN_LORESERVE && usize::from(symbol_section) >= sections.len() {
+                return Err(Error::new("ELF symbol references an invalid section index"));
+            }
+            let binding = info >> 4;
+            if (index < local_symbol_end) != (binding == STB_LOCAL) {
+                return Err(Error::new(
+                    "ELF symbol bindings disagree with the symbol table local-symbol boundary",
                 ));
             }
             symbols.push(Symbol {
@@ -383,7 +424,7 @@ fn parse_symbols(
                 table_index: u32::try_from(index)
                     .map_err(|_| Error::new("ELF symbol index overflow"))?,
                 section_index: symbol_section,
-                binding: info >> 4,
+                binding,
                 kind: info & 0x0F,
                 visibility: other & 0x03,
             });
@@ -636,6 +677,24 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
         section_headers.push(section);
     }
 
+    let null_section_is_invalid = section_headers.first().is_some_and(|null_section| {
+        null_section.kind != SHT_NULL
+            || null_section.name_offset != 0
+            || null_section.flags != 0
+            || null_section.virtual_address != 0
+            || null_section.offset != 0
+            || null_section.size != 0
+            || null_section.link != 0
+            || null_section.info != 0
+            || null_section.alignment != 0
+            || null_section.entry_size != 0
+    });
+    if null_section_is_invalid {
+        return Err(Error::new(
+            "ELF section header zero is not the required null entry",
+        ));
+    }
+
     let string_table_bytes = section_headers
         .iter()
         .filter(|section| section.kind == SHT_STRTAB)
@@ -648,6 +707,13 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             "ELF string tables exceed configured parser limit",
         ));
     }
+    for section in section_headers
+        .iter()
+        .filter(|section| section.kind == SHT_STRTAB)
+    {
+        let table = section_data(bytes, section, "ELF string table")?;
+        validate_string_table(table, "ELF string table")?;
+    }
 
     if section_name_table_index != 0 {
         let names = section_headers
@@ -659,11 +725,7 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             ));
         }
         let name_data = section_data(bytes, names, "ELF section-name string table")?;
-        if name_data.first() != Some(&0) {
-            return Err(Error::new(
-                "ELF section-name string table must begin with null",
-            ));
-        }
+        validate_string_table(name_data, "ELF section-name string table")?;
         for section in &mut section_headers {
             section.name = if section.name_offset == 0 {
                 String::new()
@@ -671,6 +733,13 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
                 read_string(name_data, section.name_offset, "ELF section name")?
             };
         }
+    } else if section_headers
+        .iter()
+        .any(|section| section.name_offset != 0)
+    {
+        return Err(Error::new(
+            "ELF section names are present but no section-name string table is declared",
+        ));
     }
 
     let symbols = parse_symbols(bytes, &section_headers, limits)?;
@@ -1126,6 +1195,89 @@ mod tests {
         assert_eq!(image.relocations[0].symbol_index, 1);
         assert_eq!(image.relocations[0].relocation_type, 2);
         assert_eq!(image.relocations[0].addend, None);
+    }
+
+    #[test]
+    fn rejects_a_nonzero_undefined_symbol_entry() {
+        let mut malformed = elf_with_symbol_and_rel();
+        let image = parse(&malformed, ParseLimits::default()).expect("symbol fixture");
+        let table_offset = image.section_headers[3].offset as usize;
+        put_u32(&mut malformed, table_offset + 4, 1);
+        assert!(parse(&malformed, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn validates_string_table_leading_and_trailing_null_bytes() {
+        let seed = elf_with_symbol_and_rel();
+        let image = parse(&seed, ParseLimits::default()).expect("well-formed table fixture");
+
+        for section_index in [1usize, 2usize] {
+            let section = &image.section_headers[section_index];
+            assert_eq!(section.kind, SHT_STRTAB);
+            assert!(section.size > 1);
+            for relative_offset in [0usize, section.size as usize - 1] {
+                let mut malformed = seed.clone();
+                let offset = section.offset as usize + relative_offset;
+                malformed[offset] = b'X';
+                assert!(
+                    parse(&malformed, ParseLimits::default()).is_err(),
+                    "string table {} accepted a non-null sentinel at {}",
+                    section_index,
+                    relative_offset
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn validates_the_null_section_header_entry() {
+        let seed = elf_with_symbol_and_rel();
+        let mut malformed = seed.clone();
+        put_u32(&mut malformed, 52 + 4, 1);
+        assert!(parse(&malformed, ParseLimits::default()).is_err());
+
+        let mut malformed = seed;
+        put_u32(&mut malformed, 52 + 8, 0x2);
+        assert!(parse(&malformed, ParseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn validates_symbol_section_indices_and_local_symbol_boundary() {
+        let seed = elf_with_symbol_and_rel();
+        let image = parse(&seed, ParseLimits::default()).expect("well-formed symbol fixture");
+        let symbol_table = &image.section_headers[3];
+        let symbol_table_offset = symbol_table.offset as usize;
+        let symbol_table_header = 52 + 3 * SECTION_HEADER_SIZE;
+
+        let mut bad_section_index = seed.clone();
+        put_u16(
+            &mut bad_section_index,
+            symbol_table_offset + SYMBOL_SIZE + 14,
+            6,
+        );
+        assert!(parse(&bad_section_index, ParseLimits::default()).is_err());
+
+        let mut special_section_index = seed.clone();
+        put_u16(
+            &mut special_section_index,
+            symbol_table_offset + SYMBOL_SIZE + 14,
+            0xFFF1,
+        );
+        let parsed = parse(&special_section_index, ParseLimits::default())
+            .expect("SHN_ABS is a valid reserved symbol section index");
+        assert_eq!(parsed.symbols[1].section_index, 0xFFF1);
+
+        let mut boundary_out_of_range = seed.clone();
+        put_u32(&mut boundary_out_of_range, symbol_table_header + 28, 3);
+        assert!(parse(&boundary_out_of_range, ParseLimits::default()).is_err());
+
+        let mut boundary_misclassifies_global = seed;
+        put_u32(
+            &mut boundary_misclassifies_global,
+            symbol_table_header + 28,
+            2,
+        );
+        assert!(parse(&boundary_misclassifies_global, ParseLimits::default()).is_err());
     }
 
     #[test]
