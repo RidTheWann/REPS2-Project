@@ -245,6 +245,20 @@ References:
 - Oracle Linkers and Libraries Guide, EI_ABIVERSION is interpreted in the context of EI_OSABI: https://docs.oracle.com/cd/E19683-01/817-1974/817-1974.pdf
 - Binutils ELF constants for OSABI and e_type: https://gnu.googlesource.com/binutils-gdb/+/b4812cfe4dc394392e47e0489f38521da4a0b7ce/include/elf/common.h
 
+## MIPS ABI flags section (.MIPS.abiflags)
+
+- MIPS ELF defines `SHT_MIPS_ABIFLAGS = 0x7000002A`. The version-zero payload is 24 bytes: a little-endian 16-bit version; ISA level/revision; GPR, CPR1 and CPR2 register-size codes; FP ABI code; then 32-bit ISA-extension, ASE, flags1 and flags2 words.
+- Register size codes are 0=none, 1=32-bit, 2=64-bit, 3=128-bit. The FP ABI code distinguishes any, double, single, soft-float, old-64, FPXX, FP64 and FP64A. Unknown numeric codes are retained.
+- The ISA extension code 6 is `AFL_EXT_5900`, the R5900 instruction extension. This is useful corroborating metadata alongside the R5900 CPU subtype in e_flags, but is not evidence that a specific title is compatible or bootable.
+- Version 0 is decoded only when the section is exactly 24 bytes. A future/unknown section version remains parseable as opaque version/size metadata rather than being interpreted with the v0 layout. Duplicate MIPS ABI-flags sections in one EM_MIPS object are rejected as ambiguous.
+- ASE names are reported for recognized mask bits; unclassified ASE bits and both flag words remain available numerically. The parser does not enforce an ABI policy or infer that a R5900 flag automatically means the game uses only supported instructions.
+
+References:
+- Linux MIPS ELF header, section and version-zero structure definitions: https://kernel.googlesource.com/pub/scm/linux/kernel/git/ralf/linux/%2B/4207b28e77fa8770c5037ed73d24399dfbdb9db1/arch/mips/include/asm/elf.h
+- LLVM MIPS ABI flags constants, including AFL_EXT_5900=6 and register/FP/ASE values: https://www.llvm.org/docs/doxygen/MipsABIFlags_8h_source.html
+- Binutils readelf handling of .MIPS.abiflags and its 24-byte size validation: https://chromium.googlesource.com/native_client/nacl-binutils/%2B/upstream/master/binutils/readelf.c
+- ELF section type SHT_MIPS_ABIFLAGS: https://android.googlesource.com/platform/art/+/d44d70354a883e6972a93d2623a55840ced8a73a/runtime/elf.h
+
 ## MIPS ELF header flags and PS2 EE identification
 
 - ELF e_machine = EM_MIPS identifies the MIPS family but does not by itself distinguish a PlayStation 2 Emotion Engine executable from other MIPS objects.
