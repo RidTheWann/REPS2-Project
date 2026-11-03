@@ -121,6 +121,7 @@ pub enum Opcode {
     ParallelAddHalfword,
     ParallelSubHalfword,
     ParallelAddUnsignedWord,
+    ParallelAddUnsignedByte,
     ParallelCopyLowDoubleword,
     /// PCPYUD copies the upper doubleword of each source into the destination:
     /// `result.low = GPR[rs][127:64]` and `result.high = GPR[rt][127:64]`.
@@ -409,6 +410,7 @@ impl Opcode {
             Self::ParallelAddHalfword => "paddh",
             Self::ParallelSubHalfword => "psubh",
             Self::ParallelAddUnsignedWord => "padduw",
+            Self::ParallelAddUnsignedByte => "paddub",
             Self::ParallelCopyLowDoubleword => "pcpyld",
             Self::ParallelCopyUpperDoubleword => "pcpyud",
             Self::ParallelOr => "por",
@@ -877,6 +879,7 @@ impl Instruction {
             | Opcode::ParallelAddHalfword
             | Opcode::ParallelSubHalfword
             | Opcode::ParallelAddUnsignedWord
+            | Opcode::ParallelAddUnsignedByte
             | Opcode::ParallelCopyLowDoubleword
             | Opcode::ParallelCopyUpperDoubleword
             | Opcode::ParallelOr
@@ -1428,6 +1431,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x09 if ((word >> 6) & 0x1F) == 0x1E && rs == 0 => Opcode::ParallelExchangeEvenWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x1F && rs == 0 => Opcode::ParallelRotate3Words,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
+                0x28 if ((word >> 6) & 0x1F) == 0x18 => Opcode::ParallelAddUnsignedByte,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x29 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyUpperDoubleword,
                 0x29 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelOr,

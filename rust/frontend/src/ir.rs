@@ -379,6 +379,11 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    ParallelAddUnsignedByte {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     /// PCPYLD: dst.low = rhs.low and dst.high = lhs.low. The high half is
     /// sourced from the first operand and the low half from the second.
     ParallelCopyLowDoubleword {
@@ -938,6 +943,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::ParallelAddUnsignedWord => Operation::ParallelAddUnsignedWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelAddUnsignedByte => Operation::ParallelAddUnsignedByte {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -2089,6 +2099,30 @@ mod tests {
             Operation::ParallelRotate3Words { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PROT3W verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi1_paddub() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x18 << 6) | 0x28,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x18 << 6) | 0x28,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xD000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PADDUB lifts into typed IR");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelAddUnsignedByte { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelAddUnsignedByte { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PADDUB verifies");
     }
 
     #[test]
