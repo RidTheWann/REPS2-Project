@@ -142,6 +142,9 @@ pub enum Opcode {
     /// granularity: result words are `[rt0, rs0, rt1, rs1]`. The upper
     /// doubleword of each source is ignored.
     ParallelExtendLowWord,
+    /// PEXTLB interleaves the lower eight bytes of two sources:
+    /// result bytes are `[rt0, rs0, ..., rt7, rs7]`. Upper doublewords ignored.
+    ParallelExtendLowByte,
     /// PPACW packs the low word of each 64-bit half of its two sources: result
     /// words are `[rt0, rt2, rs0, rs2]`. The second word of each result
     /// doubleword therefore comes from the upper doubleword of the *same*
@@ -425,6 +428,7 @@ impl Opcode {
             Self::ParallelOr => "por",
             Self::ParallelNor => "pnor",
             Self::ParallelExtendLowWord => "pextlw",
+            Self::ParallelExtendLowByte => "pextlb",
             Self::ParallelPackWord => "ppacw",
             Self::ParallelExchangeEvenWord => "pexew",
             Self::ParallelRotate3Words => "prot3w",
@@ -897,6 +901,7 @@ impl Instruction {
             | Opcode::ParallelOr
             | Opcode::ParallelNor
             | Opcode::ParallelExtendLowWord
+            | Opcode::ParallelExtendLowByte
             | Opcode::ParallelPackWord => {
                 // Every MMI operation lifted so far reads both source GPRs and
                 // writes only the destination GPR. PEXTLW, PCPYLD and PCPYUD
@@ -1439,6 +1444,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x04 => Opcode::ParallelAddHalfword,
                 0x08 if ((word >> 6) & 0x1F) == 0x05 => Opcode::ParallelSubHalfword,
                 0x08 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelExtendLowWord,
+                0x08 if ((word >> 6) & 0x1F) == 0x1A => Opcode::ParallelExtendLowByte,
                 0x08 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelPackWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
                 0x09 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelAnd,
@@ -2088,13 +2094,55 @@ mod tests {
         // increment.
         let ppacw_word = (word & !(0x1F << 6)) | (0x13 << 6);
         assert_eq!(decode(ppacw_word, 0).opcode, Opcode::ParallelPackWord);
-        for other_mmi0 in [0x11, 0x14, 0x15, 0x1A, 0x1B] {
+        for other_mmi0 in [0x11, 0x14, 0x15, 0x1B] {
             let word = (word & !(0x1F << 6)) | (other_mmi0 << 6);
             assert_eq!(
                 decode(word, 0).opcode,
                 Opcode::Unknown,
                 "MMI0 selector 0x{other_mmi0:02X}"
             );
+        }
+    }
+
+    #[test]
+    fn decodes_r5900_mmi0_pextlb_and_rejects_other_encodings() {
+        // PEXTLB is MMI0 (low six bits 0x08) with operation selector 0x1A
+        // in bits 10..6. The byte order is [rt0, rs0, ..., rt7, rs7].
+        let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x1A << 6) | 0x08;
+        assert_eq!(word, 0x7022_1E88);
+        let decoded = decode(word, 0x8000);
+        assert_eq!(decoded.opcode, Opcode::ParallelExtendLowByte);
+        assert_eq!(decoded.opcode.mnemonic(), "pextlb");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+        assert_eq!(encoding_family(word), EncodingFamily::Mmi0);
+        assert!(!decoded.has_delay_slot);
+        assert!(!decoded.is_control_transfer());
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.reads_sa && !effects.writes_sa);
+        assert!(!effects.may_raise_exception && !effects.unknown);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        assert_eq!(effects.control_flow, ControlFlowEffect::None);
+
+        let zero_destination = decode(word & !(0x1F << 11), 0x8000);
+        assert_eq!(zero_destination.opcode, Opcode::ParallelExtendLowByte);
+        assert_eq!(
+            zero_destination.effects().gpr_read_mask,
+            (1 << 1) | (1 << 2)
+        );
+        assert_eq!(zero_destination.effects().gpr_write_mask, 0);
+
+        // Exact matching: same selector in another MMI group, neighboring MMI0
+        // selectors, and a different primary opcode must remain unsupported.
+        for (candidate, label) in [
+            ((word & !0x3F) | 0x09, "MMI2 group"),
+            ((word & !(0x1F << 6)) | (0x19 << 6), "MMI0 selector 0x19"),
+            ((word & !(0x1F << 6)) | (0x1B << 6), "MMI0 selector 0x1B"),
+            ((word & !(0x3F << 26)) | (0x3E << 26), "primary opcode"),
+        ] {
+            assert_eq!(decode(candidate, 0).opcode, Opcode::Unknown, "{label}");
         }
     }
 
@@ -2151,7 +2199,7 @@ mod tests {
         assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown);
         let pextlw_word = (word & !(0x1F << 6)) | (0x12 << 6);
         assert_eq!(decode(pextlw_word, 0).opcode, Opcode::ParallelExtendLowWord);
-        for other_mmi0 in [0x11, 0x14, 0x15, 0x1A, 0x1B] {
+        for other_mmi0 in [0x11, 0x14, 0x15, 0x1B] {
             let word = (word & !(0x1F << 6)) | (other_mmi0 << 6);
             assert_eq!(
                 decode(word, 0).opcode,
