@@ -101,6 +101,12 @@ struct EeState {
     std::uint32_t acc{};
     std::uint32_t fcsr{kFpuControlResetValue};
     std::array<std::uint32_t, 32> cop0{};
+    // Host-side execution accounting, not guest-architectural state: the
+    // generated dispatcher charges an admitted basic block's instruction count
+    // (the same `required` it subtracts from the budget) here, so a host probe
+    // can report how much guest code actually ran. A block that faults part-way
+    // is still charged in full, matching the block-atomic budget model.
+    std::uint64_t instructions_executed{};
     EeMemory memory{};
 };
 
@@ -265,6 +271,7 @@ enum class Status : std::uint8_t {
     state.cop0 = {};
     state.cop0[kCop0PrId] = kEeProcessorId;
     state.cop0[kCop0Status] = 0x1040'0004U;
+    state.instructions_executed = 0;
     state.pc = entry_pc;
     return Status::ok;
 }

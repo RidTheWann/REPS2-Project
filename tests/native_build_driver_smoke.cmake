@@ -12,7 +12,7 @@ file(MAKE_DIRECTORY "${REPS2_WORK_DIR}/src")
 
 set(fixture "${REPS2_WORK_DIR}/src/control_flow_split.cpp")
 execute_process(
-    COMMAND "${REPS2_FRONTEND}" compile-cfg-fixture "${fixture}" --tu-count 4 --native-build
+    COMMAND "${REPS2_FRONTEND}" compile-cfg-fixture "${fixture}" --tu-count 4 --native-build --probe-budget 64
     RESULT_VARIABLE frontend_result
     OUTPUT_VARIABLE frontend_output
     ERROR_VARIABLE frontend_error

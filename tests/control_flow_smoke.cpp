@@ -136,6 +136,17 @@ int main() {
         return fail(10);
     }
 
+    // The host-only instructions_executed counter mirrors the block-atomic
+    // budget charge: a block rejected by the budget charges nothing, while an
+    // admitted run charges at least the block(s) that executed, never more than
+    // the budget.
+    if (limited.instructions_executed != 0) {
+        return fail(100);
+    }
+    if (taken.instructions_executed < 2 || taken.instructions_executed > 64) {
+        return fail(101);
+    }
+
     // JAL writes PC+8, executes its delay slot, enters the callee, and JR RA
     // executes its own delay slot before returning to the continuation block.
     EeState call{};
