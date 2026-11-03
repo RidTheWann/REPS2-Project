@@ -389,6 +389,13 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// PXOR: bitwise exclusive-or of both operands across the complete
+    /// 128-bit GPR.
+    ParallelXor {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     /// PCPYLD: dst.low = rhs.low and dst.high = lhs.low. The high half is
     /// sourced from the first operand and the low half from the second.
     ParallelCopyLowDoubleword {
@@ -398,6 +405,12 @@ pub enum Operation {
     },
     /// POR: bitwise OR of both operands across the complete 128-bit GPR.
     ParallelOr {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// PNOR: bitwise NOR of both operands across the complete 128-bit GPR.
+    ParallelNor {
         dst: Gpr,
         lhs: Gpr,
         rhs: Gpr,
@@ -962,12 +975,22 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
             },
+            Opcode::ParallelXor => Operation::ParallelXor {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
             Opcode::ParallelCopyLowDoubleword => Operation::ParallelCopyLowDoubleword {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
             },
             Opcode::ParallelOr => Operation::ParallelOr {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelNor => Operation::ParallelNor {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -2009,6 +2032,31 @@ mod tests {
             Operation::ParallelAnd { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PAND verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi2_pxor_and_mmi3_pnor() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x13 << 6) | 0x09,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x13 << 6) | 0x29,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xC500 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PXOR/PNOR lift into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelXor { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelNor { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PXOR/PNOR verifies");
     }
 
     #[test]

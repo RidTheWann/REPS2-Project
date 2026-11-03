@@ -780,6 +780,14 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Gpr128{lhs.low & rhs.low, lhs.high & rhs.high};
 }
 
+// PXOR is plain 128-bit bitwise XOR two operands.
+[[nodiscard]] constexpr Gpr128 parallel_xor(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    return Gpr128{lhs.low ^ rhs.low, lhs.high ^ rhs.high};
+}
+
 // POR is the plain 128-bit bitwise OR of the two operands. It touches no
 // architectural state beyond the destination GPR and cannot fault, so both
 // doublewords are computed independently and assigned as one value.
@@ -788,6 +796,14 @@ inline void disable_interrupts(EeState& state) noexcept {
     const Gpr128& rhs
 ) noexcept {
     return Gpr128{lhs.low | rhs.low, lhs.high | rhs.high};
+}
+
+// PNOR is the plain 128-bit bitwise NOR of the two operands.
+[[nodiscard]] constexpr Gpr128 parallel_nor(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    return Gpr128{~(lhs.low | rhs.low), ~(lhs.high | rhs.high)};
 }
 
 // PEXTLW interleaves the four low words of its operands: result word 0 is
