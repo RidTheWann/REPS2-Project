@@ -825,6 +825,28 @@ inline void disable_interrupts(EeState& state) noexcept {
     };
 }
 
+// PEXTLB interleaves the low eight bytes of both operands: `lhs` is `rs` and
+// `rhs` is `rt`, so each byte pair is `(rt[i], rs[i])`. The complete result is
+// formed before assignment, so source/destination aliasing is safe.
+[[nodiscard]] constexpr Gpr128 parallel_extend_low_byte(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    std::uint64_t low = 0;
+    std::uint64_t high = 0;
+    for (std::uint32_t index = 0; index < 8U; ++index) {
+        const auto lhs_byte = (lhs.low >> (index * 8U)) & 0xFFU;
+        const auto rhs_byte = (rhs.low >> (index * 8U)) & 0xFFU;
+        const auto pair = rhs_byte | (lhs_byte << 8U);
+        if (index < 4U) {
+            low |= pair << (index * 16U);
+        } else {
+            high |= pair << ((index - 4U) * 16U);
+        }
+    }
+    return Gpr128{low, high};
+}
+
 // PPACW packs the low word of each 64-bit half of its operands: result word 0
 // is rt word 0, word 1 is rt word 2, word 2 is rs word 0 and word 3 is rs word
 // 2. Each result doubleword therefore comes from one source only, and the
