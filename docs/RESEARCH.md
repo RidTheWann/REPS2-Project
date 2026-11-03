@@ -135,6 +135,13 @@ These projects have different goals and different completion levels. Their demos
 - PEXEW result words are `[rt1, rt2, rt3, rt0]`: the low word of each 64-bit half is exchanged with the low word of the other half. PROT3W result words are `[rt1, rt2, rt0, rt3]`: the four words rotate left by one position.
 - Neither operation saturates or raises an exception, and neither reads architectural state beyond `rt`. QEMU `target/mips/tcg/tx79_translate.c` (`trans_PEXEW`, `trans_PROT3W`) and PCSX2 `pcsx2/MMI.cpp` (`PEXEW`, `PROT3W`) agree on these layouts and on `rd == 0` suppression.
 - The file-backed census placed PEXEW at 356 words and PROT3W at 648 words. This increment removes 1,004 words; PADDUB, PEXTLB, PAND, PNOR and the rest of the MMI0-MMI3 set remain unsupported and are still counted by `profile-elf`.
+## R5900 MMI0 PEXTLB cross-checks
+
+- PEXTLB is encoded under primary opcode `0x1C` in the MMI0 group: the low six function bits are `0x08` and the operation selector in bits 10..6 is `0x1A`. REPS2 verifies both fields, so selector `0x1A` in another MMI group or neighboring MMI0 selectors remain unsupported.
+- The operation interleaves the low eight bytes of the two source GPRs as `[rt0, rs0, ..., rt7, rs7]`. The high doubleword of each source is ignored. The complete 128-bit result is formed before assignment, preserving source/destination alias safety; writes to `GPR[0]` are suppressed.
+- The file-backed census placed PEXTLB at 307 words. Coverage after this increment removes 307 words; the remaining MMI operations, MMI pipeline-1 state and MMI latency remain unsupported and are still counted by `profile-elf`.
+- The dedicated native fixture uses hand-derived vectors for both result halves, high-byte ignoring, `rd == rs`, `rd == rt`, `rd == rs == rt`, zero-register suppression and an untouched bystander. These synthetic results validate the independent decoder → typed IR → C++ AOT path; they do not establish retail title boot compatibility.
+
 ## R5900 MMI2 PAND cross-checks
 
 - PAND is encoded under primary opcode `0x1C` in the MMI2 group: the low six function bits are `0x09` and the operation selector in bits 10..6 is `0x12`. Selector `0x12` also names MMI0 PEXTLW and MMI3 POR, so REPS2 verifies both fields; the same selector in MMI1, the neighboring MMI2 selectors `0x10` (PMADDH), `0x11` (PHMADH) and `0x13` (PXOR), and every other MMI group selector stay unsupported.
