@@ -27,6 +27,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::sign_extend_word;\n\
              using reps2::runtime::sign_extend_word_signed;\n\
              using reps2::runtime::parallel_add_u32;             using reps2::runtime::parallel_add_word;\n\
+             using reps2::runtime::parallel_add_u8;\n\
              using reps2::runtime::parallel_sub_word;\n\
              using reps2::runtime::parallel_add_halfword;\n\
              using reps2::runtime::parallel_sub_halfword;\n\
@@ -385,6 +386,9 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelAddUnsignedWord { dst, lhs, rhs } => {
             emit_parallel_add_u32(output, dst, lhs, rhs);
+        }
+        Operation::ParallelAddUnsignedByte { dst, lhs, rhs } => {
+            emit_parallel_add_u8(output, dst, lhs, rhs);
         }
         Operation::ParallelCopyLowDoubleword { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_copy_low_doubleword");
@@ -1071,6 +1075,14 @@ fn emit_parallel_add_u32(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr) {
     let b = rhs.index();
     output.push_str(&format!(
         "    if ({d} != 0) state.gpr[{d}] = parallel_add_u32(state.gpr[{a}], state.gpr[{b}]);\n"
+    ));
+}
+fn emit_parallel_add_u8(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr) {
+    let d = dst.index();
+    let a = lhs.index();
+    let b = rhs.index();
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}] = parallel_add_u8(state.gpr[{a}], state.gpr[{b}]);\n"
     ));
 }
 
@@ -2276,5 +2288,28 @@ mod tests {
         assert!(cpp.contains("using reps2::runtime::write_cop0;"));
         assert!(cpp.contains("using reps2::runtime::enable_interrupts;"));
         assert!(cpp.contains("using reps2::runtime::disable_interrupts;"));
+    }
+
+    #[test]
+    fn emits_mmi1_paddub_as_an_unsigned_byte_saturation_call() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x18 << 6) | 0x28,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x18 << 6) | 0x28,
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xD000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("PADDUB IR");
+        let cpp = emit_cpp(&program).expect("PADDUB C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_add_u8;"));
+        assert!(
+            cpp.contains("if (3 != 0) state.gpr[3] = parallel_add_u8(state.gpr[1], state.gpr[2]);")
+        );
+        assert!(
+            cpp.contains("if (0 != 0) state.gpr[0] = parallel_add_u8(state.gpr[4], state.gpr[5]);")
+        );
     }
 }
