@@ -61,3 +61,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0054](0054-ee-mmi0-pextlw.md) | EE MMI0 PEXTLW low-word interleave | Accepted |
 | [0055](0055-ee-mmi0-ppacw-and-mmi3-pcpyud.md) | EE MMI0 PPACW and MMI3 PCPYUD word pack/copy | Accepted |
 | [0056](0056-ee-mmi2-pexew-and-prot3w.md) | EE MMI2 PEXEW and PROT3W single-source word permutations | Accepted |
+| [0057](0057-ee-mmi1-paddub.md) | EE MMI1 PADDUB unsigned byte saturation | Accepted |

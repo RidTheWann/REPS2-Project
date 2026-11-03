@@ -945,4 +945,21 @@ inline void disable_interrupts(EeState& state) noexcept {
     return shifted | fill;
 }
 
+[[nodiscard]] constexpr Gpr128 parallel_add_u8(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    auto pack = [](std::uint64_t a, std::uint64_t b) noexcept -> std::uint64_t {
+        std::uint64_t result = 0;
+        for (unsigned shift = 0; shift < 64; shift += 8) {
+            const auto sum = static_cast<unsigned>((a >> shift) & 0xFFU)
+                + static_cast<unsigned>((b >> shift) & 0xFFU);
+            const auto lane = sum > 0xFFU ? 0xFFU : sum;
+            result |= static_cast<std::uint64_t>(lane) << shift;
+        }
+        return result;
+    };
+    return Gpr128{pack(lhs.low, rhs.low), pack(lhs.high, rhs.high)};
+}
+
 } // namespace reps2::runtime
