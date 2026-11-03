@@ -770,6 +770,16 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Gpr128{rhs.low, lhs.low};
 }
 
+// POR is the plain 128-bit bitwise OR of the two operands. It touches no
+// architectural state beyond the destination GPR and cannot fault, so both
+// doublewords are computed independently and assigned as one value.
+[[nodiscard]] constexpr Gpr128 parallel_or(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    return Gpr128{lhs.low | rhs.low, lhs.high | rhs.high};
+}
+
 // QFSRV shifts the 256-bit funnel formed by GPR[rs]:GPR[rt] right by the SA
 // bit count and keeps the low 128 bits, so result bit i is funnel bit i + sa.
 // Counts above 127 therefore still draw bits from the rs operand.

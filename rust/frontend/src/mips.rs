@@ -122,6 +122,9 @@ pub enum Opcode {
     ParallelSubHalfword,
     ParallelAddUnsignedWord,
     ParallelCopyLowDoubleword,
+    /// POR applies a plain bitwise OR to the whole 128-bit GPR: every bit of
+    /// GPR[rd] is `rs OR rt`. It is the first MMI3-group operation lifted.
+    ParallelOr,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
     MoveToFpuRegister,
@@ -391,6 +394,7 @@ impl Opcode {
             Self::ParallelSubHalfword => "psubh",
             Self::ParallelAddUnsignedWord => "padduw",
             Self::ParallelCopyLowDoubleword => "pcpyld",
+            Self::ParallelOr => "por",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
             Self::MoveToFpuRegister => "mtc1",
@@ -852,7 +856,8 @@ impl Instruction {
             | Opcode::ParallelAddHalfword
             | Opcode::ParallelSubHalfword
             | Opcode::ParallelAddUnsignedWord
-            | Opcode::ParallelCopyLowDoubleword => {
+            | Opcode::ParallelCopyLowDoubleword
+            | Opcode::ParallelOr => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
@@ -1382,6 +1387,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
+                0x29 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelOr,
                 0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
                 0x11 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mthi1,
                 0x12 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mflo1,
@@ -1743,6 +1749,73 @@ mod tests {
         }
         let other_mmi2 = (word & !(0x1F << 6)) | (0x0F << 6);
         assert_eq!(decode(other_mmi2, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi3_por_and_rejects_other_selectors() {
+        // POR is MMI3 (low six bits 0x29) with operation selector 0x12 in
+        // bits 10..6. It has no reserved register fields.
+        let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x12 << 6) | 0x29;
+        assert_eq!(word, 0x7022_1CA9);
+        let decoded = decode(word, 0x8000);
+        assert_eq!(decoded.opcode, Opcode::ParallelOr);
+        assert_eq!(decoded.opcode.mnemonic(), "por");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+        assert_eq!(encoding_family(word), EncodingFamily::Mmi3);
+        assert!(!decoded.has_delay_slot);
+        assert!(!decoded.is_control_transfer());
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.reads_sa);
+        assert!(!effects.writes_sa);
+        assert!(!effects.may_raise_exception);
+        assert!(!effects.unknown);
+
+        // POR touches nothing outside the integer GPR file: no FPU, no HI/LO,
+        // no ACC, no FCR, no memory access and no control transfer.
+        assert_eq!(effects.fpr_read_mask, 0);
+        assert_eq!(effects.fpr_write_mask, 0);
+        assert!(!effects.reads_hi && !effects.writes_hi);
+        assert!(!effects.reads_lo && !effects.writes_lo);
+        assert!(!effects.reads_hi1 && !effects.writes_hi1);
+        assert!(!effects.reads_lo1 && !effects.writes_lo1);
+        assert!(!effects.reads_fcr && !effects.writes_fcr);
+        assert!(!effects.reads_acc && !effects.writes_acc);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        assert_eq!(effects.control_flow, ControlFlowEffect::None);
+
+        // GPR[0] is hard-wired, so a POR that names it still reads its sources
+        // but reports an empty write mask.
+        let zero_destination = decode(word & !(0x1F << 11), 0x8000);
+        assert_eq!(zero_destination.opcode, Opcode::ParallelOr);
+        assert_eq!(
+            zero_destination.effects().gpr_read_mask,
+            (1 << 1) | (1 << 2)
+        );
+        assert_eq!(zero_destination.effects().gpr_write_mask, 0);
+
+        // Selector 0x12 also names MMI0 PEXTLW and MMI2 PAND, so the group
+        // selector must stay part of the match. The same selector in MMI0,
+        // MMI1 or MMI2 and the neighboring MMI3 selectors 0x11 and 0x13
+        // (PNOR) must also stay unknown in this increment.
+        for other_group in [0x08, 0x28, 0x09] {
+            let word = (word & !0x3F) | other_group;
+            assert_eq!(
+                decode(word, 0).opcode,
+                Opcode::Unknown,
+                "funct 0x{other_group:02X}"
+            );
+        }
+        for other_mmi3 in [0x11, 0x13, 0x1A, 0x1E] {
+            let word = (word & !(0x1F << 6)) | (other_mmi3 << 6);
+            assert_eq!(
+                decode(word, 0).opcode,
+                Opcode::Unknown,
+                "MMI3 selector 0x{other_mmi3:02X}"
+            );
+        }
     }
 
     #[test]
