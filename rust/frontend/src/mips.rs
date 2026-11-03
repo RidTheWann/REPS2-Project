@@ -122,6 +122,7 @@ pub enum Opcode {
     ParallelSubHalfword,
     ParallelAddUnsignedWord,
     ParallelAddUnsignedByte,
+    ParallelAnd,
     ParallelCopyLowDoubleword,
     /// PCPYUD copies the upper doubleword of each source into the destination:
     /// `result.low = GPR[rs][127:64]` and `result.high = GPR[rt][127:64]`.
@@ -411,6 +412,7 @@ impl Opcode {
             Self::ParallelSubHalfword => "psubh",
             Self::ParallelAddUnsignedWord => "padduw",
             Self::ParallelAddUnsignedByte => "paddub",
+            Self::ParallelAnd => "pand",
             Self::ParallelCopyLowDoubleword => "pcpyld",
             Self::ParallelCopyUpperDoubleword => "pcpyud",
             Self::ParallelOr => "por",
@@ -880,6 +882,7 @@ impl Instruction {
             | Opcode::ParallelSubHalfword
             | Opcode::ParallelAddUnsignedWord
             | Opcode::ParallelAddUnsignedByte
+            | Opcode::ParallelAnd
             | Opcode::ParallelCopyLowDoubleword
             | Opcode::ParallelCopyUpperDoubleword
             | Opcode::ParallelOr
@@ -1428,6 +1431,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelExtendLowWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelPackWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
+                0x09 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelAnd,
                 0x09 if ((word >> 6) & 0x1F) == 0x1E && rs == 0 => Opcode::ParallelExchangeEvenWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x1F && rs == 0 => Opcode::ParallelRotate3Words,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
@@ -1851,29 +1855,94 @@ mod tests {
         assert_eq!(zero_destination.effects().gpr_write_mask, 0);
 
         // Selector 0x12 also names MMI0 PEXTLW and MMI2 PAND, so the group
-        // selector must stay part of the match. The same selector in MMI1 or
-        // MMI2 and the neighboring MMI3 selectors 0x11 and 0x13 (PNOR) must
-        // also stay unknown in this increment; MMI0 selector 0x12 is PEXTLW
-        // and is decoded separately.
+        // selector must stay part of the match. The same selector in MMI1 and
+        // the neighboring MMI3 selectors 0x11 and 0x13 (PNOR) must also stay
+        // unknown in this increment; MMI0 selector 0x12 is PEXTLW and MMI2
+        // selector 0x12 is PAND, both decoded separately.
         let pextlw_group = (word & !0x3F) | 0x08;
         assert_eq!(
             decode(pextlw_group, 0).opcode,
             Opcode::ParallelExtendLowWord
         );
-        for other_group in [0x28, 0x09] {
-            let word = (word & !0x3F) | other_group;
-            assert_eq!(
-                decode(word, 0).opcode,
-                Opcode::Unknown,
-                "funct 0x{other_group:02X}"
-            );
-        }
+        let pand_group = (word & !0x3F) | 0x09;
+        assert_eq!(decode(pand_group, 0).opcode, Opcode::ParallelAnd);
+        let mmi1_group = (word & !0x3F) | 0x28;
+        assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown, "funct 0x28");
         for other_mmi3 in [0x11, 0x13, 0x1A, 0x1E] {
             let word = (word & !(0x1F << 6)) | (other_mmi3 << 6);
             assert_eq!(
                 decode(word, 0).opcode,
                 Opcode::Unknown,
                 "MMI3 selector 0x{other_mmi3:02X}"
+            );
+        }
+    }
+
+    #[test]
+    fn decodes_r5900_mmi2_pand_and_rejects_other_selectors() {
+        // PAND is MMI2 (low six bits 0x09) with operation selector 0x12 in
+        // bits 10..6. It has no reserved register fields.
+        let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x12 << 6) | 0x09;
+        assert_eq!(word, 0x7022_1C89);
+        let decoded = decode(word, 0x8000);
+        assert_eq!(decoded.opcode, Opcode::ParallelAnd);
+        assert_eq!(decoded.opcode.mnemonic(), "pand");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+        assert_eq!(encoding_family(word), EncodingFamily::Mmi2);
+        assert!(!decoded.has_delay_slot);
+        assert!(!decoded.is_control_transfer());
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.reads_sa);
+        assert!(!effects.writes_sa);
+        assert!(!effects.may_raise_exception);
+        assert!(!effects.unknown);
+
+        // PAND touches nothing outside the integer GPR file: no FPU, no HI/LO,
+        // no ACC, no FCR, no memory access and no control transfer.
+        assert_eq!(effects.fpr_read_mask, 0);
+        assert_eq!(effects.fpr_write_mask, 0);
+        assert!(!effects.reads_hi && !effects.writes_hi);
+        assert!(!effects.reads_lo && !effects.writes_lo);
+        assert!(!effects.reads_hi1 && !effects.writes_hi1);
+        assert!(!effects.reads_lo1 && !effects.writes_lo1);
+        assert!(!effects.reads_fcr && !effects.writes_fcr);
+        assert!(!effects.reads_acc && !effects.writes_acc);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        assert_eq!(effects.control_flow, ControlFlowEffect::None);
+
+        // GPR[0] is hard-wired, so a PAND that names it still reads its sources
+        // but reports an empty write mask.
+        let zero_destination = decode(word & !(0x1F << 11), 0x8000);
+        assert_eq!(zero_destination.opcode, Opcode::ParallelAnd);
+        assert_eq!(
+            zero_destination.effects().gpr_read_mask,
+            (1 << 1) | (1 << 2)
+        );
+        assert_eq!(zero_destination.effects().gpr_write_mask, 0);
+
+        // Selector 0x12 also names MMI0 PEXTLW and MMI3 POR, so the group
+        // selector must stay part of the match. The same selector in MMI0 or
+        // MMI3 and the neighboring MMI2 selectors 0x10 (PMADDH), 0x11 (PHMADH)
+        // and 0x13 (PXOR) must stay unknown in this increment; MMI0 selector
+        // 0x12 is PEXTLW and MMI3 selector 0x12 is POR, both decoded separately.
+        let pextlw_group = (word & !0x3F) | 0x08;
+        assert_eq!(
+            decode(pextlw_group, 0).opcode,
+            Opcode::ParallelExtendLowWord
+        );
+        let por_group = (word & !0x3F) | 0x29;
+        assert_eq!(decode(por_group, 0).opcode, Opcode::ParallelOr);
+        let mmi1_group = (word & !0x3F) | 0x28;
+        assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown, "funct 0x28");
+        for other_mmi2 in [0x10, 0x11, 0x13] {
+            let word = (word & !(0x1F << 6)) | (other_mmi2 << 6);
+            assert_eq!(
+                decode(word, 0).opcode,
+                Opcode::Unknown,
+                "MMI2 selector 0x{other_mmi2:02X}"
             );
         }
     }
@@ -1919,12 +1988,12 @@ mod tests {
         assert_eq!(zero_destination.effects().gpr_write_mask, 0);
 
         // Selector 0x12 also names MMI2 PAND and MMI3 POR, so the group
-        // selector must stay part of the match: MMI3 selector 0x12 stays POR,
-        // while MMI2 selector 0x12 (PAND) stays unknown in this increment.
+        // selector must stay part of the match: MMI3 selector 0x12 is POR and
+        // MMI2 selector 0x12 is PAND, both decoded separately.
         let por_group = (word & !0x3F) | 0x29;
         assert_eq!(decode(por_group, 0).opcode, Opcode::ParallelOr);
         let pand_group = (word & !0x3F) | 0x09;
-        assert_eq!(decode(pand_group, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(pand_group, 0).opcode, Opcode::ParallelAnd);
         // MMI0 selector 0x13 is PPACW and is decoded separately. The
         // neighboring MMI0 selectors 0x11 (PSUBSW), 0x14 (PADDSH), 0x15
         // (PSUBSH), 0x1A (PEXTLB) and 0x1B (PPACB) stay unknown in this
