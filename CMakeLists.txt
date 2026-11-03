@@ -547,6 +547,40 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_mmi3_por_codegen_smoke COMMAND reps2_mmi3_por_codegen_smoke)
 
+    set(REPS2_MMI0_PEXTLW_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi0_pextlw_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_MMI0_PEXTLW_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_MMI0_PEXTLW_GENERATED_CPP}"
+            0x0000A000
+            0x70221C88  # pextlw r3, r1, r2
+            0x70A62C88  # pextlw r5, r5, r6 (rd aliases rs)
+            0x71073C88  # pextlw r7, r8, r7 (rd aliases rt)
+            0x714A5488  # pextlw r10, r10, r10 (rd aliases both sources)
+            0x70220488  # pextlw r0, r1, r2 (zero-register write is suppressed)
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling R5900 MMI0 PEXTLW lower-word interleave"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_MMI0_PEXTLW_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_mmi0_pextlw_codegen_fixture DEPENDS "${REPS2_MMI0_PEXTLW_GENERATED_CPP}")
+    add_executable(reps2_mmi0_pextlw_codegen_smoke
+        "${REPS2_MMI0_PEXTLW_GENERATED_CPP}"
+        tests/mmi0_pextlw_smoke.cpp
+    )
+    add_dependencies(reps2_mmi0_pextlw_codegen_smoke reps2_mmi0_pextlw_codegen_fixture)
+    target_link_libraries(reps2_mmi0_pextlw_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_mmi0_pextlw_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_mmi0_pextlw_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_mmi0_pextlw_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_mmi0_pextlw_codegen_smoke COMMAND reps2_mmi0_pextlw_codegen_smoke)
+
     set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_GENERATED_CPP}"
