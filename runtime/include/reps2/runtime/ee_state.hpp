@@ -780,6 +780,25 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Gpr128{lhs.low | rhs.low, lhs.high | rhs.high};
 }
 
+// PEXTLW interleaves the four low words of its operands: result word 0 is
+// rt word 0, word 1 is rs word 0, word 2 is rt word 1 and word 3 is rs word 1.
+// Both high doublewords are ignored. The complete value is formed before
+// assignment, so a destination that aliases either source observes the
+// original operands.
+[[nodiscard]] constexpr Gpr128 parallel_extend_low_word(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    const auto lhs_low = static_cast<std::uint32_t>(lhs.low);
+    const auto lhs_high = static_cast<std::uint32_t>(lhs.low >> 32U);
+    const auto rhs_low = static_cast<std::uint32_t>(rhs.low);
+    const auto rhs_high = static_cast<std::uint32_t>(rhs.low >> 32U);
+    return Gpr128{
+        static_cast<std::uint64_t>(rhs_low) | (static_cast<std::uint64_t>(lhs_low) << 32U),
+        static_cast<std::uint64_t>(rhs_high) | (static_cast<std::uint64_t>(lhs_high) << 32U),
+    };
+}
+
 // QFSRV shifts the 256-bit funnel formed by GPR[rs]:GPR[rt] right by the SA
 // bit count and keeps the low 128 bits, so result bit i is funnel bit i + sa.
 // Counts above 127 therefore still draw bits from the rs operand.

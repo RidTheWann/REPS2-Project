@@ -125,6 +125,10 @@ pub enum Opcode {
     /// POR applies a plain bitwise OR to the whole 128-bit GPR: every bit of
     /// GPR[rd] is `rs OR rt`. It is the first MMI3-group operation lifted.
     ParallelOr,
+    /// PEXTLW interleaves the lower 64 bits of its two sources at word
+    /// granularity: result words are `[rt0, rs0, rt1, rs1]`. The upper
+    /// doubleword of each source is ignored.
+    ParallelExtendLowWord,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
     MoveToFpuRegister,
@@ -395,6 +399,7 @@ impl Opcode {
             Self::ParallelAddUnsignedWord => "padduw",
             Self::ParallelCopyLowDoubleword => "pcpyld",
             Self::ParallelOr => "por",
+            Self::ParallelExtendLowWord => "pextlw",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
             Self::MoveToFpuRegister => "mtc1",
@@ -857,7 +862,8 @@ impl Instruction {
             | Opcode::ParallelSubHalfword
             | Opcode::ParallelAddUnsignedWord
             | Opcode::ParallelCopyLowDoubleword
-            | Opcode::ParallelOr => {
+            | Opcode::ParallelOr
+            | Opcode::ParallelExtendLowWord => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
@@ -1384,6 +1390,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x01 => Opcode::ParallelSubWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x04 => Opcode::ParallelAddHalfword,
                 0x08 if ((word >> 6) & 0x1F) == 0x05 => Opcode::ParallelSubHalfword,
+                0x08 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelExtendLowWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
@@ -1797,10 +1804,16 @@ mod tests {
         assert_eq!(zero_destination.effects().gpr_write_mask, 0);
 
         // Selector 0x12 also names MMI0 PEXTLW and MMI2 PAND, so the group
-        // selector must stay part of the match. The same selector in MMI0,
-        // MMI1 or MMI2 and the neighboring MMI3 selectors 0x11 and 0x13
-        // (PNOR) must also stay unknown in this increment.
-        for other_group in [0x08, 0x28, 0x09] {
+        // selector must stay part of the match. The same selector in MMI1 or
+        // MMI2 and the neighboring MMI3 selectors 0x11 and 0x13 (PNOR) must
+        // also stay unknown in this increment; MMI0 selector 0x12 is PEXTLW
+        // and is decoded separately.
+        let pextlw_group = (word & !0x3F) | 0x08;
+        assert_eq!(
+            decode(pextlw_group, 0).opcode,
+            Opcode::ParallelExtendLowWord
+        );
+        for other_group in [0x28, 0x09] {
             let word = (word & !0x3F) | other_group;
             assert_eq!(
                 decode(word, 0).opcode,
@@ -1814,6 +1827,65 @@ mod tests {
                 decode(word, 0).opcode,
                 Opcode::Unknown,
                 "MMI3 selector 0x{other_mmi3:02X}"
+            );
+        }
+    }
+
+    #[test]
+    fn decodes_r5900_mmi0_pextlw_and_rejects_other_selectors() {
+        // PEXTLW is MMI0 (low six bits 0x08) with operation selector 0x12 in
+        // bits 10..6. It has no reserved register fields.
+        let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x12 << 6) | 0x08;
+        assert_eq!(word, 0x7022_1C88);
+        let decoded = decode(word, 0x8000);
+        assert_eq!(decoded.opcode, Opcode::ParallelExtendLowWord);
+        assert_eq!(decoded.opcode.mnemonic(), "pextlw");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+        assert_eq!(encoding_family(word), EncodingFamily::Mmi0);
+        assert!(!decoded.has_delay_slot);
+        assert!(!decoded.is_control_transfer());
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.reads_sa);
+        assert!(!effects.writes_sa);
+        assert!(!effects.may_raise_exception);
+        assert!(!effects.unknown);
+        assert_eq!(effects.fpr_read_mask, 0);
+        assert_eq!(effects.fpr_write_mask, 0);
+        assert!(!effects.reads_hi && !effects.writes_hi);
+        assert!(!effects.reads_lo && !effects.writes_lo);
+        assert!(!effects.reads_hi1 && !effects.writes_hi1);
+        assert!(!effects.reads_lo1 && !effects.writes_lo1);
+        assert!(!effects.reads_fcr && !effects.writes_fcr);
+        assert!(!effects.reads_acc && !effects.writes_acc);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        assert_eq!(effects.control_flow, ControlFlowEffect::None);
+
+        let zero_destination = decode(word & !(0x1F << 11), 0x8000);
+        assert_eq!(zero_destination.opcode, Opcode::ParallelExtendLowWord);
+        assert_eq!(
+            zero_destination.effects().gpr_read_mask,
+            (1 << 1) | (1 << 2)
+        );
+        assert_eq!(zero_destination.effects().gpr_write_mask, 0);
+
+        // Selector 0x12 also names MMI2 PAND and MMI3 POR, so the group
+        // selector must stay part of the match: MMI3 selector 0x12 stays POR,
+        // while MMI2 selector 0x12 (PAND) stays unknown in this increment.
+        let por_group = (word & !0x3F) | 0x29;
+        assert_eq!(decode(por_group, 0).opcode, Opcode::ParallelOr);
+        let pand_group = (word & !0x3F) | 0x09;
+        assert_eq!(decode(pand_group, 0).opcode, Opcode::Unknown);
+        // The neighboring MMI0 selectors 0x11 (PSUBSW), 0x13 (PPACW), 0x1A
+        // (PEXT5) and 0x1B (PPAC5) stay unknown in this increment.
+        for other_mmi0 in [0x11, 0x13, 0x1A, 0x1B] {
+            let word = (word & !(0x1F << 6)) | (other_mmi0 << 6);
+            assert_eq!(
+                decode(word, 0).opcode,
+                Opcode::Unknown,
+                "MMI0 selector 0x{other_mmi0:02X}"
             );
         }
     }
