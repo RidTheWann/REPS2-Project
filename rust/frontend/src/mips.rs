@@ -123,6 +123,9 @@ pub enum Opcode {
     ParallelAddUnsignedWord,
     ParallelAddUnsignedByte,
     ParallelAnd,
+    /// PXOR applies a plain bitwise exclusive-or to the whole 128-bit GPR:
+    /// every bit of GPR[rd] is `rs XOR rt`. It is the MMI2 sibling of PAND.
+    ParallelXor,
     ParallelCopyLowDoubleword,
     /// PCPYUD copies the upper doubleword of each source into the destination:
     /// `result.low = GPR[rs][127:64]` and `result.high = GPR[rt][127:64]`.
@@ -132,6 +135,9 @@ pub enum Opcode {
     /// POR applies a plain bitwise OR to the whole 128-bit GPR: every bit of
     /// GPR[rd] is `rs OR rt`. It is the first MMI3-group operation lifted.
     ParallelOr,
+    /// PNOR applies a 128-bit bitwise NOR: every bit of GPR[rd] is
+    /// `NOT (rs OR rt)`. It is the MMI3 sibling of POR.
+    ParallelNor,
     /// PEXTLW interleaves the lower 64 bits of its two sources at word
     /// granularity: result words are `[rt0, rs0, rt1, rs1]`. The upper
     /// doubleword of each source is ignored.
@@ -413,9 +419,11 @@ impl Opcode {
             Self::ParallelAddUnsignedWord => "padduw",
             Self::ParallelAddUnsignedByte => "paddub",
             Self::ParallelAnd => "pand",
+            Self::ParallelXor => "pxor",
             Self::ParallelCopyLowDoubleword => "pcpyld",
             Self::ParallelCopyUpperDoubleword => "pcpyud",
             Self::ParallelOr => "por",
+            Self::ParallelNor => "pnor",
             Self::ParallelExtendLowWord => "pextlw",
             Self::ParallelPackWord => "ppacw",
             Self::ParallelExchangeEvenWord => "pexew",
@@ -883,9 +891,11 @@ impl Instruction {
             | Opcode::ParallelAddUnsignedWord
             | Opcode::ParallelAddUnsignedByte
             | Opcode::ParallelAnd
+            | Opcode::ParallelXor
             | Opcode::ParallelCopyLowDoubleword
             | Opcode::ParallelCopyUpperDoubleword
             | Opcode::ParallelOr
+            | Opcode::ParallelNor
             | Opcode::ParallelExtendLowWord
             | Opcode::ParallelPackWord => {
                 // Every MMI operation lifted so far reads both source GPRs and
@@ -1432,6 +1442,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelPackWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
                 0x09 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelAnd,
+                0x09 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelXor,
                 0x09 if ((word >> 6) & 0x1F) == 0x1E && rs == 0 => Opcode::ParallelExchangeEvenWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x1F && rs == 0 => Opcode::ParallelRotate3Words,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
@@ -1439,6 +1450,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x29 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyUpperDoubleword,
                 0x29 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelOr,
+                0x29 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelNor,
                 0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
                 0x11 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mthi1,
                 0x12 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mflo1,
@@ -1855,10 +1867,9 @@ mod tests {
         assert_eq!(zero_destination.effects().gpr_write_mask, 0);
 
         // Selector 0x12 also names MMI0 PEXTLW and MMI2 PAND, so the group
-        // selector must stay part of the match. The same selector in MMI1 and
-        // the neighboring MMI3 selectors 0x11 and 0x13 (PNOR) must also stay
-        // unknown in this increment; MMI0 selector 0x12 is PEXTLW and MMI2
-        // selector 0x12 is PAND, both decoded separately.
+        // selector must stay part of the match. MMI3 selector 0x13 is PNOR and
+        // is decoded separately; the neighboring MMI3 selectors 0x11 and 0x1A
+        // and the reserved-layout 0x1E must stay unknown in this increment.
         let pextlw_group = (word & !0x3F) | 0x08;
         assert_eq!(
             decode(pextlw_group, 0).opcode,
@@ -1866,9 +1877,11 @@ mod tests {
         );
         let pand_group = (word & !0x3F) | 0x09;
         assert_eq!(decode(pand_group, 0).opcode, Opcode::ParallelAnd);
+        let pnor_group = (word & !(0x1F << 6)) | (0x13 << 6);
+        assert_eq!(decode(pnor_group, 0).opcode, Opcode::ParallelNor);
         let mmi1_group = (word & !0x3F) | 0x28;
         assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown, "funct 0x28");
-        for other_mmi3 in [0x11, 0x13, 0x1A, 0x1E] {
+        for other_mmi3 in [0x11, 0x1A, 0x1E] {
             let word = (word & !(0x1F << 6)) | (other_mmi3 << 6);
             assert_eq!(
                 decode(word, 0).opcode,
@@ -1924,10 +1937,10 @@ mod tests {
         assert_eq!(zero_destination.effects().gpr_write_mask, 0);
 
         // Selector 0x12 also names MMI0 PEXTLW and MMI3 POR, so the group
-        // selector must stay part of the match. The same selector in MMI0 or
-        // MMI3 and the neighboring MMI2 selectors 0x10 (PMADDH), 0x11 (PHMADH)
-        // and 0x13 (PXOR) must stay unknown in this increment; MMI0 selector
-        // 0x12 is PEXTLW and MMI3 selector 0x12 is POR, both decoded separately.
+        // selector must stay part of the match. MMI2 selector 0x13 is PXOR and
+        // is decoded separately; the neighboring MMI2 selectors 0x10 (PMADDH)
+        // and 0x11 (PHMADH) stay unknown in this increment, and MMI3 selector
+        // 0x12 is POR, decoded separately.
         let pextlw_group = (word & !0x3F) | 0x08;
         assert_eq!(
             decode(pextlw_group, 0).opcode,
@@ -1935,15 +1948,90 @@ mod tests {
         );
         let por_group = (word & !0x3F) | 0x29;
         assert_eq!(decode(por_group, 0).opcode, Opcode::ParallelOr);
+        let pxor_group = (word & !(0x1F << 6)) | (0x13 << 6);
+        assert_eq!(decode(pxor_group, 0).opcode, Opcode::ParallelXor);
         let mmi1_group = (word & !0x3F) | 0x28;
         assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown, "funct 0x28");
-        for other_mmi2 in [0x10, 0x11, 0x13] {
+        for other_mmi2 in [0x10, 0x11] {
             let word = (word & !(0x1F << 6)) | (other_mmi2 << 6);
             assert_eq!(
                 decode(word, 0).opcode,
                 Opcode::Unknown,
                 "MMI2 selector 0x{other_mmi2:02X}"
             );
+        }
+    }
+
+    #[test]
+    fn decodes_r5900_mmi2_pxor_and_mmi3_pnor() {
+        // PXOR is MMI2 (low six bits 0x09) selector 0x13; PNOR is MMI3 (low
+        // six bits 0x29) selector 0x13. Both are plain 128-bit bitwise
+        // operations with no reserved register fields.
+        let pxor = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x13 << 6) | 0x09;
+        assert_eq!(pxor, 0x7022_1CC9);
+        let pnor = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x13 << 6) | 0x29;
+        assert_eq!(pnor, 0x7022_1CE9);
+
+        let decoded_xor = decode(pxor, 0x8000);
+        assert_eq!(decoded_xor.opcode, Opcode::ParallelXor);
+        assert_eq!(decoded_xor.opcode.mnemonic(), "pxor");
+        assert_eq!((decoded_xor.rs, decoded_xor.rt, decoded_xor.rd), (1, 2, 3));
+        assert_eq!(encoding_family(pxor), EncodingFamily::Mmi2);
+        assert!(!decoded_xor.has_delay_slot);
+        assert!(!decoded_xor.is_control_transfer());
+
+        let decoded_nor = decode(pnor, 0x8000);
+        assert_eq!(decoded_nor.opcode, Opcode::ParallelNor);
+        assert_eq!(decoded_nor.opcode.mnemonic(), "pnor");
+        assert_eq!((decoded_nor.rs, decoded_nor.rt, decoded_nor.rd), (1, 2, 3));
+        assert_eq!(encoding_family(pnor), EncodingFamily::Mmi3);
+        assert!(!decoded_nor.has_delay_slot);
+        assert!(!decoded_nor.is_control_transfer());
+
+        for decoded in [decoded_xor, decoded_nor] {
+            let effects = decoded.effects();
+            assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+            assert_eq!(effects.gpr_write_mask, 1 << 3);
+            assert!(!effects.reads_sa);
+            assert!(!effects.writes_sa);
+            assert!(!effects.may_raise_exception);
+            assert!(!effects.unknown);
+            assert_eq!(effects.fpr_read_mask, 0);
+            assert_eq!(effects.fpr_write_mask, 0);
+            assert!(!effects.reads_hi && !effects.writes_hi);
+            assert!(!effects.reads_lo && !effects.writes_lo);
+            assert!(!effects.reads_hi1 && !effects.writes_hi1);
+            assert!(!effects.reads_lo1 && !effects.writes_lo1);
+            assert!(!effects.reads_fcr && !effects.writes_fcr);
+            assert!(!effects.reads_acc && !effects.writes_acc);
+            assert_eq!(effects.memory, MemoryEffect::None);
+            assert_eq!(effects.control_flow, ControlFlowEffect::None);
+        }
+
+        // GPR[0] is hard-wired, so a PXOR/PNOR that names it still reads its
+        // sources but reports an empty write mask.
+        for (opcode, word) in [(Opcode::ParallelXor, pxor), (Opcode::ParallelNor, pnor)] {
+            let zero_destination = decode(word & !(0x1F << 11), 0x8000);
+            assert_eq!(zero_destination.opcode, opcode);
+            assert_eq!(
+                zero_destination.effects().gpr_read_mask,
+                (1 << 1) | (1 << 2)
+            );
+            assert_eq!(zero_destination.effects().gpr_write_mask, 0);
+        }
+
+        // Selector 0x13 also names MMI0 PPACW, so the group selector must stay
+        // part of the match. MMI1 selector 0x13, the rs-guarded MMI2 selectors
+        // 0x1E/0x1F and the unassigned MMI3 selector 0x1F must not decode.
+        let ppacw_group = (pxor & !0x3F) | 0x08;
+        assert_eq!(decode(ppacw_group, 0).opcode, Opcode::ParallelPackWord);
+        for (word, label) in [
+            ((pxor & !0x3F) | 0x28, "MMI1 funct 0x28"),
+            ((pxor & !(0x1F << 6)) | (0x1E << 6), "MMI2 selector 0x1E"),
+            ((pxor & !(0x1F << 6)) | (0x1F << 6), "MMI2 selector 0x1F"),
+            ((pnor & !(0x1F << 6)) | (0x1F << 6), "MMI3 selector 0x1F"),
+        ] {
+            assert_eq!(decode(word, 0).opcode, Opcode::Unknown, "{label}");
         }
     }
 
@@ -2056,9 +2144,9 @@ mod tests {
         // selector must stay part of the match, and the sibling MMI0 PEXTLW at
         // selector 0x12 is a different operation.
         let pxor_group = (word & !0x3F) | 0x09;
-        assert_eq!(decode(pxor_group, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(pxor_group, 0).opcode, Opcode::ParallelXor);
         let pnor_group = (word & !0x3F) | 0x29;
-        assert_eq!(decode(pnor_group, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(pnor_group, 0).opcode, Opcode::ParallelNor);
         let mmi1_group = (word & !0x3F) | 0x28;
         assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown);
         let pextlw_word = (word & !(0x1F << 6)) | (0x12 << 6);

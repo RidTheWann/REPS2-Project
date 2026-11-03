@@ -33,7 +33,9 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_sub_halfword;\n\
              using reps2::runtime::parallel_copy_low_doubleword;\n\
              using reps2::runtime::parallel_and;\n\
+             using reps2::runtime::parallel_xor;\n\
              using reps2::runtime::parallel_or;\n\
+             using reps2::runtime::parallel_nor;\n\
              using reps2::runtime::parallel_extend_low_word;\n\
              using reps2::runtime::parallel_pack_word;\n\
              using reps2::runtime::parallel_copy_upper_doubleword;\n\
@@ -394,11 +396,17 @@ pub(crate) fn emit_instruction(
         Operation::ParallelAnd { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_and");
         }
+        Operation::ParallelXor { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_xor");
+        }
         Operation::ParallelCopyLowDoubleword { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_copy_low_doubleword");
         }
         Operation::ParallelOr { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_or");
+        }
+        Operation::ParallelNor { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_nor");
         }
         Operation::ParallelExtendLowWord { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_extend_low_word");
@@ -1888,6 +1896,54 @@ mod tests {
         assert!(
             cpp.contains("if (6 != 0) state.gpr[6] = parallel_and(state.gpr[6], state.gpr[6]);")
         );
+    }
+
+    #[test]
+    fn emits_mmi2_pxor_and_mmi3_pnor_as_full_128_bit_runtime_calls() {
+        for (selector, funct, helper, label, base) in [
+            (0x13u32, 0x09u32, "parallel_xor", "PXOR", 0xC600u32),
+            (0x13u32, 0x29u32, "parallel_nor", "PNOR", 0xC650u32),
+        ] {
+            let words = [
+                (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (selector << 6) | funct,
+                (0x1C << 26) | (1 << 21) | (2 << 16) | (selector << 6) | funct,
+                (0x1C << 26) | (4 << 21) | (5 << 16) | (4 << 11) | (selector << 6) | funct,
+                (0x1C << 26) | (6 << 21) | (6 << 16) | (6 << 11) | (selector << 6) | funct,
+            ];
+            let decoded_stream = words
+                .iter()
+                .enumerate()
+                .map(|(index, word)| crate::mips::decode(*word, base + index as u32 * 4))
+                .collect::<Vec<_>>();
+            let program = ir::lift(&decoded_stream).expect("bitwise IR");
+            let cpp = emit_cpp(&program).expect("bitwise C++");
+
+            assert!(cpp.contains(&format!("using reps2::runtime::{helper};")));
+            assert!(
+                cpp.contains(&format!(
+                    "if (3 != 0) state.gpr[3] = {helper}(state.gpr[1], state.gpr[2]);"
+                )),
+                "{label} destination"
+            );
+            assert!(
+                cpp.contains(&format!(
+                    "if (0 != 0) state.gpr[0] = {helper}(state.gpr[1], state.gpr[2]);"
+                )),
+                "{label} zero destination"
+            );
+            assert!(
+                cpp.contains(&format!(
+                    "if (4 != 0) state.gpr[4] = {helper}(state.gpr[4], state.gpr[5]);"
+                )),
+                "{label} aliased destination"
+            );
+            assert!(
+                cpp.contains(&format!(
+                    "if (6 != 0) state.gpr[6] = {helper}(state.gpr[6], state.gpr[6]);"
+                )),
+                "{label} same-register sources"
+            );
+        }
     }
 
     #[test]
