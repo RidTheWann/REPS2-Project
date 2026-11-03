@@ -139,6 +139,32 @@ enum class Status : std::uint8_t {
         || status == Status::exception_delivered;
 }
 
+// Host-observable classification of how a bounded execution stopped. The names
+// are a stable, machine-readable contract for the native probe trace and any
+// session layer that consumes it; they describe the host boundary, not a claim
+// that a game booted. `guest_exception` means COP0/PC hold the exception
+// context; `unresolved_control_flow` means the dispatcher reached a PC with no
+// translated block. Neither is success or playability.
+[[nodiscard]] constexpr const char* status_name(Status status) noexcept {
+    switch (status) {
+    case Status::ok: return "ok";
+    case Status::undefined_word_operand: return "undefined_word_operand";
+    case Status::integer_overflow: return "integer_overflow";
+    case Status::instruction_budget_exhausted: return "budget_exhausted";
+    case Status::external_control_flow: return "unresolved_control_flow";
+    case Status::unsupported_instruction: return "unsupported_instruction";
+    case Status::address_error: return "address_error";
+    case Status::unmapped_memory: return "unmapped_memory";
+    case Status::unsupported_memory_access: return "unsupported_memory_access";
+    case Status::invalid_memory_image: return "invalid_memory_image";
+    case Status::syscall: return "syscall";
+    case Status::breakpoint: return "breakpoint";
+    case Status::exception_delivered: return "guest_exception";
+    case Status::invalid_exception_return: return "invalid_exception_return";
+    }
+    return "unknown";
+}
+
 // Enter the EE's general Level-1 vector for synchronous exceptions. The caller
 // sets state.pc to the faulting instruction before calling this helper.
 // For a delay-slot fault, state.pc is the delay-slot PC and BD/EPC identify the

@@ -214,9 +214,10 @@ enable_testing()
 @TEST@
 # The probe prints one machine-readable trace line; require it so the test
 # fails if the trace fields disappear or the probe never reaches execution.
+# stage=... is an optional classification field inserted after status.
 set_tests_properties(reps2_generated_probe PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
-    PASS_REGULAR_EXPRESSION "entry=0x[0-9A-Fa-f]+ status=[0-9]+ pc=0x[0-9A-Fa-f]+ budget=[0-9]+ executed=[0-9]+"
+    PASS_REGULAR_EXPRESSION "entry=0x[0-9A-Fa-f]+ status=[0-9]+( stage=[a-z_]+)? pc=0x[0-9A-Fa-f]+ budget=[0-9]+ executed=[0-9]+"
 )
 "#;
 
@@ -320,18 +321,35 @@ int main(int argc, char** argv) {
 
     const std::uint32_t entry = state.pc;
     const Status status = reps2::generated::execute_cfg(state, budget);
+    // Classify how bounded execution stopped. `stage` is a stable host contract
+    // (see reps2::runtime::status_name); it distinguishes a compile-time
+    // success, executed guest instructions, budget exhaustion, guest exception,
+    // unsupported instruction and unresolved control flow without claiming a
+    // title booted. When the stop is an architecturally delivered SYSCALL, also
+    // report Cause.ExcCode and the EE kernel service number the SDK passes in
+    // $3 (v1); the observed retail boot path uses register-numbered syscalls.
+    const std::uint32_t cause = state.cop0[reps2::runtime::kCop0Cause];
+    const std::uint32_t exccode = (cause >> 2U) & 0x1FU;
+    const bool is_syscall =
+        status == Status::exception_delivered && exccode == 8U;
+    const std::uint32_t syscall_code =
+        is_syscall ? static_cast<std::uint32_t>(state.gpr[3].low) : 0U;
     std::printf(
-        "entry=0x%08X status=%d pc=0x%08X budget=%llu executed=%llu"
-        " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X\n",
+        "entry=0x%08X status=%d stage=%s pc=0x%08X budget=%llu executed=%llu"
+        " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X"
+        " exccode=%u syscall=0x%08X\n",
         static_cast<unsigned>(entry),
         static_cast<int>(status),
+        reps2::runtime::status_name(status),
         static_cast<unsigned>(state.pc),
         static_cast<unsigned long long>(budget),
         static_cast<unsigned long long>(state.instructions_executed),
-        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Cause]),
+        static_cast<unsigned>(cause),
         static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Epc]),
         static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Status]),
-        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0BadVAddr]));
+        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0BadVAddr]),
+        static_cast<unsigned>(exccode),
+        static_cast<unsigned>(syscall_code));
     return 0;
 }
 "#;
