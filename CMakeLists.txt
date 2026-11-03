@@ -581,6 +581,74 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_mmi2_pand_codegen_smoke COMMAND reps2_mmi2_pand_codegen_smoke)
 
+    set(REPS2_MMI2_PXOR_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi2_pxor_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_MMI2_PXOR_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_MMI2_PXOR_GENERATED_CPP}"
+            0x00008C00
+            0x70221CC9  # pxor r3, r1, r2
+            0x70A62CC9  # pxor r5, r5, r6 (rd aliases rs)
+            0x71073CC9  # pxor r7, r8, r7 (rd aliases rt)
+            0x714A54C9  # pxor r10, r10, r10 (rd aliases both sources)
+            0x702204C9  # pxor r0, r1, r2 (zero-register write is suppressed)
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling R5900 MMI2 PXOR 128-bit bitwise XOR"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_MMI2_PXOR_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_mmi2_pxor_codegen_fixture DEPENDS "${REPS2_MMI2_PXOR_GENERATED_CPP}")
+    add_executable(reps2_mmi2_pxor_codegen_smoke
+        "${REPS2_MMI2_PXOR_GENERATED_CPP}"
+        tests/mmi2_pxor_smoke.cpp
+    )
+    add_dependencies(reps2_mmi2_pxor_codegen_smoke reps2_mmi2_pxor_codegen_fixture)
+    target_link_libraries(reps2_mmi2_pxor_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_mmi2_pxor_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_mmi2_pxor_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_mmi2_pxor_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_mmi2_pxor_codegen_smoke COMMAND reps2_mmi2_pxor_codegen_smoke)
+
+    set(REPS2_MMI3_PNOR_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi3_pnor_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_MMI3_PNOR_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_MMI3_PNOR_GENERATED_CPP}"
+            0x00008D00
+            0x70221CE9  # pnor r3, r1, r2
+            0x70A62CE9  # pnor r5, r5, r6 (rd aliases rs)
+            0x71073CE9  # pnor r7, r8, r7 (rd aliases rt)
+            0x714A54E9  # pnor r10, r10, r10 (rd aliases both sources)
+            0x702204E9  # pnor r0, r1, r2 (zero-register write is suppressed)
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling R5900 MMI3 PNOR 128-bit bitwise NOR"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_MMI3_PNOR_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_mmi3_pnor_codegen_fixture DEPENDS "${REPS2_MMI3_PNOR_GENERATED_CPP}")
+    add_executable(reps2_mmi3_pnor_codegen_smoke
+        "${REPS2_MMI3_PNOR_GENERATED_CPP}"
+        tests/mmi3_pnor_smoke.cpp
+    )
+    add_dependencies(reps2_mmi3_pnor_codegen_smoke reps2_mmi3_pnor_codegen_fixture)
+    target_link_libraries(reps2_mmi3_pnor_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_mmi3_pnor_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_mmi3_pnor_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_mmi3_pnor_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_mmi3_pnor_codegen_smoke COMMAND reps2_mmi3_pnor_codegen_smoke)
+
     set(REPS2_MMI0_PEXTLB_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi0_pextlb_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_MMI0_PEXTLB_GENERATED_CPP}"

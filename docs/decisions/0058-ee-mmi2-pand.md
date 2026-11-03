@@ -110,4 +110,5 @@ not a playability claim: the titles still stop at other unsupported instructions
 and unimplemented runtime services. The MMI2 siblings (PNOR, PXOR, PEXTLB,
 PEXT5, PPAC5 and the MMI2 multiply/divide group compilers), the other MMI0–MMI3
 operations, MMI pipeline-1 state and MMI latency stay out of scope and are still
-counted by `profile-elf`.
+counted by `profile-elf`. PNOR and PXOR were subsequently implemented as ADR
+0061, and PEXTLB as ADR 0059.

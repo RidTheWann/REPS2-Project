@@ -127,4 +127,4 @@ The census no longer counts these 1,004 words as unsupported. This is a
 coverage increment, not a playability claim. The remaining high-frequency MMI
 operations (PROT3W 648, PADDUB 358, PEXEW 356, PEXTLB 307, PAND 238, PNOR 196)
 and the rest of the MMI0-MMI3 set, MMI pipeline-1 state and MMI latency stay
-out of scope and are still counted by `profile-elf`. PROT3W and PEXEW were subsequently implemented as ADR 0056.
+out of scope and are still counted by `profile-elf`. PROT3W and PEXEW were subsequently implemented as ADR 0056, PADDUB as ADR 0057, PAND as ADR 0058, PNOR and PXOR as ADR 0061, and PEXTLB as ADR 0059.
