@@ -275,7 +275,8 @@ fn emit_block_definition(output: &mut String, block: &ControlBlock) {
         "[[nodiscard]] reps2::runtime::Status block_0x{pc:08X}(\n\
          {BLOCK_PARAMS} {{\n\
          \x20   if (remaining < {required}ULL) return Status::instruction_budget_exhausted;\n\
-         \x20   remaining -= {required}ULL;\n"
+         \x20   remaining -= {required}ULL;\n\
+         \x20   state.instructions_executed += {required}ULL;\n"
     ));
 
     for (instruction_index, instruction) in block.instructions.iter().enumerate() {

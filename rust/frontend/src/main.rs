@@ -818,6 +818,7 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             output,
             &sources,
             Some(&ram_output_name),
+            options.probe_budget,
         )?)
     } else {
         None
@@ -993,6 +994,7 @@ struct RecompileOptions {
     discover: bool,
     translation_units: usize,
     native_build: bool,
+    probe_budget: u64,
     limits: LimitOptions,
 }
 
@@ -1002,6 +1004,7 @@ impl Default for RecompileOptions {
             discover: false,
             translation_units: 1,
             native_build: false,
+            probe_budget: 0,
             limits: LimitOptions::default(),
         }
     }
@@ -1029,6 +1032,15 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
                 options.native_build = true;
                 index += 1;
             }
+            "--probe-budget" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--probe-budget requires a value".to_owned())?;
+                options.probe_budget = value.parse::<u64>().map_err(|_| {
+                    format!("invalid probe budget {value:?}; expected a non-negative integer")
+                })?;
+                index += 2;
+            }
             flag @ ("--max-blocks" | "--max-instructions" | "--max-roots") => {
                 let value = arguments
                     .get(index + 1)
@@ -1047,6 +1059,7 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
 struct FixtureOptions {
     translation_units: usize,
     native_build: bool,
+    probe_budget: u64,
 }
 
 impl Default for FixtureOptions {
@@ -1054,6 +1067,7 @@ impl Default for FixtureOptions {
         Self {
             translation_units: 1,
             native_build: false,
+            probe_budget: 0,
         }
     }
 }
@@ -1075,6 +1089,15 @@ fn parse_fixture_options(arguments: &[String]) -> Result<FixtureOptions, String>
             "--native-build" => {
                 options.native_build = true;
                 index += 1;
+            }
+            "--probe-budget" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--probe-budget requires a value".to_owned())?;
+                options.probe_budget = value.parse::<u64>().map_err(|_| {
+                    format!("invalid probe budget {value:?}; expected a non-negative integer")
+                })?;
+                index += 2;
             }
             other => return Err(format!("unknown compile-cfg-fixture option {other:?}")),
         }
@@ -1194,6 +1217,7 @@ fn write_native_project(
     output: &Path,
     sources: &[String],
     ram_image: Option<&str>,
+    probe_budget: u64,
 ) -> Result<PathBuf, String> {
     let (stem, _) = generated_output_parts(output);
     let directory = output.with_file_name(format!("{stem}.native"));
@@ -1204,7 +1228,7 @@ fn write_native_project(
         )
     })?;
 
-    let project = native_build::render(&stem, sources, ram_image);
+    let project = native_build::render(&stem, sources, ram_image, probe_budget);
     fs::write(directory.join("CMakeLists.txt"), project.cmake_lists).map_err(|error| {
         format!(
             "cannot write native build CMakeLists.txt in {}: {error}",
@@ -1659,7 +1683,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         let mut sources = Vec::with_capacity(parts.len() + 1);
         sources.push(output_file_name(output));
         sources.extend(parts.iter().map(|part| output_file_name(part)));
-        let directory = write_native_project(output, &sources, None)?;
+        let directory = write_native_project(output, &sources, None, options.probe_budget)?;
         println!("  Native build project: {}", directory.display());
     }
     Ok(())
@@ -1712,10 +1736,12 @@ fn usage() {
     );
     println!("  reps2 profile-elf <elf-file>");
     println!(
-        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--max-blocks N] [--max-instructions N] [--max-roots N]"
     );
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
-    println!("  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build]");
+    println!(
+        "  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build] [--probe-budget N]"
+    );
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
     println!(
@@ -1744,6 +1770,9 @@ fn usage() {
     );
     println!(
         "--native-build writes a deterministic <stem>.native/ CMake project plus a host probe that compiles and runs the emitted units; pass -DREPS2_RUNTIME_INCLUDE=<repo>/runtime/include when configuring it."
+    );
+    println!(
+        "--probe-budget N bakes N as the generated probe's default instruction budget so its CTest executes real guest code; 0 (the default) stops before any instruction runs. The probe prints one trace line: entry, status, final pc, budget, executed, and COP0 cause/epc/status/badvaddr."
     );
     println!(
         "--max-blocks/--max-instructions/--max-roots override the default analysis bounds (250000 blocks, 2000000 instructions, 500000 discovered roots). Overrides must be positive and stay below the CLI ceilings."
@@ -1833,6 +1862,8 @@ mod tests {
             "4".to_owned(),
             "--discover".to_owned(),
             "--native-build".to_owned(),
+            "--probe-budget".to_owned(),
+            "4096".to_owned(),
             "--max-blocks".to_owned(),
             "300000".to_owned(),
             "--max-instructions".to_owned(),
@@ -1847,6 +1878,7 @@ mod tests {
                 discover: true,
                 translation_units: 4,
                 native_build: true,
+                probe_budget: 4096,
                 limits: LimitOptions {
                     max_blocks: 300_000,
                     max_instructions: 2_500_000,
@@ -1919,6 +1951,8 @@ mod tests {
             "--native-build".to_owned(),
             "--tu-count".to_owned(),
             "4".to_owned(),
+            "--probe-budget".to_owned(),
+            "2048".to_owned(),
         ])
         .expect("fixture options");
         assert_eq!(
@@ -1926,9 +1960,12 @@ mod tests {
             FixtureOptions {
                 translation_units: 4,
                 native_build: true,
+                probe_budget: 2048,
             }
         );
         assert!(parse_fixture_options(&["--unknown".to_owned()]).is_err());
+        assert!(parse_fixture_options(&["--probe-budget".to_owned()]).is_err());
+        assert!(parse_fixture_options(&["--probe-budget".to_owned(), "nope".to_owned()]).is_err());
     }
 
     #[test]

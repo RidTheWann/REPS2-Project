@@ -62,7 +62,11 @@ recompile-elf also writes `<stem>.manifest.json` beside the translation: it reco
 
 ### Native build project
 
-`--native-build` additionally writes `<stem>.native/CMakeLists.txt` and `<stem>.native/probe_main.cpp`: a standalone project that compiles the dispatcher, all parts and a host probe, and registers a CTest. Configure it with `cmake -S <stem>.native -B <build> -DREPS2_RUNTIME_INCLUDE=<repo>/runtime/include`, then build and run CTest; the probe loads `<stem>.ram.bin` (or takes a path and instruction budget as arguments), calls `initialize_ee_state`, and reports one `execute_cfg` result. The generated files contain no absolute paths or timestamps.
+`--native-build` additionally writes `<stem>.native/CMakeLists.txt` and `<stem>.native/probe_main.cpp`: a standalone project that compiles the dispatcher, all parts and a host probe, and registers a CTest. Configure it with `cmake -S <stem>.native -B <build> -DREPS2_RUNTIME_INCLUDE=<repo>/runtime/include`, then build and run CTest; the probe loads `<stem>.ram.bin` (or takes a path and instruction budget as arguments), calls `initialize_ee_state`, and executes with a bounded instruction budget. `--probe-budget N` bakes N into the generated probe and its CTest as the default budget; the default of 0 stops before any guest instruction runs, while a positive budget lets the generated CTest exercise real translated code.
+
+The probe prints one machine-readable trace line: `entry`, `status` (the `Status` enumerator), final `pc`, `budget`, `executed` (guest instructions charged by the block-atomic dispatcher), and the COP0 `cause`/`epc`/`cop0_status`/`badvaddr` registers. The generated CTest uses a `PASS_REGULAR_EXPRESSION` on that line so it fails if the trace is lost.
+
+The generated files contain no absolute paths or timestamps.
 
 ### Related decisions
 

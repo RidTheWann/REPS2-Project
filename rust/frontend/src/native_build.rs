@@ -27,12 +27,19 @@ pub struct NativeProject {
 /// `project_stem` is the translation output stem used to derive a CMake project
 /// name. `sources` lists the dispatcher first and parts afterwards. `ram_image`
 /// is the RAM file name recorded in the probe default, or `None` for synthetic
-/// fixtures that execute against zero-filled RAM.
+/// fixtures that execute against zero-filled RAM. `probe_budget` is the default
+/// instruction budget baked into the generated probe and the generated CTest,
+/// so the project exercises real guest code instead of stopping immediately.
 #[must_use]
-pub fn render(project_stem: &str, sources: &[String], ram_image: Option<&str>) -> NativeProject {
+pub fn render(
+    project_stem: &str,
+    sources: &[String],
+    ram_image: Option<&str>,
+    probe_budget: u64,
+) -> NativeProject {
     NativeProject {
         cmake_lists: render_cmake_lists(project_stem, sources, ram_image),
-        probe_source: render_probe_source(ram_image),
+        probe_source: render_probe_source(ram_image, probe_budget),
     }
 }
 
@@ -92,7 +99,7 @@ fn render_cmake_lists(project_stem: &str, sources: &[String], ram_image: Option<
         .join("\n");
     let test = match ram_image {
         Some(name) => format!(
-            "add_test(NAME reps2_generated_probe\n    COMMAND reps2_probe \"${{CMAKE_CURRENT_SOURCE_DIR}}/../{}\" 0)",
+            "add_test(NAME reps2_generated_probe\n    COMMAND reps2_probe \"${{CMAKE_CURRENT_SOURCE_DIR}}/../{}\")",
             cmake_quote(name)
         ),
         None => "add_test(NAME reps2_generated_probe COMMAND reps2_probe)".to_owned(),
@@ -205,8 +212,11 @@ file(GENERATE
 
 enable_testing()
 @TEST@
+# The probe prints one machine-readable trace line; require it so the test
+# fails if the trace fields disappear or the probe never reaches execution.
 set_tests_properties(reps2_generated_probe PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    PASS_REGULAR_EXPRESSION "entry=0x[0-9A-Fa-f]+ status=[0-9]+ pc=0x[0-9A-Fa-f]+ budget=[0-9]+ executed=[0-9]+"
 )
 "#;
 
@@ -217,7 +227,7 @@ set_tests_properties(reps2_generated_probe PROPERTIES
         .replace("@TEST@", &test)
 }
 
-fn render_probe_source(ram_image: Option<&str>) -> String {
+fn render_probe_source(ram_image: Option<&str>, probe_budget: u64) -> String {
     let default_image = ram_image
         .map(cpp_string_literal)
         .unwrap_or_else(|| "nullptr".to_owned());
@@ -268,7 +278,7 @@ int main(int argc, char** argv) {
     using reps2::runtime::Status;
 
     const char* image_path = (argc > 1) ? argv[1] : @DEFAULT_IMAGE@;
-    std::uint64_t budget = 0;
+    std::uint64_t budget = @DEFAULT_BUDGET@ULL;
     if (argc > 2) {
         char* end = nullptr;
         budget = static_cast<std::uint64_t>(std::strtoull(argv[2], &end, 0));
@@ -311,11 +321,17 @@ int main(int argc, char** argv) {
     const std::uint32_t entry = state.pc;
     const Status status = reps2::generated::execute_cfg(state, budget);
     std::printf(
-        "entry=0x%08X status=%d pc=0x%08X budget=%llu\n",
+        "entry=0x%08X status=%d pc=0x%08X budget=%llu executed=%llu"
+        " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X\n",
         static_cast<unsigned>(entry),
         static_cast<int>(status),
         static_cast<unsigned>(state.pc),
-        static_cast<unsigned long long>(budget));
+        static_cast<unsigned long long>(budget),
+        static_cast<unsigned long long>(state.instructions_executed),
+        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Cause]),
+        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Epc]),
+        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Status]),
+        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0BadVAddr]));
     return 0;
 }
 "#;
@@ -323,6 +339,7 @@ int main(int argc, char** argv) {
     TEMPLATE
         .replace("@VERSION@", VERSION)
         .replace("@DEFAULT_IMAGE@", &default_image)
+        .replace("@DEFAULT_BUDGET@", &probe_budget.to_string())
 }
 
 #[cfg(test)]
@@ -335,12 +352,12 @@ mod tests {
 
     #[test]
     fn renders_ordered_sources_and_named_probe_test() {
-        let project = render("game", &sources(), Some("game.ram.bin"));
+        let project = render("game", &sources(), Some("game.ram.bin"), 0);
         assert!(project.cmake_lists.contains(
             "add_executable(reps2_probe\n    \"../game.cpp\"\n    \"../game.part0001.cpp\"\n    \"probe_main.cpp\""
         ));
         assert!(project.cmake_lists.contains(
-            "add_test(NAME reps2_generated_probe\n    COMMAND reps2_probe \"${CMAKE_CURRENT_SOURCE_DIR}/../game.ram.bin\" 0)"
+            "add_test(NAME reps2_generated_probe\n    COMMAND reps2_probe \"${CMAKE_CURRENT_SOURCE_DIR}/../game.ram.bin\")"
         ));
         assert!(
             project
@@ -356,7 +373,7 @@ mod tests {
 
     #[test]
     fn omits_ram_image_for_synthetic_fixtures() {
-        let project = render("fixture", &sources(), None);
+        let project = render("fixture", &sources(), None, 0);
         assert!(
             project
                 .cmake_lists
@@ -381,14 +398,14 @@ mod tests {
     #[test]
     fn escapes_cmake_and_cpp_strings() {
         let names = vec!["a\"b.cpp".to_owned()];
-        let project = render("weird", &names, Some("r\"m.bin"));
+        let project = render("weird", &names, Some("r\"m.bin"), 0);
         assert!(project.cmake_lists.contains("\"../a\\\"b.cpp\""));
         assert!(project.probe_source.contains(": \"r\\\"m.bin\";"));
     }
 
     #[test]
     fn probe_exposes_the_runtime_boundary_and_bounded_execution() {
-        let project = render("game", &sources(), Some("game.ram.bin"));
+        let project = render("game", &sources(), Some("game.ram.bin"), 0);
         assert!(
             project
                 .probe_source
@@ -401,8 +418,37 @@ mod tests {
     }
 
     #[test]
+    fn probe_bakes_budget_and_emits_a_machine_readable_trace() {
+        let project = render("game", &sources(), Some("game.ram.bin"), 4096);
+        assert!(
+            project
+                .probe_source
+                .contains("std::uint64_t budget = 4096ULL;")
+        );
+        for field in [
+            "entry=0x%08X",
+            "status=%d",
+            "pc=0x%08X",
+            "budget=%llu",
+            "executed=%llu",
+            "cause=0x%08X",
+            "epc=0x%08X",
+            "cop0_status=0x%08X",
+            "badvaddr=0x%08X",
+        ] {
+            assert!(
+                project.probe_source.contains(field),
+                "probe trace omits {field}"
+            );
+        }
+        assert!(project.probe_source.contains("state.instructions_executed"));
+        assert!(project.cmake_lists.contains("PASS_REGULAR_EXPRESSION"));
+        assert!(project.cmake_lists.contains("executed=[0-9]+"));
+    }
+
+    #[test]
     fn renders_native_toolchain_provenance_contract() {
-        let project = render("game", &sources(), Some("game.ram.bin"));
+        let project = render("game", &sources(), Some("game.ram.bin"), 0);
         assert!(
             project
                 .cmake_lists
@@ -422,8 +468,8 @@ mod tests {
 
     #[test]
     fn rendering_is_deterministic() {
-        let first = render("game", &sources(), Some("game.ram.bin"));
-        let second = render("game", &sources(), Some("game.ram.bin"));
+        let first = render("game", &sources(), Some("game.ram.bin"), 0);
+        let second = render("game", &sources(), Some("game.ram.bin"), 0);
         assert_eq!(first, second);
         assert!(!first.cmake_lists.contains("timestamp"));
     }

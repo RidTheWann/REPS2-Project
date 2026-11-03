@@ -64,3 +64,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0057](0057-ee-mmi1-paddub.md) | EE MMI1 PADDUB unsigned byte saturation | Accepted |
 | [0058](0058-ee-mmi2-pand.md) | EE MMI2 PAND 128-bit bitwise AND | Accepted |
 | [0059](0059-ee-mmi0-pextlb.md) | EE MMI0 PEXTLB low-byte interleave | Accepted |
+| [0060](0060-native-probe-execution-trace.md) | Native probe execution trace and configurable budget | Accepted |
