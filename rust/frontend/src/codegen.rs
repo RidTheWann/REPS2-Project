@@ -35,6 +35,8 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_extend_low_word;\n\
              using reps2::runtime::parallel_pack_word;\n\
              using reps2::runtime::parallel_copy_upper_doubleword;\n\
+             using reps2::runtime::parallel_exchange_even_word;\n\
+             using reps2::runtime::parallel_rotate_3_words;\n\
 \n\
              using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::store_fpu_control;\n\
@@ -398,6 +400,12 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelCopyUpperDoubleword { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_copy_upper_doubleword");
+        }
+        Operation::ParallelExchangeEvenWord { dst, src } => {
+            emit_parallel_single_word(output, dst, src, "parallel_exchange_even_word");
+        }
+        Operation::ParallelRotate3Words { dst, src } => {
+            emit_parallel_single_word(output, dst, src, "parallel_rotate_3_words");
         }
         Operation::AddDoublewordSigned { dst, lhs, rhs } => {
             emit_doubleword_signed_add(output, index, dst, lhs, rhs, in_branch_delay);
@@ -1046,6 +1054,14 @@ fn emit_parallel_word(output: &mut String, dst: Gpr, lhs: Gpr, rhs: Gpr, helper:
     let b = rhs.index();
     output.push_str(&format!(
         "    if ({d} != 0) state.gpr[{d}] = {helper}(state.gpr[{a}], state.gpr[{b}]);\n"
+    ));
+}
+
+fn emit_parallel_single_word(output: &mut String, dst: Gpr, src: Gpr, helper: &str) {
+    let d = dst.index();
+    let s = src.index();
+    output.push_str(&format!(
+        "    if ({d} != 0) state.gpr[{d}] = {helper}(state.gpr[{s}]);\n"
     ));
 }
 
@@ -1922,6 +1938,61 @@ mod tests {
         // PCPYUD crosses neither half, while PCPYLD does: the lowering must not
         // reuse the MMI2 helper.
         assert!(!cpp.contains("parallel_copy_low_doubleword("));
+    }
+
+    #[test]
+    fn emits_mmi2_pexew_as_a_single_source_runtime_call() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1E << 6) | 0x09,
+            (0x1C << 26) | (2 << 16) | (0x1E << 6) | 0x09,
+            (0x1C << 26) | (5 << 16) | (4 << 11) | (0x1E << 6) | 0x09,
+            (0x1C << 26) | (6 << 16) | (6 << 11) | (0x1E << 6) | 0x09,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xC800 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PEXEW IR");
+        let cpp = emit_cpp(&program).expect("PEXEW C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_exchange_even_word;"));
+        assert!(
+            cpp.contains("if (3 != 0) state.gpr[3] = parallel_exchange_even_word(state.gpr[2]);")
+        );
+        assert!(
+            cpp.contains("if (0 != 0) state.gpr[0] = parallel_exchange_even_word(state.gpr[2]);")
+        );
+        assert!(
+            cpp.contains("if (4 != 0) state.gpr[4] = parallel_exchange_even_word(state.gpr[5]);")
+        );
+        assert!(
+            cpp.contains("if (6 != 0) state.gpr[6] = parallel_exchange_even_word(state.gpr[6]);")
+        );
+        assert!(!cpp.contains("parallel_extend_low_word("));
+    }
+
+    #[test]
+    fn emits_mmi2_prot3w_as_a_single_source_runtime_call() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1F << 6) | 0x09,
+            (0x1C << 26) | (2 << 16) | (0x1F << 6) | 0x09,
+            (0x1C << 26) | (5 << 16) | (4 << 11) | (0x1F << 6) | 0x09,
+            (0x1C << 26) | (6 << 16) | (6 << 11) | (0x1F << 6) | 0x09,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xC900 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PROT3W IR");
+        let cpp = emit_cpp(&program).expect("PROT3W C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_rotate_3_words;"));
+        assert!(cpp.contains("if (3 != 0) state.gpr[3] = parallel_rotate_3_words(state.gpr[2]);"));
+        assert!(cpp.contains("if (0 != 0) state.gpr[0] = parallel_rotate_3_words(state.gpr[2]);"));
+        assert!(cpp.contains("if (4 != 0) state.gpr[4] = parallel_rotate_3_words(state.gpr[5]);"));
+        assert!(cpp.contains("if (6 != 0) state.gpr[6] = parallel_rotate_3_words(state.gpr[6]);"));
     }
 
     #[test]
