@@ -407,6 +407,18 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// PEXEW: exchange the even words of one source between its two 64-bit
+    /// halves. Result words are [rt1, rt2, rt3, rt0].
+    ParallelExchangeEvenWord {
+        dst: Gpr,
+        src: Gpr,
+    },
+    /// PROT3W: rotate the four 32-bit words left by one position.
+    /// Result words are [rt1, rt2, rt0, rt3].
+    ParallelRotate3Words {
+        dst: Gpr,
+        src: Gpr,
+    },
     /// PCPYUD: dst.low = lhs.high and dst.high = rhs.high. Unlike PCPYLD the
     /// two halves are not crossed, so the first operand supplies the low half.
     ParallelCopyUpperDoubleword {
@@ -949,6 +961,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelExchangeEvenWord => Operation::ParallelExchangeEvenWord {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            Opcode::ParallelRotate3Words => Operation::ParallelRotate3Words {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
             },
             Opcode::ParallelCopyUpperDoubleword => Operation::ParallelCopyUpperDoubleword {
                 dst: gpr(instruction.rd),
@@ -2019,6 +2039,56 @@ mod tests {
             Operation::ParallelCopyUpperDoubleword { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PCPYUD verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi2_pexew() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1E << 6) | 0x09,
+            (0x1C << 26) | (5 << 16) | (0x1E << 6) | 0x09,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xC800 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PEXEW lifts into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelExchangeEvenWord { dst, src }
+                if dst.index() == 3 && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelExchangeEvenWord { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PEXEW verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi2_prot3w() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1F << 6) | 0x09,
+            (0x1C << 26) | (5 << 16) | (0x1F << 6) | 0x09,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xC900 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PROT3W lifts into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelRotate3Words { dst, src }
+                if dst.index() == 3 && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelRotate3Words { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PROT3W verifies");
     }
 
     #[test]

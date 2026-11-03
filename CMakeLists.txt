@@ -652,7 +652,69 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_mmi3_pcpyud_codegen_smoke COMMAND reps2_mmi3_pcpyud_codegen_smoke)
 
-    set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
+    set(REPS2_MMI2_PEXEW_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi2_pexew_program.cpp")
+add_custom_command(
+OUTPUT "${REPS2_MMI2_PEXEW_GENERATED_CPP}"
+COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+"${REPS2_MMI2_PEXEW_GENERATED_CPP}"
+0x0000D000
+0x70021F89 # pexew r3, r2
+0x70020789 # pexew r0, r2 (zero-register suppressed)
+DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+COMMENT "AOT-compiling R5900 MMI2 PEXEW word exchange"
+VERBATIM
+)
+set_source_files_properties("${REPS2_MMI2_PEXEW_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+add_custom_target(reps2_mmi2_pexew_codegen_fixture DEPENDS "${REPS2_MMI2_PEXEW_GENERATED_CPP}")
+add_executable(reps2_mmi2_pexew_codegen_smoke
+"${REPS2_MMI2_PEXEW_GENERATED_CPP}"
+tests/mmi2_pexew_smoke.cpp
+)
+add_dependencies(reps2_mmi2_pexew_codegen_smoke reps2_mmi2_pexew_codegen_fixture)
+target_link_libraries(reps2_mmi2_pexew_codegen_smoke PRIVATE REPS2::Runtime)
+target_compile_features(reps2_mmi2_pexew_codegen_smoke PRIVATE cxx_std_20)
+if(MSVC)
+target_compile_options(reps2_mmi2_pexew_codegen_smoke PRIVATE /W4 /permissive-)
+else()
+target_compile_options(reps2_mmi2_pexew_codegen_smoke PRIVATE
+-Wall -Wextra -Wpedantic -Wconversion
+)
+endif()
+add_test(NAME reps2_mmi2_pexew_codegen_smoke COMMAND reps2_mmi2_pexew_codegen_smoke)
+
+set(REPS2_MMI2_PROT3W_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi2_prot3w_program.cpp")
+add_custom_command(
+OUTPUT "${REPS2_MMI2_PROT3W_GENERATED_CPP}"
+COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+"${REPS2_MMI2_PROT3W_GENERATED_CPP}"
+0x0000F000
+0x70021FC9 # prot3w r3, r2
+0x700207C9 # prot3w r0, r2 (zero-register suppressed)
+DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+COMMENT "AOT-compiling R5900 MMI2 PROT3W word rotation"
+VERBATIM
+)
+set_source_files_properties("${REPS2_MMI2_PROT3W_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+add_custom_target(reps2_mmi2_prot3w_codegen_fixture DEPENDS "${REPS2_MMI2_PROT3W_GENERATED_CPP}")
+add_executable(reps2_mmi2_prot3w_codegen_smoke
+"${REPS2_MMI2_PROT3W_GENERATED_CPP}"
+tests/mmi2_prot3w_smoke.cpp
+)
+add_dependencies(reps2_mmi2_prot3w_codegen_smoke reps2_mmi2_prot3w_codegen_fixture)
+target_link_libraries(reps2_mmi2_prot3w_codegen_smoke PRIVATE REPS2::Runtime)
+target_compile_features(reps2_mmi2_prot3w_codegen_smoke PRIVATE cxx_std_20)
+if(MSVC)
+target_compile_options(reps2_mmi2_prot3w_codegen_smoke PRIVATE /W4 /permissive-)
+else()
+target_compile_options(reps2_mmi2_prot3w_codegen_smoke PRIVATE
+-Wall -Wextra -Wpedantic -Wconversion
+)
+endif()
+add_test(NAME reps2_mmi2_prot3w_codegen_smoke COMMAND reps2_mmi2_prot3w_codegen_smoke)
+
+set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_GENERATED_CPP}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"

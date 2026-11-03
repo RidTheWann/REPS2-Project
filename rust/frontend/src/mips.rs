@@ -139,6 +139,8 @@ pub enum Opcode {
     /// doubleword therefore comes from the upper doubleword of the *same*
     /// source, which is the opposite of PEXTLW's interleave.
     ParallelPackWord,
+    ParallelExchangeEvenWord,
+    ParallelRotate3Words,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
     MoveToFpuRegister,
@@ -412,6 +414,8 @@ impl Opcode {
             Self::ParallelOr => "por",
             Self::ParallelExtendLowWord => "pextlw",
             Self::ParallelPackWord => "ppacw",
+            Self::ParallelExchangeEvenWord => "pexew",
+            Self::ParallelRotate3Words => "prot3w",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
             Self::MoveToFpuRegister => "mtc1",
@@ -885,6 +889,14 @@ impl Instruction {
                 // (PROT3W, PEXEW, PCPYH, PEXT5, PPAC5) read `rt` only and stay
                 // unknown until they are decoded.
                 effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rd;
+            }
+            Opcode::ParallelExchangeEvenWord | Opcode::ParallelRotate3Words => {
+                // Single-source MMI2 word permutations read only rt and write
+                // only rd. rs is reserved and must be zero for a legal
+                // encoding; the decoder rejects a nonzero rs before this arm
+                // is reached.
+                effects.gpr_read_mask = rt;
                 effects.gpr_write_mask = rd;
             }
             Opcode::FunnelShiftRightVec => {
@@ -1413,6 +1425,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelExtendLowWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelPackWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
+                0x09 if ((word >> 6) & 0x1F) == 0x1E && rs == 0 => Opcode::ParallelExchangeEvenWord,
+                0x09 if ((word >> 6) & 0x1F) == 0x1F && rs == 0 => Opcode::ParallelRotate3Words,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x29 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyUpperDoubleword,
@@ -3040,5 +3054,36 @@ mod tests {
         assert!(!eret.has_delay_slot);
         let eret_eff = eret.effects();
         assert_eq!(eret_eff.control_flow, ControlFlowEffect::Trap);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi2_pexew_and_prot3w_with_reserved_rs() {
+        let pexew_word = (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1E << 6) | 0x09;
+        assert_eq!(pexew_word, 0x7002_1F89);
+        let decoded = decode(pexew_word, 0x8000);
+        assert_eq!(decoded.opcode, Opcode::ParallelExchangeEvenWord);
+        assert_eq!(decoded.opcode.mnemonic(), "pexew");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (0, 2, 3));
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, 1 << 2);
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.unknown);
+
+        let bad_pexew = pexew_word | (1 << 21);
+        assert_eq!(decode(bad_pexew, 0).opcode, Opcode::Unknown);
+
+        let prot3w_word = (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1F << 6) | 0x09;
+        assert_eq!(prot3w_word, 0x7002_1FC9);
+        let decoded = decode(prot3w_word, 0x8000);
+        assert_eq!(decoded.opcode, Opcode::ParallelRotate3Words);
+        assert_eq!(decoded.opcode.mnemonic(), "prot3w");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (0, 2, 3));
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, 1 << 2);
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.unknown);
+
+        let bad_prot3w = prot3w_word | (1 << 21);
+        assert_eq!(decode(bad_prot3w, 0).opcode, Opcode::Unknown);
     }
 }
