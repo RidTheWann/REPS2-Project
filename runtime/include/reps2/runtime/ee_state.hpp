@@ -832,6 +832,32 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Gpr128{lhs.high, rhs.high};
 }
 
+// PEXEW exchanges the low word of each 64-bit half with the low word of the
+// other half: result words are [rt1, rt2, rt3, rt0].
+[[nodiscard]] constexpr Gpr128 parallel_exchange_even_word(
+    const Gpr128& src
+) noexcept {
+    return Gpr128{
+        (src.low & 0xFFFFFFFF00000000ULL) | (src.high & 0x00000000FFFFFFFFULL),
+        (src.high & 0xFFFFFFFF00000000ULL) | (src.low & 0x00000000FFFFFFFFULL),
+    };
+}
+
+// PROT3W rotates the four 32-bit words left by one position: result words are
+// [rt1, rt2, rt0, rt3].
+[[nodiscard]] constexpr Gpr128 parallel_rotate_3_words(
+    const Gpr128& src
+) noexcept {
+    const auto word0 = static_cast<std::uint32_t>(src.low);
+    const auto word1 = static_cast<std::uint32_t>(src.low >> 32U);
+    const auto word2 = static_cast<std::uint32_t>(src.high);
+    const auto word3 = static_cast<std::uint32_t>(src.high >> 32U);
+    return Gpr128{
+        static_cast<std::uint64_t>(word1) | (static_cast<std::uint64_t>(word2) << 32U),
+        static_cast<std::uint64_t>(word0) | (static_cast<std::uint64_t>(word3) << 32U),
+    };
+}
+
 // QFSRV shifts the 256-bit funnel formed by GPR[rs]:GPR[rt] right by the SA
 // bit count and keeps the low 128 bits, so result bit i is funnel bit i + sa.
 // Counts above 127 therefore still draw bits from the rs operand.
