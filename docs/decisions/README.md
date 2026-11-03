@@ -59,3 +59,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0052](0052-ee-mmi2-pcpyld.md) | EE MMI2 PCPYLD low-doubleword copy | Accepted |
 | [0053](0053-ee-mmi3-por.md) | EE MMI3 POR 128-bit bitwise OR | Accepted |
 | [0054](0054-ee-mmi0-pextlw.md) | EE MMI0 PEXTLW low-word interleave | Accepted |
+| [0055](0055-ee-mmi0-ppacw-and-mmi3-pcpyud.md) | EE MMI0 PPACW and MMI3 PCPYUD word pack/copy | Accepted |

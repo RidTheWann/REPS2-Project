@@ -399,6 +399,21 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// PPACW: pack the low word of each doubleword as `[rt0, rt2, rs0, rs2]`.
+    /// Each result doubleword takes both words from one source, so the second
+    /// word comes from that source's high doubleword.
+    ParallelPackWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// PCPYUD: dst.low = lhs.high and dst.high = rhs.high. Unlike PCPYLD the
+    /// two halves are not crossed, so the first operand supplies the low half.
+    ParallelCopyUpperDoubleword {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     SubWord {
         dst: Gpr,
         lhs: Gpr,
@@ -926,6 +941,16 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::ParallelExtendLowWord => Operation::ParallelExtendLowWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelPackWord => Operation::ParallelPackWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelCopyUpperDoubleword => Operation::ParallelCopyUpperDoubleword {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -1944,6 +1969,56 @@ mod tests {
             Operation::ParallelExtendLowWord { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PEXTLW verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi0_ppacw() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x13 << 6) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x13 << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xC600 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PPACW lifts into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelPackWord { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelPackWord { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PPACW verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi3_pcpyud() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x0E << 6) | 0x29,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x0E << 6) | 0x29,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xC700 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PCPYUD lifts into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelCopyUpperDoubleword { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelCopyUpperDoubleword { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PCPYUD verifies");
     }
 
     #[test]

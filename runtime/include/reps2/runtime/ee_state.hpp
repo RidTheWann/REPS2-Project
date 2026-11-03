@@ -799,6 +799,39 @@ inline void disable_interrupts(EeState& state) noexcept {
     };
 }
 
+// PPACW packs the low word of each 64-bit half of its operands: result word 0
+// is rt word 0, word 1 is rt word 2, word 2 is rs word 0 and word 3 is rs word
+// 2. Each result doubleword therefore comes from one source only, and the
+// second word of that pair is the low word of the source's upper doubleword --
+// the opposite of PEXTLW, which pairs the two sources within each doubleword.
+// The complete value is formed before assignment, so a destination that
+// aliases either source observes the original operands.
+[[nodiscard]] constexpr Gpr128 parallel_pack_word(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    const auto lhs_lower = static_cast<std::uint32_t>(lhs.low);
+    const auto lhs_upper = static_cast<std::uint32_t>(lhs.high);
+    const auto rhs_lower = static_cast<std::uint32_t>(rhs.low);
+    const auto rhs_upper = static_cast<std::uint32_t>(rhs.high);
+    return Gpr128{
+        static_cast<std::uint64_t>(rhs_lower) | (static_cast<std::uint64_t>(rhs_upper) << 32U),
+        static_cast<std::uint64_t>(lhs_lower) | (static_cast<std::uint64_t>(lhs_upper) << 32U),
+    };
+}
+
+// PCPYUD copies the upper doubleword of each operand: result.low is rs.high and
+// result.high is rt.high. Unlike PCPYLD the two halves are not crossed, so the
+// first operand supplies the low half. Both reads happen before the single
+// assignment, so a destination that aliases either source observes the original
+// operands.
+[[nodiscard]] constexpr Gpr128 parallel_copy_upper_doubleword(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    return Gpr128{lhs.high, rhs.high};
+}
+
 // QFSRV shifts the 256-bit funnel formed by GPR[rs]:GPR[rt] right by the SA
 // bit count and keeps the low 128 bits, so result bit i is funnel bit i + sa.
 // Counts above 127 therefore still draw bits from the rs operand.

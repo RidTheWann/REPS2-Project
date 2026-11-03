@@ -33,6 +33,8 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_copy_low_doubleword;\n\
              using reps2::runtime::parallel_or;\n\
              using reps2::runtime::parallel_extend_low_word;\n\
+             using reps2::runtime::parallel_pack_word;\n\
+             using reps2::runtime::parallel_copy_upper_doubleword;\n\
 \n\
              using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::store_fpu_control;\n\
@@ -390,6 +392,12 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelExtendLowWord { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_extend_low_word");
+        }
+        Operation::ParallelPackWord { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_pack_word");
+        }
+        Operation::ParallelCopyUpperDoubleword { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_copy_upper_doubleword");
         }
         Operation::AddDoublewordSigned { dst, lhs, rhs } => {
             emit_doubleword_signed_add(output, index, dst, lhs, rhs, in_branch_delay);
@@ -1846,6 +1854,74 @@ mod tests {
         assert!(cpp.contains(
             "if (6 != 0) state.gpr[6] = parallel_extend_low_word(state.gpr[6], state.gpr[6]);"
         ));
+    }
+
+    #[test]
+    fn emits_mmi0_ppacw_as_a_full_128_bit_runtime_call() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x13 << 6) | 0x08,
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (0x13 << 6) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (4 << 11) | (0x13 << 6) | 0x08,
+            (0x1C << 26) | (6 << 21) | (6 << 16) | (6 << 11) | (0x13 << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xC600 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PPACW IR");
+        let cpp = emit_cpp(&program).expect("PPACW C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_pack_word;"));
+        assert!(cpp.contains(
+            "if (3 != 0) state.gpr[3] = parallel_pack_word(state.gpr[1], state.gpr[2]);"
+        ));
+        assert!(cpp.contains(
+            "if (0 != 0) state.gpr[0] = parallel_pack_word(state.gpr[1], state.gpr[2]);"
+        ));
+        assert!(cpp.contains(
+            "if (4 != 0) state.gpr[4] = parallel_pack_word(state.gpr[4], state.gpr[5]);"
+        ));
+        assert!(cpp.contains(
+            "if (6 != 0) state.gpr[6] = parallel_pack_word(state.gpr[6], state.gpr[6]);"
+        ));
+        // PPACW and PEXTLW are different lanes of the same shape: lowering must
+        // not reuse the PEXTLW helper.
+        assert!(!cpp.contains("parallel_extend_low_word("));
+    }
+
+    #[test]
+    fn emits_mmi3_pcpyud_as_a_full_128_bit_runtime_call() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x0E << 6) | 0x29,
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (0x0E << 6) | 0x29,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (4 << 11) | (0x0E << 6) | 0x29,
+            (0x1C << 26) | (6 << 21) | (6 << 16) | (6 << 11) | (0x0E << 6) | 0x29,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xC700 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PCPYUD IR");
+        let cpp = emit_cpp(&program).expect("PCPYUD C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_copy_upper_doubleword;"));
+        assert!(cpp.contains(
+            "if (3 != 0) state.gpr[3] = parallel_copy_upper_doubleword(state.gpr[1], state.gpr[2]);"
+        ));
+        assert!(cpp.contains(
+            "if (0 != 0) state.gpr[0] = parallel_copy_upper_doubleword(state.gpr[1], state.gpr[2]);"
+        ));
+        assert!(cpp.contains(
+            "if (4 != 0) state.gpr[4] = parallel_copy_upper_doubleword(state.gpr[4], state.gpr[5]);"
+        ));
+        assert!(cpp.contains(
+            "if (6 != 0) state.gpr[6] = parallel_copy_upper_doubleword(state.gpr[6], state.gpr[6]);"
+        ));
+        // PCPYUD crosses neither half, while PCPYLD does: the lowering must not
+        // reuse the MMI2 helper.
+        assert!(!cpp.contains("parallel_copy_low_doubleword("));
     }
 
     #[test]
