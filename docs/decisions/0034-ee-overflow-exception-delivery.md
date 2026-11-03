@@ -65,7 +65,7 @@ The scalar emitter receives an explicit `in_branch_delay` context:
 - On overflow in a delay slot, the helper computes EPC=PC-4 and sets Cause.BD before transferring to V_COMMON. The generated early return prevents the branch's post-delay target assignment from overwriting the exception vector.
 - Branch-likely lowering already guards the delay slot with the branch predicate. A not-taken branch-likely therefore does not execute the faulting instruction and cannot raise its overflow exception.
 
-SYSCALL/BREAK instructions in delay slots remain rejected by CFG lifting; this decision does not silently broaden those unsupported control-flow cases.
+SYSCALL/BREAK instructions in delay slots remain rejected by CFG lifting; this decision does not silently broaden those unsupported control-flow cases. (Superseded by ADR 0037, which admits SYSCALL/BREAK in delay slots while still rejecting ERET.)
 
 ### 4. Preserve legacy host status numbering
 

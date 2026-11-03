@@ -50,7 +50,7 @@ Generated C++ exports initialize_ee_state(EeState&, std::span<const std::uint8_t
 
 ### Control flow and exceptions
 
-Direct branches, J/JAL, JR/JALR and the supported REGIMM branches are represented with explicit delay slots. Unsupported instructions and out-of-graph control flow return structured statuses. Known `SYSCALL`/`BREAK` instructions now enter the EE Level-1 common exception vector: generated code updates COP0 Cause/EPC/Status (including nested EXL handling and BEV vector selection) and returns `Status::exception_delivered` as a host boundary. `ERET` is lowered as a dynamic control-flow terminator that resumes through EPC or ErrorEPC and clears the corresponding exception-level bit. This does not execute BIOS/HLE syscall services; other exception causes and CFG traps in delay slots remain unsupported. This is a compiler vertical slice, not a complete game recompiler or runnable PS2 module.
+Direct branches, J/JAL, JR/JALR and the supported REGIMM branches are represented with explicit delay slots. Unsupported instructions and out-of-graph control flow return structured statuses. Known `SYSCALL`/`BREAK` instructions now enter the EE Level-1 common exception vector: generated code updates COP0 Cause/EPC/Status (including nested EXL handling and BEV vector selection) and returns `Status::exception_delivered` as a host boundary. `ERET` is lowered as a dynamic control-flow terminator that resumes through EPC or ErrorEPC and clears the corresponding exception-level bit. This does not execute BIOS/HLE syscall services; other exception causes and ERET in a delay slot remain unsupported. This is a compiler vertical slice, not a complete game recompiler or runnable PS2 module.
 
 ### Discovery and translation units
 
