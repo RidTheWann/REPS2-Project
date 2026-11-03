@@ -46,12 +46,12 @@ Primary references:
 - PS2Tek MMI encoding table (MMI0 selector `0x12`)
 - QEMU R5900/TX79 instruction tables, which place PEXTLW at MMI0 selector `0x12`
   and mask the encoding to the major opcode plus bits 10..0
+- QEMU `gen_pextw` helper, which agrees with PCSX2 on the `[rt0, rs0, rt1, rs1]`
+  layout and on ignoring both upper doublewords
 - PCSX2 `pcsx2/MMI.cpp`, `PEXTLW`
 - `ps2homebrew/ps2-unpacker` `MMI.c`, `PEXTLW`
 
-QEMU's `gen_pextw` helper was **not** used as semantic evidence: its upper-half
-construction appears inconsistent with PCSX2's word ordering. QEMU's encoding table was
-used for encoding confirmation only. The two behavioural references agree on the
+QEMU's encoding table was used for encoding confirmation only. The two behavioural references agree on the
 `[rt0, rs0, rt1, rs1]` layout and on ignoring both upper doublewords.
 
 ## Decision
@@ -61,7 +61,7 @@ used for encoding confirmation only. The two behavioural references agree on the
 Accept primary opcode `0x1C` (already required by the MMI arm), group selector `0x08`
 and operation selector `0x12`. MMI3 selector `0x12` stays `POR` and MMI2 selector
 `0x12` (`PAND`) stays unknown in this increment. The neighboring MMI0 selectors `0x11`
-(PSUBSW), `0x13` (PPACW), `0x1A` (PEXT5) and `0x1B` (PPAC5) stay unknown.
+(PSUBSW), `0x13` (PPACW), `0x1A` (PEXTLB) and `0x1B` (PPACB) stay unknown.
 
 ### 2. Use a typed IR operation
 
@@ -114,6 +114,6 @@ by the generated guard. PEXTLW is not commutative, so the emitted operand order
 The census no longer counts these 489 PEXTLW words as unsupported. This is a coverage
 increment, not a playability claim: the titles still stop at other unsupported
 instructions and unimplemented runtime services. The MMI0 siblings (PAND, PXOR, PNOR,
-PSUBW saturation forms, PPACW, PEXT5, PPAC5, PADDSW/PSUBSW), the remaining MMI0–MMI3
+PSUBW saturation forms, PEXTLB, PPACB, PADDSW/PSUBSW), the remaining MMI0–MMI3
 operations, MMI pipeline-1 state and MMI latency stay out of scope and are still
 counted by `profile-elf`.
