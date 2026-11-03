@@ -770,6 +770,16 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Gpr128{rhs.low, lhs.low};
 }
 
+// PAND is the plain 128-bit bitwise AND of the two operands. It touches no
+// architectural state beyond the destination GPR and cannot fault, so both
+// doublewords are computed independently and assigned as one value.
+[[nodiscard]] constexpr Gpr128 parallel_and(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    return Gpr128{lhs.low & rhs.low, lhs.high & rhs.high};
+}
+
 // POR is the plain 128-bit bitwise OR of the two operands. It touches no
 // architectural state beyond the destination GPR and cannot fault, so both
 // doublewords are computed independently and assigned as one value.

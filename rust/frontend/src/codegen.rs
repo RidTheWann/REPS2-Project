@@ -32,6 +32,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_add_halfword;\n\
              using reps2::runtime::parallel_sub_halfword;\n\
              using reps2::runtime::parallel_copy_low_doubleword;\n\
+             using reps2::runtime::parallel_and;\n\
              using reps2::runtime::parallel_or;\n\
              using reps2::runtime::parallel_extend_low_word;\n\
              using reps2::runtime::parallel_pack_word;\n\
@@ -389,6 +390,9 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelAddUnsignedByte { dst, lhs, rhs } => {
             emit_parallel_add_u8(output, dst, lhs, rhs);
+        }
+        Operation::ParallelAnd { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_and");
         }
         Operation::ParallelCopyLowDoubleword { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_copy_low_doubleword");
@@ -1850,6 +1854,39 @@ mod tests {
         );
         assert!(
             cpp.contains("if (6 != 0) state.gpr[6] = parallel_or(state.gpr[6], state.gpr[6]);")
+        );
+    }
+
+    #[test]
+    fn emits_mmi2_pand_as_a_full_128_bit_runtime_call() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x12 << 6) | 0x09,
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (0x12 << 6) | 0x09,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (4 << 11) | (0x12 << 6) | 0x09,
+            (0x1C << 26) | (6 << 21) | (6 << 16) | (6 << 11) | (0x12 << 6) | 0x09,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xC350 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PAND IR");
+        let cpp = emit_cpp(&program).expect("PAND C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_and;"));
+        assert!(
+            cpp.contains("if (3 != 0) state.gpr[3] = parallel_and(state.gpr[1], state.gpr[2]);")
+        );
+        assert!(
+            cpp.contains("if (0 != 0) state.gpr[0] = parallel_and(state.gpr[1], state.gpr[2]);")
+        );
+        // Aliasing the destination with either source, or with both, keeps the
+        // same call shape because the helper receives full values.
+        assert!(
+            cpp.contains("if (4 != 0) state.gpr[4] = parallel_and(state.gpr[4], state.gpr[5]);")
+        );
+        assert!(
+            cpp.contains("if (6 != 0) state.gpr[6] = parallel_and(state.gpr[6], state.gpr[6]);")
         );
     }
 
