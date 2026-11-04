@@ -55,8 +55,13 @@ window was:
 `0x0025EFC4,0x0025EFC8,0x0025F090,0x0025EFD0,0x0025EFD4,0x0025F090,`
 `0x0025EFDC,0x0025EFE0,0x0025EFE4,0x0025EF78`.
 The window reaches the syscall-adjacent caller path but does not include the
-post-service path because execution stops at the unhandled boundary. It provides
-control-flow context only; it does not establish the `FindAddress` ABI.
+post-service path because execution stops at the unhandled boundary. Generated
+caller code shows the preceding sequence saves registers at `$sp+0x00` through
+`$sp+0x70`, loads `$a0` from `[$a2+0x2218]`, loads `$a1` from `[$s0+4]`, sets
+`$v1=0x83`, and executes `SYSCALL`; the delay slot is at `0x0025EF80` and the
+following block returns through `$ra`. This identifies the call-site shape but
+not the service's return or memory contract. It provides control-flow context
+only; it does not establish the `FindAddress` ABI.
 
 ## Next evidence required
 
