@@ -34,7 +34,7 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 
 ## Active backlog
 
-1. Rebuild the generated Downhill Domination probe with MSVC `/bigobj` support, then run it with `REPS2_INSTRUCTION_TRACE=1` against the owner-provided ISO and preserve only structured evidence outside Git.
+1. Add a bounded rolling instruction trace so long retail runs expose the final 16 guest PCs, then regenerate and rerun Downhill Domination with `REPS2_INSTRUCTION_TRACE=1`.
 2. Recover the FindAddress caller's post-call control flow and register/memory use from actual executable evidence; do not implement the service without an oracle.
 3. Add any required trace-field regression assertions and document the resulting evidence in ADR 0068.
 4. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
