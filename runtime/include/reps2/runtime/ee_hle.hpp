@@ -36,6 +36,7 @@ inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
+inline constexpr std::uint32_t kEeSyscallSetSyscall = 0x74U;
 inline constexpr std::uint32_t kEeSyscallFlushCache = 0x64U;
 
 // The public description of CreateSema states that the call returns the new
@@ -238,6 +239,31 @@ struct EeSyscallService {
     return refuse(EeSemaRejection::table_full);
 }
 
+[[nodiscard]] inline Status hle_set_syscall(EeState& state) noexcept {
+    const std::uint32_t slot = ee_syscall_argument(state, 0);
+    const std::uint32_t handler = ee_syscall_argument(state, 1);
+    ++state.hle.set_syscall_calls;
+    state.hle.last_set_syscall_slot = slot;
+    state.hle.last_set_syscall_handler = handler;
+    state.hle.last_set_syscall_rejection = EeSetSyscallRejection::none;
+    const auto refuse = [&state](EeSetSyscallRejection reason) {
+        state.hle.last_set_syscall_rejection = reason;
+        return Status::ok;
+    };
+    if (slot >= kEeMaxSyscallSlots) {
+        return refuse(EeSetSyscallRejection::invalid_slot);
+    }
+    std::uint32_t physical_handler{};
+    if (handler == 0U || (handler & 3U) != 0U
+        || !resolve_ee_main_ram_address(handler, physical_handler)) {
+        return refuse(EeSetSyscallRejection::invalid_handler);
+    }
+    auto& registration = state.hle.syscall_registrations[slot];
+    registration.in_use = true;
+    registration.handler_address = handler;
+    return Status::ok;
+}
+
 [[nodiscard]] inline Status hle_flush_cache(EeState& state) noexcept {
     state.gpr[kEeSyscallResultRegister].low = 0;
     return Status::ok;
@@ -249,6 +275,7 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
     {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},
     {kEeSyscallFlushCache, "FlushCache", &hle_flush_cache},
+    {kEeSyscallSetSyscall, "SetSyscall", &hle_set_syscall},
 };
 inline constexpr std::size_t kEeSyscallServiceCount =
     sizeof(kEeSyscallServices) / sizeof(kEeSyscallServices[0]);

@@ -84,6 +84,29 @@ enum class AddressErrorCode : std::uint8_t { InstructionFetch = 4, Load = 4, Sto
 // ps2sdk's documented kernel limit (`MAX_SEMAPHORES 256`). Sema ids are indices
 // into this table, so the bound is the same one the guest sees.
 inline constexpr std::size_t kEeMaxSemaphores = 256;
+inline constexpr std::size_t kEeMaxSyscallSlots = 256;
+
+struct EeSyscallRegistration {
+    bool in_use{};
+    std::uint32_t handler_address{};
+};
+
+enum class EeSetSyscallRejection : std::uint8_t {
+    none,
+    invalid_slot,
+    invalid_handler,
+};
+
+[[nodiscard]] constexpr const char* ee_set_syscall_rejection_name(
+    EeSetSyscallRejection rejection
+) noexcept {
+    switch (rejection) {
+    case EeSetSyscallRejection::none: return "none";
+    case EeSetSyscallRejection::invalid_slot: return "invalid_slot";
+    case EeSetSyscallRejection::invalid_handler: return "invalid_handler";
+    }
+    return "unknown";
+}
 
 // Why a CreateSema (0x40) call returned the documented -1 instead of an id.
 // A rejection is a guest-visible failure code, not a host error: nothing is
@@ -176,6 +199,11 @@ struct EeHleState {
     // -1 when the call was refused; otherwise the id written to $v0.
     std::int32_t last_sema_id{-1};
     EeSemaRejection last_sema_rejection{};
+    std::uint64_t set_syscall_calls{};
+    std::uint32_t last_set_syscall_slot{};
+    std::uint32_t last_set_syscall_handler{};
+    EeSetSyscallRejection last_set_syscall_rejection{};
+    std::array<EeSyscallRegistration, kEeMaxSyscallSlots> syscall_registrations{};
     std::array<EeSema, kEeMaxSemaphores> semaphores{};
 };
 

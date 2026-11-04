@@ -30,7 +30,7 @@ C++20 owns the native runtime and platform-facing subsystem implementations:
 
 The current runtime code is only a small EE GPR state/helper ABI used by the first generated-code integration test. It is not a functional EE emulator or complete PS2 runtime.
 
-One runtime component already carries a real contract: the EE kernel syscall HLE layer in `runtime/include/reps2/runtime/ee_hle.hpp`. Generated `syscall` sites call `dispatch_ee_syscall(state, resume_pc, in_branch_delay)`, which either raises the architectural Level-1 exception (layer disabled, the default), services the number found in `$v1` and resumes at the caller-supplied continuation, or returns `Status::unhandled_syscall` with the PC still on the trap. The layer holds a sorted table of implemented services (`SetupThread` 0x3C, `SetupHeap` 0x3D, `CreateSema` 0x40, `FlushCache` 0x64); a service is added only when its
+One runtime component already carries a real contract: the EE kernel syscall HLE layer in `runtime/include/reps2/runtime/ee_hle.hpp`. Generated `syscall` sites call `dispatch_ee_syscall(state, resume_pc, in_branch_delay)`, which either raises the architectural Level-1 exception (layer disabled, the default), services the number found in `$v1` and resumes at the caller-supplied continuation, or returns `Status::unhandled_syscall` with the PC still on the trap. The layer holds a sorted table of implemented services (`SetupThread` 0x3C, `SetupHeap` 0x3D, `CreateSema` 0x40, `SetSyscall` 0x74, `FlushCache` 0x64); a service is added only when its
 guest-visible contract is documented in `docs/RESEARCH.md`, and unimplemented services are reported rather
 than stubbed into success (ADRs 0062, 0064 and 0066).
 

@@ -35,6 +35,7 @@ constexpr std::uint32_t kUnreachableReturnPc = 0xDEAD0000U;
 constexpr std::uint32_t kSetupThread = reps2::runtime::kEeSyscallSetupThread;
 constexpr std::uint32_t kSetupHeap = reps2::runtime::kEeSyscallSetupHeap;
 constexpr std::uint32_t kCreateSema = reps2::runtime::kEeSyscallCreateSema;
+constexpr std::uint32_t kSetSyscall = reps2::runtime::kEeSyscallSetSyscall;
 constexpr std::uint32_t kFlushCache = reps2::runtime::kEeSyscallFlushCache;
 
 // The CreateSema tests need guest-readable parameters, but a full 32 MiB image
@@ -559,6 +560,41 @@ int test_create_sema_table_is_bounded() {
     return 0;
 }
 
+int test_set_syscall_registers_guest_handler() {
+    EeState state{};
+    state.pc = 0xE500U;
+    state.hle.syscall_enabled = true;
+    state.gpr[3].low = kSetSyscall;
+    state.gpr[4].low = 0x83U;
+    state.gpr[5].low = 0x0025EF38U;
+    state.gpr[31].low = kUnreachableReturnPc;
+    const Status status = reps2::generated::execute_cfg(state, 16U);
+    if (status != Status::external_control_flow || state.pc != kUnreachableReturnPc) return 160;
+    const auto& registration = state.hle.syscall_registrations[0x83U];
+    if (!registration.in_use || registration.handler_address != 0x0025EF38U) return 161;
+    if (state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::none) return 162;
+    if (state.gpr[2].low != 0U || state.gpr[3].low != kSetSyscall) return 163;
+    return 0;
+}
+
+int test_set_syscall_rejects_invalid_registration() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.gpr[4].low = 256U;
+    state.gpr[5].low = 0x1000U;
+    if (reps2::runtime::hle_set_syscall(state) != Status::ok
+        || state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::invalid_slot) return 170;
+    state.gpr[4].low = 1U;
+    state.gpr[5].low = 0x1002U;
+    if (reps2::runtime::hle_set_syscall(state) != Status::ok
+        || state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::invalid_handler) return 171;
+    state.gpr[5].low = 0xFFF00000U;
+    if (reps2::runtime::hle_set_syscall(state) != Status::ok
+        || state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::invalid_handler) return 172;
+    return 0;
+}
+
 int test_delay_slot_syscall_without_the_layer_raises_the_exception() {
     EeState state{};
     state.pc = 0xE200U;
@@ -639,6 +675,8 @@ int main() {
         {"create sema inconsistent counts", &test_create_sema_rejects_inconsistent_counts},
         {"create sema unreadable parameters", &test_create_sema_rejects_unreadable_parameters},
         {"create sema table bound", &test_create_sema_table_is_bounded},
+        {"set syscall registers handler", &test_set_syscall_registers_guest_handler},
+        {"set syscall rejects invalid registration", &test_set_syscall_rejects_invalid_registration},
         {"service table names", &test_service_table_reports_names},
     };
 
