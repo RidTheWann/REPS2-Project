@@ -127,7 +127,7 @@ add_executable(reps2_probe
 target_include_directories(reps2_probe PRIVATE "${REPS2_RUNTIME_INCLUDE}")
 target_compile_features(reps2_probe PRIVATE cxx_std_20)
 if(MSVC)
-    target_compile_options(reps2_probe PRIVATE /W4 /permissive-)
+    target_compile_options(reps2_probe PRIVATE /W4 /permissive- /bigobj)
 else()
     target_compile_options(reps2_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
