@@ -162,6 +162,7 @@ The library must distinguish these states; no state implies a later one:
 - [ ] Analyze a developer-supplied local ELF from a lawfully owned ISO; keep the ISO/ELF and extracted game material outside Git.
 - [ ] Discover and translate a real code region and its direct callees, with coverage and unresolved edges recorded.
 - [ ] Implement only the EE/runtime services required by that observed execution path.
+- [x] Establish the EE kernel syscall boundary that the observed boot path hits first: every generated `syscall` dispatches through a host HLE table keyed by the service number the SDK passes in `$v1` (magnitude, so the negated "i" forms resolve), arguments `$a0..$a3`, result `$v0`. A serviced call resumes at the correct continuation (PC+4, or the branch target/fallthrough for a delay slot, or the captured dynamic jump/return target); a disabled layer keeps the architectural Level-1 exception byte-for-byte; an unknown service stops at the trapping `syscall` as `unhandled_syscall` with no COP0 context instead of fabricating a kernel result. `SetupThread` (0x3C) implements its documented guest-visible part — stack pointer from `$a1`/`$a2` with the `0xFFFFFFFF` sentinel, `$v0` result, `$v1` cleared — while the thread control block, argv rewrite, `root_func` consumption and scheduling are explicitly unmodeled; `FlushCache` (0x64) is an accurate coherent-host no-op. Public evidence and every unverified observation are recorded in `docs/RESEARCH.md`; no real-title trace is claimed yet (ADR 0062).
 - [ ] Produce a native title module linked to the shared runtime ABI; record all unresolved instructions, relocations, and services.
 - [ ] Capture traces and an exact repeatable guest-visible boot/entry stage, including the disc digest and test configuration.
 
@@ -177,7 +178,7 @@ Runtime work is driven by real-title traces, public behavioral evidence, and dif
 - [ ] IOP/R3000A execution, IOP RAM, IRX loading, and HLE kernel/service surface.
 - [ ] GIF packet processing, GS registers/state/local memory, rendering, frame presentation, and synchronization.
 - [ ] SPU2/audio, controller, optical media, and memory-card services.
-- [ ] Clean-room HLE boot/kernel-facing behavior sufficient for supported titles without requiring users to provide a proprietary BIOS image; document services that remain unavailable.
+- [ ] Clean-room HLE boot/kernel-facing behavior sufficient for supported titles without requiring users to provide a proprietary BIOS image; document services that remain unavailable. The EE syscall dispatch layer from ADR 0062 is the first piece of this surface: it routes `$v1`-numbered services through an explicit table and reports unimplemented ones instead of faking them.
 - [ ] Host integration for window/input/audio, save storage, diagnostics, and deterministic session shutdown.
 
 **Exit gate:** the selected real-title path advances through its required EE, VU, IOP, graphics, media, input, and audio interactions without unexplained success fallbacks. Scope is evidence-driven; not every PS2 subsystem must be implemented before the first boot slice.

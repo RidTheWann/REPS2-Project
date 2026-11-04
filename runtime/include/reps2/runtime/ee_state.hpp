@@ -81,6 +81,33 @@ enum class ExceptionCode : std::uint8_t {
 /// Level-1 address errors for instruction fetches and data accesses.
 enum class AddressErrorCode : std::uint8_t { InstructionFetch = 4, Load = 4, Store = 5 };
 
+// Host-configured HLE (high-level emulation) service layer for the EE kernel
+// syscall interface declared in ee_hle.hpp. None of these fields is
+// guest-architectural state: they record what the host service layer observed,
+// so a probe or session can report which services ran without claiming that the
+// title's kernel executed them. Everything here is reset by
+// initialize_ee_state; enabling the layer is a host decision taken afterwards.
+struct EeHleState {
+    // When false, a generated SYSCALL delivers the architectural Level-1
+    // exception exactly as it did before this layer existed.
+    bool syscall_enabled{};
+    std::uint64_t syscall_count{};
+    std::uint64_t syscall_handled_count{};
+    // Raw 32-bit $v1 value and the normalized dispatch number: the ps2sdk "i"
+    // wrappers pass the negated service number, so dispatch uses its magnitude.
+    std::uint32_t last_syscall_code{};
+    std::uint32_t last_syscall_number{};
+    // SetupThread (0x3C) observation. No thread context object exists yet, so
+    // this records the decoded arguments and the stack pointer the service
+    // returned rather than a thread that could be scheduled.
+    bool setup_thread_called{};
+    std::uint32_t setup_thread_gp{};
+    std::uint32_t setup_thread_stack_top{};
+    std::uint32_t setup_thread_stack_size{};
+    std::uint32_t setup_thread_stack_pointer{};
+    std::uint32_t setup_thread_args{};
+};
+
 struct EeState {
     std::uint32_t pc{};
     std::array<Gpr128, 32> gpr{};
@@ -108,6 +135,7 @@ struct EeState {
     // is still charged in full, matching the block-atomic budget model.
     std::uint64_t instructions_executed{};
     EeMemory memory{};
+    EeHleState hle{};
 };
 
 enum class Status : std::uint8_t {
@@ -125,13 +153,20 @@ enum class Status : std::uint8_t {
     invalid_memory_image,
     // Architectural traps, not unknown encodings. Execution stops with the PC
     // pointing at the trapping instruction; the 20-bit code field is bits
-    // 25..6 of the word at that PC. HLE service delivery is a later layer.
+    // 25..6 of the word at that PC. The EE kernel service layer is ee_hle.hpp;
+    // a guest `syscall` reaches it through `dispatch_ee_syscall`.
     syscall,
     breakpoint,
     // A Level-1 guest exception was entered and COP0/PC now hold its context.
     exception_delivered,
     // ERET was executed without exactly one valid EXL/ERL return context.
     invalid_exception_return,
+    // HLE boundary: the generated SYSCALL site asked the host service layer for
+    // the EE kernel service numbered by $v1 and no handler exists. PC still
+    // points at the SYSCALL and no COP0 exception context was created, so the
+    // guest never observed this service; it is a host limitation, not a guest
+    // exception and not success. See ee_hle.hpp.
+    unhandled_syscall,
 };
 
 [[nodiscard]] constexpr bool is_guest_trap(Status status) noexcept {
@@ -161,6 +196,7 @@ enum class Status : std::uint8_t {
     case Status::breakpoint: return "breakpoint";
     case Status::exception_delivered: return "guest_exception";
     case Status::invalid_exception_return: return "invalid_exception_return";
+    case Status::unhandled_syscall: return "unhandled_syscall";
     }
     return "unknown";
 }
@@ -298,6 +334,9 @@ enum class Status : std::uint8_t {
     state.cop0[kCop0PrId] = kEeProcessorId;
     state.cop0[kCop0Status] = 0x1040'0004U;
     state.instructions_executed = 0;
+    // The HLE layer is host configuration, not guest state: reset it so a probe
+    // starts from "disabled, nothing observed" and must opt in explicitly.
+    state.hle = {};
     state.pc = entry_pc;
     return Status::ok;
 }

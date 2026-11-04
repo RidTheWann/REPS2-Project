@@ -819,6 +819,7 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             &sources,
             Some(&ram_output_name),
             options.probe_budget,
+            options.hle_syscalls,
         )?)
     } else {
         None
@@ -995,6 +996,7 @@ struct RecompileOptions {
     translation_units: usize,
     native_build: bool,
     probe_budget: u64,
+    hle_syscalls: bool,
     limits: LimitOptions,
 }
 
@@ -1005,6 +1007,7 @@ impl Default for RecompileOptions {
             translation_units: 1,
             native_build: false,
             probe_budget: 0,
+            hle_syscalls: false,
             limits: LimitOptions::default(),
         }
     }
@@ -1030,6 +1033,10 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
             }
             "--native-build" => {
                 options.native_build = true;
+                index += 1;
+            }
+            "--hle-syscalls" => {
+                options.hle_syscalls = true;
                 index += 1;
             }
             "--probe-budget" => {
@@ -1060,6 +1067,7 @@ struct FixtureOptions {
     translation_units: usize,
     native_build: bool,
     probe_budget: u64,
+    hle_syscalls: bool,
 }
 
 impl Default for FixtureOptions {
@@ -1068,6 +1076,7 @@ impl Default for FixtureOptions {
             translation_units: 1,
             native_build: false,
             probe_budget: 0,
+            hle_syscalls: false,
         }
     }
 }
@@ -1088,6 +1097,10 @@ fn parse_fixture_options(arguments: &[String]) -> Result<FixtureOptions, String>
             }
             "--native-build" => {
                 options.native_build = true;
+                index += 1;
+            }
+            "--hle-syscalls" => {
+                options.hle_syscalls = true;
                 index += 1;
             }
             "--probe-budget" => {
@@ -1218,6 +1231,7 @@ fn write_native_project(
     sources: &[String],
     ram_image: Option<&str>,
     probe_budget: u64,
+    hle_syscalls: bool,
 ) -> Result<PathBuf, String> {
     let (stem, _) = generated_output_parts(output);
     let directory = output.with_file_name(format!("{stem}.native"));
@@ -1228,7 +1242,7 @@ fn write_native_project(
         )
     })?;
 
-    let project = native_build::render(&stem, sources, ram_image, probe_budget);
+    let project = native_build::render(&stem, sources, ram_image, probe_budget, hle_syscalls);
     fs::write(directory.join("CMakeLists.txt"), project.cmake_lists).map_err(|error| {
         format!(
             "cannot write native build CMakeLists.txt in {}: {error}",
@@ -1586,6 +1600,28 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x03E0_0008,                                  // jr ra
         0x0000_0000,                                  // return delay slot
     ];
+    // HLE syscall fixtures. The EE kernel service number lives in $v1 (GPR[3]),
+    // not in the instruction, so the tests set it before execution.
+    let hle_syscall = [
+        0x0000_000C, // syscall: service number from $v1
+        0x2402_0001, // addiu v0, zero, 1: proves execution resumed past the trap
+        0x03E0_0008, // jr ra
+        0x0000_0000, // return delay slot
+    ];
+    let hle_unhandled_syscall = [
+        0x0000_000C, // syscall: service number with no host handler
+        0x2402_0001, // addiu v0, zero, 1: unreachable when the service is missing
+    ];
+    let hle_delay_slot_syscall = [
+        (0x04 << 26) | (8 << 21) | 4, // beq t0, zero, 0xE214
+        0x0000_000C,                  // delay slot: syscall
+        0x2402_0007,                  // not-taken path: addiu v0, zero, 7
+        0x03E0_0008,                  // not-taken return
+        0x0000_0000,                  // return delay slot
+        0x2402_0009,                  // taken path: addiu v0, zero, 9 (resume point)
+        0x03E0_0008,                  // taken return
+        0x0000_0000,                  // return delay slot
+    ];
 
     let mut segments = vec![
         segment(0x1000, &branch_and_jump),
@@ -1615,6 +1651,9 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xB200, &break_in_jump_delay),
         segment(0xF000, &eret_return),
         segment(0xCC00, &conditional_trap_delay),
+        segment(0xE000, &hle_syscall),
+        segment(0xE100, &hle_unhandled_syscall),
+        segment(0xE200, &hle_delay_slot_syscall),
     ];
     // Each conditional trap is an independent one-instruction segment, so a
     // false predicate retires to an untranslated boundary instead of flowing
@@ -1651,6 +1690,9 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xB200, "jump-trap-delay-slot-fixture"),
         entry(0xF000, "eret-fixture"),
         entry(0xF004, "eret-return-continuation-fixture"),
+        entry(0xE000, "hle-syscall-fixture"),
+        entry(0xE100, "hle-unhandled-syscall-fixture"),
+        entry(0xE200, "hle-delay-slot-syscall-fixture"),
     ];
     entries.extend(
         (0..conditional_traps.len())
@@ -1660,7 +1702,11 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     let mut roots = vec![
         0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200,
         0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
-        0xB000, 0xB100, 0xB200, 0xF000, 0xF004,
+        0xB000, 0xB100, 0xB200, 0xF000, 0xF004, 0xE000, 0xE100, 0xE200,
+        // A host HLE service resumes at the instruction after the SYSCALL, so
+        // these continuation PCs are roots of their own: the trap terminator
+        // has no architectural successor for the CFG to follow.
+        0xE004, 0xE104,
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);
@@ -1683,7 +1729,13 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         let mut sources = Vec::with_capacity(parts.len() + 1);
         sources.push(output_file_name(output));
         sources.extend(parts.iter().map(|part| output_file_name(part)));
-        let directory = write_native_project(output, &sources, None, options.probe_budget)?;
+        let directory = write_native_project(
+            output,
+            &sources,
+            None,
+            options.probe_budget,
+            options.hle_syscalls,
+        )?;
         println!("  Native build project: {}", directory.display());
     }
     Ok(())
@@ -1736,11 +1788,11 @@ fn usage() {
     );
     println!("  reps2 profile-elf <elf-file>");
     println!(
-        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls] [--max-blocks N] [--max-instructions N] [--max-roots N]"
     );
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!(
-        "  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build] [--probe-budget N]"
+        "  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls]"
     );
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
     println!();
@@ -1773,6 +1825,9 @@ fn usage() {
     );
     println!(
         "--probe-budget N bakes N as the generated probe's default instruction budget so its CTest executes real guest code; 0 (the default) stops before any instruction runs. The probe prints one trace line: entry, status, final pc, budget, executed, and COP0 cause/epc/status/badvaddr."
+    );
+    println!(
+        "--hle-syscalls enables the runtime EE syscall HLE layer in the generated probe (without it a guest SYSCALL delivers the architectural Level-1 exception). The probe trace then also reports hle, syscalls, hle_handled, hle_number and hle_name; an unimplemented service number stops as status=unhandled_syscall instead of being faked."
     );
     println!(
         "--max-blocks/--max-instructions/--max-roots override the default analysis bounds (250000 blocks, 2000000 instructions, 500000 discovered roots). Overrides must be positive and stay below the CLI ceilings."
@@ -1879,6 +1934,7 @@ mod tests {
                 translation_units: 4,
                 native_build: true,
                 probe_budget: 4096,
+                hle_syscalls: false,
                 limits: LimitOptions {
                     max_blocks: 300_000,
                     max_instructions: 2_500_000,
@@ -1961,11 +2017,35 @@ mod tests {
                 translation_units: 4,
                 native_build: true,
                 probe_budget: 2048,
+                hle_syscalls: false,
             }
         );
         assert!(parse_fixture_options(&["--unknown".to_owned()]).is_err());
         assert!(parse_fixture_options(&["--probe-budget".to_owned()]).is_err());
         assert!(parse_fixture_options(&["--probe-budget".to_owned(), "nope".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn parses_the_hle_syscall_layer_flags() {
+        let fixture =
+            parse_fixture_options(&["--hle-syscalls".to_owned()]).expect("fixture HLE option");
+        assert!(fixture.hle_syscalls);
+        assert!(!fixture.native_build);
+
+        let recompile =
+            parse_recompile_options(&["--hle-syscalls".to_owned()]).expect("recompile HLE option");
+        assert!(recompile.hle_syscalls);
+        // The layer is opt-in: neither parser enables it by default.
+        assert!(
+            !parse_fixture_options(&[])
+                .expect("fixture defaults")
+                .hle_syscalls
+        );
+        assert!(
+            !parse_recompile_options(&[])
+                .expect("recompile defaults")
+                .hle_syscalls
+        );
     }
 
     #[test]

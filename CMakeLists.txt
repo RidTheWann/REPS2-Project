@@ -1048,6 +1048,26 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
 
     add_test(NAME reps2_cfg_codegen_smoke COMMAND reps2_cfg_codegen_smoke)
 
+    # EE syscall HLE dispatch: the same generated fixture, driven with the HLE
+    # layer enabled and disabled, pins resume-after-service, delay-slot resume
+    # targets, the SetupThread stack contract and the unhandled-service stop.
+    add_executable(reps2_hle_syscall_codegen_smoke
+        "${REPS2_CFG_GENERATED_CPP}"
+        tests/hle_syscall_smoke.cpp
+    )
+    add_dependencies(reps2_hle_syscall_codegen_smoke reps2_cfg_codegen_fixture)
+    target_link_libraries(reps2_hle_syscall_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_hle_syscall_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_hle_syscall_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_hle_syscall_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+
+    add_test(NAME reps2_hle_syscall_codegen_smoke COMMAND reps2_hle_syscall_codegen_smoke)
+
     # The same synthetic CFG emitted as one dispatcher plus four block parts.
     # This pins the multi-translation-unit path: the dispatcher's sorted block
     # table must link against definitions living in the part files, and the

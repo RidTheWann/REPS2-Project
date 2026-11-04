@@ -33,6 +33,7 @@ const SOURCE_PRELUDE: &str = "\
 #include <limits>
 #include <span>
 #include \"reps2/runtime/ee_state.hpp\"
+#include \"reps2/runtime/ee_hle.hpp\"
 
 namespace reps2::generated {
 
@@ -92,6 +93,7 @@ using reps2::runtime::AddressErrorCode;
 using reps2::runtime::raise_ee_exception;
 using reps2::runtime::raise_ee_address_error;
 using reps2::runtime::return_from_ee_exception;
+using reps2::runtime::dispatch_ee_syscall;
 
 ";
 
@@ -321,8 +323,20 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             delay_slot_policy,
         } => {
             output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
+            // A SYSCALL in an executed delay slot resumes at the branch target
+            // or the fallthrough after the HLE layer services it, so the
+            // predicate is materialized even when no annulment needs it.
             let needs_branch_predicate = *delay_slot_policy == DelaySlotPolicy::AnnulWhenNotTaken
-                || !matches!(delay_slot, ControlDelaySlot::GuestException { .. });
+                || !matches!(
+                    delay_slot,
+                    ControlDelaySlot::GuestException {
+                        trap: TrapKind::Break,
+                        ..
+                    }
+                );
+            let syscall_resume = format!(
+                "(branch_taken_{guest_pc:08X} ? 0x{target_pc:08X}U : 0x{fallthrough_pc:08X}U)"
+            );
             if needs_branch_predicate {
                 output.push_str(&format!(
                     "    const bool branch_taken_{guest_pc:08X} = {};\n",
@@ -332,13 +346,13 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             emit_link_write(output, *link_register, guest_pc.wrapping_add(8));
             match delay_slot_policy {
                 DelaySlotPolicy::ExecuteAlways => {
-                    if emit_delay_slot(output, index, delay_slot) {
+                    if emit_delay_slot(output, index, delay_slot, &syscall_resume) {
                         return;
                     }
                 }
                 DelaySlotPolicy::AnnulWhenNotTaken => {
                     output.push_str(&format!("    if (branch_taken_{guest_pc:08X}) {{\n"));
-                    let is_exception = emit_delay_slot(output, index, delay_slot);
+                    let is_exception = emit_delay_slot(output, index, delay_slot, &syscall_resume);
                     output.push_str("    }\n");
                     if is_exception {
                         output.push_str(&format!(
@@ -366,7 +380,7 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 *link_register,
                 return_pc.unwrap_or(guest_pc.wrapping_add(8)),
             );
-            if emit_delay_slot(output, index, delay_slot) {
+            if emit_delay_slot(output, index, delay_slot, &format!("0x{target_pc:08X}U")) {
                 return;
             }
             output.push_str(&format!(
@@ -390,7 +404,12 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 *link_register,
                 return_pc.unwrap_or(guest_pc.wrapping_add(8)),
             );
-            if emit_delay_slot(output, index, delay_slot) {
+            if emit_delay_slot(
+                output,
+                index,
+                delay_slot,
+                &format!("dynamic_target_{guest_pc:08X}"),
+            ) {
                 return;
             }
             output.push_str(&format!(
@@ -406,7 +425,12 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                 "    state.pc = 0x{guest_pc:08X}U;\n\
                  \x20   const std::uint32_t return_target_{guest_pc:08X} = static_cast<std::uint32_t>(state.gpr[{source_register}].low);\n"
             ));
-            if emit_delay_slot(output, index, delay_slot) {
+            if emit_delay_slot(
+                output,
+                index,
+                delay_slot,
+                &format!("return_target_{guest_pc:08X}"),
+            ) {
                 return;
             }
             output.push_str(&format!(
@@ -421,8 +445,16 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
         ControlTerminator::GuestException { guest_pc, trap } => {
             output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
             match trap {
-                TrapKind::Syscall => output
-                    .push_str("    return raise_ee_exception(state, ExceptionCode::SystemCall);\n"),
+                // A guest `syscall` first offers the service number in $v1 to
+                // the host HLE layer. With HLE disabled (the default) or with
+                // no handler for the number, dispatch_ee_syscall either raises
+                // the architectural Level-1 exception or reports the missing
+                // service; it never invents a kernel result. The resume PC is
+                // the instruction after the trap.
+                TrapKind::Syscall => output.push_str(&format!(
+                    "    return dispatch_ee_syscall(state, 0x{:08X}U);\n",
+                    guest_pc.wrapping_add(4)
+                )),
                 TrapKind::Break => output
                     .push_str("    return raise_ee_exception(state, ExceptionCode::Breakpoint);\n"),
             }
@@ -450,7 +482,12 @@ fn emit_link_write(output: &mut String, register: Option<u8>, return_pc: u32) {
     }
 }
 
-fn emit_delay_slot(output: &mut String, index: usize, delay_slot: &ControlDelaySlot) -> bool {
+fn emit_delay_slot(
+    output: &mut String,
+    index: usize,
+    delay_slot: &ControlDelaySlot,
+    syscall_resume: &str,
+) -> bool {
     match delay_slot {
         ControlDelaySlot::Instruction(instruction) => {
             output.push_str(&format!(
@@ -462,13 +499,17 @@ fn emit_delay_slot(output: &mut String, index: usize, delay_slot: &ControlDelayS
         }
         ControlDelaySlot::GuestException { guest_pc, trap } => {
             output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
-            let exception = match trap {
-                TrapKind::Syscall => "ExceptionCode::SystemCall",
-                TrapKind::Break => "ExceptionCode::Breakpoint",
-            };
-            output.push_str(&format!(
-                "    return raise_ee_exception(state, {exception}, true);\n"
-            ));
+            match trap {
+                // A delay-slot SYSCALL resumes after a serviced HLE call at the
+                // branch target or fallthrough, which the owning branch site
+                // passes in; the architectural exception path ignores it.
+                TrapKind::Syscall => output.push_str(&format!(
+                    "    return dispatch_ee_syscall(state, {syscall_resume}, true);\n"
+                )),
+                TrapKind::Break => output.push_str(
+                    "    return raise_ee_exception(state, ExceptionCode::Breakpoint, true);\n",
+                ),
+            }
             true
         }
     }
@@ -780,8 +821,11 @@ mod tests {
         let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
         let cpp = emit_cpp(&program).expect("single unit");
 
+        // A guest SYSCALL is offered to the HLE service layer first; the
+        // architectural exception remains the runtime's response when the layer
+        // is disabled or the service number has no handler.
         assert!(cpp.contains(
-            "state.pc = 0x00002000U;\n    return raise_ee_exception(state, ExceptionCode::SystemCall);"
+            "state.pc = 0x00002000U;\n    return dispatch_ee_syscall(state, 0x00002004U);"
         ));
         assert!(cpp.contains(
             "state.pc = 0x00002004U;\n    return raise_ee_exception(state, ExceptionCode::Breakpoint);"
@@ -814,6 +858,61 @@ mod tests {
         assert!(cpp.contains("if (branch_taken_00005000) {"));
         assert!(cpp.contains("state.pc = 0x00005008U;\n    return Status::ok;"));
         assert!(!cpp.contains("state.pc = branch_taken_00005000 ?"));
+    }
+
+    #[test]
+    fn emits_branch_target_resume_for_a_syscall_in_a_branch_delay_slot() {
+        // A SYSCALL executed in a delay slot is serviced before the branch
+        // transfer completes, so the HLE layer must resume at the target or the
+        // fallthrough the predicate selects, not at the instruction after the
+        // branch.
+        let words = [
+            0x1100_0002, // beq t0, zero, 0x500C
+            0x0000_000C, // syscall in the delay slot
+            0x2409_0001, // not-taken path: t1 = 1
+            0x2409_0002, // taken path: t1 = 2
+            0x03E0_0008, // jr ra
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x5000, &words)];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x5000)],
+            &[0x5000],
+            AnalysisLimits::default(),
+        )
+        .expect("syscall delay-slot CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("single unit");
+
+        assert!(cpp.contains("const bool branch_taken_00005000 ="));
+        assert!(cpp.contains(
+            "state.pc = 0x00005004U;\n    return dispatch_ee_syscall(state, (branch_taken_00005000 ? 0x0000500CU : 0x00005008U), true);"
+        ));
+        assert!(!cpp.contains("ExceptionCode::SystemCall"));
+    }
+
+    #[test]
+    fn emits_return_target_resume_for_a_syscall_in_a_return_delay_slot() {
+        let words = [
+            0x03E0_0008, // jr ra
+            0x0000_000C, // syscall in the return delay slot
+        ];
+        let segments = [segment(0x5000, &words)];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x5000)],
+            &[0x5000],
+            AnalysisLimits::default(),
+        )
+        .expect("syscall return delay-slot CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("single unit");
+
+        assert!(cpp.contains("const std::uint32_t return_target_00005000 ="));
+        assert!(cpp.contains(
+            "state.pc = 0x00005004U;\n    return dispatch_ee_syscall(state, return_target_00005000, true);"
+        ));
     }
 
     #[test]

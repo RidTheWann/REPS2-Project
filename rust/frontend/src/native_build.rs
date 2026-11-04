@@ -30,16 +30,18 @@ pub struct NativeProject {
 /// fixtures that execute against zero-filled RAM. `probe_budget` is the default
 /// instruction budget baked into the generated probe and the generated CTest,
 /// so the project exercises real guest code instead of stopping immediately.
+/// `hle_syscalls` enables the runtime EE syscall HLE layer in the probe.
 #[must_use]
 pub fn render(
     project_stem: &str,
     sources: &[String],
     ram_image: Option<&str>,
     probe_budget: u64,
+    hle_syscalls: bool,
 ) -> NativeProject {
     NativeProject {
         cmake_lists: render_cmake_lists(project_stem, sources, ram_image),
-        probe_source: render_probe_source(ram_image, probe_budget),
+        probe_source: render_probe_source(ram_image, probe_budget, hle_syscalls),
     }
 }
 
@@ -228,7 +230,7 @@ set_tests_properties(reps2_generated_probe PROPERTIES
         .replace("@TEST@", &test)
 }
 
-fn render_probe_source(ram_image: Option<&str>, probe_budget: u64) -> String {
+fn render_probe_source(ram_image: Option<&str>, probe_budget: u64, hle_syscalls: bool) -> String {
     let default_image = ram_image
         .map(cpp_string_literal)
         .unwrap_or_else(|| "nullptr".to_owned());
@@ -244,6 +246,7 @@ fn render_probe_source(ram_image: Option<&str>, probe_budget: u64) -> String {
 #include <vector>
 
 #include "reps2/runtime/ee_state.hpp"
+#include "reps2/runtime/ee_hle.hpp"
 
 namespace reps2::generated {
 [[nodiscard]] reps2::runtime::Status initialize_ee_state(
@@ -320,6 +323,7 @@ int main(int argc, char** argv) {
     }
 
     const std::uint32_t entry = state.pc;
+    @ENABLE_HLE@
     const Status status = reps2::generated::execute_cfg(state, budget);
     // Classify how bounded execution stopped. `stage` is a stable host contract
     // (see reps2::runtime::status_name); it distinguishes a compile-time
@@ -334,10 +338,18 @@ int main(int argc, char** argv) {
         status == Status::exception_delivered && exccode == 8U;
     const std::uint32_t syscall_code =
         is_syscall ? static_cast<std::uint32_t>(state.gpr[3].low) : 0U;
+    // HLE accounting: `hle` reports whether the host service layer was enabled,
+    // `syscalls`/`hle_handled` how many guest SYSCALLs it saw and serviced, and
+    // `hle_number`/`hle_name` the last normalized service number. A name here
+    // means a handler exists, not that the guest kernel executed the service.
+    const bool hle = state.hle.syscall_enabled;
+    const char* hle_name =
+        hle ? reps2::runtime::ee_syscall_service_name(state.hle.last_syscall_number) : nullptr;
     std::printf(
         "entry=0x%08X status=%d stage=%s pc=0x%08X budget=%llu executed=%llu"
         " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X"
-        " exccode=%u syscall=0x%08X\n",
+        " exccode=%u syscall=0x%08X"
+        " hle=%u syscalls=%llu hle_handled=%llu hle_number=0x%08X hle_name=%s\n",
         static_cast<unsigned>(entry),
         static_cast<int>(status),
         reps2::runtime::status_name(status),
@@ -349,15 +361,26 @@ int main(int argc, char** argv) {
         static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Status]),
         static_cast<unsigned>(state.cop0[reps2::runtime::kCop0BadVAddr]),
         static_cast<unsigned>(exccode),
-        static_cast<unsigned>(syscall_code));
+        static_cast<unsigned>(syscall_code),
+        hle ? 1U : 0U,
+        static_cast<unsigned long long>(state.hle.syscall_count),
+        static_cast<unsigned long long>(state.hle.syscall_handled_count),
+        static_cast<unsigned>(state.hle.last_syscall_number),
+        hle_name == nullptr ? "-" : hle_name);
     return 0;
 }
 "#;
 
+    let enable_hle = if hle_syscalls {
+        "    // HLE service layer requested by --hle-syscalls.\n    state.hle.syscall_enabled = true;"
+    } else {
+        "    // Architectural exception delivery: the HLE layer is disabled.\n    state.hle.syscall_enabled = false;"
+    };
     TEMPLATE
         .replace("@VERSION@", VERSION)
         .replace("@DEFAULT_IMAGE@", &default_image)
         .replace("@DEFAULT_BUDGET@", &probe_budget.to_string())
+        .replace("@ENABLE_HLE@", enable_hle)
 }
 
 #[cfg(test)]
@@ -370,7 +393,7 @@ mod tests {
 
     #[test]
     fn renders_ordered_sources_and_named_probe_test() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 0);
+        let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert!(project.cmake_lists.contains(
             "add_executable(reps2_probe\n    \"../game.cpp\"\n    \"../game.part0001.cpp\"\n    \"probe_main.cpp\""
         ));
@@ -391,7 +414,7 @@ mod tests {
 
     #[test]
     fn omits_ram_image_for_synthetic_fixtures() {
-        let project = render("fixture", &sources(), None, 0);
+        let project = render("fixture", &sources(), None, 0, false);
         assert!(
             project
                 .cmake_lists
@@ -416,14 +439,14 @@ mod tests {
     #[test]
     fn escapes_cmake_and_cpp_strings() {
         let names = vec!["a\"b.cpp".to_owned()];
-        let project = render("weird", &names, Some("r\"m.bin"), 0);
+        let project = render("weird", &names, Some("r\"m.bin"), 0, false);
         assert!(project.cmake_lists.contains("\"../a\\\"b.cpp\""));
         assert!(project.probe_source.contains(": \"r\\\"m.bin\";"));
     }
 
     #[test]
     fn probe_exposes_the_runtime_boundary_and_bounded_execution() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 0);
+        let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert!(
             project
                 .probe_source
@@ -437,7 +460,7 @@ mod tests {
 
     #[test]
     fn probe_bakes_budget_and_emits_a_machine_readable_trace() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 4096);
+        let project = render("game", &sources(), Some("game.ram.bin"), 4096, false);
         assert!(
             project
                 .probe_source
@@ -465,8 +488,49 @@ mod tests {
     }
 
     #[test]
+    fn probe_reports_hle_accounting_and_enables_the_layer_on_request() {
+        let enabled = render("game", &sources(), Some("game.ram.bin"), 4096, true);
+        assert!(
+            enabled
+                .probe_source
+                .contains("state.hle.syscall_enabled = true;")
+        );
+        for field in [
+            "hle=%u",
+            "syscalls=%llu",
+            "hle_handled=%llu",
+            "hle_number=0x%08X",
+            "hle_name=%s",
+        ] {
+            assert!(
+                enabled.probe_source.contains(field),
+                "probe trace omits {field}"
+            );
+        }
+        assert!(enabled.probe_source.contains("ee_syscall_service_name"));
+        assert!(
+            enabled
+                .probe_source
+                .contains("state.hle.last_syscall_number")
+        );
+
+        // The default keeps the architectural exception path untouched.
+        let disabled = render("game", &sources(), Some("game.ram.bin"), 4096, false);
+        assert!(
+            disabled
+                .probe_source
+                .contains("state.hle.syscall_enabled = false;")
+        );
+        assert!(
+            !disabled
+                .probe_source
+                .contains("state.hle.syscall_enabled = true;")
+        );
+    }
+
+    #[test]
     fn renders_native_toolchain_provenance_contract() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 0);
+        let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert!(
             project
                 .cmake_lists
@@ -486,8 +550,8 @@ mod tests {
 
     #[test]
     fn rendering_is_deterministic() {
-        let first = render("game", &sources(), Some("game.ram.bin"), 0);
-        let second = render("game", &sources(), Some("game.ram.bin"), 0);
+        let first = render("game", &sources(), Some("game.ram.bin"), 0, false);
+        let second = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert_eq!(first, second);
         assert!(!first.cmake_lists.contains("timestamp"));
     }

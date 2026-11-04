@@ -11,7 +11,7 @@ The CLI is the developer and automation interface. This reference was moved out 
     reps2 elf-info <elf-file>
     reps2 analyze-elf <elf-file> [--discover] [--max-blocks N] [--max-instructions N] [--max-roots N]
     reps2 profile-elf <elf-file>
-    reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--max-blocks N] [--max-instructions N] [--max-roots N]
+    reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls] [--max-blocks N] [--max-instructions N] [--max-roots N]
     reps2 decode <instruction-word-hex> [pc-hex]
     reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...
 
@@ -66,11 +66,13 @@ recompile-elf also writes `<stem>.manifest.json` beside the translation: it reco
 
 The probe prints one machine-readable trace line: `entry`, `status` (the `Status` enumerator), final `pc`, `budget`, `executed` (guest instructions charged by the block-atomic dispatcher), and the COP0 `cause`/`epc`/`cop0_status`/`badvaddr` registers. The generated CTest uses a `PASS_REGULAR_EXPRESSION` on that line so it fails if the trace is lost.
 
+`--hle-syscalls` enables the runtime EE syscall HLE layer in the generated probe (see `docs/decisions/0062-ee-syscall-hle-dispatch.md`). Without it a guest `syscall` delivers the architectural Level-1 exception exactly as before the layer existed. With it, the service numbered by `$v1` is looked up in the host table: a serviced call resumes after the trap (or at the branch target/fallthrough for a delay slot) and the trace gains `hle`, `syscalls`, `hle_handled`, `hle_number` and `hle_name`; a service number with no handler stops as `status=unhandled_syscall` with the PC still on the `syscall` and no COP0 context. The layer never returns success for a service it does not implement.
+
 The generated files contain no absolute paths or timestamps.
 
 ### Related decisions
 
-See `docs/decisions/0027-multi-translation-unit-codegen.md`, `docs/decisions/0028-deterministic-build-manifest.md` and `docs/decisions/0029-native-build-driver.md`. Analysis bounds and their overrides are documented in `docs/decisions/0030-analysis-limit-policy.md`. The initial guest-trap classification is documented historically in `docs/decisions/0031-guest-trap-status.md`; the current Level-1 exception/ERET behavior is specified in `docs/decisions/0033-ee-level1-exception-and-eret.md`.
+See `docs/decisions/0027-multi-translation-unit-codegen.md`, `docs/decisions/0028-deterministic-build-manifest.md` and `docs/decisions/0029-native-build-driver.md`. Analysis bounds and their overrides are documented in `docs/decisions/0030-analysis-limit-policy.md`. The initial guest-trap classification is documented historically in `docs/decisions/0031-guest-trap-status.md`; the current Level-1 exception/ERET behavior is specified in `docs/decisions/0033-ee-level1-exception-and-eret.md`. The EE syscall HLE dispatch and its `SetupThread`/`FlushCache` services are specified in `docs/decisions/0062-ee-syscall-hle-dispatch.md`.
 
 ## Development-only commands
 
