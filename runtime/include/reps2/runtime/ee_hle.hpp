@@ -351,6 +351,9 @@ inline constexpr std::size_t kEeSyscallServiceCount =
     }
     ++state.hle.syscall_handled_count;
     state.pc = resume_pc;
+    state.hle.last_syscall_v0_after =
+        static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
+    state.hle.last_syscall_resume_pc = resume_pc;
     return Status::ok;
 }
 

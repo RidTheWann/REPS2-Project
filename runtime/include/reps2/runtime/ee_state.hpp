@@ -171,6 +171,8 @@ struct EeHleState {
     std::uint32_t last_syscall_pc{};
     std::array<std::uint32_t, 4> last_syscall_arguments{};
     std::uint32_t last_syscall_v0_before{};
+    std::uint32_t last_syscall_v0_after{};
+    std::uint32_t last_syscall_resume_pc{};
     std::uint32_t last_syscall_sp{};
     // SetupThread (0x3C) observation. No thread context object exists yet, so
     // this records the decoded arguments and the stack pointer the service

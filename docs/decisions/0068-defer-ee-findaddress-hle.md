@@ -33,6 +33,14 @@ establishes its contract. The SetSyscall registration remains host-side state;
 it does not justify invoking arbitrary guest handlers or treating FindAddress as
 handler lookup.
 
+## Reusable diagnostic boundary
+
+The HLE state now records the pre- and post-service `$v0` values and the exact
+resume PC for every handled service. This is host-side observation only; it does
+not claim a FindAddress result or memory side effect. The fields are reset with
+`initialize_ee_state` and remain available to an optional probe without changing
+normal syscall semantics.
+
 ## Next evidence required
 
 - A public or independently reconstructed declaration/implementation.
