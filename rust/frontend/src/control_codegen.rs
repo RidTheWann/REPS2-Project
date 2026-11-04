@@ -646,6 +646,8 @@ mod tests {
             .find("state.instruction_trace_pcs[state.instruction_trace_count++]")
             .expect("instruction trace write");
         assert!(pc < trace);
+        assert!(cpp.contains("for (std::size_t trace_index = 1;"));
+        assert!(cpp.contains("instruction_trace_pcs[trace_index - 1]"));
     }
 
     #[test]
