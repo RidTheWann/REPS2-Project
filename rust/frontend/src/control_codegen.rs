@@ -283,7 +283,10 @@ fn emit_block_definition(output: &mut String, block: &ControlBlock) {
 
     for (instruction_index, instruction) in block.instructions.iter().enumerate() {
         output.push_str(&format!(
-            "    state.pc = 0x{:08X}U;\n",
+            "    state.pc = 0x{:08X}U;\n\
+             if (state.instruction_trace_enabled && state.instruction_trace_count < reps2::runtime::EeState::kInstructionTraceWindowSize) {{\n\
+                 state.instruction_trace_pcs[state.instruction_trace_count++] = state.pc;\n\
+             }}\n",
             instruction.guest_pc
         ));
         crate::codegen::emit_instruction(output, instruction_index, *instruction, false);

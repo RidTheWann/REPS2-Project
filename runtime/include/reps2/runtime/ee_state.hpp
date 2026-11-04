@@ -246,6 +246,10 @@ struct EeState {
     // is still charged in full, matching the block-atomic budget model.
     std::uint64_t instructions_executed{};
     EeMemory memory{};
+    static constexpr std::size_t kInstructionTraceWindowSize = 16U;
+    bool instruction_trace_enabled{};
+    std::array<std::uint32_t, kInstructionTraceWindowSize> instruction_trace_pcs{};
+    std::uint32_t instruction_trace_count{};
     EeHleState hle{};
 };
 
