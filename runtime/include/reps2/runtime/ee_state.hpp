@@ -97,6 +97,10 @@ struct EeHleState {
     // wrappers pass the negated service number, so dispatch uses its magnitude.
     std::uint32_t last_syscall_code{};
     std::uint32_t last_syscall_number{};
+    std::uint32_t last_syscall_pc{};
+    std::array<std::uint32_t, 4> last_syscall_arguments{};
+    std::uint32_t last_syscall_v0_before{};
+    std::uint32_t last_syscall_sp{};
     // SetupThread (0x3C) observation. No thread context object exists yet, so
     // this records the decoded arguments and the stack pointer the service
     // returned rather than a thread that could be scheduled.
@@ -106,6 +110,12 @@ struct EeHleState {
     std::uint32_t setup_thread_stack_size{};
     std::uint32_t setup_thread_stack_pointer{};
     std::uint32_t setup_thread_args{};
+    // SetupHeap (0x3D) observation. The heap is recorded as a per-thread range;
+    // no kernel allocator or thread scheduler is modeled by this layer.
+    bool setup_heap_called{};
+    std::uint32_t setup_heap_start{};
+    std::uint32_t setup_heap_size{};
+    std::uint32_t setup_heap_end{};
 };
 
 struct EeState {

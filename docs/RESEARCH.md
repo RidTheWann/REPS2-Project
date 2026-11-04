@@ -350,7 +350,43 @@ References:
 - REL/RELA entries targeting SHF_ALLOC sections are rejected until their specific R_MIPS relocation semantics are implemented and differential-tested. Debug/non-allocated relocations do not change the executable image.
 - ET_DYN, relocatable objects, expansion RAM, custom TOOL mappings, COP0/TLB mappings, and segments outside default main RAM are not silently accepted.
 
-## Provenance rules
+## EE syscall continuation discovery (M4 evidence)
+
+- ADR 0062 added opt-in HLE dispatch for the EE `SYSCALL` boundary. The first real-title run answered Downhill Domination's `SetupThread` service (0x3C), but stopped at the following PC because the CFG treated a trap as having no successor.
+- ADR 0063 adds a distinct `syscall_continuation` edge to `pc + 4`. This is not an architectural successor: an unserviced trap vectors through COP0. It is a translation candidate because a serviced HLE call resumes there.
+- Continuations are queued leniently. Retail images can place data after a trap; an undecodable continuation is reported as a skipped heuristic block rather than a hard analysis failure.
+- Reproduced on Downhill Domination USA (`SCUS_971.77`, local ISO only): before the change, `SetupThread` was handled and execution stopped at `pc=0x0010A17C`; after the change, execution resumed and reached the next service, `SetupHeap` (0x3D), at `pc=0x0010A194`. The observed bounded run was `executed=2756980`, `syscalls=2`, `hle_handled=1`, `hle_number=0x0000003D`, `status=unhandled_syscall`.
+- This proves continuation translation and service-boundary progress only. It does not prove heap behavior, BIOS completion, a visible boot stage, or playability.
+
+## EE SetupHeap research (next M4 runtime boundary)
+
+Public sources fetched for the next service:
+
+- ps2sdk `kernel.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/kernel.h
+- ps2sdk `kernel.S`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/src/kernel.S
+- ps2sdk `syscallnr.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/syscallnr.h
+- ps2sdk startup `crt0.c`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/startup/src/crt0.c
+- ps2sdk startup `linkfile`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/startup/src/linkfile
+- ps2tek: https://psi-rockin.github.io/ps2tek/
+
+Documented facts:
+
+- ps2sdk declares `SetupHeap(void *heap_start, s32 heap_size)` and assigns service 0x3D. The wrapper places 0x3D in `$v1`, preserves `$a0/$a1`, and leaves the kernel result in `$v0`; the C declaration is `void`.
+- ps2tek describes 0x3D as initializing the current thread's heap. For a non-sentinel address it documents the end as `heap + heap_size`; for its documented sentinel form it says the heap ends at the current thread's stack pointer and returns that end. The heap is per-thread; child threads inherit their parent's heap.
+- ps2sdk startup calls `SetupThread` first, then calls `SetupHeap(&_end, -1)`; its own linker file sets `_heap_size = -1`, and `crt0.c` discards the result. No EE `CreateHeap` follows; `CreateHeap` references found in ps2sdk are IOP-side.
+- ps2sdk's `_sbrk` uses `EndOfHeap()` as the upper bound for newlib allocations. ps2tek's 0x3E wording calls the result the heap base, contradicting its 0x3D wording and the `_sbrk` usage; the end interpretation is better supported.
+
+Unresolved discrepancy:
+
+- Downhill Domination calls `SetupHeap(0x008A0400, 0xFFFFFFFF)`, and ps2sdk's startup passes `-1` in the **size** parameter. ps2tek places its documented sentinel on the **heap address** parameter. The sources therefore do not prove that both slots are accepted equivalently. Treating `heap_size == -1` as "heap end equals the current thread's stack pointer" is an empirically required compatibility extension for this M4 path, not a settled hardware fact.
+
+Safe implementation boundary:
+
+- Explicit non-negative `(heap_start, heap_size)` can record a per-thread range and return its end in `$v0`.
+- The observed `heap_size == -1` form can be implemented as a named, traceable profile extension using the stack pointer produced by `SetupThread`.
+- Downhill Domination then reaches syscall `0x40` (`CreateSema`) at `pc=0x0025A6E4` after the `SetupHeap` continuation. The captured boundary is `a0=0x0093C7E0`, `a1=0xFFFFFFFF`, `a2=0`, `a3=0`, `sp=0x0093C7E0`, and `v0_before=1`; the 24 bytes at `a0` in the initial RAM image are all zero. The runtime deliberately stops there until its semaphore ABI and required kernel state are researched; no semaphore ID or success result is fabricated.
+- Do not invent error codes, an EE kernel allocator, overlap policy, alignment/slack rules, repeated-call semantics, or `CreateHeap`. Unknown or unsupported behavior must remain an explicit diagnostic.
+
 
 1. REPS2 source is independently authored.
 2. Public specifications may be cited. Keep source notes adjacent to non-obvious semantics.

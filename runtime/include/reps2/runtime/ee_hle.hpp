@@ -33,6 +33,7 @@ inline constexpr std::uint8_t kEeSyscallArgumentBase = 4;
 inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
+inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallFlushCache = 0x64U;
 
 // SetupThread's documented "no caller stack" sentinel for $a1.
@@ -95,6 +96,47 @@ struct EeSyscallService {
     return Status::ok;
 }
 
+// SetupHeap (0x3D): SetupHeap(heap_start, heap_size).
+//
+// Two forms are implemented, and they are not equally well evidenced:
+//
+//   * An explicit `(heap_start, heap_size)` pair records the per-thread range
+//     and returns its end. The addition is 32-bit modular, matching an
+//     EE-pointer-width computation rather than trapping on overflow.
+//   * `heap_size == -1` treats the heap as ending at the stack pointer that
+//     SetupThread returned. ps2sdk's own crt0 passes -1 in that slot while the
+//     public description places its sentinel on the address operand, so this
+//     form is a named compatibility extension required by the observed retail
+//     call, not a settled hardware fact (ADR 0064).
+//
+// Not modeled: no kernel allocator, overlap or alignment policy, no repeated-
+// call semantics, and no CreateHeap promotion. The recorded range is a host
+// observation of what the guest asked for; nothing allocates from it yet.
+[[nodiscard]] inline Status hle_setup_heap(EeState& state) noexcept {
+    const std::uint32_t heap_start = ee_syscall_argument(state, 0);
+    const std::uint32_t heap_size = ee_syscall_argument(state, 1);
+
+    // ps2tek documents -1 on the heap address, while ps2sdk's crt0 and the
+    // observed retail call pass -1 as heap_size. Accept the latter as an
+    // explicitly named compatibility extension: the heap ends at the current
+    // thread's SetupThread stack pointer. Do not invent allocator metadata or
+    // an error code; the kernel API is declared void by ps2sdk.
+    const bool inferred_end = heap_size == kEeSyscallStackSentinel;
+    const std::uint32_t heap_end = inferred_end
+        ? state.hle.setup_thread_stack_pointer
+        : heap_start + heap_size;
+
+    state.hle.setup_heap_called = true;
+    state.hle.setup_heap_start = heap_start;
+    state.hle.setup_heap_size = heap_size;
+    state.hle.setup_heap_end = heap_end;
+    // ps2tek describes the machine-level result as the end of the current
+    // thread's heap, although ps2sdk declares SetupHeap(void) and callers often
+    // discard it. Preserve that documented result for code that reads $v0.
+    state.gpr[kEeSyscallResultRegister].low = sign_extend_word(heap_end);
+    return Status::ok;
+}
+
 // FlushCache (0x64): the guest asks the kernel to make written instructions
 // visible to the instruction stream. The runtime keeps no instruction-cache
 // model and the host is cache-coherent, so the call completes with $v0 = 0 and
@@ -109,6 +151,7 @@ struct EeSyscallService {
 // Sorted by service number so a lookup can stop as soon as it passes the key.
 inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
+    {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
     {kEeSyscallFlushCache, "FlushCache", &hle_flush_cache},
 };
 inline constexpr std::size_t kEeSyscallServiceCount =
@@ -159,6 +202,13 @@ inline constexpr std::size_t kEeSyscallServiceCount =
 
     const std::uint32_t code =
         static_cast<std::uint32_t>(state.gpr[kEeSyscallNumberRegister].low);
+    state.hle.last_syscall_pc = state.pc;
+    state.hle.last_syscall_v0_before =
+        static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
+    for (std::uint8_t index = 0; index < kEeSyscallArgumentCount; ++index) {
+        state.hle.last_syscall_arguments[index] = ee_syscall_argument(state, index);
+    }
+    state.hle.last_syscall_sp = static_cast<std::uint32_t>(state.gpr[29].low);
     // The "i" wrappers negate the number. Unsigned subtraction avoids the
     // INT32_MIN negation that signed arithmetic cannot represent.
     const std::uint32_t number =

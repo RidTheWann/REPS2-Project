@@ -31,6 +31,7 @@ using reps2::runtime::Status;
 
 constexpr std::uint32_t kUnreachableReturnPc = 0xDEAD0000U;
 constexpr std::uint32_t kSetupThread = reps2::runtime::kEeSyscallSetupThread;
+constexpr std::uint32_t kSetupHeap = reps2::runtime::kEeSyscallSetupHeap;
 constexpr std::uint32_t kFlushCache = reps2::runtime::kEeSyscallFlushCache;
 
 // A serviced call resumes at the instruction after the trap and the following
@@ -270,6 +271,54 @@ int test_delay_slot_syscall_resumes_at_the_fallthrough() {
     return 0;
 }
 
+int test_setup_heap_with_explicit_range() {
+    EeState state{};
+    state.pc = 0xE300U;
+    state.hle.syscall_enabled = true;
+    state.gpr[3].low = kSetupHeap;
+    state.gpr[4].low = 0x00100000U; // $a0: heap start
+    state.gpr[5].low = 0x00008000U; // $a1: heap size
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    const Status status = reps2::generated::execute_cfg(state, 16U);
+    if (status != Status::external_control_flow || state.pc != kUnreachableReturnPc) {
+        return 95;
+    }
+    if (!state.hle.setup_heap_called
+        || state.hle.setup_heap_start != 0x00100000U
+        || state.hle.setup_heap_size != 0x00008000U
+        || state.hle.setup_heap_end != 0x00108000U) {
+        return 96;
+    }
+    // The fixture's first post-trap instruction overwrites $v0 with its resume
+    // marker; the host observation preserves the service result independently.
+    if (state.gpr[2].low != 1U) {
+        return 97;
+    }
+    return 0;
+}
+
+int test_setup_heap_size_sentinel_uses_setup_thread_stack() {
+    EeState state{};
+    state.pc = 0xE300U;
+    state.hle.syscall_enabled = true;
+    state.hle.setup_thread_called = true;
+    state.hle.setup_thread_stack_pointer = 0x01FF0000U;
+    state.gpr[3].low = kSetupHeap;
+    state.gpr[4].low = 0x008A0400U; // retail heap start
+    state.gpr[5].low = 0xFFFFFFFFU; // ps2sdk/retail observed size sentinel
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    const Status status = reps2::generated::execute_cfg(state, 16U);
+    if (status != Status::external_control_flow || state.pc != kUnreachableReturnPc) {
+        return 98;
+    }
+    if (state.hle.setup_heap_end != 0x01FF0000U || state.gpr[2].low != 1U) {
+        return 99;
+    }
+    return 0;
+}
+
 int test_delay_slot_syscall_without_the_layer_raises_the_exception() {
     EeState state{};
     state.pc = 0xE200U;
@@ -307,8 +356,8 @@ int test_service_table_reports_names() {
     if (reps2::runtime::find_ee_syscall_service(kFlushCache) == nullptr) {
         return 101;
     }
-    if (reps2::runtime::find_ee_syscall_service(0x3DU) != nullptr) {
-        return 102; // SetupHeap is not implemented yet
+    if (reps2::runtime::find_ee_syscall_service(kSetupHeap) == nullptr) {
+        return 102;
     }
     const char* const name = reps2::runtime::status_name(Status::unhandled_syscall);
     if (name == nullptr || std::string_view(name) != "unhandled_syscall") {
@@ -335,6 +384,8 @@ int main() {
         {"delay slot fallthrough", &test_delay_slot_syscall_resumes_at_the_fallthrough},
         {"delay slot without the layer",
          &test_delay_slot_syscall_without_the_layer_raises_the_exception},
+        {"setup heap explicit range", &test_setup_heap_with_explicit_range},
+        {"setup heap size sentinel", &test_setup_heap_size_sentinel_uses_setup_thread_stack},
         {"service table names", &test_service_table_reports_names},
     };
 

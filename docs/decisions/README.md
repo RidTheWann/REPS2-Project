@@ -67,3 +67,6 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0060](0060-native-probe-execution-trace.md) | Native probe execution trace and configurable budget | Accepted |
 | [0061](0061-ee-mmi2-pxor-and-mmi3-pnor.md) | EE MMI2 PXOR and MMI3 PNOR 128-bit bitwise XOR/NOR | Accepted |
 | [0062](0062-ee-syscall-hle-dispatch.md) | EE syscall HLE dispatch and the SetupThread service | Accepted |
+| [0063](0063-syscall-continuation-discovery.md) | Discover the continuation after a SYSCALL trap | Accepted |
+| [0064](0064-ee-setupheap-hle.md) | Conservative EE SetupHeap HLE | Accepted |
+| [0065](0065-ee-syscall-trace-arguments.md) | Capture EE syscall boundary arguments | Accepted |

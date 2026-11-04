@@ -349,7 +349,9 @@ int main(int argc, char** argv) {
         "entry=0x%08X status=%d stage=%s pc=0x%08X budget=%llu executed=%llu"
         " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X"
         " exccode=%u syscall=0x%08X"
-        " hle=%u syscalls=%llu hle_handled=%llu hle_number=0x%08X hle_name=%s\n",
+        " hle=%u syscalls=%llu hle_handled=%llu hle_pc=0x%08X hle_number=0x%08X"
+        " hle_v0_before=0x%08X hle_a0=0x%08X hle_a1=0x%08X hle_a2=0x%08X hle_a3=0x%08X"
+        " hle_sp=0x%08X hle_name=%s\n",
         static_cast<unsigned>(entry),
         static_cast<int>(status),
         reps2::runtime::status_name(status),
@@ -365,7 +367,14 @@ int main(int argc, char** argv) {
         hle ? 1U : 0U,
         static_cast<unsigned long long>(state.hle.syscall_count),
         static_cast<unsigned long long>(state.hle.syscall_handled_count),
+        static_cast<unsigned>(state.hle.last_syscall_pc),
         static_cast<unsigned>(state.hle.last_syscall_number),
+        static_cast<unsigned>(state.hle.last_syscall_v0_before),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[0]),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[1]),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[2]),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[3]),
+        static_cast<unsigned>(state.hle.last_syscall_sp),
         hle_name == nullptr ? "-" : hle_name);
     return 0;
 }
@@ -499,7 +508,14 @@ mod tests {
             "hle=%u",
             "syscalls=%llu",
             "hle_handled=%llu",
+            "hle_pc=0x%08X",
             "hle_number=0x%08X",
+            "hle_v0_before=0x%08X",
+            "hle_a0=0x%08X",
+            "hle_a1=0x%08X",
+            "hle_a2=0x%08X",
+            "hle_a3=0x%08X",
+            "hle_sp=0x%08X",
             "hle_name=%s",
         ] {
             assert!(

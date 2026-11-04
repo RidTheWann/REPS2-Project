@@ -94,6 +94,12 @@ pub enum EdgeKind {
     Jump,
     Call,
     ReturnContinuation,
+    /// The instruction after a `SYSCALL`, reached only when a host HLE service
+    /// answers the trap and resumes the guest. It is not the architectural
+    /// successor: without a serviced call the trap vectors through COP0 and no
+    /// guest code at this address runs. The edge exists so the continuation is
+    /// discovered and translated, because a serviced call has to resolve.
+    SyscallContinuation,
 }
 
 /// One statically known CFG edge.
@@ -228,7 +234,28 @@ impl Terminator {
                 }],
                 _ => Vec::new(),
             },
-            Self::Return { .. } | Self::Unsupported { .. } | Self::SegmentEnd { .. } => Vec::new(),
+            Self::Unsupported { instruction } => {
+                // A `SYSCALL` ends the block without an architectural successor:
+                // the trap vectors through COP0. A host HLE service still has to
+                // resume somewhere, so the fall-through is exposed as a
+                // continuation for discovery only.
+                if instruction.opcode == Opcode::Syscall {
+                    instruction
+                        .pc
+                        .checked_add(4)
+                        .map(|continuation_pc| {
+                            vec![Edge {
+                                from_block,
+                                to_pc: continuation_pc,
+                                kind: EdgeKind::SyscallContinuation,
+                            }]
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            }
+            Self::Return { .. } | Self::SegmentEnd { .. } => Vec::new(),
         }
     }
 
@@ -957,6 +984,7 @@ fn build_cfg(
 
         register_block_owners(&block, &mut owners)?;
         let next_targets = block_targets(&block);
+        let trap_continuations = lenient_block_targets(&block);
         if let Terminator::IndirectJump { instruction, .. } = &block.terminator {
             unresolved_indirect_jumps.insert(instruction.pc);
         }
@@ -982,6 +1010,23 @@ fn build_cfg(
                 &mut queued_lenient,
                 target,
                 lenient,
+            );
+        }
+
+        // A trap continuation is a guess even when the trapping block itself is
+        // authoritative: the address only holds code if a service is answered.
+        for target in trap_continuations {
+            if !is_executable_view(target) {
+                external_targets.insert(target);
+                continue;
+            }
+            leaders.insert(target);
+            enqueue_root(
+                &mut queue,
+                &mut queued_authoritative,
+                &mut queued_lenient,
+                target,
+                true,
             );
         }
     }
@@ -1244,11 +1289,27 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
     }
 }
 
+/// Successors the analysis must translate because guest register state requires
+/// them: the architectural successors of the terminator.
 fn block_targets(block: &BasicBlock) -> Vec<u32> {
     block
         .terminator
         .outgoing_edges(block.start_pc)
         .into_iter()
+        .filter(|edge| edge.kind != EdgeKind::SyscallContinuation)
+        .map(|edge| edge.to_pc)
+        .collect()
+}
+
+/// Successors that are only real code if a host HLE service answers a trap.
+/// They are queued leniently, so a `SYSCALL` followed by data rather than code
+/// is reported as a skipped guess instead of aborting the analysis.
+fn lenient_block_targets(block: &BasicBlock) -> Vec<u32> {
+    block
+        .terminator
+        .outgoing_edges(block.start_pc)
+        .into_iter()
+        .filter(|edge| edge.kind == EdgeKind::SyscallContinuation)
         .map(|edge| edge.to_pc)
         .collect()
 }
@@ -1815,6 +1876,79 @@ mod tests {
                 other => panic!("expected branch terminator, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn discovers_the_continuation_after_a_syscall_terminator() {
+        // A `SYSCALL` has no architectural successor, but a host HLE service
+        // resumes at the following instruction. `sp` receives the serviced
+        // result, which is why the continuation must be translated.
+        let words = [
+            0x2403_003C, // 0x4000: addiu $3, $zero, 0x3C (SetupThread)
+            0x0000_000C, // 0x4004: syscall
+            0x0040_E82D, // 0x4008: daddu $sp, $2, $zero
+            0x03E0_0008, // 0x400C: jr $ra
+            0x0000_0000, // 0x4010: return delay slot
+        ];
+        let segments = [segment(0x4000, &words)];
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x4000)],
+            &[0x4000],
+            AnalysisLimits::default(),
+        )
+        .expect("syscall continuation graph");
+
+        let block = &graph.blocks[&0x4000];
+        match &block.terminator {
+            Terminator::Unsupported { instruction } => {
+                assert_eq!(instruction.opcode, Opcode::Syscall);
+                assert_eq!(instruction.pc, 0x4004);
+            }
+            other => panic!("expected a trap terminator, got {other:?}"),
+        }
+        assert!(graph.edges().iter().any(|edge| {
+            edge.from_block == 0x4000
+                && edge.to_pc == 0x4008
+                && edge.kind == EdgeKind::SyscallContinuation
+        }));
+        // The continuation is real code here, so it is translated.
+        assert!(graph.blocks.contains_key(&0x4008));
+        assert_eq!(graph.blocks[&0x4008].instructions[0].opcode, Opcode::Daddu);
+    }
+
+    #[test]
+    fn treats_an_undecodable_syscall_continuation_as_a_skipped_guess() {
+        // Retail images put data and jump tables directly after a trap. The
+        // continuation is only code if a service is answered, so an
+        // undecodable one is a skipped guess, never a fatal analysis error.
+        let words = [
+            0x2403_003C, // 0x4000: addiu $3, $zero, 0x3C (SetupThread)
+            0x0000_000C, // 0x4004: syscall
+            0x1100_0001, // 0x4008: beq $t0, $zero, 0x4010
+            0x4200_0018, // 0x400C: delay slot: eret is a control transfer
+            0x2401_0001, // 0x4010: addiu $1, $zero, 1
+        ];
+        let segments = [segment(0x4000, &words)];
+        let built = build_cfg(
+            &segments,
+            vec![entry(0x4000)],
+            &[0x4000],
+            &BTreeSet::new(),
+            AnalysisLimits::default(),
+        )
+        .expect("an undecodable continuation does not abort the analysis");
+        let graph = built.graph;
+
+        assert!(graph.blocks.contains_key(&0x4000));
+        // The guess is dropped rather than translated, and the analysis still
+        // succeeds: it is reported through the skipped-block channel, so a
+        // retail tail of data after a trap cannot abort a discovery run.
+        assert!(!graph.blocks.contains_key(&0x4008));
+        assert_eq!(built.skipped_blocks, vec![0x4008]);
+        // It is a guess, not a candidate function root, so it is not reported
+        // as a rejected root.
+        assert!(built.rejected_roots.is_empty());
     }
 
     #[test]
