@@ -345,13 +345,21 @@ int main(int argc, char** argv) {
     const bool hle = state.hle.syscall_enabled;
     const char* hle_name =
         hle ? reps2::runtime::ee_syscall_service_name(state.hle.last_syscall_number) : nullptr;
+    // CreateSema (0x40) boundary: the parameter address, the two counts that are
+    // actually inputs, and the id the service returned or the reason it refused.
+    // These are host observations of the last CreateSema call, so a trace shows
+    // what the guest asked for without claiming a scheduler exists.
+    const char* sema_rejection = reps2::runtime::ee_sema_rejection_name(
+        state.hle.last_sema_rejection);
     std::printf(
         "entry=0x%08X status=%d stage=%s pc=0x%08X budget=%llu executed=%llu"
         " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X"
         " exccode=%u syscall=0x%08X"
         " hle=%u syscalls=%llu hle_handled=%llu hle_pc=0x%08X hle_number=0x%08X"
         " hle_v0_before=0x%08X hle_a0=0x%08X hle_a1=0x%08X hle_a2=0x%08X hle_a3=0x%08X"
-        " hle_sp=0x%08X hle_name=%s\n",
+        " hle_sp=0x%08X hle_name=%s"
+        " sema_calls=%llu sema_live=%u sema_param=0x%08X sema_init=%d sema_max=%d"
+        " sema_attr=0x%08X sema_option=0x%08X sema_id=%d sema_refused=%s\n",
         static_cast<unsigned>(entry),
         static_cast<int>(status),
         reps2::runtime::status_name(status),
@@ -375,7 +383,16 @@ int main(int argc, char** argv) {
         static_cast<unsigned>(state.hle.last_syscall_arguments[2]),
         static_cast<unsigned>(state.hle.last_syscall_arguments[3]),
         static_cast<unsigned>(state.hle.last_syscall_sp),
-        hle_name == nullptr ? "-" : hle_name);
+        hle_name == nullptr ? "-" : hle_name,
+        static_cast<unsigned long long>(state.hle.create_sema_calls),
+        static_cast<unsigned>(state.hle.semaphore_count),
+        static_cast<unsigned>(state.hle.last_sema_parameter_address),
+        static_cast<int>(state.hle.last_sema_init_count),
+        static_cast<int>(state.hle.last_sema_max_count),
+        static_cast<unsigned>(state.hle.last_sema_attr),
+        static_cast<unsigned>(state.hle.last_sema_option),
+        static_cast<int>(state.hle.last_sema_id),
+        sema_rejection);
     return 0;
 }
 "#;
@@ -517,6 +534,15 @@ mod tests {
             "hle_a3=0x%08X",
             "hle_sp=0x%08X",
             "hle_name=%s",
+            "sema_calls=%llu",
+            "sema_live=%u",
+            "sema_param=0x%08X",
+            "sema_init=%d",
+            "sema_max=%d",
+            "sema_attr=0x%08X",
+            "sema_option=0x%08X",
+            "sema_id=%d",
+            "sema_refused=%s",
         ] {
             assert!(
                 enabled.probe_source.contains(field),

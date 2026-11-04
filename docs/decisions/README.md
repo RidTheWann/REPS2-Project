@@ -70,3 +70,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0063](0063-syscall-continuation-discovery.md) | Discover the continuation after a SYSCALL trap | Accepted |
 | [0064](0064-ee-setupheap-hle.md) | Conservative EE SetupHeap HLE | Accepted |
 | [0065](0065-ee-syscall-trace-arguments.md) | Capture EE syscall boundary arguments | Accepted |
+| [0066](0066-ee-createsema-hle.md) | EE CreateSema HLE with a bounded semaphore table | Accepted |

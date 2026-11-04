@@ -384,8 +384,36 @@ Safe implementation boundary:
 
 - Explicit non-negative `(heap_start, heap_size)` can record a per-thread range and return its end in `$v0`.
 - The observed `heap_size == -1` form can be implemented as a named, traceable profile extension using the stack pointer produced by `SetupThread`.
-- Downhill Domination then reaches syscall `0x40` (`CreateSema`) at `pc=0x0025A6E4` after the `SetupHeap` continuation. The captured boundary is `a0=0x0093C7E0`, `a1=0xFFFFFFFF`, `a2=0`, `a3=0`, `sp=0x0093C7E0`, and `v0_before=1`; the 24 bytes at `a0` in the initial RAM image are all zero. The runtime deliberately stops there until its semaphore ABI and required kernel state are researched; no semaphore ID or success result is fabricated.
+- Downhill Domination then reached syscall `0x40` (`CreateSema`) at `pc=0x0025A6E4` after the `SetupHeap` continuation. The captured boundary was `a0=0x0093C7E0`, `a1=0xFFFFFFFF`, `a2=0`, `a3=0`, `sp=0x0093C7E0`, and `v0_before=1`; the 24 bytes at `a0` in the initial RAM image are all zero, which says nothing about the call because a stack-allocated parameter block is only filled at run time. That boundary is now resolved by ADR 0066; no semaphore id or success result was fabricated to get past it.
 - Do not invent error codes, an EE kernel allocator, overlap policy, alignment/slack rules, repeated-call semantics, or `CreateHeap`. Unknown or unsupported behavior must remain an explicit diagnostic.
+
+## EE CreateSema research (M4 runtime boundary)
+
+Public sources fetched:
+
+- ps2sdk `kernel.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/kernel.h
+- ps2sdk `syscallnr.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/syscallnr.h
+- ps2sdk `kernel.S`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/src/kernel.S
+- ps2tek: https://psi-rockin.github.io/ps2tek/
+
+Documented facts:
+
+- `ee_sema_t` is `int count, max_count, init_count, wait_threads; u32 attr, option;` — six 32-bit fields, 24 bytes. ps2sdk declares `s32 CreateSema(ee_sema_t *sema)` and assigns service 0x40; the wrapper is the ordinary `li $3, __NR_CreateSema; syscall` shape.
+- ps2sdk documents `MAX_SEMAPHORES 256`. ps2tek describes the internal object as `{ free, count, max_count, attr, option, wait_threads, wait_next, wait_prev }`, i.e. the kernel keeps the count, the maximum, both guest attribute words and a waiter list.
+- The public description says the call "returns the semaphore's id if successful and -1 if not", and that only `init_count` and `max_count` need to be specified; `attr` and `option` may be given but the same source marks them as not interpreted by the kernel. `count` and `wait_threads` are the fields `ReferSemaStatus` (0x47) reports back.
+- `WaitSema` blocks when `count` is zero, `SignalSema` increments `count` or releases a waiter, and both force a reschedule; `PollSema` decrements and fails when the count is zero.
+
+Unresolved:
+
+- No public source states the kernel's id allocation order, whether it rewrites the guest parameter block, or which count pairs it rejects. The implementation therefore treats "lowest free slot" as a host choice and refuses only combinations that cannot be represented.
+- EE kernel semaphores and IOP THSEMAP services share an API shape but their equivalence is not demonstrated, so no IOP behavior was reused.
+
+Observed on the real title:
+
+- Downhill Domination calls `CreateSema` twice (`sema_param=0x0093C800` on the second call, `init=1`, `max=1`, `attr=0`, `option=0`). The service returned ids 0 and 1 and the guest continued, which confirms the 24-byte layout and the returned-id contract: the read succeeded through the normal EE address-resolution path, and a wrong layout would have produced `init_exceeds_max`/`negative_counts` refusals instead of clean ids.
+- The next boundary is syscall `0x74` (`SetSyscall`) at `pc=0x0025F094` with `a0=0x83`, `a1=0x0025EF38`, `a2=0`, `a3=0x0029E580`. That service installs a guest handler for a syscall number — ps2tek records that BIOS patches and games use it to replace syscall slots — so it needs a dispatch-table model that can transfer control to guest code. It is not implemented, and the runtime stops there honestly.
+
+## Provenance rules
 
 
 1. REPS2 source is independently authored.

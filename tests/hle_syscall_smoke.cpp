@@ -2,15 +2,17 @@
 //
 // EE syscall HLE smoke test.
 //
-// The synthetic CFG fixture exposes three HLE entries:
+// The synthetic CFG fixture exposes four HLE entries:
 //   0xE000  syscall; addiu v0, zero, 1; jr ra
 //   0xE100  syscall; addiu v0, zero, 1        (service number has no handler)
 //   0xE200  beq t0, zero, 0xE214; syscall (delay slot); ... ; either path jr ra
+//   0xE400  syscall; jr ra                    ($v0 keeps the service result)
 //
 // The EE kernel service number is passed in $v1 (GPR[3]), so these tests set it
 // directly instead of relying on the instruction's 20-bit code field.
 #include "reps2/runtime/ee_hle.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -32,7 +34,52 @@ using reps2::runtime::Status;
 constexpr std::uint32_t kUnreachableReturnPc = 0xDEAD0000U;
 constexpr std::uint32_t kSetupThread = reps2::runtime::kEeSyscallSetupThread;
 constexpr std::uint32_t kSetupHeap = reps2::runtime::kEeSyscallSetupHeap;
+constexpr std::uint32_t kCreateSema = reps2::runtime::kEeSyscallCreateSema;
 constexpr std::uint32_t kFlushCache = reps2::runtime::kEeSyscallFlushCache;
+
+// The CreateSema tests need guest-readable parameters, but a full 32 MiB image
+// per case is unnecessary: main RAM is a span, so a small aligned window proves
+// the same address-resolution and bounds behavior.
+using RamWindow = std::array<std::uint8_t, 0x1000>;
+constexpr std::uint32_t kSemaParameters = 0x0000'0100U;
+
+void store_word(RamWindow& ram, std::uint32_t address, std::uint32_t value) {
+    const auto offset = static_cast<std::size_t>(address);
+    ram[offset] = static_cast<std::uint8_t>(value);
+    ram[offset + 1U] = static_cast<std::uint8_t>(value >> 8U);
+    ram[offset + 2U] = static_cast<std::uint8_t>(value >> 16U);
+    ram[offset + 3U] = static_cast<std::uint8_t>(value >> 24U);
+}
+
+std::uint32_t load_word(const RamWindow& ram, std::uint32_t address) {
+    const auto offset = static_cast<std::size_t>(address);
+    return static_cast<std::uint32_t>(ram[offset])
+        | (static_cast<std::uint32_t>(ram[offset + 1U]) << 8U)
+        | (static_cast<std::uint32_t>(ram[offset + 2U]) << 16U)
+        | (static_cast<std::uint32_t>(ram[offset + 3U]) << 24U);
+}
+
+// Writes the six documented parameter words: count, max_count, init_count,
+// wait_threads, attr, option.
+void store_sema_parameters(
+    RamWindow& ram,
+    std::uint32_t address,
+    std::int32_t count,
+    std::int32_t max_count,
+    std::int32_t init_count,
+    std::int32_t wait_threads,
+    std::uint32_t attr,
+    std::uint32_t option
+) {
+    const auto words = {count, max_count, init_count, wait_threads};
+    std::uint32_t index = 0;
+    for (const std::int32_t word : words) {
+        store_word(ram, address + index * 4U, static_cast<std::uint32_t>(word));
+        ++index;
+    }
+    store_word(ram, address + 16U, attr);
+    store_word(ram, address + 20U, option);
+}
 
 // A serviced call resumes at the instruction after the trap and the following
 // register write proves the guest continued past the SYSCALL.
@@ -319,6 +366,199 @@ int test_setup_heap_size_sentinel_uses_setup_thread_stack() {
     return 0;
 }
 
+int test_create_sema_returns_a_unique_id() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.pc = 0xE400U;
+    state.hle.syscall_enabled = true;
+    // count/max_count/init_count/wait_threads: only the middle two are inputs.
+    store_sema_parameters(ram, kSemaParameters, 0, 4, 2, 0, 0U, 0U);
+    state.gpr[3].low = kCreateSema;
+    state.gpr[4].low = kSemaParameters;
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    const Status status = reps2::generated::execute_cfg(state, 16U);
+    if (status != Status::external_control_flow || state.pc != kUnreachableReturnPc) {
+        return 110;
+    }
+    // The fixture does not touch $v0, so this is the service's own result.
+    if (state.gpr[2].low != 0U) {
+        return 111;
+    }
+    if (state.hle.last_sema_id != 0 || state.hle.semaphore_count != 1U) {
+        return 112;
+    }
+    if (state.hle.last_sema_init_count != 2 || state.hle.last_sema_max_count != 4) {
+        return 113;
+    }
+    const auto& sema = state.hle.semaphores[0];
+    if (!sema.in_use || sema.count != 2 || sema.max_count != 4
+        || sema.attr != 0U || sema.option != 0U) {
+        return 114;
+    }
+    if (sema.create_pc != 0xE400U || state.hle.last_sema_rejection
+        != reps2::runtime::EeSemaRejection::none) {
+        return 115;
+    }
+    // Only $v0 changed: the service number register and the argument registers
+    // are not invented side effects, and no COP0 context was created.
+    if (state.gpr[3].low != kCreateSema || state.gpr[4].low != kSemaParameters
+        || state.cop0[reps2::runtime::kCop0Cause] != 0U
+        || state.cop0[reps2::runtime::kCop0Epc] != 0U) {
+        return 116;
+    }
+    // The guest parameter block is an input, not a status mirror.
+    if (load_word(ram, kSemaParameters) != 0U
+        || load_word(ram, kSemaParameters + 4U) != 4U
+        || load_word(ram, kSemaParameters + 8U) != 2U) {
+        return 117;
+    }
+    // A second call must not reuse the first id.
+    if (reps2::runtime::hle_create_sema(state) != Status::ok
+        || state.gpr[2].low != 1U || state.hle.semaphore_count != 2U) {
+        return 118;
+    }
+    return 0;
+}
+
+int test_create_sema_consumes_only_the_documented_result() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.pc = 0xE400U;
+    state.hle.syscall_enabled = true;
+    // The ps2sdk "i" wrappers pass the negated service number; CreateSema has no
+    // such wrapper, but dispatch normalizes by magnitude regardless.
+    store_sema_parameters(ram, kSemaParameters, 0, 1, 1, 0, 0U, 0U);
+    state.gpr[3].low = static_cast<std::uint64_t>(0U - kCreateSema);
+    state.gpr[4].low = kSemaParameters;
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    const Status status = reps2::generated::execute_cfg(state, 16U);
+    if (status != Status::external_control_flow || state.pc != kUnreachableReturnPc) {
+        return 120;
+    }
+    if (state.hle.last_syscall_number != kCreateSema || state.hle.last_sema_id != 0) {
+        return 121;
+    }
+    if (state.gpr[2].low != 0U) {
+        return 122;
+    }
+    return 0;
+}
+
+int test_create_sema_rejects_inconsistent_counts() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    state.gpr[4].low = kSemaParameters;
+
+    // init_count above max_count can never be represented by the object.
+    store_sema_parameters(ram, kSemaParameters, 0, 2, 5, 0, 0U, 0U);
+    if (reps2::runtime::hle_create_sema(state) != Status::ok) {
+        return 130;
+    }
+    if (state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL
+        || state.hle.last_sema_rejection != reps2::runtime::EeSemaRejection::init_exceeds_max) {
+        return 131;
+    }
+    if (state.hle.semaphore_count != 0U || state.hle.last_sema_id != -1) {
+        return 132;
+    }
+
+    // A negative count is not a count.
+    store_sema_parameters(ram, kSemaParameters, 0, -1, 0, 0, 0U, 0U);
+    if (reps2::runtime::hle_create_sema(state) != Status::ok
+        || state.hle.last_sema_rejection != reps2::runtime::EeSemaRejection::negative_counts) {
+        return 133;
+    }
+    if (state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL || state.hle.semaphore_count != 0U) {
+        return 134;
+    }
+
+    // An equal pair is accepted: the bound is inclusive.
+    store_sema_parameters(ram, kSemaParameters, 0, 3, 3, 0, 0U, 0U);
+    if (reps2::runtime::hle_create_sema(state) != Status::ok || state.gpr[2].low != 0U
+        || state.hle.semaphores[0].count != 3 || state.hle.semaphores[0].max_count != 3) {
+        return 135;
+    }
+    return 0;
+}
+
+int test_create_sema_rejects_unreadable_parameters() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    store_sema_parameters(ram, kSemaParameters, 0, 1, 1, 0, 0U, 0U);
+
+    // A misaligned pointer is refused rather than read partially.
+    state.gpr[4].low = kSemaParameters + 2U;
+    if (reps2::runtime::hle_create_sema(state) != Status::ok
+        || state.hle.last_sema_rejection
+            != reps2::runtime::EeSemaRejection::unreadable_parameters) {
+        return 140;
+    }
+    if (state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL || state.hle.semaphore_count != 0U) {
+        return 141;
+    }
+
+    // A block that runs past the end of main RAM is refused, not truncated.
+    state.gpr[4].low = static_cast<std::uint32_t>(ram.size()) - 8U;
+    if (reps2::runtime::hle_create_sema(state) != Status::ok
+        || state.hle.last_sema_rejection
+            != reps2::runtime::EeSemaRejection::unreadable_parameters) {
+        return 142;
+    }
+    if (state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL || state.hle.semaphore_count != 0U) {
+        return 143;
+    }
+
+    // An address outside any RAM alias is refused too.
+    state.gpr[4].low = 0xFFF0'0000U;
+    if (reps2::runtime::hle_create_sema(state) != Status::ok
+        || state.hle.semaphore_count != 0U || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL) {
+        return 144;
+    }
+    return 0;
+}
+
+int test_create_sema_table_is_bounded() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    store_sema_parameters(ram, kSemaParameters, 0, 1, 0, 0, 0U, 0U);
+    state.gpr[4].low = kSemaParameters;
+
+    for (std::uint32_t index = 0;
+         index < static_cast<std::uint32_t>(reps2::runtime::kEeMaxSemaphores);
+         ++index) {
+        if (reps2::runtime::hle_create_sema(state) != Status::ok) {
+            return 150;
+        }
+        if (state.gpr[2].low != static_cast<std::uint64_t>(index)) {
+            return 151;
+        }
+    }
+    // The documented kernel limit is a hard bound, and the refusal is the
+    // documented -1 rather than a wrapped-around id.
+    if (reps2::runtime::hle_create_sema(state) != Status::ok) {
+        return 152;
+    }
+    if (state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL
+        || state.hle.last_sema_rejection != reps2::runtime::EeSemaRejection::table_full) {
+        return 153;
+    }
+    if (state.hle.semaphore_count != reps2::runtime::kEeMaxSemaphores
+        || state.hle.last_sema_id != -1) {
+        return 154;
+    }
+    return 0;
+}
+
 int test_delay_slot_syscall_without_the_layer_raises_the_exception() {
     EeState state{};
     state.pc = 0xE200U;
@@ -359,6 +599,13 @@ int test_service_table_reports_names() {
     if (reps2::runtime::find_ee_syscall_service(kSetupHeap) == nullptr) {
         return 102;
     }
+    if (reps2::runtime::find_ee_syscall_service(kCreateSema) == nullptr) {
+        return 104;
+    }
+    const char* const sema_name = reps2::runtime::ee_syscall_service_name(kCreateSema);
+    if (sema_name == nullptr || std::string_view(sema_name) != "CreateSema") {
+        return 105;
+    }
     const char* const name = reps2::runtime::status_name(Status::unhandled_syscall);
     if (name == nullptr || std::string_view(name) != "unhandled_syscall") {
         return 103;
@@ -386,6 +633,12 @@ int main() {
          &test_delay_slot_syscall_without_the_layer_raises_the_exception},
         {"setup heap explicit range", &test_setup_heap_with_explicit_range},
         {"setup heap size sentinel", &test_setup_heap_size_sentinel_uses_setup_thread_stack},
+        {"create sema unique id", &test_create_sema_returns_a_unique_id},
+        {"create sema negated service number",
+         &test_create_sema_consumes_only_the_documented_result},
+        {"create sema inconsistent counts", &test_create_sema_rejects_inconsistent_counts},
+        {"create sema unreadable parameters", &test_create_sema_rejects_unreadable_parameters},
+        {"create sema table bound", &test_create_sema_table_is_bounded},
         {"service table names", &test_service_table_reports_names},
     };
 

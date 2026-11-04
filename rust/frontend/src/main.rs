@@ -1628,6 +1628,13 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x03E0_0008, // jr ra
         0x0000_0000, // return delay slot
     ];
+    // The semaphore fixture returns straight to $ra so $v0 still holds whatever
+    // the service decided, which is the value these tests assert on.
+    let hle_create_sema = [
+        0x0000_000C, // syscall: CreateSema service number from $v1
+        0x03E0_0008, // jr ra: no register write hides the service result
+        0x0000_0000, // return delay slot
+    ];
 
     let mut segments = vec![
         segment(0x1000, &branch_and_jump),
@@ -1661,6 +1668,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xE100, &hle_unhandled_syscall),
         segment(0xE200, &hle_delay_slot_syscall),
         segment(0xE300, &hle_setup_heap),
+        segment(0xE400, &hle_create_sema),
     ];
     // Each conditional trap is an independent one-instruction segment, so a
     // false predicate retires to an untranslated boundary instead of flowing
@@ -1701,6 +1709,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xE100, "hle-unhandled-syscall-fixture"),
         entry(0xE200, "hle-delay-slot-syscall-fixture"),
         entry(0xE300, "hle-setup-heap-fixture"),
+        entry(0xE400, "hle-create-sema-fixture"),
     ];
     entries.extend(
         (0..conditional_traps.len())
@@ -1710,11 +1719,11 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     let mut roots = vec![
         0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200,
         0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
-        0xB000, 0xB100, 0xB200, 0xF000, 0xF004, 0xE000, 0xE100, 0xE200, 0xE300,
+        0xB000, 0xB100, 0xB200, 0xF000, 0xF004, 0xE000, 0xE100, 0xE200, 0xE300, 0xE400,
         // Keep the continuation PCs as explicit fixture roots as a regression
         // guard for multi-root analysis; production CFG discovery also reaches
         // them through its lenient SyscallContinuation edges.
-        0xE004, 0xE104, 0xE304,
+        0xE004, 0xE104, 0xE304, 0xE404,
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);

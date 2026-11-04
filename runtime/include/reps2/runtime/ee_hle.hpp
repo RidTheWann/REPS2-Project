@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -34,7 +35,13 @@ inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
+inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
 inline constexpr std::uint32_t kEeSyscallFlushCache = 0x64U;
+
+// The public description of CreateSema states that the call returns the new
+// semaphore's id on success and -1 on failure, so -1 is a guest-visible failure
+// code the guest already expects rather than an invented one.
+inline constexpr std::uint32_t kEeSyscallFailure = 0xFFFF'FFFFU;
 
 // SetupThread's documented "no caller stack" sentinel for $a1.
 inline constexpr std::uint32_t kEeSyscallStackSentinel = 0xFFFF'FFFFU;
@@ -143,6 +150,94 @@ struct EeSyscallService {
 // touches no other state. It stops being a stub only once a real cache model
 // exists; until then this is an accurate description of the host, not a
 // fabricated kernel behavior.
+// CreateSema (0x40): CreateSema(ee_sema_t *sema).
+//
+// The guest parameter block is four signed ints -- count, max_count, init_count,
+// wait_threads -- followed by the attribute and option words. Only init_count
+// and max_count are inputs: count and wait_threads are the fields
+// ReferSemaStatus (0x47) reports back, so they are read but never interpreted.
+//
+// The documented result is the new semaphore's id on success and -1 on failure.
+// A refused call writes that -1 and allocates nothing, so the guest sees the
+// documented failure code and the host never invents an id. What is validated,
+// with the reason recorded for diagnostics: word-aligned readable parameters, a
+// non-negative max_count/init_count pair, init_count not above max_count, and a
+// free slot in the kernel's 256-object table.
+//
+// Not modeled: no waiter list, no dispatcher interaction, and no write-back to
+// the parameter block (the guest block is an input, not a status mirror). Id
+// allocation order -- lowest free slot -- is a host choice, because only id
+// uniqueness and the documented table bound are evidenced, not the kernel's own
+// allocation order. See ADR 0066.
+[[nodiscard]] inline Status hle_create_sema(EeState& state) noexcept {
+    constexpr std::size_t kParameterWords = 6U;
+    constexpr std::size_t kParameterBytes = kParameterWords * 4U;
+
+    const std::uint32_t parameters = ee_syscall_argument(state, 0);
+    ++state.hle.create_sema_calls;
+    state.hle.last_sema_parameter_address = parameters;
+    state.hle.last_sema_id = -1;
+    state.hle.last_sema_rejection = EeSemaRejection::none;
+    state.hle.last_sema_init_count = 0;
+    state.hle.last_sema_max_count = 0;
+    state.hle.last_sema_attr = 0;
+    state.hle.last_sema_option = 0;
+
+    const auto refuse = [&state](EeSemaRejection reason) {
+        state.hle.last_sema_rejection = reason;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    };
+
+    std::uint32_t physical{};
+    if (resolve_ee_memory_access(state.memory, parameters, kParameterBytes, 4U, physical)
+        != Status::ok) {
+        return refuse(EeSemaRejection::unreadable_parameters);
+    }
+
+    std::array<std::uint32_t, kParameterWords> words{};
+    for (std::size_t index = 0; index < kParameterWords; ++index) {
+        const std::size_t offset = static_cast<std::size_t>(physical) + index * 4U;
+        words[index] = static_cast<std::uint32_t>(state.memory.main_ram[offset])
+            | (static_cast<std::uint32_t>(state.memory.main_ram[offset + 1U]) << 8U)
+            | (static_cast<std::uint32_t>(state.memory.main_ram[offset + 2U]) << 16U)
+            | (static_cast<std::uint32_t>(state.memory.main_ram[offset + 3U]) << 24U);
+    }
+
+    const auto max_count = static_cast<std::int32_t>(words[1]);
+    const auto init_count = static_cast<std::int32_t>(words[2]);
+    state.hle.last_sema_init_count = init_count;
+    state.hle.last_sema_max_count = max_count;
+    state.hle.last_sema_attr = words[4];
+    state.hle.last_sema_option = words[5];
+
+    if (init_count < 0 || max_count < 0) {
+        return refuse(EeSemaRejection::negative_counts);
+    }
+    if (init_count > max_count) {
+        return refuse(EeSemaRejection::init_exceeds_max);
+    }
+
+    for (std::size_t index = 0; index < kEeMaxSemaphores; ++index) {
+        EeSema& sema = state.hle.semaphores[index];
+        if (sema.in_use) {
+            continue;
+        }
+        sema.in_use = true;
+        sema.count = init_count;
+        sema.max_count = max_count;
+        sema.attr = words[4];
+        sema.option = words[5];
+        sema.create_pc = state.pc;
+        ++state.hle.semaphore_count;
+        const auto id = static_cast<std::uint32_t>(index);
+        state.hle.last_sema_id = static_cast<std::int32_t>(id);
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(id);
+        return Status::ok;
+    }
+    return refuse(EeSemaRejection::table_full);
+}
+
 [[nodiscard]] inline Status hle_flush_cache(EeState& state) noexcept {
     state.gpr[kEeSyscallResultRegister].low = 0;
     return Status::ok;
@@ -152,6 +247,7 @@ struct EeSyscallService {
 inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
     {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
+    {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},
     {kEeSyscallFlushCache, "FlushCache", &hle_flush_cache},
 };
 inline constexpr std::size_t kEeSyscallServiceCount =

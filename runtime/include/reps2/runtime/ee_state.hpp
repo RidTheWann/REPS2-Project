@@ -81,6 +81,54 @@ enum class ExceptionCode : std::uint8_t {
 /// Level-1 address errors for instruction fetches and data accesses.
 enum class AddressErrorCode : std::uint8_t { InstructionFetch = 4, Load = 4, Store = 5 };
 
+// ps2sdk's documented kernel limit (`MAX_SEMAPHORES 256`). Sema ids are indices
+// into this table, so the bound is the same one the guest sees.
+inline constexpr std::size_t kEeMaxSemaphores = 256;
+
+// Why a CreateSema (0x40) call returned the documented -1 instead of an id.
+// A rejection is a guest-visible failure code, not a host error: nothing is
+// allocated and no id is invented. The reason is recorded for diagnostics only.
+enum class EeSemaRejection : std::uint8_t {
+    none,
+    unreadable_parameters,
+    negative_counts,
+    init_exceeds_max,
+    table_full,
+};
+
+[[nodiscard]] constexpr const char* ee_sema_rejection_name(EeSemaRejection rejection) noexcept {
+    switch (rejection) {
+    case EeSemaRejection::none: return "none";
+    case EeSemaRejection::unreadable_parameters: return "unreadable_parameters";
+    case EeSemaRejection::negative_counts: return "negative_counts";
+    case EeSemaRejection::init_exceeds_max: return "init_exceeds_max";
+    case EeSemaRejection::table_full: return "table_full";
+    }
+    return "unknown";
+}
+
+// A semaphore object created through CreateSema (0x40).
+//
+// The public description of the guest parameter block lists count, max_count,
+// init_count, wait_threads, attr and option, and states that only init_count and
+// max_count need to be supplied. The kernel's own object keeps a count, a
+// maximum, the attribute/option words and a waiter list.
+//
+// What this model deliberately does not have is the waiter list: there is no
+// scheduler, so no thread can block. The object is therefore a counter and
+// nothing can be released from a wait by observing it. Signal/Wait/Poll are not
+// implemented yet, so this table is created state only (ADR 0066).
+struct EeSema {
+    bool in_use{};
+    std::int32_t count{};
+    std::int32_t max_count{};
+    std::uint32_t attr{};
+    std::uint32_t option{};
+    // The guest PC of the creating syscall, so a session can attribute an object
+    // back to the code that asked for it.
+    std::uint32_t create_pc{};
+};
+
 // Host-configured HLE (high-level emulation) service layer for the EE kernel
 // syscall interface declared in ee_hle.hpp. None of these fields is
 // guest-architectural state: they record what the host service layer observed,
@@ -116,6 +164,19 @@ struct EeHleState {
     std::uint32_t setup_heap_start{};
     std::uint32_t setup_heap_size{};
     std::uint32_t setup_heap_end{};
+    // CreateSema (0x40) observation. `semaphore_count` counts live objects, not
+    // ids handed out: nothing deletes objects yet, so the two happen to agree.
+    std::uint64_t create_sema_calls{};
+    std::uint32_t semaphore_count{};
+    std::uint32_t last_sema_parameter_address{};
+    std::int32_t last_sema_init_count{};
+    std::int32_t last_sema_max_count{};
+    std::uint32_t last_sema_attr{};
+    std::uint32_t last_sema_option{};
+    // -1 when the call was refused; otherwise the id written to $v0.
+    std::int32_t last_sema_id{-1};
+    EeSemaRejection last_sema_rejection{};
+    std::array<EeSema, kEeMaxSemaphores> semaphores{};
 };
 
 struct EeState {
