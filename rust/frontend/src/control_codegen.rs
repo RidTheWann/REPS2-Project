@@ -477,7 +477,7 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
 
 fn emit_instruction_trace(output: &mut String) {
     output.push_str(
-        "    if (state.instruction_trace_enabled) {\n"
+        &("    if (state.instruction_trace_enabled) {\n"
             .to_owned()
             + "        if (state.instruction_trace_count < reps2::runtime::EeState::kInstructionTraceWindowSize) {\n"
             + "            state.instruction_trace_pcs[state.instruction_trace_count++] = state.pc;\n"
@@ -487,7 +487,7 @@ fn emit_instruction_trace(output: &mut String) {
             + "            }\n"
             + "            state.instruction_trace_pcs[reps2::runtime::EeState::kInstructionTraceWindowSize - 1] = state.pc;\n"
             + "        }\n"
-            + "    }\n",
+            + "    }\n"),
     );
 }
 
