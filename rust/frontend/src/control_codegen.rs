@@ -282,11 +282,9 @@ fn emit_block_definition(output: &mut String, block: &ControlBlock) {
     ));
 
     for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+        emit_instruction_trace(output);
         output.push_str(&format!(
-            "    state.pc = 0x{:08X}U;\n\
-             if (state.instruction_trace_enabled && state.instruction_trace_count < reps2::runtime::EeState::kInstructionTraceWindowSize) {{\n\
-                 state.instruction_trace_pcs[state.instruction_trace_count++] = state.pc;\n\
-             }}\n",
+            "    state.pc = 0x{:08X}U;\n",
             instruction.guest_pc
         ));
         crate::codegen::emit_instruction(output, instruction_index, *instruction, false);
@@ -326,6 +324,7 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             delay_slot_policy,
         } => {
             output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
+            emit_instruction_trace(output);
             // A SYSCALL in an executed delay slot resumes at the branch target
             // or the fallthrough after the HLE layer services it, so the
             // predicate is materialized even when no annulment needs it.
@@ -378,6 +377,7 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             delay_slot,
         } => {
             output.push_str(&format!("    state.pc = 0x{guest_pc:08X}U;\n"));
+            emit_instruction_trace(output);
             emit_link_write(
                 output,
                 *link_register,
@@ -473,6 +473,10 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             ));
         }
     }
+}
+
+fn emit_instruction_trace(output: &mut String) {
+    output.push_str("    if (state.instruction_trace_enabled && state.instruction_trace_count < reps2::runtime::EeState::kInstructionTraceWindowSize) {\n        state.instruction_trace_pcs[state.instruction_trace_count++] = state.pc;\n    }\n");
 }
 
 fn emit_link_write(output: &mut String, register: Option<u8>, return_pc: u32) {

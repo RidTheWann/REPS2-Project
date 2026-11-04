@@ -449,6 +449,8 @@ enum class Status : std::uint8_t {
     state.cop0[kCop0PrId] = kEeProcessorId;
     state.cop0[kCop0Status] = 0x1040'0004U;
     state.instructions_executed = 0;
+    state.instruction_trace_count = 0;
+    state.instruction_trace_pcs.fill(0);
     // The HLE layer is host configuration, not guest state: reset it so a probe
     // starts from "disabled, nothing observed" and must opt in explicitly.
     state.hle = {};
