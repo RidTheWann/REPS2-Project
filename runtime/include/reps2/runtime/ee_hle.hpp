@@ -332,6 +332,25 @@ inline constexpr std::size_t kEeSyscallServiceCount =
         state.hle.last_syscall_arguments[index] = ee_syscall_argument(state, index);
     }
     state.hle.last_syscall_sp = static_cast<std::uint32_t>(state.gpr[29].low);
+    if (state.hle.syscall_memory_trace_enabled) {
+        const std::uint32_t address = ee_syscall_argument(state, 3);
+        state.hle.syscall_memory_trace_address = address;
+        state.hle.syscall_memory_trace_size = 0U;
+        state.hle.syscall_memory_changed_bytes = 0U;
+        state.hle.syscall_memory_trace_status = static_cast<std::uint8_t>(Status::ok);
+        std::uint32_t physical{};
+        const auto memory_status = resolve_ee_memory_access(
+            state.memory, address, EeHleState::kSyscallMemoryWindowSize, 1U, physical);
+        if (memory_status == Status::ok) {
+            state.hle.syscall_memory_trace_size = EeHleState::kSyscallMemoryWindowSize;
+            for (std::size_t index = 0; index < EeHleState::kSyscallMemoryWindowSize; ++index) {
+                state.hle.syscall_memory_before[index] =
+                    state.memory.main_ram[static_cast<std::size_t>(physical) + index];
+            }
+        } else {
+            state.hle.syscall_memory_trace_status = static_cast<std::uint8_t>(memory_status);
+        }
+    }
     // The "i" wrappers negate the number. Unsigned subtraction avoids the
     // INT32_MIN negation that signed arithmetic cannot represent.
     const std::uint32_t number =
@@ -348,6 +367,21 @@ inline constexpr std::size_t kEeSyscallServiceCount =
     const Status handler_status = service->handler(state);
     if (handler_status != Status::ok) {
         return handler_status;
+    }
+    if (state.hle.syscall_memory_trace_enabled
+        && state.hle.syscall_memory_trace_size != 0U) {
+        std::uint32_t physical{};
+        if (resolve_ee_memory_access(
+                state.memory, state.hle.syscall_memory_trace_address,
+                state.hle.syscall_memory_trace_size, 1U, physical) == Status::ok) {
+            for (std::size_t index = 0; index < state.hle.syscall_memory_trace_size; ++index) {
+                const auto value = state.memory.main_ram[static_cast<std::size_t>(physical) + index];
+                state.hle.syscall_memory_after[index] = value;
+                if (value != state.hle.syscall_memory_before[index]) {
+                    ++state.hle.syscall_memory_changed_bytes;
+                }
+            }
+        }
     }
     ++state.hle.syscall_handled_count;
     state.pc = resume_pc;

@@ -174,6 +174,16 @@ struct EeHleState {
     std::uint32_t last_syscall_v0_after{};
     std::uint32_t last_syscall_resume_pc{};
     std::uint32_t last_syscall_sp{};
+    // Optional syscall-boundary memory window. The pre-call snapshot records
+    // observable reads; the post-call comparison records guest writes.
+    static constexpr std::size_t kSyscallMemoryWindowSize = 256U;
+    bool syscall_memory_trace_enabled{};
+    std::uint32_t syscall_memory_trace_address{};
+    std::uint32_t syscall_memory_trace_size{};
+    std::array<std::uint8_t, kSyscallMemoryWindowSize> syscall_memory_before{};
+    std::array<std::uint8_t, kSyscallMemoryWindowSize> syscall_memory_after{};
+    std::uint32_t syscall_memory_changed_bytes{};
+    std::uint8_t syscall_memory_trace_status{};
     // SetupThread (0x3C) observation. No thread context object exists yet, so
     // this records the decoded arguments and the stack pointer the service
     // returned rather than a thread that could be scheduled.

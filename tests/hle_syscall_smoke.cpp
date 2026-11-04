@@ -651,6 +651,27 @@ int test_service_table_reports_names() {
 
 } // namespace
 
+int test_syscall_memory_trace_records_changes() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    state.hle.syscall_memory_trace_enabled = true;
+    state.gpr[3].low = kCreateSema;
+    state.gpr[4].low = kSemaParameters;
+    state.gpr[7].low = kSemaParameters;
+    store_sema_parameters(ram, kSemaParameters, 0, 4, 2, 0, 0U, 0U);
+    state.pc = 0xE400U;
+    const Status status = reps2::runtime::dispatch_ee_syscall(state, 16U);
+    if (status != Status::ok
+        || state.hle.syscall_memory_trace_size != 256U
+        || state.hle.syscall_memory_trace_status != static_cast<std::uint8_t>(Status::ok)
+        || state.hle.syscall_memory_changed_bytes != 0U) {
+        return 200;
+    }
+    return 0;
+}
+
 int main() {
     const struct {
         const char* what;
@@ -678,6 +699,7 @@ int main() {
         {"set syscall registers handler", &test_set_syscall_registers_guest_handler},
         {"set syscall rejects invalid registration", &test_set_syscall_rejects_invalid_registration},
         {"service table names", &test_service_table_reports_names},
+        {"syscall memory trace", &test_syscall_memory_trace_records_changes},
     };
 
     for (const auto& test : cases) {
