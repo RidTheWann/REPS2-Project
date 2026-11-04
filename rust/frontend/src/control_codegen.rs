@@ -478,15 +478,16 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
 fn emit_instruction_trace(output: &mut String) {
     output.push_str(
         "    if (state.instruction_trace_enabled) {\n"
-        "        if (state.instruction_trace_count < reps2::runtime::EeState::kInstructionTraceWindowSize) {\n"
-        "            state.instruction_trace_pcs[state.instruction_trace_count++] = state.pc;\n"
-        "        } else {\n"
-        "            for (std::size_t trace_index = 1; trace_index < reps2::runtime::EeState::kInstructionTraceWindowSize; ++trace_index) {\n"
-        "                state.instruction_trace_pcs[trace_index - 1] = state.instruction_trace_pcs[trace_index];\n"
-        "            }\n"
-        "            state.instruction_trace_pcs[reps2::runtime::EeState::kInstructionTraceWindowSize - 1] = state.pc;\n"
-        "        }\n"
-        "    }\n",
+            .to_owned()
+            + "        if (state.instruction_trace_count < reps2::runtime::EeState::kInstructionTraceWindowSize) {\n"
+            + "            state.instruction_trace_pcs[state.instruction_trace_count++] = state.pc;\n"
+            + "        } else {\n"
+            + "            for (std::size_t trace_index = 1; trace_index < reps2::runtime::EeState::kInstructionTraceWindowSize; ++trace_index) {\n"
+            + "                state.instruction_trace_pcs[trace_index - 1] = state.instruction_trace_pcs[trace_index];\n"
+            + "            }\n"
+            + "            state.instruction_trace_pcs[reps2::runtime::EeState::kInstructionTraceWindowSize - 1] = state.pc;\n"
+            + "        }\n"
+            + "    }\n",
     );
 }
 
