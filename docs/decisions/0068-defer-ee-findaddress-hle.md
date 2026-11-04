@@ -49,9 +49,14 @@ A regenerated MSVC retail probe with `/bigobj` executed with budget `2,757,047` 
 `6` handled services. The rolling window reported `16` PCs, but the generated
 probe recorded the initial-entry window (`0x0010A008` through `0x0010A040`)
 because tracing occurred before the generated block updated `state.pc`. This
-ordering defect was fixed in `ec2becc`; the probe must be regenerated before
-using the window as caller evidence. The prior output must not be used to infer
-the `FindAddress` ABI.
+ordering defect was fixed in `ec2becc`. After regeneration, the corrected
+window was:
+`0x0025EFAC,0x0025EFB0,0x0025EFB4,0x0025EFB8,0x0025EFBC,0x0025EFC0,`
+`0x0025EFC4,0x0025EFC8,0x0025F090,0x0025EFD0,0x0025EFD4,0x0025F090,`
+`0x0025EFDC,0x0025EFE0,0x0025EFE4,0x0025EF78`.
+The window reaches the syscall-adjacent caller path but does not include the
+post-service path because execution stops at the unhandled boundary. It provides
+control-flow context only; it does not establish the `FindAddress` ABI.
 
 ## Next evidence required
 
