@@ -9,10 +9,10 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 ## Verified repository state
 
 - Branch: `feat/m4-syscall-boundary-diagnostics`
-- HEAD: `739bd3a`
+- HEAD: `06c9307`
 - PR: `RidTheWann/REPS2-Project#79` (open; CI checks green; merge state clean)
 - Working tree: clean
-- Latest delivered work: optional syscall-boundary memory diagnostics and opt-in bounded instruction-PC tracing.
+- Latest delivered work: large retail probe support and rolling bounded instruction-PC tracing.
 
 ## Verified validation
 
@@ -34,10 +34,9 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 
 ## Active backlog
 
-1. Add a bounded rolling instruction trace so long retail runs expose the final 16 guest PCs, then regenerate and rerun Downhill Domination with `REPS2_INSTRUCTION_TRACE=1`.
-2. Recover the FindAddress caller's post-call control flow and register/memory use from actual executable evidence; do not implement the service without an oracle.
-3. Add any required trace-field regression assertions and document the resulting evidence in ADR 0068.
-4. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
+1. Recover the FindAddress caller's post-call control flow and register/memory use from actual executable evidence; do not implement the service without an oracle.
+2. Add any required trace-field regression assertions and document the resulting evidence in ADR 0068.
+3. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
 
 ## Release-gate status
 
