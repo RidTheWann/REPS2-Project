@@ -628,6 +628,27 @@ mod tests {
     }
 
     #[test]
+    fn records_instruction_trace_after_updating_pc() {
+        let words = [0x2408_0001, 0x03E0_0008, 0x0000_0000];
+        let segments = [segment(0x3000, &words)];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x3000)],
+            &[0x3000],
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic trace CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("C++ output");
+
+        let pc = cpp.find("state.pc = 0x00003000U").expect("instruction PC");
+        let trace = cpp
+            .find("state.instruction_trace_pcs[state.instruction_trace_count++]")
+            .expect("instruction trace write");
+        assert!(pc < trace);
+    }
+
+    #[test]
     fn emits_branch_likely_delay_slot_only_on_the_taken_path() {
         let words = [
             (0x14 << 26) | (8 << 21) | 2, // beql t0, zero, 0x100C

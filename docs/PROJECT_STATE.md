@@ -9,7 +9,7 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 ## Verified repository state
 
 - Branch: `feat/m4-syscall-boundary-diagnostics`
-- HEAD: `ec2becc` (source fix; retail evidence pending documentation commit)
+- HEAD: `0082cbd` (retail rolling-window evidence documented)
 - PR: `RidTheWann/REPS2-Project#79` (open; CI checks green; merge state clean)
 - Working tree: clean
 - Latest delivered work: large retail probe support and rolling bounded instruction-PC tracing.
@@ -35,8 +35,7 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 ## Active backlog
 
 1. Correlate the corrected final PC window with the FindAddress caller's disassembly and register/memory use; do not implement the service without an oracle.
-2. Add any required trace-field regression assertions and document the resulting evidence in ADR 0068.
-3. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
+2. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
 3. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
 
 ## Release-gate status
