@@ -47,10 +47,11 @@ A regenerated MSVC retail probe with `/bigobj` executed with budget `2,757,047` 
 `REPS2_INSTRUCTION_TRACE=1`. It reached the same unhandled service boundary:
 `status=14`, `PC=0x0025EF7C`, service `0x83`, with `7` syscall observations and
 `6` handled services. The rolling window reported `16` PCs, but the generated
-probe's execution path returned the initial-entry window (`0x0010A008` through
-`0x0010A040`) rather than a caller-adjacent window. Therefore this output proves
-trace emission and retention fields are present, but does not provide reliable
-post-call caller evidence. It must not be used to infer the `FindAddress` ABI.
+probe recorded the initial-entry window (`0x0010A008` through `0x0010A040`)
+because tracing occurred before the generated block updated `state.pc`. This
+ordering defect was fixed in `ec2becc`; the probe must be regenerated before
+using the window as caller evidence. The prior output must not be used to infer
+the `FindAddress` ABI.
 
 ## Next evidence required
 
