@@ -34,8 +34,9 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 
 ## Active backlog
 
-1. Preserve the caller correlation and trace regression assertions in the next PR update; do not implement `FindAddress` without an oracle.
-2. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
+1. Build and execute the generated Black native probe with a bounded budget; record the result without claiming boot.
+2. Preserve the caller correlation and trace regression assertions in the next PR update; do not implement `FindAddress` without an oracle.
+3. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
 
 ## Release-gate status
 
