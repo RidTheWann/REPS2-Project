@@ -282,11 +282,11 @@ fn emit_block_definition(output: &mut String, block: &ControlBlock) {
     ));
 
     for (instruction_index, instruction) in block.instructions.iter().enumerate() {
-        emit_instruction_trace(output);
         output.push_str(&format!(
             "    state.pc = 0x{:08X}U;\n",
             instruction.guest_pc
         ));
+        emit_instruction_trace(output);
         crate::codegen::emit_instruction(output, instruction_index, *instruction, false);
     }
 
