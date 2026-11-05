@@ -1,6 +1,6 @@
 //! Reachability-guided executable analysis and delay-slot-aware control-flow graphs.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 
 use crate::elf::{self, Image, LoadedSegment};
@@ -1037,10 +1037,24 @@ fn build_cfg(
         };
 
         register_block_owners(&block, &mut owners)?;
-        let next_targets = block_targets(&block);
+        let mut next_targets = block_targets(&block);
         let trap_continuations = lenient_block_targets(&block);
-        if let Terminator::IndirectJump { instruction, .. } = &block.terminator {
-            unresolved_indirect_jumps.insert(instruction.pc);
+        if let Terminator::IndirectJump {
+            instruction,
+            source_register,
+            ..
+        } = &block.terminator
+        {
+            match resolve_indirect_jump_target(&block, *source_register) {
+                Some(target) => {
+                    if is_executable_view(target) && !next_targets.contains(&target) {
+                        next_targets.push(target);
+                    }
+                }
+                None => {
+                    unresolved_indirect_jumps.insert(instruction.pc);
+                }
+            }
         }
         blocks.insert(start_pc, block);
 
@@ -1345,6 +1359,62 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
 
 /// Successors the analysis must translate because guest register state requires
 /// them: the architectural successors of the terminator.
+/// Within-block constant propagation for the address register used by an
+/// indirect jump. Recognises the common address-loading idiom (e.g.
+/// `lui $t9, hi; ori $t9, $t9, lo` followed by `jr $t9` or `jalr $t9`) so a
+/// statically-known indirect target can be discovered as a normal block
+/// instead of an unresolved stop.
+///
+/// Conservative: never invents a target. Returns `None` when the source
+/// register's value cannot be determined from the block's immediate-forming
+/// instructions.
+fn resolve_indirect_jump_target(block: &BasicBlock, source_register: u8) -> Option<u32> {
+    if source_register == 0 {
+        return None; // $zero is not a meaningful indirect target here
+    }
+    let mut constants: HashMap<u8, u32> = HashMap::new();
+    for instruction in &block.instructions {
+        match instruction.opcode {
+            Opcode::Lui => {
+                constants.insert(instruction.rt, (instruction.immediate as u32) << 16);
+            }
+            Opcode::Ori | Opcode::Addiu | Opcode::Andi | Opcode::Xori => {
+                let base = if instruction.rs == 0 {
+                    Some(0u32)
+                } else {
+                    constants.get(&instruction.rs).copied()
+                };
+                match base {
+                    Some(base) => {
+                        let result = match instruction.opcode {
+                            Opcode::Ori => base | instruction.immediate as u32,
+                            Opcode::Addiu => {
+                                base.wrapping_add(instruction.signed_immediate() as u32)
+                            }
+                            Opcode::Andi => base & instruction.immediate as u32,
+                            Opcode::Xori => base ^ instruction.immediate as u32,
+                            _ => unreachable!(),
+                        };
+                        constants.insert(instruction.rt, result);
+                    }
+                    None => {
+                        // Result depends on an unknown register.
+                        constants.remove(&instruction.rt);
+                    }
+                }
+            }
+            Opcode::Nop => {}
+            _ => {
+                // Any other instruction may clobber a register we do not
+                // precisely track; drop all tracked constants rather than
+                // risk a stale value.
+                constants.clear();
+            }
+        }
+    }
+    constants.get(&source_register).copied()
+}
+
 fn block_targets(block: &BasicBlock) -> Vec<u32> {
     block
         .terminator
@@ -1822,13 +1892,13 @@ mod tests {
         )
         .expect("KSEG0 control flow");
 
-        // The call block and the callee block are reachable statically. A
-        // register-indirect `jr` return has no static destination, so no
-        // continuation block is invented for it.
+        // The call block and the callee block are reachable statically: the
+        // `jalr $8` target is resolved from the `lui`/`addiu` address load, so
+        // no indirect jump is left unresolved. The register-indirect `jr $ra`
+        // return has a runtime destination, so it is a `Return` terminator,
+        // not an unresolved indirect jump.
         assert_eq!(graph.blocks.len(), 2);
-        // Only the `jalr` target is unresolved; the callee itself was reached
-        // statically because the same image contains it.
-        assert_eq!(graph.unresolved_indirect_jumps, vec![0x8010_0008]);
+        assert!(graph.unresolved_indirect_jumps.is_empty());
         assert!(graph.external_targets.is_empty());
         assert!(matches!(
             graph.blocks[&0x8010_0000].terminator,
@@ -1837,20 +1907,15 @@ mod tests {
                 ..
             }
         ));
-        let callee = discover_cfg(
-            &segments,
-            vec![entry(0x8010_0010)],
-            &[0x8010_0010],
-            AnalysisLimits::default(),
-        )
-        .expect("KSEG0 callee");
-        assert_eq!(callee.blocks[&0x8010_0010].instructions.len(), 1);
+        // The callee is reached through the resolved indirect call, not
+        // through a separate manual root.
+        assert!(graph.blocks.contains_key(&0x8010_0010));
         assert_eq!(
-            callee.blocks[&0x8010_0010].instructions[0].opcode,
+            graph.blocks[&0x8010_0010].instructions[0].opcode,
             Opcode::Addiu
         );
         assert!(matches!(
-            callee.blocks[&0x8010_0010].terminator,
+            graph.blocks[&0x8010_0010].terminator,
             Terminator::Return { .. }
         ));
 
@@ -1860,6 +1925,52 @@ mod tests {
         // by the image, not guessed by the analyzer.
         assert!(!contains_executable_address(&segments, 0x0010_0010));
         assert!(contains_executable_address(&segments, 0x8010_0010));
+    }
+
+    #[test]
+    fn follows_constant_indirect_jump_target() {
+        //   lui  t9, 0x0010      # t9 = 0x00100000
+        //   ori  t9, t9, 0x0010  # t9 = 0x00100010
+        //   jr   t9              # indirect jump to 0x00100010
+        //   nop                  # delay slot
+        //   addiu t1, zero, 1    # target block at 0x00100010
+        //   jr   ra              # return
+        //   nop                  # return delay slot
+        let words = [
+            0x3C09_0010, // lui  $9, 0x0010
+            0x3529_0010, // ori  $9, $9, 0x0010
+            0x0120_0008, // jr   $9
+            0x0000_0000, // delay slot
+            0x2401_0001, // target: addiu $1, $0, 1
+            0x03E0_0008, // jr $ra
+            0x0000_0000, // return delay slot
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("constant indirect jump");
+
+        // The `jr $9` target is resolved to 0x00100010, so the target block is
+        // discovered and no indirect jump is left unresolved.
+        assert_eq!(graph.blocks.len(), 2);
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_0010));
+        assert!(matches!(
+            graph.blocks[&0x0010_0000].terminator,
+            Terminator::IndirectJump {
+                source_register: 9,
+                ..
+            }
+        ));
+        assert_eq!(
+            graph.blocks[&0x0010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
     }
 
     #[test]
