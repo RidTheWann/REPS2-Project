@@ -19,6 +19,21 @@ MILESTONE_HEADER = re.compile(r"^##\s+(M\d+)\s+—\s+(.+?)\s*$")
 CHECKBOX = re.compile(r"^\s*-\s+\[([ xX])\]\s+(.+?)\s*$")
 GATE_LINE = re.compile(r"^\s*-\s*(Alpha|Public Beta|REPS2 1\.0):\s*(.+?)\s*$")
 
+# Verified cover serials from xlenore/ps2-covers; artwork is hotlinked, not vendored.
+COVER_SERIALS = (
+    "SCUS-97328", "SCUS-97399", "SCUS-97472", "SLUS-20312",
+    "SLUS-20341", "SLUS-20370", "SLUS-20635", "SLUS-20915",
+    "SLUS-20946", "SLUS-20964", "SLUS-21050", "SLUS-21134",
+    "SLUS-21267", "SLUS-21269",
+)
+COVER_IMAGE_BASE = (
+    "https://raw.githubusercontent.com/xlenore/ps2-covers/main/"
+    "covers/default/"
+)
+COVER_IMAGE_URLS = tuple(
+    f"{COVER_IMAGE_BASE}{serial}.jpg" for serial in COVER_SERIALS
+)
+
 
 def parse_roadmap(source: str) -> dict[str, Any]:
     """Count checked and unchecked roadmap tasks, grouped by milestone."""
@@ -126,7 +141,7 @@ def _clip(value: str, limit: int = 43) -> str:
     return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
 
 
-def render_svg(data: dict[str, Any]) -> str:
+def render_svg(data: dict[str, Any], *, glass: bool = False) -> str:
     """Render a restrained, next-generation systems dashboard in SVG."""
     width = 1160
     totals = data["totals"]
@@ -168,7 +183,7 @@ def render_svg(data: dict[str, Any]) -> str:
             <path d="M32 0H0V32" fill="none" stroke="#8aa4c8" stroke-opacity=".055" stroke-width="1"/>
           </pattern>
         </defs>""",
-        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="url(#surface)" stroke="#26364d"/>',
+        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="url(#surface)" fill-opacity="{0.56 if glass else 1}" stroke="#26364d"/>',
         f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#ambient)"/>',
         f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#grid)"/>',
         '<path d="M40 124H1120" stroke="#26364d" stroke-width="1"/>',
@@ -177,7 +192,7 @@ def render_svg(data: dict[str, Any]) -> str:
         f'<text x="1120" y="46" text-anchor="end" fill="#7185a2" font-family="Consolas,Menlo,monospace" font-size="10">REPOSITORY STATE  •  {_esc(generated)}</text>',
         '<text x="40" y="91" fill="#eef5ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="31" font-weight="650" letter-spacing="-.7">Engineering progress</text>',
         '<text x="42" y="111" fill="#8da1bd" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">A live view of the REPS2 roadmap, implementation gates and real-title evidence.</text>',
-        '<rect x="40" y="148" width="1080" height="151" rx="13" fill="#0b1220" fill-opacity=".82" stroke="#26364d"/>',
+        f'<rect x="40" y="148" width="1080" height="151" rx="13" fill="#0b1220" fill-opacity="{0.68 if glass else 0.82}" stroke="#26364d"/>',
         '<text x="66" y="180" fill="#8fa6c3" font-family="Consolas,Menlo,monospace" font-size="10" font-weight="600" letter-spacing="1.4">ROADMAP COMPLETION</text>',
         f'<text x="64" y="245" fill="#e6f8ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="54" font-weight="700" letter-spacing="-2">{percent}<tspan fill="#67e8f9" font-size="27">%</tspan></text>',
         f'<text x="244" y="202" fill="#e2ebf8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="600">{completed:,} of {total:,} tasks completed</text>',
@@ -212,7 +227,7 @@ def render_svg(data: dict[str, Any]) -> str:
             stage_status = "PENDING"
             stage_color = "#8394ad"
         parts.extend([
-            f'<rect x="40" y="{y}" width="1080" height="42" rx="7" fill="#111b2b" fill-opacity=".58"/>',
+            f'<rect x="40" y="{y}" width="1080" height="42" rx="7" fill="#111b2b" fill-opacity="{0.40 if glass else 0.58}"/>',
             f'<text x="64" y="{y + 25}" fill="#67e8f9" font-family="Consolas,Menlo,monospace" font-size="11" font-weight="600">{milestone_id}</text>',
             f'<text x="112" y="{y + 25}" fill="#dce7f6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500">{title}</text>',
             f'<rect x="540" y="{y + 17}" width="350" height="6" rx="3" fill="#293a52"/>',
@@ -236,7 +251,7 @@ def render_svg(data: dict[str, Any]) -> str:
         status = gate["status"]
         status_color = "#7ee7c0" if status.lower() in {"met", "claimed"} else "#f6c777"
         parts.extend([
-            f'<rect x="{x}" y="{gates_top}" width="{column_width}" height="54" rx="8" fill="#101a29" stroke="#26364d"/>',
+            f'<rect x="{x}" y="{gates_top}" width="{column_width}" height="54" rx="8" fill="#101a29" fill-opacity="{0.62 if glass else 1}" stroke="#26364d"/>',
             f'<text x="{x + 15}" y="{gates_top + 20}" fill="#8298b5" font-family="Consolas,Menlo,monospace" font-size="9" font-weight="600" letter-spacing=".8">{_esc(gate["label"]).upper()}</text>',
             f'<text x="{x + 15}" y="{gates_top + 40}" fill="{status_color}" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="600">{_esc(_clip(status, 43))}</text>',
         ])
@@ -254,17 +269,22 @@ def render_svg(data: dict[str, Any]) -> str:
 
 
 def render_index_html() -> str:
-    return """<!doctype html>
+    """Render the full dashboard with an upstream PS2-cover wallpaper."""
+    cover_tiles = "\n".join(
+        f'<div class="cover-tile"><img src="{url}" alt="" loading="eager" decoding="async" referrerpolicy="no-referrer"></div>'
+        for url in (*COVER_IMAGE_URLS, *reversed(COVER_IMAGE_URLS))
+    )
+    page = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#090e19">
+  <meta name="theme-color" content="#050a12">
   <title>REPS2 — Engineering progress</title>
   <style>
     :root {
       color-scheme: dark;
-      background: #080c15;
+      background: #050a12;
       color: #e7effb;
       font-family: Inter, "Segoe UI", Arial, sans-serif;
     }
@@ -273,50 +293,124 @@ def render_index_html() -> str:
       margin: 0;
       min-height: 100vh;
       padding: 36px 20px;
+      overflow-x: hidden;
+      position: relative;
+      isolation: isolate;
+      background: #050a12;
+    }
+    .cover-wall {
+      position: fixed;
+      z-index: -1;
+      inset: 0;
+      overflow: hidden;
+      background: #050a12;
+    }
+    .cover-grid {
+      position: absolute;
+      inset: -10vh -7vw;
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      grid-auto-rows: clamp(210px, 29vh, 320px);
+      gap: 10px;
+      transform: rotate(-3deg) scale(1.12);
+      filter: saturate(.82) brightness(.72);
+    }
+    .cover-tile {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid rgba(174, 204, 240, .12);
+      border-radius: 9px;
+      background: linear-gradient(145deg, #18243a, #0b1220);
+    }
+    .cover-tile img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: .88;
+    }
+    .wall-shade {
+      position: absolute;
+      inset: 0;
       background:
-        radial-gradient(ellipse at 85% 0%, rgba(82,105,216,.10), transparent 42%),
-        #080c15;
+        radial-gradient(ellipse at 50% 18%, rgba(16, 42, 73, .12), transparent 55%),
+        linear-gradient(180deg, rgba(2, 6, 13, .48), rgba(2, 6, 13, .72));
+      backdrop-filter: blur(1.5px);
     }
     main {
       width: min(1160px, 100%);
       margin: 0 auto;
       padding: 12px;
-      border: 1px solid #1d2b40;
+      border: 1px solid rgba(120, 160, 210, .28);
       border-radius: 16px;
-      background: rgba(12,18,30,.88);
+      background: rgba(5, 10, 18, .30);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, .38);
+      backdrop-filter: blur(18px) saturate(125%);
+      -webkit-backdrop-filter: blur(18px) saturate(125%);
     }
-    img { display: block; width: 100%; height: auto; }
+    main > img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
     footer {
       margin: 0 12px;
       padding: 14px 8px 8px;
-      border-top: 1px solid #1d2b40;
-      color: #8295b0;
+      border-top: 1px solid rgba(120, 160, 210, .20);
+      color: #9aabc2;
       font-size: 12px;
       line-height: 1.7;
     }
-    a { color: #67e8f9; text-decoration: none; }
-    a:hover { color: #a5f3fc; text-decoration: underline; }
-    @media (max-width: 640px) {
+    a { color: #78e7f2; text-decoration: none; }
+    a:hover { color: #b8f5fb; text-decoration: underline; }
+    @supports not ((backdrop-filter: blur(1px))) {
+      main { background: rgba(5, 10, 18, .88); }
+    }
+    @media (max-width: 760px) {
       body { padding: 12px 6px; }
-      main { padding: 4px; border-radius: 10px; }
+      .cover-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-auto-rows: 190px;
+        gap: 7px;
+      }
+      main { padding: 5px; border-radius: 10px; }
       footer { margin: 0 4px; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      main { background: rgba(5, 10, 18, .92); backdrop-filter: none; }
+      .wall-shade { background: rgba(2, 6, 13, .78); backdrop-filter: none; }
     }
   </style>
 </head>
 <body>
+  <div class="cover-wall" aria-hidden="true">
+    <div class="cover-grid">
+      {{COVER_TILES}}
+    </div>
+    <div class="wall-shade"></div>
+  </div>
   <main>
-    <img src="progress.svg" alt="REPS2 engineering progress dashboard">
+    <img src="progress-overlay.svg" alt="REPS2 engineering progress dashboard">
     <footer>
       Live status generated from
       <a href="https://github.com/RidTheWann/REPS2-Project/blob/main/docs/ROADMAP.md">the engineering roadmap</a>
       and <a href="https://github.com/RidTheWann/REPS2-Project/blob/main/docs/PROJECT_STATE.md">verified project state</a>.
       Checklist completion is not a game compatibility or release-readiness score.
       <a href="progress.json">Progress data (JSON)</a>.
+      Cover artwork is loaded directly from
+      <a href="https://github.com/xlenore/ps2-covers">xlenore/ps2-covers</a>;
+      images remain hosted by the upstream project and are not vendored here; artwork remains the property of its respective rights holders.
     </footer>
   </main>
+  <script>
+    document.querySelectorAll(".cover-tile img").forEach((image) => {
+      image.addEventListener("error", () => image.closest(".cover-tile")?.remove(), { once: true });
+    });
+  </script>
 </body>
 </html>
 """
+    return page.replace("{{COVER_TILES}}", cover_tiles)
 
 
 def main() -> int:
@@ -332,6 +426,9 @@ def main() -> int:
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "progress.svg").write_text(render_svg(data), encoding="utf-8")
+    (args.output_dir / "progress-overlay.svg").write_text(
+        render_svg(data, glass=True), encoding="utf-8"
+    )
     (args.output_dir / "progress.json").write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
