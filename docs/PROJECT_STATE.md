@@ -13,26 +13,30 @@ no success is fabricated.
 
 The frontend CFG now performs bounded, within-basic-block constant propagation
 for indirect `JR/JALR` source registers formed by `LUI`, `ORI`, `ADDIU`,
-`DADDIU`, `ANDI`, or `XORI`. Targets are queued only when the calculated
-32-bit address belongs to an executable view. This is static discovery, not a
-claim that a retail game has passed the former `0x0025EF38` boundary: a new
-Downhill Domination probe with this resolver has not yet been run.
+`DADDIU`, `ANDI`, or `XORI`. Resolved destinations are explicit CFG
+`Jump`/`Call` edges; executable destinations are traversed, known
+non-executable destinations are retained in `external_targets`, and unknown
+register-derived destinations remain unresolved. This is static discovery,
+not a claim that a retail game has passed the former `0x0025EF38` boundary:
+a new Downhill Domination probe with this resolver has not yet been run.
 
 ## Verified repository state
 
-- Default branch: `main` at `b966a96` (last verified main commit during this work).
-- PR #4 is the active integration branch, based on `main`; its changes include
-  the documentation corrections originally proposed by PR #3, EE syscall
-  context preservation, indirect-target analysis, and CFG regression tests.
+- Default branch: `main` at `3409a10` (PR #4 squash-merged on 2026-11-05).
+- PR #4 is **closed and merged**; merge commit
+  `3409a10d09c9b21944107de16361fc3e2019f553` contains the M4 documentation,
+  syscall-handler context preservation, indirect-target CFG analysis, and
+  regression tests.
 - PR #3 was **closed without a GitHub merge** after its documentation changes
   were folded into PR #4. Do not describe PR #3 as independently merged.
-- `main` has branch protection enabled. Required checks are
+- `main` remains protected. Required checks are
   `Rust frontend (ubuntu-latest)`, `Rust frontend (windows-latest)`, and
   `Rust frontend (MSRV 1.88)`.
-- Do not merge PR #4 until the required checks for its final head commit pass
-  and the diff has been reviewed.
+- PR #4's final head passed all three required checks on Ubuntu, Windows, and
+  Rust MSRV 1.88 before squash merge. Review follow-up fixes were included in
+  that verified head.
 
-## Delivered in the active PR #4
+## Delivered in PR #4 (merged)
 
 - Corrected stale project-state descriptions and removed the superseded
   FindAddress deferral text from ADR 0068.
@@ -50,9 +54,8 @@ Downhill Domination probe with this resolver has not yet been run.
 - Preserve resolved indirect destinations as explicit `Jump`/`Call` CFG edges;
   known non-executable destinations remain visible in `external_targets`, and
   `JR $zero` is treated as a constant transfer to address zero.
-- The latest source/test changes must remain subject to the required Windows,
-  Ubuntu, and MSRV CI checks. A passing synthetic/host CI run does not replace
-  a real-title probe.
+- The merged source/test changes passed the required Windows, Ubuntu, and
+  MSRV CI checks. Passing synthetic/host CI does not replace a real-title probe.
 
 ## M4 real-title evidence
 
