@@ -492,8 +492,9 @@ def render_readme_png(
     wall = Image.new("RGB", (wall_width, wall_height), (5, 10, 18))
     draw = ImageDraw.Draw(wall)
 
+    tile_assets = cover_assets + list(reversed(cover_assets))
     for index in range(rows * columns):
-        payload = cover_assets[index % len(cover_assets)]
+        payload = tile_assets[index % len(tile_assets)]
         try:
             with Image.open(BytesIO(payload)) as source:
                 cover = ImageOps.fit(
