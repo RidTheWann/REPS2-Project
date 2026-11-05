@@ -89,6 +89,7 @@ No guest-visible boot stage was demonstrated.
         self.assertEqual(svg.count('<image href="https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default/'), 8)
         self.assertIn('fill-opacity=".55"', svg)
         self.assertIn("decorative cover art", svg)
+        self.assertIn('id="coverSoft"', svg)
         self.assertIn("Shadow of the Colossus", svg)
 
     def test_dashboard_page_uses_dark_systems_layout(self):
@@ -98,7 +99,7 @@ No guest-visible boot stage was demonstrated.
         self.assertIn("progress.svg", page)
         self.assertIn("<svg", page)
         self.assertIn("xlenore/ps2-covers", page)
-        self.assertIn("backdrop-filter", page)
+        self.assertIn('fill-opacity=".55"', page)
         self.assertIn("#080c15", page)
         self.assertIn("radial-gradient", page)
         self.assertNotIn("box-shadow", page)
