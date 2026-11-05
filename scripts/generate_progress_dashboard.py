@@ -404,7 +404,8 @@ def render_index_html() -> str:
       <a href="progress.json">Progress data (JSON)</a>.
       Cover artwork is loaded directly from
       <a href="https://github.com/xlenore/ps2-covers">xlenore/ps2-covers</a>;
-      images remain hosted by the upstream project and are not vendored here; artwork remains the property of its respective rights holders.
+      the HTML wallpaper hotlinks this source, while the README preview is generated as a composite during deployment.
+      Individual cover files are not committed here; artwork remains the property of its respective rights holders.
     </footer>
   </main>
   <script>
@@ -535,12 +536,11 @@ def render_readme_png(
     wall = wall.crop((crop_left, crop_top, crop_left + width, crop_top + height))
 
     shade = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    shade_pixels = shade.load()
+    shade_draw = ImageDraw.Draw(shade)
     for y in range(height):
         ratio = y / max(1, height - 1)
         alpha = round(122 + ratio * 46)
-        for x in range(width):
-            shade_pixels[x, y] = (2, 6, 13, alpha)
+        shade_draw.line((0, y, width, y), fill=(2, 6, 13, alpha))
     background = Image.alpha_composite(wall.convert("RGBA"), shade)
     background = background.filter(ImageFilter.GaussianBlur(radius=3))
 
