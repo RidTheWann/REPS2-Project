@@ -8,6 +8,7 @@ on:
       - "docs/PROJECT_STATE.md"
       - "scripts/generate_progress_dashboard.py"
       - "scripts/test_progress_dashboard.py"
+      - "scripts/dashboard-requirements.txt"
       - ".github/workflows/progress-dashboard.yml"
   workflow_dispatch:
 
