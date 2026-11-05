@@ -270,7 +270,7 @@ def render_svg(data: dict[str, Any], *, glass: bool = False) -> str:
 
 def render_index_html() -> str:
     """Render the full dashboard with an upstream PS2-cover wallpaper."""
-    cover_tiles = "\\n".join(
+    cover_tiles = "\n".join(
         f'<div class="cover-tile"><img src="{url}" alt="" loading="eager" decoding="async" referrerpolicy="no-referrer"></div>'
         for url in (*COVER_IMAGE_URLS, *reversed(COVER_IMAGE_URLS))
     )
