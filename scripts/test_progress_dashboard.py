@@ -119,8 +119,8 @@ No guest-visible boot stage was demonstrated.
         self.assertEqual(glass_rects[1].attrib.get("fill-opacity"), ".035")
         self.assertEqual(glass_rects[2].attrib.get("opacity"), ".12")
         self.assertEqual(glass_rects[3].attrib.get("fill-opacity"), "0.34")
-        self.assertIn('fill-opacity="0.20"', glass_svg)
-        self.assertIn('fill-opacity="0.30"', glass_svg)
+        self.assertIn('fill-opacity="0.2"', glass_svg)
+        self.assertIn('fill-opacity="0.3"', glass_svg)
         self.assertNotIn('fill="url(#ambient)"', glass_svg)
 
     def test_empty_roadmap_is_rejected(self):
