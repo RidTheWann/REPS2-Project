@@ -99,15 +99,29 @@ No guest-visible boot stage was demonstrated.
             28,
         )
 
-    def test_glass_svg_is_translucent_while_readme_svg_stays_opaque(self):
+    def test_glass_svg_preserves_the_cover_wall_through_transparent_canvas(self):
         data = build_dashboard_data(self.roadmap, self.project_state)
         readme_svg = render_svg(data)
         glass_svg = render_svg(data, glass=True)
 
-        ET.fromstring(readme_svg)
-        ET.fromstring(glass_svg)
-        self.assertNotIn('fill-opacity="0.56"', readme_svg)
-        self.assertIn('fill-opacity="0.56"', glass_svg)
+        readme_root = ET.fromstring(readme_svg)
+        glass_root = ET.fromstring(glass_svg)
+        ns = "{http://www.w3.org/2000/svg}"
+        readme_rects = readme_root.findall(f"{ns}rect")
+        glass_rects = glass_root.findall(f"{ns}rect")
+
+        # README's standalone preview keeps its own solid background.
+        self.assertEqual(readme_rects[0].attrib.get("fill"), "url(#surface)")
+        # Pages overlay leaves the wallpaper visible; only a near-clear veil
+        # and dark translucent information panels are drawn on top.
+        self.assertEqual(glass_rects[0].attrib.get("fill"), "none")
+        self.assertEqual(glass_rects[1].attrib.get("fill"), "#050a12")
+        self.assertEqual(glass_rects[1].attrib.get("fill-opacity"), ".035")
+        self.assertEqual(glass_rects[2].attrib.get("opacity"), ".12")
+        self.assertEqual(glass_rects[3].attrib.get("fill-opacity"), "0.34")
+        self.assertIn('fill-opacity="0.20"', glass_svg)
+        self.assertIn('fill-opacity="0.30"', glass_svg)
+        self.assertNotIn('fill="url(#ambient)"', glass_svg)
 
     def test_empty_roadmap_is_rejected(self):
         with self.assertRaises(ValueError):
