@@ -595,6 +595,87 @@ int test_set_syscall_rejects_invalid_registration() {
     return 0;
 }
 
+int test_registered_handler_runs_through_the_dispatcher() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    // Install a guest handler for slot 0x83 (FindAddress) at 0xE600: addiu v0,
+    // zero, 42; jr ra. The HLE layer diverts the SYSCALL into the translated
+    // guest routine and resumes at the instruction after the trap.
+    auto& registration = state.hle.syscall_registrations[0x83U];
+    registration.in_use = true;
+    registration.handler_address = 0xE600U;
+    state.gpr[3].low = 0x83U;           // FindAddress service number
+    state.gpr[4].low = 0x8000'0000U;    // $a0: kernel address
+    state.gpr[5].low = 0x8008'0000U;    // $a1: kernel address
+    state.gpr[31].low = kUnreachableReturnPc;
+    state.pc = 0xE700U;                 // syscall; addiu v0, zero, 0; jr ra
+    const Status status = reps2::generated::execute_cfg(state, 64U);
+    if (status != Status::external_control_flow
+        || state.pc != kUnreachableReturnPc) {
+        return 180;
+    }
+    // The handler's result survives as the service result, and the caller's
+    // context (including $ra, now back to the sentinel) was fully restored.
+    if (state.gpr[2].low != 42ULL) return 181;
+    if (state.hle.guest_handler_dispatches != 1U || state.hle.guest_handler_returns != 1U) return 182;
+    if (state.hle.syscall_handler_depth != 0U) return 183;
+    if (!registration.in_use || registration.handler_address != 0xE600U) return 184;
+    if (state.hle.last_syscall_resume_pc != 0xE704U) return 185;
+    return 0;
+}
+
+int test_guest_handler_restore_preserves_service_result() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    const std::uint32_t handler = 0x1000U;
+    const std::uint32_t resume = 0x2000U;
+    state.gpr[4].low = 0x1111'1111U;
+    state.gpr[5].low = 0x2222'2222U;
+    state.hi = 0x3333'3333U;
+    state.lo = 0x4444'4444U;
+    state.fpr[7] = 0x5555'5555U;
+    state.acc = 0x6666'6666U;
+    state.fcsr = 0x7777'7777U;
+    if (reps2::runtime::enter_ee_syscall_handler(state, 0x83U, handler, resume)
+        != Status::ok) {
+        return 190;
+    }
+    if (state.pc != handler || state.gpr[31].low != 0xFFFF'FFFF'FFFF'FFE0ULL) return 191;
+    // The handler clobbers everything but leaves its result in $v0.
+    state.gpr = {};
+    state.gpr[0] = {};
+    state.gpr[2].low = 42ULL;
+    state.hi = state.lo = state.hi1 = state.lo1 = 0;
+    state.fpr.fill(0);
+    state.acc = 0;
+    state.fcsr = 0;
+    if (reps2::runtime::return_from_ee_syscall_handler(state) != Status::ok) return 192;
+    if (state.pc != resume) return 193;
+    if (state.gpr[4].low != 0x1111'1111U || state.gpr[5].low != 0x2222'2222U) return 194;
+    if (state.gpr[2].low != 42ULL) return 195;
+    if (state.hi != 0x3333'3333U || state.lo != 0x4444'4444U) return 196;
+    if (state.fpr[7] != 0x5555'5555U || state.acc != 0x6666'6666U
+        || state.fcsr != 0x7777'7777U) return 197;
+    if (state.gpr[0].low != 0U || state.gpr[0].high != 0U) return 198;
+    if (state.hle.syscall_handler_depth != 0U) return 199;
+    return 0;
+}
+
+int test_guest_handler_overflow_refuses_instead_of_recursing() {
+    EeState state{};
+    state.hle.syscall_handler_depth = reps2::runtime::kEeMaxSyscallHandlerDepth;
+    if (reps2::runtime::enter_ee_syscall_handler(state, 0, 0x1000U, 0x2000U)
+        != Status::syscall_handler_overflow) {
+        return 200;
+    }
+    if (state.hle.syscall_handler_depth != reps2::runtime::kEeMaxSyscallHandlerDepth) return 201;
+    if (state.hle.guest_handler_dispatches != 0U || state.hle.guest_handler_returns != 0U) return 202;
+    return 0;
+}
+
 int test_delay_slot_syscall_without_the_layer_raises_the_exception() {
     EeState state{};
     state.pc = 0xE200U;
@@ -700,6 +781,9 @@ int main() {
         {"set syscall rejects invalid registration", &test_set_syscall_rejects_invalid_registration},
         {"service table names", &test_service_table_reports_names},
         {"syscall memory trace", &test_syscall_memory_trace_records_changes},
+        {"registered handler runs through the dispatcher", &test_registered_handler_runs_through_the_dispatcher},
+        {"guest handler restore preserves service result", &test_guest_handler_restore_preserves_service_result},
+        {"guest handler overflow refuses recursion", &test_guest_handler_overflow_refuses_instead_of_recursing},
     };
 
     for (const auto& test : cases) {

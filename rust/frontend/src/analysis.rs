@@ -535,18 +535,27 @@ pub struct FunctionDiscovery {
     /// Addresses whose first word is `addiu $sp, $sp, -N`, the PS2/EE ABI
     /// callee prologue.
     pub prologue_candidates: BTreeSet<u32>,
-    /// Number of aligned words examined.
+    /// Code addresses stored as 32-bit words in file-backed, non-executable
+    /// segments: callback, vtable and syscall-handler tables. A title can reach
+    /// such a routine without any static `JAL`, so these are equally candidate
+    /// roots.
+    pub data_pointer_candidates: BTreeSet<u32>,
+    /// Number of aligned words examined in executable segments.
     pub scanned_words: u64,
+    /// Number of aligned words examined in non-executable segments.
+    pub scanned_data_words: u64,
     /// Whether the candidate limit stopped the scan before the end of `.text`.
     pub truncated: bool,
 }
 
 impl FunctionDiscovery {
-    /// The union of both evidence sets in deterministic address order.
+    /// The union of all evidence sets in deterministic address order.
     #[must_use]
     pub fn candidate_roots(&self) -> BTreeSet<u32> {
         self.call_targets
-            .union(&self.prologue_candidates)
+            .iter()
+            .chain(&self.prologue_candidates)
+            .chain(&self.data_pointer_candidates)
             .copied()
             .collect()
     }
@@ -554,7 +563,20 @@ impl FunctionDiscovery {
     /// Number of distinct candidate addresses.
     #[must_use]
     pub fn candidate_count(&self) -> usize {
-        self.call_targets.union(&self.prologue_candidates).count()
+        self.call_targets
+            .iter()
+            .chain(&self.prologue_candidates)
+            .chain(&self.data_pointer_candidates)
+            .collect::<BTreeSet<_>>()
+            .len()
+    }
+
+    /// Cheap upper bound used to enforce the candidate limit inside the scan
+    /// loops without allocating per word.
+    fn candidate_upper_bound(&self) -> usize {
+        self.call_targets.len()
+            + self.prologue_candidates.len()
+            + self.data_pointer_candidates.len()
     }
 }
 
@@ -582,9 +604,7 @@ pub fn discover_function_roots(
         let base = segment.virtual_address;
         let mut offset = ((4 - (base % 4)) % 4) as usize;
         while offset + 4 <= file_size {
-            if discovery.call_targets.len() + discovery.prologue_candidates.len()
-                >= limits.max_function_roots
-            {
+            if discovery.candidate_upper_bound() >= limits.max_function_roots {
                 discovery.truncated = true;
                 return discovery;
             }
@@ -610,6 +630,40 @@ pub fn discover_function_roots(
                 && instruction.signed_immediate() < 0
             {
                 discovery.prologue_candidates.insert(pc);
+            }
+            offset += 4;
+        }
+    }
+
+    // Non-executable, initialized, file-backed segments hold pointer tables.
+    // A word that resolves into a file-backed executable segment is a candidate
+    // routine address: callback/vtable entries and, importantly for syscalls,
+    // the SetSyscall descriptor tables a title copies into kernel slots.
+    for segment in segments {
+        if segment.flags & elf::PF_X != 0 {
+            continue;
+        }
+        let file_size = segment.file_size.min(segment.bytes.len());
+        if file_size < 4 {
+            continue;
+        }
+        let base = segment.virtual_address;
+        let mut offset = ((4 - (base % 4)) % 4) as usize;
+        while offset + 4 <= file_size {
+            if discovery.candidate_count() >= limits.max_function_roots {
+                discovery.truncated = true;
+                return discovery;
+            }
+            let value = u32::from_le_bytes(
+                segment.bytes[offset..offset + 4]
+                    .try_into()
+                    .expect("four-byte pointer window"),
+            );
+            discovery.scanned_data_words += 1;
+            if value & 3 == 0
+                && crate::address::file_backed_executable_segment(segments, value).is_some()
+            {
+                discovery.data_pointer_candidates.insert(value);
             }
             offset += 4;
         }
@@ -2178,5 +2232,33 @@ mod tests {
             error,
             AnalysisError::InstructionLimitExceeded { limit: 1 }
         ));
+    }
+
+    #[test]
+    fn data_pointers_in_non_executable_segments_are_candidate_roots() {
+        let executable = segment(0x1000, &[0x03E0_0008]); // jr ra
+        let data_bytes = [
+            0x1000u32,   // pointer into executable code
+            0x0000_0003, // unaligned word: not a candidate
+            0xFFF0_0000, // outside every mapping: not a candidate
+            0x2000u32,   // self-reference: non-executable, not a candidate
+        ];
+        let mut bytes = Vec::with_capacity(data_bytes.len() * 4);
+        for word in &data_bytes {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let data = LoadedSegment {
+            virtual_address: 0x2000,
+            flags: 0,
+            file_size: bytes.len(),
+            bytes,
+        };
+        let discovery = discover_function_roots(&[executable, data], AnalysisLimits::default());
+        assert_eq!(discovery.scanned_data_words, 4);
+        assert_eq!(
+            discovery.data_pointer_candidates,
+            BTreeSet::from([0x1000u32])
+        );
+        assert!(discovery.candidate_roots().contains(&0x1000u32));
     }
 }

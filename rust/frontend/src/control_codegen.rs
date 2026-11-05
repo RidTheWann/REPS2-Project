@@ -94,6 +94,8 @@ using reps2::runtime::raise_ee_exception;
 using reps2::runtime::raise_ee_address_error;
 using reps2::runtime::return_from_ee_exception;
 using reps2::runtime::dispatch_ee_syscall;
+using reps2::runtime::ee_syscall_handler_return_pending;
+using reps2::runtime::return_from_ee_syscall_handler;
 
 ";
 
@@ -128,6 +130,16 @@ const EXECUTE_CFG_TAIL: &str = "\
     const BlockEntry* const begin = std::begin(kBlocks);
     const BlockEntry* const end = std::end(kBlocks);
     for (;;) {
+        // A guest syscall handler installed through SetSyscall returns through a
+        // kseg3 sentinel address. Complete its context restore before any fetch
+        // or address-error check; the sentinel is never fetched.
+        if (ee_syscall_handler_return_pending(state)) {
+            const Status handler_status = return_from_ee_syscall_handler(state);
+            if (handler_status != Status::ok) {
+                return handler_status;
+            }
+            continue;
+        }
         // Check the next fetch PC on every dispatch, including post-transfer PCs.
         if ((state.pc & 0x3U) != 0U) {
             return raise_ee_address_error(
@@ -141,6 +153,18 @@ const EXECUTE_CFG_TAIL: &str = "\
         }
         const Status status = found->function(state, remaining);
         if (status != Status::ok) {
+            // A guest syscall handler returns through the kseg3 sentinel: the
+            // jr $ra block exits as external control flow with pc set to the
+            // sentinel. Complete the context restore and resume at the saved PC
+            // instead of surfacing a synthetic external target.
+            if (status == Status::external_control_flow
+                && ee_syscall_handler_return_pending(state)) {
+                const Status handler_status = return_from_ee_syscall_handler(state);
+                if (handler_status != Status::ok) {
+                    return handler_status;
+                }
+                continue;
+            }
             return status;
         }
     }

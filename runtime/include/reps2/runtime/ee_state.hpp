@@ -91,6 +91,34 @@ struct EeSyscallRegistration {
     std::uint32_t handler_address{};
 };
 
+// The EE kernel syscall table holds a handler address per slot (ps2sdk's
+// GetSyscallHandler indexes exactly that table). A title can replace a slot
+// through SetSyscall (0x74) and then reach its own kernel-mode routine by
+// issuing the corresponding SYSCALL, so REPS2 must be able to continue guest
+// execution at that handler and return to the user continuation afterwards.
+//
+// The real kernel enters the handler from its exception path, so the user
+// register context is saved before the call and restored on return, with only
+// $v0 kept from the handler as the service result. The host models that here:
+// one frame per active handler invocation, saved before the handler runs.
+struct EeSyscallHandlerFrame {
+    std::array<Gpr128, 32> saved_gpr{};
+    std::uint64_t saved_hi{};
+    std::uint64_t saved_lo{};
+    std::uint64_t saved_hi1{};
+    std::uint64_t saved_lo1{};
+    std::array<std::uint32_t, 32> saved_fpr{};
+    std::uint32_t saved_acc{};
+    std::uint32_t saved_fcsr{};
+    std::uint32_t handler_address{};
+    std::uint32_t resume_pc{};
+    std::uint32_t slot{};
+};
+
+// Handlers can themselves issue syscalls, so dispatch keeps a small stack of
+// frames rather than a single slot.
+inline constexpr std::size_t kEeMaxSyscallHandlerDepth = 8;
+
 enum class EeSetSyscallRejection : std::uint8_t {
     none,
     invalid_slot,
@@ -216,6 +244,12 @@ struct EeHleState {
     std::uint32_t last_set_syscall_handler{};
     EeSetSyscallRejection last_set_syscall_rejection{};
     std::array<EeSyscallRegistration, kEeMaxSyscallSlots> syscall_registrations{};
+    // Guest-handler invocation, distinct from host-serviced HLE calls: the
+    // handler itself is translated guest code and runs through the dispatcher.
+    std::array<EeSyscallHandlerFrame, kEeMaxSyscallHandlerDepth> syscall_handler_frames{};
+    std::uint8_t syscall_handler_depth{};
+    std::uint64_t guest_handler_dispatches{};
+    std::uint64_t guest_handler_returns{};
     std::array<EeSema, kEeMaxSemaphores> semaphores{};
 };
 
@@ -282,6 +316,10 @@ enum class Status : std::uint8_t {
     // guest never observed this service; it is a host limitation, not a guest
     // exception and not success. See ee_hle.hpp.
     unhandled_syscall,
+    // HLE boundary: a registered guest handler was about to run but the
+    // handler-invocation stack is full. The syscall did not execute and the
+    // guest never observed it.
+    syscall_handler_overflow,
 };
 
 [[nodiscard]] constexpr bool is_guest_trap(Status status) noexcept {
@@ -312,6 +350,7 @@ enum class Status : std::uint8_t {
     case Status::exception_delivered: return "guest_exception";
     case Status::invalid_exception_return: return "invalid_exception_return";
     case Status::unhandled_syscall: return "unhandled_syscall";
+    case Status::syscall_handler_overflow: return "syscall_handler_overflow";
     }
     return "unknown";
 }

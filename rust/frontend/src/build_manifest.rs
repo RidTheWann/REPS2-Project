@@ -46,8 +46,12 @@ pub struct DiscoveryStats {
     pub call_target_count: usize,
     /// Candidates supplied by ABI stack prologues.
     pub prologue_candidate_count: usize,
+    /// Candidates supplied by code pointers stored in non-executable segments.
+    pub data_pointer_candidate_count: usize,
     /// Aligned words examined by the scan.
     pub scanned_words: u64,
+    /// Aligned words examined in non-executable segments.
+    pub scanned_data_words: u64,
     /// Whether the candidate limit stopped the scan early.
     pub truncated: bool,
     /// Candidates accepted after CFG validation.
@@ -174,8 +178,16 @@ impl BuildManifest {
                     discovery.prologue_candidate_count
                 ));
                 output.push_str(&format!(
+                    "      \"data_pointer_candidate_count\": {},\n",
+                    discovery.data_pointer_candidate_count
+                ));
+                output.push_str(&format!(
                     "      \"scanned_words\": {},\n",
                     discovery.scanned_words
+                ));
+                output.push_str(&format!(
+                    "      \"scanned_data_words\": {},\n",
+                    discovery.scanned_data_words
                 ));
                 output.push_str(&format!("      \"truncated\": {},\n", discovery.truncated));
                 output.push_str(&format!(
@@ -339,8 +351,10 @@ mod tests {
         manifest.discovery = Some(DiscoveryStats {
             candidate_count: 5,
             call_target_count: 3,
-            prologue_candidate_count: 2,
+            prologue_candidate_count: 1,
+            data_pointer_candidate_count: 1,
             scanned_words: 1_024,
+            scanned_data_words: 256,
             truncated: false,
             accepted_root_count: 4,
             skipped_root_count: 1,

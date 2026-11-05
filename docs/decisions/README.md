@@ -73,3 +73,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0066](0066-ee-createsema-hle.md) | EE CreateSema HLE with a bounded semaphore table | Accepted |
 | [0067](0067-ee-setsyscall-registration.md) | EE SetSyscall registration boundary | Accepted |
 | [0068](0068-defer-ee-findaddress-hle.md) | Defer EE FindAddress HLE pending ABI evidence | Accepted |
+| [0069](0069-ee-guest-syscall-handlers.md) | EE guest syscall handlers invoked through SetSyscall | Accepted |
