@@ -4,21 +4,23 @@ Updated: 2026-11-05
 
 ## Current objective
 
-Advance M4 real-title native execution. The EE `FindAddress` (0x83) ABI deferral
-(ADR 0068) is resolved via an independent behavioral reference, the service is
-implemented as an honest host service (returns `0` = not found, never faked
-success), and the M4 boundary is unblocked. Next step: commit/push the feature
-branch, open and merge its PR, then re-run the bounded Downhill Domination and
-Black probes with HLE on to confirm execution progresses past PC `0x0025EF7C` /
-`0x0036D664`.
+Advance M4 real-title native execution past the FindAddress (0x83) boundary.
+The FindAddress ABI deferral (ADR 0068) is resolved; the service is implemented
+as an honest host service (returns `0` = not found, never faked success) and
+merged to `main`. The Downhill Domination bounded probe with HLE on confirmed
+execution progresses past PC `0x0025EF7C`; it now stops at an unrelated
+`unresolved_control_flow` CFG gap at `pc=0x0025EF38` (indirect branch target
+not resolved). Next highest-value work: synchronize documentation, audit HLE
+semantics, and investigate the indirect CFG blocker.
 
 ## Verified repository state
 
-- Branch: `main` at HEAD `253ba31` (CI green).
-- Feature branch: `feat/m4-ee-findaddress-hle` off `253ba31`, working tree dirty
-  (3 files + ADR 0068 + PROJECT_STATE.md, not yet committed).
-- PR: `RidTheWann/REPS2-Project#79` (merged; all 6 CI checks passed: MSRV, Linux, Windows)
-- Cleanup PR: `RidTheWann/REPS2-Project#80` (open; remove `path/to/filename.js` placeholder)
+- Branch: `main` at HEAD `b966a96` (CI green: Windows, MSRV 1.88, Ubuntu).
+- No open PRs; PR #1 (EE guest syscall handlers via SetSyscall) and PR #2
+  (EE FindAddress 0x83 HLE service) both merged to `main`.
+- Working tree: clean on `main`. Feature branch `feat/m4-ee-findaddress-hle`
+  deleted after merge.
+- No `path/to/filename.js` placeholder exists in the repository tree.
 - Latest delivered work: EE FindAddress HLE service (0x83) — `hle_find_address` +
   `normalize_ee_kernel_alias` in `ee_hle.hpp`, registered in the sorted
   `kEeSyscallServices` table under `kEeSyscallFindAddress = 0x83U`, observation
@@ -97,13 +99,23 @@ Black probes with HLE on to confirm execution progresses past PC `0x0025EF7C` /
 
 ## Active backlog
 
-1. Commit/push `feat/m4-ee-findaddress-hle`, open its PR, merge to `main` after CI passes — **DONE** (PR #2 merged, commit `8b7cede` on `main`).
-2. Re-run the bounded Downhill Domination probe with HLE on — **DONE**: execution
-   progresses past PC `0x0025EF7C` (FindAddress handled); stops at unrelated
-   `unresolved_control_flow` CFG gap at `pc=0x0025EF38`. Black ELF not available
-   locally for re-probe; same FindAddress contract applies.
-3. Remove `path/to/filename.js` placeholder from main (PR #80 open; does not block M4).
-4. Advance independent compiler/runtime workstreams not blocked by `FindAddress` (M4 is a priority, not the whole mission).
+1. Synchronize PROJECT_STATE.md with actual repository state — DONE for this
+   commit; keep it current on every PR.
+2. Audit ADR 0068 for contradictory stale text (decision supersedes deferral;
+   no "do not implement" language should remain).
+3. Audit README.md and docs/CAPABILITIES.md for outdated SetSyscall/FindAddress
+   descriptions.
+4. Audit EeSyscallHandlerFrame context preservation: GPR, HI/LO, HI1/LO1, FPR,
+   ACC, FCSR are saved; SA and COP0 are not — determine whether they must be
+   preserved across the syscall boundary.
+5. Enable branch protection on `main` and require PR reviews; clean up stray
+   remote feature branches after verifying they contain no unique unmerged work.
+6. Investigate the indirect CFG blocker at `pc=0x0025EF38` (Downhill Domination)
+   to find the next execution path past FindAddress.
+7. Re-run Black bounded probe with HLE on (Black ELF not available locally;
+   same FindAddress contract applies).
+8. Advance independent compiler/runtime workstreams not blocked by FindAddress
+   (M4 is a priority, not the whole mission).
 
 ## Release-gate status
 
