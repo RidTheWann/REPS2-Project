@@ -127,44 +127,72 @@ def _clip(value: str, limit: int = 43) -> str:
 
 
 def render_svg(data: dict[str, Any]) -> str:
-    """Render a clean, responsive README-friendly progress dashboard."""
-    width = 1080
+    """Render a restrained, next-generation systems dashboard in SVG."""
+    width = 1160
     totals = data["totals"]
     completed = totals["completed"]
     total = totals["total"]
     percent = totals["percent"]
-    generated = datetime.fromisoformat(data["generated_at"]).strftime("%Y-%m-%d %H:%M UTC")
+    remaining = total - completed
+    generated = datetime.fromisoformat(data["generated_at"]).strftime("%Y-%m-%d  %H:%M UTC")
 
-    rows_top = 293
-    row_height = 44
+    rows_top = 354
+    row_height = 48
     rows_bottom = rows_top + len(data["milestones"]) * row_height
-    gates_heading_y = rows_bottom + 30
-    gates_top = gates_heading_y + 22
-    stage_label_y = gates_top + 82
+    gates_heading_y = rows_bottom + 34
+    gates_top = gates_heading_y + 24
+    stage_rule_y = gates_top + 66
+    stage_label_y = stage_rule_y + 27
     stage_text_y = stage_label_y + 25
     footer_y = stage_text_y + 42
-    height = footer_y + 24
+    height = footer_y + 28
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
-        "<title id=\"title\">REPS2 development progress</title>",
+        "<title id=\"title\">REPS2 engineering progress</title>",
         f"<desc id=\"desc\">{_esc(completed)} of {_esc(total)} roadmap checklist tasks completed ({_esc(percent)} percent). Checklist progress is not game compatibility or release readiness.</desc>",
-        '<rect x="0.5" y="0.5" width="1079" height="{0}" rx="10" fill="#ffffff" stroke="#e2e8f0"/>'.format(height - 1),
-        '<text x="40" y="42" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="1.4">REPS2  /  PROJECT STATUS</text>',
-        '<text x="40" y="82" fill="#0f172a" font-family="Segoe UI,Arial,sans-serif" font-size="29" font-weight="700">Development progress</text>',
-        '<text x="40" y="107" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="13">Roadmap checklist across all engineering milestones</text>',
-        f'<text x="1040" y="42" text-anchor="end" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="11">UPDATED  {_esc(generated)}</text>',
-        '<path d="M40 129 H1040" stroke="#e2e8f0" stroke-width="1"/>',
-        f'<text x="40" y="196" fill="#2563eb" font-family="Segoe UI,Arial,sans-serif" font-size="43" font-weight="700">{percent}%</text>',
-        f'<text x="155" y="166" fill="#0f172a" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="600">{completed:,} of {total:,} checklist items complete</text>',
-        '<text x="1040" y="166" text-anchor="end" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="12">Overall roadmap progress</text>',
-        '<rect x="155" y="181" width="885" height="8" rx="4" fill="#e2e8f0"/>',
-        f'<rect x="155" y="181" width="{885 * percent / 100:.1f}" height="8" rx="4" fill="#2563eb"/>',
-        '<text x="40" y="258" fill="#0f172a" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">Milestone progress</text>',
-        '<text x="40" y="279" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="0.8">MILESTONE</text>',
-        '<text x="640" y="279" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="0.8">PROGRESS</text>',
-        '<text x="955" y="279" text-anchor="end" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="0.8">TASKS</text>',
-        '<text x="1040" y="279" text-anchor="end" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="0.8">DONE</text>',
+        """<defs>
+          <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#101a2d"/>
+            <stop offset="1" stop-color="#090e19"/>
+          </linearGradient>
+          <linearGradient id="progress" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#4de1ec"/>
+            <stop offset="1" stop-color="#8b8cf8"/>
+          </linearGradient>
+          <radialGradient id="ambient" cx="1" cy="0" r="1">
+            <stop offset="0" stop-color="#5269d8" stop-opacity=".17"/>
+            <stop offset="1" stop-color="#5269d8" stop-opacity="0"/>
+          </radialGradient>
+          <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+            <path d="M32 0H0V32" fill="none" stroke="#8aa4c8" stroke-opacity=".055" stroke-width="1"/>
+          </pattern>
+        </defs>""",
+        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="url(#surface)" stroke="#26364d"/>',
+        f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#ambient)"/>',
+        f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#grid)"/>',
+        '<path d="M40 124H1120" stroke="#26364d" stroke-width="1"/>',
+        '<circle cx="48" cy="42" r="4" fill="#67e8f9"/>',
+        '<text x="62" y="46" fill="#9bb1cd" font-family="Consolas,Menlo,monospace" font-size="11" font-weight="600" letter-spacing="1.2">REPS2  /  NATIVE RECOMPILATION</text>',
+        f'<text x="1120" y="46" text-anchor="end" fill="#7185a2" font-family="Consolas,Menlo,monospace" font-size="10">REPOSITORY STATE  •  {_esc(generated)}</text>',
+        '<text x="40" y="91" fill="#eef5ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="31" font-weight="650" letter-spacing="-.7">Engineering progress</text>',
+        '<text x="42" y="111" fill="#8da1bd" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">A live view of the REPS2 roadmap, implementation gates and real-title evidence.</text>',
+        '<rect x="40" y="148" width="1080" height="151" rx="13" fill="#0b1220" fill-opacity=".82" stroke="#26364d"/>',
+        '<text x="66" y="180" fill="#8fa6c3" font-family="Consolas,Menlo,monospace" font-size="10" font-weight="600" letter-spacing="1.4">ROADMAP COMPLETION</text>',
+        f'<text x="64" y="245" fill="#e6f8ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="54" font-weight="700" letter-spacing="-2">{percent}<tspan fill="#67e8f9" font-size="27">%</tspan></text>',
+        f'<text x="244" y="202" fill="#e2ebf8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="600">{completed:,} of {total:,} tasks completed</text>',
+        '<text x="244" y="224" fill="#8499b5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">Completion is measured from checked items in docs/ROADMAP.md</text>',
+        '<rect x="244" y="244" width="650" height="8" rx="4" fill="#25364e"/>',
+        f'<rect x="244" y="244" width="{650 * percent / 100:.1f}" height="8" rx="4" fill="url(#progress)"/>',
+        '<path d="M920 174V272" stroke="#26364d" stroke-width="1"/>',
+        f'<text x="952" y="211" fill="#f0f5ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="27" font-weight="650">{remaining:,}</text>',
+        '<text x="952" y="232" fill="#8fa6c3" font-family="Consolas,Menlo,monospace" font-size="10" letter-spacing="1">OPEN ITEMS</text>',
+        '<text x="40" y="333" fill="#e7effb" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" font-weight="650">Milestone map</text>',
+        '<text x="1120" y="333" text-anchor="end" fill="#7388a5" font-family="Consolas,Menlo,monospace" font-size="10">IMPLEMENTATION TRACK  /  MILESTONES</text>',
+        '<text x="64" y="350" fill="#748ba9" font-family="Consolas,Menlo,monospace" font-size="9" letter-spacing="1">STAGE</text>',
+        '<text x="540" y="350" fill="#748ba9" font-family="Consolas,Menlo,monospace" font-size="9" letter-spacing="1">COMPLETION</text>',
+        '<text x="1000" y="350" text-anchor="end" fill="#748ba9" font-family="Consolas,Menlo,monospace" font-size="9" letter-spacing="1">TASKS</text>',
+        '<text x="1120" y="350" text-anchor="end" fill="#748ba9" font-family="Consolas,Menlo,monospace" font-size="9" letter-spacing="1">STATUS</text>',
     ]
 
     for index, milestone in enumerate(data["milestones"]):
@@ -173,43 +201,53 @@ def render_svg(data: dict[str, Any]) -> str:
         count = milestone["total"]
         pct = milestone["percent"]
         milestone_id = _esc(milestone["id"])
-        title = _esc(_clip(milestone["title"], 58))
+        title = _esc(_clip(milestone["title"], 55))
+        if count and done == count:
+            stage_status = "COMPLETE"
+            stage_color = "#7ee7c0"
+        elif done:
+            stage_status = "ACTIVE"
+            stage_color = "#67e8f9"
+        else:
+            stage_status = "PENDING"
+            stage_color = "#8394ad"
         parts.extend([
-            f'<text x="40" y="{y + 20}" fill="#2563eb" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="700">{milestone_id}</text>',
-            f'<text x="83" y="{y + 20}" fill="#1e293b" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="500">{title}</text>',
-            f'<rect x="640" y="{y + 10}" width="230" height="7" rx="3.5" fill="#e2e8f0"/>',
-            f'<rect x="640" y="{y + 10}" width="{230 * pct / 100:.1f}" height="7" rx="3.5" fill="#2563eb"/>',
-            f'<text x="955" y="{y + 20}" text-anchor="end" fill="#475569" font-family="Segoe UI,Arial,sans-serif" font-size="12">{done} / {count}</text>',
-            f'<text x="1040" y="{y + 20}" text-anchor="end" fill="#0f172a" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="600">{pct}%</text>',
-            f'<path d="M40 {y + 34} H1040" stroke="#f1f5f9" stroke-width="1"/>',
+            f'<rect x="40" y="{y}" width="1080" height="42" rx="7" fill="#111b2b" fill-opacity=".58"/>',
+            f'<text x="64" y="{y + 25}" fill="#67e8f9" font-family="Consolas,Menlo,monospace" font-size="11" font-weight="600">{milestone_id}</text>',
+            f'<text x="112" y="{y + 25}" fill="#dce7f6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500">{title}</text>',
+            f'<rect x="540" y="{y + 17}" width="350" height="6" rx="3" fill="#293a52"/>',
+            f'<rect x="540" y="{y + 17}" width="{350 * pct / 100:.1f}" height="6" rx="3" fill="url(#progress)"/>',
+            f'<text x="1000" y="{y + 25}" text-anchor="end" fill="#a9bad0" font-family="Consolas,Menlo,monospace" font-size="10">{done} / {count}</text>',
+            f'<circle cx="1030" cy="{y + 21}" r="3" fill="{stage_color}"/>',
+            f'<text x="1042" y="{y + 25}" fill="{stage_color}" font-family="Consolas,Menlo,monospace" font-size="9" letter-spacing=".4">{stage_status}</text>',
         ])
 
-    parts.extend([
-        f'<text x="40" y="{gates_heading_y}" fill="#0f172a" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">Release readiness</text>',
-    ])
+    parts.append(
+        f'<text x="40" y="{gates_heading_y}" fill="#e7effb" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" font-weight="650">Release gates</text>'
+    )
+    parts.append(
+        f'<text x="1120" y="{gates_heading_y}" text-anchor="end" fill="#7388a5" font-family="Consolas,Menlo,monospace" font-size="10">PRODUCT READINESS</text>'
+    )
 
     gates = data["release_gates"] or [{"label": "Release gates", "status": "not recorded"}]
-    column_width = 1000 / 3
+    column_width = 360
     for index, gate in enumerate(gates[:3]):
-        x = 40 + index * column_width
+        x = 40 + index * 370
         status = gate["status"]
-        status_color = "#166534" if status.lower() in {"met", "claimed"} else "#475569"
+        status_color = "#7ee7c0" if status.lower() in {"met", "claimed"} else "#f6c777"
         parts.extend([
-            f'<text x="{x:.1f}" y="{gates_top + 17}" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="0.6">{_esc(gate["label"]).upper()}</text>',
-            f'<text x="{x:.1f}" y="{gates_top + 40}" fill="{status_color}" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="600">{_esc(_clip(status, 34))}</text>',
+            f'<rect x="{x}" y="{gates_top}" width="{column_width}" height="54" rx="8" fill="#101a29" stroke="#26364d"/>',
+            f'<text x="{x + 15}" y="{gates_top + 20}" fill="#8298b5" font-family="Consolas,Menlo,monospace" font-size="9" font-weight="600" letter-spacing=".8">{_esc(gate["label"]).upper()}</text>',
+            f'<text x="{x + 15}" y="{gates_top + 40}" fill="{status_color}" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="600">{_esc(_clip(status, 43))}</text>',
         ])
-        if index < min(len(gates), 3) - 1:
-            separator_x = x + column_width - 18
-            parts.append(
-                f'<path d="M{separator_x:.1f} {gates_top} V{gates_top + 48}" stroke="#e2e8f0" stroke-width="1"/>'
-            )
 
-    stage = _esc(_clip(data["real_title_stage"], 110))
+    stage = _esc(_clip(data["real_title_stage"], 112))
     parts.extend([
-        f'<path d="M40 {stage_label_y - 13} H1040" stroke="#e2e8f0" stroke-width="1"/>',
-        f'<text x="40" y="{stage_label_y}" fill="#64748b" font-family="Segoe UI,Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="0.8">REAL-TITLE TESTING</text>',
-        f'<text x="40" y="{stage_text_y}" fill="#334155" font-family="Segoe UI,Arial,sans-serif" font-size="13">{stage}</text>',
-        f'<text x="40" y="{footer_y}" fill="#94a3b8" font-family="Segoe UI,Arial,sans-serif" font-size="10">{_esc(data["metric_note"])}</text>',
+        f'<path d="M40 {stage_rule_y}H1120" stroke="#26364d" stroke-width="1"/>',
+        f'<text x="40" y="{stage_label_y}" fill="#8298b5" font-family="Consolas,Menlo,monospace" font-size="9" font-weight="600" letter-spacing="1">REAL-TITLE EVIDENCE</text>',
+        f'<text x="40" y="{stage_text_y}" fill="#d5e2f3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">{stage}</text>',
+        f'<text x="40" y="{footer_y}" fill="#70839f" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="10">{_esc(data["metric_note"])}</text>',
+        f'<text x="1120" y="{footer_y}" text-anchor="end" fill="#536985" font-family="Consolas,Menlo,monospace" font-size="9">REPS2 // STATUS SNAPSHOT</text>',
         "</svg>",
     ])
     return "\n".join(parts) + "\n"
@@ -221,48 +259,56 @@ def render_index_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#ffffff">
-  <title>REPS2 — Development progress</title>
+  <meta name="theme-color" content="#090e19">
+  <title>REPS2 — Engineering progress</title>
   <style>
     :root {
-      color-scheme: light;
-      background: #f8fafc;
-      color: #0f172a;
+      color-scheme: dark;
+      background: #080c15;
+      color: #e7effb;
       font-family: Inter, "Segoe UI", Arial, sans-serif;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 36px 20px; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 36px 20px;
+      background:
+        radial-gradient(ellipse at 85% 0%, rgba(82,105,216,.10), transparent 42%),
+        #080c15;
+    }
     main {
-      width: min(1080px, 100%);
+      width: min(1160px, 100%);
       margin: 0 auto;
-      padding: 20px;
-      background: #fff;
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
+      padding: 12px;
+      border: 1px solid #1d2b40;
+      border-radius: 16px;
+      background: rgba(12,18,30,.88);
     }
     img { display: block; width: 100%; height: auto; }
     footer {
-      margin-top: 16px;
-      padding-top: 12px;
-      border-top: 1px solid #e2e8f0;
-      color: #64748b;
+      margin: 0 12px;
+      padding: 14px 8px 8px;
+      border-top: 1px solid #1d2b40;
+      color: #8295b0;
       font-size: 12px;
-      line-height: 1.6;
+      line-height: 1.7;
     }
-    a { color: #2563eb; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    a { color: #67e8f9; text-decoration: none; }
+    a:hover { color: #a5f3fc; text-decoration: underline; }
     @media (max-width: 640px) {
-      body { padding: 12px 8px; }
-      main { padding: 8px; border-radius: 6px; }
+      body { padding: 12px 6px; }
+      main { padding: 4px; border-radius: 10px; }
+      footer { margin: 0 4px; }
     }
   </style>
 </head>
 <body>
   <main>
-    <img src="progress.svg" alt="REPS2 development progress dashboard">
+    <img src="progress.svg" alt="REPS2 engineering progress dashboard">
     <footer>
-      Generated from
-      <a href="https://github.com/RidTheWann/REPS2-Project/blob/main/docs/ROADMAP.md">the project roadmap</a>
+      Live status generated from
+      <a href="https://github.com/RidTheWann/REPS2-Project/blob/main/docs/ROADMAP.md">the engineering roadmap</a>
       and <a href="https://github.com/RidTheWann/REPS2-Project/blob/main/docs/PROJECT_STATE.md">verified project state</a>.
       Checklist completion is not a game compatibility or release-readiness score.
       <a href="progress.json">Progress data (JSON)</a>.
