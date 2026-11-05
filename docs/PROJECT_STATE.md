@@ -4,14 +4,16 @@ Updated: 2026-11-05
 
 ## Current objective
 
-Advance M4 real-title native execution without inventing the unresolved EE `FindAddress` (0x83) ABI, while preserving the shared multi-game architecture. M4 probe validation for Black is complete; execution stops at `FindAddress` 0x83 (same boundary as Downhill Domination) with no local reference-execution oracle available.
+Advance M4 real-title native execution without inventing the unresolved EE `FindAddress` (0x83) ABI, while preserving the shared multi-game architecture. M4 probe validation for Black is complete (PR #79 merged); execution stops at `FindAddress` 0x83 (same boundary as Downhill Domination) with no local reference-execution oracle available.
 
 ## Verified repository state
 
-- Branch: `feat/m4-syscall-boundary-diagnostics`
-- HEAD: `3e6b789` (pushed; PR #79 updated; CI checks pending after push)
+- Branch: `main`
+- HEAD: `082ce4d` (PR #79 merged via rebase, linear history preserved)
+- PR: `RidTheWann/REPS2-Project#79` (merged; all 6 CI checks passed: MSRV, Linux, Windows)
+- Cleanup PR: `RidTheWann/REPS2-Project#80` (open; remove `path/to/filename.js` placeholder)
 - Working tree: clean
-- Latest delivered work: rolling bounded instruction-PC tracing with PC-before-trace ordering fix, trace regression assertions, FindAddress caller correlation, ADR 0068 extended with retail trace evidence, Black title added to compatibility matrix.
+- Latest delivered work: rolling bounded instruction-PC tracing with PC-before-trace ordering fix, trace regression assertions, FindAddress caller correlation, ADR 0068 extended with retail trace evidence, Black title added to compatibility matrix, PR #79 merged to main.
 
 ## Verified validation
 
@@ -49,10 +51,10 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 
 ## Active backlog
 
-1. Record Black probe evidence (done: COMPATIBILITY_MATRIX.md + PROJECT_STATE.md).
+1. Record Black probe evidence (done: COMPATIBILITY_MATRIX.md + PROJECT_STATE.md, PR #79 merged).
 2. Preserve caller correlation and trace regression assertions (delivered in PR #79); do not implement `FindAddress` without an oracle.
 3. Advance independent compiler/runtime workstreams not blocked by `FindAddress` (M4 is a priority, not the whole mission).
-4. Remove `path/to/filename.js` placeholder from main (separate cleanup PR; does not block M4).
+4. Remove `path/to/filename.js` placeholder from main (PR #80 open; does not block M4).
 
 ## Release-gate status
 
