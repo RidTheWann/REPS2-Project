@@ -134,13 +134,22 @@ def render_svg(data: dict[str, Any]) -> str:
     total = totals["total"]
     percent = totals["percent"]
     generated = datetime.fromisoformat(data["generated_at"]).strftime("%Y-%m-%d %H:%M UTC")
+    row_count = max(1, (len(data["milestones"]) + 1) // 2)
+    cards_bottom = 224 + (row_count - 1) * 106 + 92
+    divider_y = cards_bottom + 26
+    gate_heading_y = divider_y + 29
+    gate_box_y = divider_y + 45
+    stage_box_y = gate_box_y + 68
+    stage_text_y = stage_box_y + 25
+    footer_text_y = stage_box_y + 59
+    height = footer_text_y + 20
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
         "<title id=\"title\">REPS2 project progress dashboard</title>",
         f"<desc id=\"desc\">{_esc(completed)} of {_esc(total)} roadmap checklist tasks completed ({_esc(percent)} percent). Checklist progress is not game compatibility or release readiness.</desc>",
         "<defs><linearGradient id=\"accent\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\"><stop offset=\"0\" stop-color=\"#8f2432\"/><stop offset=\"1\" stop-color=\"#d0a64e\"/></linearGradient></defs>",
-        '<rect width="1160" height="850" rx="24" fill="#111015"/>',
+        f'<rect width="{width}" height="{height}" rx="24" fill="#111015"/>',
         '<path d="M24 176 H1136" stroke="#332b31" stroke-width="1"/>',
         '<text x="38" y="47" fill="#d5ad5a" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="3">REPS2  /  MASTER REVERSE ENGINEERING</text>',
         '<text x="38" y="98" fill="#f5f0e8" font-family="Segoe UI,Arial,sans-serif" font-size="38" font-weight="750">PROJECT PROGRESS</text>',
@@ -174,8 +183,8 @@ def render_svg(data: dict[str, Any]) -> str:
             f'<text x="{x + 18}" y="{y + 82}" fill="#9f969d" font-family="Segoe UI,Arial,sans-serif" font-size="11">{done} completed  ·  {count - done} remaining</text>',
         ])
 
-    parts.append('<path d="M24 668 H1136" stroke="#332b31" stroke-width="1"/>')
-    parts.append('<text x="40" y="697" fill="#d5ad5a" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="2">PRODUCT / RELEASE GATES</text>')
+    parts.append(f'<path d="M24 {divider_y} H1136" stroke="#332b31" stroke-width="1"/>')
+    parts.append(f'<text x="40" y="{gate_heading_y}" fill="#d5ad5a" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="2">PRODUCT / RELEASE GATES</text>')
 
     gates = data["release_gates"]
     if not gates:
@@ -185,17 +194,17 @@ def render_svg(data: dict[str, Any]) -> str:
         status = gate["status"]
         color = "#d6ad58" if status.lower() in {"met", "claimed"} else "#c76a72"
         parts.extend([
-            f'<rect x="{x}" y="713" width="350" height="55" rx="11" fill="#1b1820" stroke="#39303a"/>',
-            f'<text x="{x + 15}" y="736" fill="#b6abb0" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="700">{_esc(gate["label"]).upper()}</text>',
-            f'<text x="{x + 15}" y="757" fill="{color}" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">{_esc(status)}</text>',
+            f'<rect x="{x}" y="{gate_box_y}" width="350" height="55" rx="11" fill="#1b1820" stroke="#39303a"/>',
+            f'<text x="{x + 15}" y="{gate_box_y + 23}" fill="#b6abb0" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="700">{_esc(gate["label"]).upper()}</text>',
+            f'<text x="{x + 15}" y="{gate_box_y + 44}" fill="{color}" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">{_esc(status)}</text>',
         ])
 
     stage = _esc(data["real_title_stage"])
     parts.extend([
-        '<rect x="36" y="781" width="1088" height="39" rx="9" fill="#281b20" stroke="#63323a"/>',
-        '<text x="52" y="806" fill="#d6ad58" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="800" letter-spacing="1">REAL-TITLE EVIDENCE</text>',
-        f'<text x="250" y="806" fill="#e7c6c7" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600">{stage}</text>',
-        f'<text x="40" y="840" fill="#8e858d" font-family="Segoe UI,Arial,sans-serif" font-size="10">Generated {_esc(generated)} • {_esc(data["metric_note"])}</text>',
+        f'<rect x="36" y="{stage_box_y}" width="1088" height="39" rx="9" fill="#281b20" stroke="#63323a"/>',
+        f'<text x="52" y="{stage_text_y}" fill="#d6ad58" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="800" letter-spacing="1">REAL-TITLE EVIDENCE</text>',
+        f'<text x="250" y="{stage_text_y}" fill="#e7c6c7" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600">{stage}</text>',
+        f'<text x="40" y="{footer_text_y}" fill="#8e858d" font-family="Segoe UI,Arial,sans-serif" font-size="10">Generated {_esc(generated)} • {_esc(data["metric_note"])}</text>',
         "</svg>",
     ])
     return "\n".join(parts) + "\n"
