@@ -37,6 +37,7 @@ constexpr std::uint32_t kSetupHeap = reps2::runtime::kEeSyscallSetupHeap;
 constexpr std::uint32_t kCreateSema = reps2::runtime::kEeSyscallCreateSema;
 constexpr std::uint32_t kSetSyscall = reps2::runtime::kEeSyscallSetSyscall;
 constexpr std::uint32_t kFlushCache = reps2::runtime::kEeSyscallFlushCache;
+constexpr std::uint32_t kFindAddress = reps2::runtime::kEeSyscallFindAddress;
 
 // The CreateSema tests need guest-readable parameters, but a full 32 MiB image
 // per case is unnecessary: main RAM is a span, so a small aligned window proves
@@ -706,6 +707,134 @@ int test_delay_slot_syscall_without_the_layer_raises_the_exception() {
     return 0;
 }
 
+int test_find_address_returns_matching_entry_address() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    // Table at KSEG0 0x80000000 (physical 0x0000): [0x11111111, 0xDEADBEEF, 0x55555555]
+    store_word(ram, 0x0000, 0x11111111U);
+    store_word(ram, 0x0004, 0xDEADBEEFU);
+    store_word(ram, 0x0008, 0x55555555U);
+    state.gpr[4].low = 0x8000'0000U; // $a0: table start (KSEG0)
+    state.gpr[5].low = 0x8000'000CU; // $a1: table end (exclusive)
+    state.gpr[6].low = 0xDEADBEEFU;  // $a2: target
+
+    if (reps2::runtime::hle_find_address(state) != Status::ok) return 230;
+    if (state.hle.last_find_address_result != 0x8000'0004U) return 231;
+    if (static_cast<std::uint32_t>(state.gpr[2].low) != 0x8000'0004U) return 232;
+    if (!state.hle.find_address_called) return 233;
+    if (state.hle.last_find_address_start != 0x8000'0000U
+        || state.hle.last_find_address_end != 0x8000'000CU
+        || state.hle.last_find_address_target != 0xDEADBEEFU) {
+        return 234;
+    }
+    return 0;
+}
+
+int test_find_address_matches_kseg_aliases() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    // Table at KSEG0 0x80000FF8: [0x00123456, 0x8000AAAA]
+    store_word(ram, 0x0FF8, 0x00123456U);
+    store_word(ram, 0x0FFC, 0x8000AAAAU);
+    state.gpr[4].low = 0x8000'0FF8U;
+    state.gpr[5].low = 0x8000'1000U;
+    // Target is the KSEG alias of the first entry's value.
+    state.gpr[6].low = 0x8012'3456U;
+
+    if (reps2::runtime::hle_find_address(state) != Status::ok) return 240;
+    if (state.hle.last_find_address_result != 0x8000'0FF8U) return 241;
+    if (static_cast<std::uint32_t>(state.gpr[2].low) != 0x8000'0FF8U) return 242;
+    return 0;
+}
+
+int test_find_address_returns_zero_when_no_match() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    store_word(ram, 0x0000, 0x00000001U);
+    store_word(ram, 0x0004, 0x00000002U);
+    store_word(ram, 0x0008, 0x00000003U);
+    state.gpr[4].low = 0x8000'0000U;
+    state.gpr[5].low = 0x8000'000CU;
+    state.gpr[6].low = 0xDEADBEEFU;
+
+    if (reps2::runtime::hle_find_address(state) != Status::ok) return 250;
+    if (state.hle.last_find_address_result != 0U) return 251;
+    if (state.gpr[2].low != 0U) return 252;
+    return 0;
+}
+
+int test_find_address_empty_window_returns_zero() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    state.gpr[4].low = 0x8000'4000U;
+    state.gpr[5].low = 0x8000'4000U; // start == end
+    state.gpr[6].low = 0x00000001U;
+
+    if (reps2::runtime::hle_find_address(state) != Status::ok) return 260;
+    if (state.hle.last_find_address_result != 0U) return 261;
+    if (state.gpr[2].low != 0U) return 262;
+
+    // Inverted window.
+    state.gpr[4].low = 0x8000'4010U;
+    state.gpr[5].low = 0x8000'4000U;
+    if (reps2::runtime::hle_find_address(state) != Status::ok) return 263;
+    if (state.hle.last_find_address_result != 0U) return 264;
+    return 0;
+}
+
+int test_find_address_breaks_on_unreadable_memory() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    // First word readable and non-matching; the next word is past the end of RAM.
+    store_word(ram, 0xFFC, 0x00000001U);
+    state.gpr[4].low = 0x8000'0FFCU; // physical 0xFFC
+    state.gpr[5].low = 0x8000'1004U; // physical 0x1004 past the 0x1000-byte window
+    state.gpr[6].low = 0xDEADBEEFU;  // does not match the first entry
+
+    if (reps2::runtime::hle_find_address(state) != Status::ok) return 270;
+    if (state.hle.last_find_address_result != 0U) return 271;
+    if (state.gpr[2].low != 0U) return 272;
+    return 0;
+}
+
+int test_find_address_via_dispatch() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    store_word(ram, 0x0000, 0xCAFEBABEU);
+    state.gpr[3].low = kFindAddress;   // $v1: service number
+    state.gpr[4].low = 0x8000'0000U;   // $a0: start
+    state.gpr[5].low = 0x8000'0004U;   // $a1: end (one word)
+    state.gpr[6].low = 0xCAFEBABEU;    // $a2: target
+    state.gpr[31].low = kUnreachableReturnPc;
+    state.pc = 0xE400U;
+
+    const Status status = reps2::runtime::dispatch_ee_syscall(state, 0xE404U);
+    if (status != Status::ok) return 280;
+    if (state.pc != 0xE404U) return 281; // resumed after the trap
+    if (state.hle.last_find_address_result != 0x8000'0000U) return 282;
+    if (static_cast<std::uint32_t>(state.gpr[2].low) != 0x8000'0000U) return 283;
+    if (state.hle.syscall_handled_count != 1U) return 284;
+    if (state.hle.last_syscall_number != kFindAddress) return 285;
+    // No COP0 exception context from a serviced call.
+    if (state.cop0[reps2::runtime::kCop0Cause] != 0U
+        || state.cop0[reps2::runtime::kCop0Epc] != 0U) {
+        return 286;
+    }
+    return 0;
+}
+
 int test_service_table_reports_names() {
     if (reps2::runtime::ee_syscall_service_name(kSetupThread) == nullptr) {
         return 100;
@@ -722,6 +851,10 @@ int test_service_table_reports_names() {
     const char* const sema_name = reps2::runtime::ee_syscall_service_name(kCreateSema);
     if (sema_name == nullptr || std::string_view(sema_name) != "CreateSema") {
         return 105;
+    }
+    const char* const find_name = reps2::runtime::ee_syscall_service_name(kFindAddress);
+    if (find_name == nullptr || std::string_view(find_name) != "FindAddress") {
+        return 106;
     }
     const char* const name = reps2::runtime::status_name(Status::unhandled_syscall);
     if (name == nullptr || std::string_view(name) != "unhandled_syscall") {
@@ -780,6 +913,12 @@ int main() {
         {"set syscall registers handler", &test_set_syscall_registers_guest_handler},
         {"set syscall rejects invalid registration", &test_set_syscall_rejects_invalid_registration},
         {"service table names", &test_service_table_reports_names},
+        {"find address matching entry", &test_find_address_returns_matching_entry_address},
+        {"find address kseg alias match", &test_find_address_matches_kseg_aliases},
+        {"find address no match", &test_find_address_returns_zero_when_no_match},
+        {"find address empty window", &test_find_address_empty_window_returns_zero},
+        {"find address unreadable memory", &test_find_address_breaks_on_unreadable_memory},
+        {"find address via dispatch", &test_find_address_via_dispatch},
         {"syscall memory trace", &test_syscall_memory_trace_records_changes},
         {"registered handler runs through the dispatcher", &test_registered_handler_runs_through_the_dispatcher},
         {"guest handler restore preserves service result", &test_guest_handler_restore_preserves_service_result},
