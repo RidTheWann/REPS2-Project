@@ -1934,6 +1934,16 @@ mod tests {
         assert_eq!(graph.blocks.len(), 2);
         assert!(graph.unresolved_indirect_jumps.is_empty());
         assert!(graph.external_targets.is_empty());
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x8010_0010,
+            kind: EdgeKind::Call,
+        }));
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x8010_0010,
+            kind: EdgeKind::ReturnContinuation,
+        }));
         assert!(matches!(
             graph.blocks[&0x8010_0000].terminator,
             Terminator::IndirectJump {
