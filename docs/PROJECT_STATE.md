@@ -159,11 +159,14 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ## Active backlog
 
-1. **Resolve why `$s3` is zero at `0x0025F024`**: decode the selector at
-   `0x0025F00C` (`beq $s1,$s0`, `sltu`, the two `$sN + 4` branches) and record
-   enough state to prove whether that fallback path is reachable on real
-   hardware. A KUSEG start would fault long before the KSEG0 end bound. Do not
-   fabricate a FindAddress match to steer the branch.
+1. **Model the guest-visible side effect of `SetSyscall`**: the routine at
+   `0x0025EF90` registers `(0x83 → 0x0025EF38)` and `(0x5A → 0x0025EF00)`, then
+   searches low EE RAM for those handler values to recover object headers
+   (`$s3 - 0x20C`, `$s2 - 0x168`). Neither value exists in the searched 512 KiB
+   window, so both searches return `0` and the fallback scans from address `4`.
+   The kernel-side table address, capacity and entry layout must come from
+   evidence, never a guess, because the fixed offsets assume a specific object
+   layout.
 2. Decide whether the two `0x83` lookups should succeed. Both search only the
    512 KiB window `[0x80000000, 0x80080000)` and return `0`; the guest then
    continues on its not-found path. Modeling a kernel-populated lookup table
