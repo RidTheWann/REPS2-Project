@@ -362,7 +362,7 @@ int main(int argc, char** argv) {
         " hle_sp=0x%08X hle_name=%s"
         " sema_calls=%llu sema_live=%u sema_param=0x%08X sema_init=%d sema_max=%d"
         " sema_attr=0x%08X sema_option=0x%08X sema_id=%d sema_refused=%s"
-        " instruction_trace_enabled=%u instruction_trace_count=%u instruction_trace_pcs=",
+        " syscall_seq_count=%u syscall_seq=",
 
         static_cast<unsigned>(entry),
         static_cast<int>(status),
@@ -397,6 +397,26 @@ int main(int argc, char** argv) {
         static_cast<unsigned>(state.hle.last_sema_option),
         static_cast<int>(state.hle.last_sema_id),
         sema_rejection,
+        static_cast<unsigned>(state.hle.syscall_sequence_count));
+    for (std::size_t i = 0; i < state.hle.syscall_sequence_count; ++i) {
+        const reps2::runtime::EeSyscallObservation& observation =
+            state.hle.syscall_observation(i);
+        const char path = observation.path == reps2::runtime::EeSyscallPath::guest_handler
+            ? 'G'
+            : (observation.path == reps2::runtime::EeSyscallPath::host_service ? 'H' : 'U');
+        std::printf("%s0x%08X:%u:%c:0x%08X:0x%08X:0x%08X:0x%08X:0x%08X",
+                    i == 0U ? "" : ";",
+                    static_cast<unsigned>(observation.pc),
+                    static_cast<unsigned>(observation.number),
+                    path,
+                    static_cast<unsigned>(observation.arguments[0]),
+                    static_cast<unsigned>(observation.arguments[1]),
+                    static_cast<unsigned>(observation.arguments[2]),
+                    static_cast<unsigned>(observation.arguments[3]),
+                    static_cast<unsigned>(observation.v0_before));
+    }
+    std::printf(
+        " instruction_trace_enabled=%u instruction_trace_count=%u instruction_trace_pcs=",
         state.instruction_trace_enabled ? 1U : 0U,
         static_cast<unsigned>(state.instruction_trace_count));
     for (std::uint32_t i = 0; i < state.instruction_trace_count; ++i) {
@@ -522,6 +542,7 @@ mod tests {
         assert!(project.probe_source.contains("state.instructions_executed"));
         assert!(project.probe_source.contains("REPS2_INSTRUCTION_TRACE"));
         assert!(project.probe_source.contains("instruction_trace_count"));
+        assert!(project.probe_source.contains("syscall_seq_count"));
         assert!(project.cmake_lists.contains("PASS_REGULAR_EXPRESSION"));
         assert!(project.cmake_lists.contains("executed=[0-9]+"));
     }

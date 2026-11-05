@@ -437,13 +437,48 @@ Four call sites exist in the same routine. `$a1` is always
 | `0x0025F024` | `$s3 + 4` | `0x0025EF38` |
 | `0x0025F040` | `$s2 + 4` | `0x0025EF00` |
 
-The bounded probe's last `0x83` boundary reports `a0=0x00000004`, so the two
-`$sN + 4` sites are reached last and `$s3`/`$s2` are zero there. The `$a2`
-offsets corroborate one shared base: `0x0025EF38 + 0x10C8` and
-`0x0025EF00 + 0x1100` are both `0x00260000`, so `$s4` and `$s5` hold that
-constant rather than unrelated values.
+The bounded probe's syscall-sequence ring (ADR 0071) settles where `4` comes from.
+Observed boundaries, oldest first, with `path` = host service (`H`) or registered
+guest handler (`G`):
 
-The addressed routine is the word scan that ADR 0070 now translates:
+```
+0x0010A178  0x3C H  SetupThread
+0x0010A194  0x3D H  SetupHeap
+0x0025A6E4  0x64 H  FlushCache
+0x0025A6E4  0x64 H  FlushCache
+0x0025F094  0x74 H  a0=0x00000083 a1=0x0025EF38   SetSyscall
+0x0025F094  0x74 H  a0=0x0000005A a1=0x0025EF00   SetSyscall
+0x0025EF7C  0x83 G  a0=0x80000000 a1=0x80080000 a2=0x0025EF38
+0x0025EF7C  0x83 G  a0=0x80000000 a1=0x80080000 a2=0x0025EF00
+0x0025EF7C  0x83 G  a0=0x00000004 a1=0x80080000 a2=0x0025EF38
+```
+
+Two conclusions follow directly from the bytes and the trace:
+
+- `$a0` survives guest-handler entry and return unchanged: the first two
+  dispatches carry `0x80000000`, matching call sites `0x0025EFE4` and
+  `0x0025EFF8`. There is no register-restoration defect in the REPS2 path.
+- The third dispatch matches call site `0x0025F024`, whose `addiu $a0,$s3,4`
+  runs with `$s3 == 0`, so `4` is produced by guest code.
+
+`$a1 - $a0` is 512 KiB for the first two calls but almost the whole KUSEG window
+for the third, which is why only the third run exhausts the budget. On real
+hardware the third scan would reach unmapped KUSEG long before the KSEG0 end
+bound and fault, which suggests the path is not intended to be taken.
+
+Unresolved:
+
+- Why `$s3` is zero at `0x0025F024`. The routine at `0x0025F00C` selects between
+  the `$s3 + 4` and `$s2 + 4` branches from `$s1`/`$s0`; both earlier calls
+  returned through the `0x80000000` sites, so the branch that reaches the zero
+  base depends on state this trace does not yet record.
+- Whether the first two lookups should have succeeded. Both returned `0`
+  (`0x80080000 - 0x80000000` is 512 KiB, and the descriptor table at physical
+  `0x00282218` is outside that window), so the guest continues through its
+  not-found path. A kernel-populated lookup table is not modeled, and returning
+  a fabricated match is not an acceptable fix.
+
+The routine the guest handler at `0x0025EF38` enters is this word scan:
 
 ```
 0025ef38: 8c820000   lw    $v0, 0($a0)

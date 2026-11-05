@@ -188,6 +188,24 @@ struct EeSema {
 // so a probe or session can report which services ran without claiming that the
 // title's kernel executed them. Everything here is reset by
 // initialize_ee_state; enabling the layer is a host decision taken afterwards.
+// Which dispatch path served a syscall boundary.
+enum class EeSyscallPath : std::uint8_t {
+    guest_handler = 0, ///< A slot the title replaced through SetSyscall.
+    host_service = 1,  ///< A REPS2 HLE service.
+    unhandled = 2,     ///< No handler: execution stops on the trap.
+};
+
+// One syscall boundary, captured before dispatch. The sequence ring keeps the
+// last few boundaries so a caller/callee order can be inspected without a
+// per-call trace line.
+struct EeSyscallObservation {
+    std::uint32_t pc{};
+    std::uint32_t number{};
+    std::array<std::uint32_t, 4> arguments{};
+    std::uint32_t v0_before{};
+    EeSyscallPath path{};
+};
+
 struct EeHleState {
     // When false, a generated SYSCALL delivers the architectural Level-1
     // exception exactly as it did before this layer existed.
@@ -204,6 +222,20 @@ struct EeHleState {
     std::uint32_t last_syscall_v0_after{};
     std::uint32_t last_syscall_resume_pc{};
     std::uint32_t last_syscall_sp{};
+    // Bounded ring of recent syscall boundaries, oldest first once the ring is
+    // full. It records the dispatch path as well as the pre-dispatch arguments.
+    static constexpr std::size_t kSyscallSequenceCapacity = 16U;
+    std::array<EeSyscallObservation, kSyscallSequenceCapacity> syscall_sequence{};
+    std::size_t syscall_sequence_next{};
+    std::size_t syscall_sequence_count{};
+
+    /// Observation at `index`, counting from the oldest retained boundary.
+    [[nodiscard]] const EeSyscallObservation& syscall_observation(std::size_t index) const noexcept {
+        const std::size_t oldest = syscall_sequence_count < kSyscallSequenceCapacity
+            ? std::size_t{0}
+            : syscall_sequence_next;
+        return syscall_sequence[(oldest + index) % kSyscallSequenceCapacity];
+    }
     // Optional syscall-boundary memory window. The pre-call snapshot records
     // observable reads; the post-call comparison records guest writes.
     static constexpr std::size_t kSyscallMemoryWindowSize = 256U;

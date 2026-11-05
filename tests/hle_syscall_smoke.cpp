@@ -624,6 +624,17 @@ int test_registered_handler_runs_through_the_dispatcher() {
     if (state.hle.syscall_handler_depth != 0U) return 183;
     if (!registration.in_use || registration.handler_address != 0xE600U) return 184;
     if (state.hle.last_syscall_resume_pc != 0xE704U) return 185;
+    // The boundary ring records the guest-handler path and the pre-dispatch
+    // arguments, which is what identifies a caller in a real trace.
+    if (state.hle.syscall_sequence_count != 1U) return 186;
+    const reps2::runtime::EeSyscallObservation& observation =
+        state.hle.syscall_observation(0);
+    if (observation.pc != 0xE700U || observation.number != 0x83U
+        || observation.arguments[0] != 0x8000'0000U
+        || observation.arguments[1] != 0x8008'0000U
+        || observation.path != reps2::runtime::EeSyscallPath::guest_handler) {
+        return 187;
+    }
     return 0;
 }
 
@@ -920,6 +931,49 @@ int test_syscall_memory_trace_records_changes() {
     return 0;
 }
 
+int test_syscall_sequence_ring_records_path_and_evicts() {
+    constexpr std::size_t capacity = reps2::runtime::EeHleState::kSyscallSequenceCapacity;
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    for (std::uint32_t i = 0; i < capacity + 4U; ++i) {
+        state.gpr[3].low = 0x64U; // FlushCache, a serviced host no-op
+        state.gpr[4].low = 0x1000U + i;
+        state.pc = 0x2000U + (i * 4U);
+        if (reps2::runtime::dispatch_ee_syscall(state, 16U) != Status::ok) {
+            return 300;
+        }
+    }
+    if (state.hle.syscall_sequence_count != capacity) {
+        return 301;
+    }
+    const reps2::runtime::EeSyscallObservation& oldest = state.hle.syscall_observation(0);
+    if (oldest.pc != 0x2000U + 4U * 4U) {
+        return 302; // 20 calls into a 16-entry ring: the first four are gone
+    }
+    const reps2::runtime::EeSyscallObservation& newest =
+        state.hle.syscall_observation(capacity - 1U);
+    if (newest.pc != 0x2000U + 4U * 19U || newest.number != 0x64U
+        || newest.arguments[0] != 0x1000U + 19U
+        || newest.path != reps2::runtime::EeSyscallPath::host_service) {
+        return 303;
+    }
+
+    state.gpr[3].low = 0xFFFFU; // no such service
+    state.pc = 0x3000U;
+    if (reps2::runtime::dispatch_ee_syscall(state, 16U) != Status::unhandled_syscall) {
+        return 304;
+    }
+    const reps2::runtime::EeSyscallObservation& unhandled =
+        state.hle.syscall_observation(state.hle.syscall_sequence_count - 1U);
+    if (unhandled.pc != 0x3000U || unhandled.number != 0xFFFFU
+        || unhandled.path != reps2::runtime::EeSyscallPath::unhandled) {
+        return 305;
+    }
+    return 0;
+}
+
 int main() {
     const struct {
         const char* what;
@@ -932,6 +986,8 @@ int main() {
         {"negated service number", &test_negated_service_number_dispatches_on_its_magnitude},
         {"unknown service", &test_unknown_service_stops_without_faking_success},
         {"flush cache", &test_flush_cache_is_an_honest_no_op},
+        {"syscall sequence ring records path and evicts",
+         &test_syscall_sequence_ring_records_path_and_evicts},
         {"delay slot taken target", &test_delay_slot_syscall_resumes_at_the_taken_target},
         {"delay slot fallthrough", &test_delay_slot_syscall_resumes_at_the_fallthrough},
         {"delay slot without the layer",
