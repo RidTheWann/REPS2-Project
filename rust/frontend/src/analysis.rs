@@ -1378,7 +1378,7 @@ fn resolve_indirect_jump_target(block: &BasicBlock, source_register: u8) -> Opti
             Opcode::Lui => {
                 constants.insert(instruction.rt, (instruction.immediate as u32) << 16);
             }
-            Opcode::Ori | Opcode::Addiu | Opcode::Andi | Opcode::Xori => {
+            Opcode::Ori | Opcode::Addiu | Opcode::Daddiu | Opcode::Andi | Opcode::Xori => {
                 let base = if instruction.rs == 0 {
                     Some(0u32)
                 } else {
@@ -1388,7 +1388,10 @@ fn resolve_indirect_jump_target(block: &BasicBlock, source_register: u8) -> Opti
                     Some(base) => {
                         let result = match instruction.opcode {
                             Opcode::Ori => base | instruction.immediate as u32,
-                            Opcode::Addiu => {
+                            Opcode::Addiu | Opcode::Daddiu => {
+                                // JR/JALR consume the low 32-bit guest address;
+                                // the low lane is identical for wrapping 32-bit
+                                // addition and the EE's sign-extended DADDIU.
                                 base.wrapping_add(instruction.signed_immediate() as u32)
                             }
                             Opcode::Andi => base & instruction.immediate as u32,
@@ -1969,6 +1972,39 @@ mod tests {
         ));
         assert_eq!(
             graph.blocks[&0x0010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn follows_daddiu_indirect_jump_target() {
+        // DADDIU sign-extends its immediate, but the low 32 bits of the
+        // resulting EE address are still ordinary wrapping 32-bit addition.
+        //   lui    t9, 0x0010
+        //   daddiu t9, t9, 0x0040
+        //   jr     t9
+        //   nop
+        //   ... target at 0x00100040 ...
+        let mut words = [0u32; 19];
+        words[0] = 0x3C09_0010; // lui $t9, 0x0010
+        words[1] = 0x6529_0040; // daddiu $t9, $t9, 0x0040
+        words[2] = 0x0120_0008; // jr $t9
+        words[16] = 0x2401_0001; // addiu $at, $zero, 1 at 0x00100040
+        words[17] = 0x03E0_0008; // jr $ra
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("DADDIU-built indirect jump");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_0040));
+        assert_eq!(
+            graph.blocks[&0x0010_0040].instructions[0].opcode,
             Opcode::Addiu
         );
     }
