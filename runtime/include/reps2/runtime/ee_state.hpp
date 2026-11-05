@@ -243,6 +243,15 @@ struct EeHleState {
     std::uint32_t last_set_syscall_slot{};
     std::uint32_t last_set_syscall_handler{};
     EeSetSyscallRejection last_set_syscall_rejection{};
+    // FindAddress (0x83) observation. The service scans a guest word table for a
+    // target entry and reports the match address; it writes nothing to guest
+    // memory. No kernel table is populated by REPS2, so an unpopulated window
+    // reports "not found" (0) rather than inventing a match.
+    bool find_address_called{};
+    std::uint32_t last_find_address_start{};
+    std::uint32_t last_find_address_end{};
+    std::uint32_t last_find_address_target{};
+    std::uint32_t last_find_address_result{};
     std::array<EeSyscallRegistration, kEeMaxSyscallSlots> syscall_registrations{};
     // Guest-handler invocation, distinct from host-serviced HLE calls: the
     // handler itself is translated guest code and runs through the dispatcher.

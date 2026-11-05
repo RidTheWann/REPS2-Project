@@ -4,15 +4,27 @@ Updated: 2026-11-05
 
 ## Current objective
 
-Advance M4 real-title native execution without inventing the unresolved EE `FindAddress` (0x83) ABI, while preserving the shared multi-game architecture. M4 probe validation for Black is complete (PR #79 merged); execution stops at `FindAddress` 0x83 (same boundary as Downhill Domination) with no local reference-execution oracle available.
+Advance M4 real-title native execution. The EE `FindAddress` (0x83) ABI deferral
+(ADR 0068) is resolved via an independent behavioral reference, the service is
+implemented as an honest host service (returns `0` = not found, never faked
+success), and the M4 boundary is unblocked. Next step: commit/push the feature
+branch, open and merge its PR, then re-run the bounded Downhill Domination and
+Black probes with HLE on to confirm execution progresses past PC `0x0025EF7C` /
+`0x0036D664`.
 
 ## Verified repository state
 
-- Branch: `main` at HEAD `627c71f5` (CI green); feature branch `feat/ee-guest-syscall-handlers` with unmerged changes (below).
+- Branch: `main` at HEAD `253ba31` (CI green).
+- Feature branch: `feat/m4-ee-findaddress-hle` off `253ba31`, working tree dirty
+  (3 files + ADR 0068 + PROJECT_STATE.md, not yet committed).
 - PR: `RidTheWann/REPS2-Project#79` (merged; all 6 CI checks passed: MSRV, Linux, Windows)
 - Cleanup PR: `RidTheWann/REPS2-Project#80` (open; remove `path/to/filename.js` placeholder)
-- Working tree: dirty on `feat/ee-guest-syscall-handlers` (6 files + ADR 0069 + docs, not yet committed)
-- Latest delivered work: EE guest syscall handler dispatch through SetSyscall (ADR 0069) — registered slots take precedence over host services, bounded handler frames with kseg3 sentinel return (`kEeSyscallHandlerReturnPc`), `syscall_handler_overflow` status, host/service and guest-handler separation preserved; static data-pointer root discovery for non-executable loaded segments; cfg fixture gains handler/caller roots 0xE600/0xE700; HLE smoke suite grows to 23 cases.
+- Latest delivered work: EE FindAddress HLE service (0x83) — `hle_find_address` +
+  `normalize_ee_kernel_alias` in `ee_hle.hpp`, registered in the sorted
+  `kEeSyscallServices` table under `kEeSyscallFindAddress = 0x83U`, observation
+  fields on `EeHleState`, HLE smoke suite grows from 23 to 29 cases (6 new
+  FindAddress cases). Builds on SetSyscall dispatch (ADR 0069): registered guest
+  handler slots take precedence over host services.
 
 ## Verified validation
 
@@ -20,7 +32,7 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 - Rust workspace tests: passed (271 tests, 0 failures)
 - Rust clippy: passed (no warnings, `-D warnings`)
 - Release native build: passed
-- Full CTest: 30/30 passed (incl. `reps2_hle_syscall_codegen_smoke` 23 cases)
+- Full CTest: 30/30 passed (incl. `reps2_hle_syscall_codegen_smoke` 29 cases)
 - `git diff --check`: not re-run after uncommitted edits
 
 ## M4 evidence status
@@ -42,19 +54,30 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 
 ### M4 boundary (both titles)
 
-- `FindAddress` service 0x83 ABI, return value, and memory effects: **UNKNOWN**.
-- ps2sdk names service 0x83 `FindAddress` but exposes no declaration or ABI; ps2tek does not define its contract.
+- `FindAddress` service 0x83 ABI: **RESOLVED** via independent behavioral
+  reference (PS2Recomp `9e4fd79`, research only — no source copied).
+  Contract: `$a0`=table start (inclusive), `$a1`=table end (exclusive),
+  `$a2`=target; scans word entries in `[a0, a1)`, returns the guest address of
+  the first matching word or `0` when none matches; KSEG0/KSEG1 aliasing
+  (`addr & 0x1FFFFFFF`); memory-validated reads; unreadable entry ends the scan.
+- Implemented as an honest host service on `feat/m4-ee-findaddress-hle`:
+  returns `0` ("not found") for an empty/inverted/unpopulated window, writes
+  nothing to guest memory — no faked kernel success. 6 tests added; suite 23→29
+  cases; CTest 30/30.
 - Trustworthy local reference-execution oracle: not available.
 - Repeatable guest-visible boot stage: not demonstrated.
-- M4: **INCOMPLETE** — blocked on `FindAddress` without an oracle; will not invent the ABI.
+- M4 boundary: **UNBLOCKED** — awaiting commit/PR/merge and a re-run of the
+  bounded Downhill Domination and Black probes with HLE on to confirm execution
+  progresses past PC `0x0025EF7C` / `0x0036D664`.
 
 ## Active backlog
 
-1. Record Black probe evidence (done: COMPATIBILITY_MATRIX.md + PROJECT_STATE.md, PR #79 merged).
-2. Preserve caller correlation and trace regression assertions (delivered in PR #79); do not implement `FindAddress` without an oracle.
-3. Advance independent compiler/runtime workstreams not blocked by `FindAddress` (M4 is a priority, not the whole mission).
-4. Remove `path/to/filename.js` placeholder from main (PR #80 open; does not block M4).
-5. Commit/push `feat/ee-guest-syscall-handlers` and open its PR.
+1. Commit/push `feat/m4-ee-findaddress-hle`, open its PR, merge to `main` after CI passes.
+2. Re-run the bounded Downhill Domination and Black probes with HLE on; confirm
+   execution progresses past PC `0x0025EF7C` / `0x0036D664` past the FindAddress
+   boundary.
+3. Remove `path/to/filename.js` placeholder from main (PR #80 open; does not block M4).
+4. Advance independent compiler/runtime workstreams not blocked by `FindAddress` (M4 is a priority, not the whole mission).
 
 ## Release-gate status
 

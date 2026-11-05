@@ -38,6 +38,7 @@ inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
 inline constexpr std::uint32_t kEeSyscallSetSyscall = 0x74U;
 inline constexpr std::uint32_t kEeSyscallFlushCache = 0x64U;
+inline constexpr std::uint32_t kEeSyscallFindAddress = 0x83U;
 
 // The public description of CreateSema states that the call returns the new
 // semaphore's id on success and -1 on failure, so -1 is a guest-visible failure
@@ -275,6 +276,64 @@ struct EeSyscallService {
     return Status::ok;
 }
 
+// Normalize a KSEG0/KSEG1 kernel alias to its physical low 29 bits. Addresses
+// outside the kernel window are returned unchanged. Mirrors the translation
+// performed by resolve_ee_main_ram_address for direct-mapped kernel addresses.
+[[nodiscard]] inline std::uint32_t normalize_ee_kernel_alias(
+    std::uint32_t address
+) noexcept {
+    if (address >= 0x80000000U && address < 0xC0000000U) {
+        return address & 0x1FFFFFFFU;
+    }
+    return address;
+}
+
+// FindAddress (0x83): FindAddress(table_start, table_end, target).
+//
+// Scans the guest word table [table_start, table_end) for a word equal to
+// `target` (or its KSEG alias) and returns the guest address of the first
+// matching word entry, or 0 when none matches. The service reads guest memory
+// only and writes nothing; an unreadable entry ends the scan.
+//
+// This is an honest, bounded table scan: it returns 0 ("not found") for an
+// empty, inverted, or unpopulated window rather than inventing a match. REPS2
+// does not populate a kernel table, so a retail title whose window contains no
+// matching entry observes 0 and must handle that result itself. The observed
+// Downhill Domination and Black call sites pass a kernel window
+// (0x80000000..0x80080000) and a code address as the target.
+[[nodiscard]] inline Status hle_find_address(EeState& state) noexcept {
+    const std::uint32_t table_start = ee_syscall_argument(state, 0);
+    const std::uint32_t table_end = ee_syscall_argument(state, 1);
+    const std::uint32_t target = ee_syscall_argument(state, 2);
+    const std::uint32_t target_normalized = normalize_ee_kernel_alias(target);
+
+    state.hle.find_address_called = true;
+    state.hle.last_find_address_start = table_start;
+    state.hle.last_find_address_end = table_end;
+    state.hle.last_find_address_target = target;
+    state.hle.last_find_address_result = 0;
+
+    // Align the search window to 32-bit word boundaries.
+    std::uint32_t start = (table_start + 3U) & ~0x3U;
+    std::uint32_t end = table_end & ~0x3U;
+
+    std::uint32_t result = 0;
+    for (std::uint32_t addr = start; addr < end; addr += 4U) {
+        std::uint32_t entry = 0;
+        if (load_u32(state.memory, addr, entry) != Status::ok) {
+            break;
+        }
+        if (entry == target || normalize_ee_kernel_alias(entry) == target_normalized) {
+            result = addr;
+            break;
+        }
+    }
+
+    state.hle.last_find_address_result = result;
+    state.gpr[kEeSyscallResultRegister].low = sign_extend_word(result);
+    return Status::ok;
+}
+
 // Finish the optional syscall-boundary memory comparison, shared by host-serviced
 // calls and guest-handler returns so both report the same observation.
 inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
@@ -379,6 +438,7 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},
     {kEeSyscallFlushCache, "FlushCache", &hle_flush_cache},
     {kEeSyscallSetSyscall, "SetSyscall", &hle_set_syscall},
+    {kEeSyscallFindAddress, "FindAddress", &hle_find_address},
 };
 inline constexpr std::size_t kEeSyscallServiceCount =
     sizeof(kEeSyscallServices) / sizeof(kEeSyscallServices[0]);
