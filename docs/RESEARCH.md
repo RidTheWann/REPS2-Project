@@ -438,7 +438,10 @@ Four call sites exist in the same routine. `$a1` is always
 | `0x0025F040` | `$s2 + 4` | `0x0025EF00` |
 
 The bounded probe's last `0x83` boundary reports `a0=0x00000004`, so the two
-`$sN + 4` sites are reached last and `$s3`/`$s2` are zero there.
+`$sN + 4` sites are reached last and `$s3`/`$s2` are zero there. The `$a2`
+offsets corroborate one shared base: `0x0025EF38 + 0x10C8` and
+`0x0025EF00 + 0x1100` are both `0x00260000`, so `$s4` and `$s5` hold that
+constant rather than unrelated values.
 
 The addressed routine is the word scan that ADR 0070 now translates:
 
