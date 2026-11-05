@@ -114,8 +114,16 @@ Current bounded probe (2026-11-06, after ADR 0070 section-aware pointer discover
   scan loop `0x0025EF50` → `0x0025EF54` → `0x0025EF5C`.
 - Observed arguments at the last FindAddress boundary: `$a0=0x00000004`,
   `$a1=0x80080000`, `$a2=0x0025EF38`, so the loop walks roughly
-  0x2002_0000 words. `$a0` provenance is the next investigation; the budget was
-  deliberately not raised to hide it.
+  0x2002_0000 words. The budget was deliberately not raised to hide it.
+- Syscall-sequence trace (ADR 0071) records nine boundaries: `0x3C` SetupThread,
+  `0x3D` SetupHeap, `0x64` FlushCache twice, `0x74` SetSyscall for `0x83` and
+  `0x5A`, then three `0x83` guest-handler dispatches at `0x0025EF7C` with
+  `$a0` = `0x80000000`, `0x80000000`, `0x00000004`.
+- This **disproves** a register-restoration defect: `$a0` survives handler entry
+  and return unchanged for the first two dispatches. The third matches call site
+  `0x0025F024` (`addiu $a0,$s3,4`) with `$s3 == 0`, so `4` is produced by guest
+  code. Only that call has a KUSEG start, and it is the one that exhausts the
+  budget.
 - No guest-visible boot stage was demonstrated.
 
 Previous bounded probe, before the indirect-target resolver (historical):
@@ -151,15 +159,18 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ## Active backlog
 
-1. **Investigate FindAddress argument `$a0` provenance**: the trace shows a guest
-   call to the word-scan routine with `$a0=0x00000004` and budget exhaustion at
-   `0x0025EF5C`. `docs/RESEARCH.md` records the four call sites: two pass
-   `0x80000000` and two pass `$sN + 4`. Confirm whether this reflects correct
-   HLE service return values and proper register propagation after the previous
-   syscall handler returned, and document any fix.
-2. Extend the native probe trace to record the syscall sequence, not only the
-   last boundary, so the `$a0` path can be followed across handlers, and
-   investigate any new unresolved edge separately.
+1. **Model the guest-visible side effect of `SetSyscall`**: the routine at
+   `0x0025EF90` registers `(0x83 → 0x0025EF38)` and `(0x5A → 0x0025EF00)`, then
+   searches low EE RAM for those handler values to recover object headers
+   (`$s3 - 0x20C`, `$s2 - 0x168`). Neither value exists in the searched 512 KiB
+   window, so both searches return `0` and the fallback scans from address `4`.
+   The kernel-side table address, capacity and entry layout must come from
+   evidence, never a guess, because the fixed offsets assume a specific object
+   layout.
+2. Decide whether the two `0x83` lookups should succeed. Both search only the
+   512 KiB window `[0x80000000, 0x80080000)` and return `0`; the guest then
+   continues on its not-found path. Modeling a kernel-populated lookup table
+   needs observed contract evidence, never a fabricated match.
 3. Re-run the Black probe with HLE enabled using its matching legal input
    digest; do not infer its progress from Downhill Domination.
 4. Trace the caller's use of FindAddress `$v0` and verify that the

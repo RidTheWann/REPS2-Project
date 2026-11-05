@@ -531,8 +531,31 @@ inline constexpr std::size_t kEeSyscallServiceCount =
     // precedence over any host service for the same number. The handler is
     // translated guest code and runs through the dispatcher; the HLE layer only
     // services slots no guest handler has replaced.
-    if (number < kEeMaxSyscallSlots
-        && state.hle.syscall_registrations[number].in_use) {
+    const bool guest_handler = number < kEeMaxSyscallSlots
+        && state.hle.syscall_registrations[number].in_use;
+    const EeSyscallService* const service =
+        guest_handler ? nullptr : find_ee_syscall_service(number);
+
+    // Record the boundary before dispatch so the ring reflects the guest's
+    // registers rather than any handler's side effects.
+    EeSyscallObservation& observation =
+        state.hle.syscall_sequence[state.hle.syscall_sequence_next];
+    observation = EeSyscallObservation{
+        .pc = state.pc,
+        .number = number,
+        .arguments = state.hle.last_syscall_arguments,
+        .v0_before = state.hle.last_syscall_v0_before,
+        .path = guest_handler
+            ? EeSyscallPath::guest_handler
+            : (service != nullptr ? EeSyscallPath::host_service : EeSyscallPath::unhandled),
+    };
+    state.hle.syscall_sequence_next =
+        (state.hle.syscall_sequence_next + 1U) % EeHleState::kSyscallSequenceCapacity;
+    if (state.hle.syscall_sequence_count < EeHleState::kSyscallSequenceCapacity) {
+        ++state.hle.syscall_sequence_count;
+    }
+
+    if (guest_handler) {
         return enter_ee_syscall_handler(
             state,
             number,
@@ -540,7 +563,6 @@ inline constexpr std::size_t kEeSyscallServiceCount =
             resume_pc);
     }
 
-    const EeSyscallService* const service = find_ee_syscall_service(number);
     if (service == nullptr) {
         return Status::unhandled_syscall;
     }

@@ -437,13 +437,82 @@ Four call sites exist in the same routine. `$a1` is always
 | `0x0025F024` | `$s3 + 4` | `0x0025EF38` |
 | `0x0025F040` | `$s2 + 4` | `0x0025EF00` |
 
-The bounded probe's last `0x83` boundary reports `a0=0x00000004`, so the two
-`$sN + 4` sites are reached last and `$s3`/`$s2` are zero there. The `$a2`
-offsets corroborate one shared base: `0x0025EF38 + 0x10C8` and
-`0x0025EF00 + 0x1100` are both `0x00260000`, so `$s4` and `$s5` hold that
-constant rather than unrelated values.
+The bounded probe's syscall-sequence ring (ADR 0071) settles where `4` comes from.
+Observed boundaries, oldest first, with `path` = host service (`H`) or registered
+guest handler (`G`):
 
-The addressed routine is the word scan that ADR 0070 now translates:
+```
+0x0010A178  0x3C H  SetupThread
+0x0010A194  0x3D H  SetupHeap
+0x0025A6E4  0x64 H  FlushCache
+0x0025A6E4  0x64 H  FlushCache
+0x0025F094  0x74 H  a0=0x00000083 a1=0x0025EF38   SetSyscall
+0x0025F094  0x74 H  a0=0x0000005A a1=0x0025EF00   SetSyscall
+0x0025EF7C  0x83 G  a0=0x80000000 a1=0x80080000 a2=0x0025EF38
+0x0025EF7C  0x83 G  a0=0x80000000 a1=0x80080000 a2=0x0025EF00
+0x0025EF7C  0x83 G  a0=0x00000004 a1=0x80080000 a2=0x0025EF38
+```
+
+Two conclusions follow directly from the bytes and the trace:
+
+- `$a0` survives guest-handler entry and return unchanged: the first two
+  dispatches carry `0x80000000`, matching call sites `0x0025EFE4` and
+  `0x0025EFF8`. There is no register-restoration defect in the REPS2 path.
+- The third dispatch matches call site `0x0025F024`, whose `addiu $a0,$s3,4`
+  runs with `$s3 == 0`, so `4` is produced by guest code.
+
+`$a1 - $a0` is 512 KiB for the first two calls but almost the whole KUSEG window
+for the third, which is why only the third run exhausts the budget. On real
+hardware the third scan would reach unmapped KUSEG long before the KSEG0 end
+bound and fault, which suggests the path is not intended to be taken.
+
+### The selector at `0x0025F00C` and the kernel-table dependency
+
+The routine at `0x0025EF90` (prologue `addiu $sp,$sp,-0x80`) runs this sequence:
+
+1. reads the descriptor table at `0x00282218` and calls the `SetSyscall` wrapper
+   `0x0025F090` for `(0x83, 0x0025EF38)` and `(0x5A, 0x0025EF00)`, which are the
+   two `0x74` boundaries in the trace;
+2. calls the `0x83` wrapper `0x0025EF78` with `(0x80000000, 0x80080000,
+   0x0025EF38)` and keeps the result in `$s3`, then repeats with `0x0025EF00`
+   and keeps the result in `$s2`;
+3. computes `$s1 = $s3 - 0x20C` and `$s0 = $s2 - 0x168`, then loops: while
+   `$s1 != $s0`, the smaller one is advanced by another search starting at
+   `$sN + 4` for the same handler value, recomputing `$sN - 0x20C` or
+   `$sN - 0x168`;
+4. stores the final `$s1` to `0x00282210`.
+
+So both searches are meant to locate the *stored copy* of the registered handler
+addresses, and the fixed offsets recover object headers from those slots.
+
+Measured against the generated 32 MiB RAM image:
+
+- `0x0025EF38` occurs exactly once, at `0x0028221C`; `0x0025EF00` occurs exactly
+  once, at `0x00282224`. Both are the `.data` descriptor table.
+- Neither value occurs anywhere in the 512 KiB window `[0, 0x80000)` that the
+  search covers, and low RAM is zero-filled in the image.
+
+The searches therefore return `0`, `$s1`/`$s0` become `0xFFFFFDF4`/`0xFFFFFE98`,
+and the loop's first iteration starts at address `4` — the run that exhausts the
+budget.
+
+That is the root cause: the guest expects its registered handler addresses to be
+present in **low EE RAM**, i.e. it expects `SetSyscall` to copy them into a
+kernel-side table. ADR 0067 records the registration in host state and writes
+nothing to guest memory, so no such table exists. The table address and layout
+must come from evidence rather than a guess, because `$s3 - 0x20C` assumes the
+slot's position inside a specific kernel object.
+
+Unresolved:
+
+- The kernel table's address, capacity and entry layout. This needs evidence
+  from a public behavioural reference or from guest writes observed at the
+  `0x74` boundary; it must not be invented.
+- Whether the two initial lookups are expected to succeed at all. Every measured
+  path says they cannot with the current RAM image, so the not-found fallback is
+  what actually runs.
+
+The routine the guest handler at `0x0025EF38` enters is this word scan:
 
 ```
 0025ef38: 8c820000   lw    $v0, 0($a0)
