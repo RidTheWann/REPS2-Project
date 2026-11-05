@@ -1,6 +1,6 @@
 # REPS2 autonomous engineering state
 
-Updated: 2026-11-05
+Updated: 2026-11-06
 
 ## Current objective
 
@@ -27,9 +27,11 @@ word-scan loop, not unresolved control flow.
 
 ## Verified repository state
 
-- Default branch: `main` at `3409a10` (PR #4 squash-merged on 2026-11-05).
-- PR #4 is **closed and merged**; merge commit
-  `3409a10d09c9b21944107de16361fc3e2019f553` contains the M4 documentation,
+- Default branch: `main` at `f691db7` (PR #13 squash-merged on 2026-11-05).
+- PR #13 is **closed and merged**. It adds section-permission-driven function
+  and pointer discovery (ADR 0070) and the M4 evidence below.
+- Before PR #13, `main` was at `3409a10` (PR #4 squash-merge).
+- PR #4 is **closed and merged**; it contains the M4 documentation,
   syscall-handler context preservation, indirect-target CFG analysis, and
   regression tests.
 - PR #3 was **closed without a GitHub merge** after its documentation changes
@@ -37,9 +39,24 @@ word-scan loop, not unresolved control flow.
 - `main` remains protected. Required checks are
   `Rust frontend (ubuntu-latest)`, `Rust frontend (windows-latest)`, and
   `Rust frontend (MSRV 1.88)`.
-- PR #4's final head passed all three required checks on Ubuntu, Windows, and
-  Rust MSRV 1.88 before squash merge. Review follow-up fixes were included in
-  that verified head.
+- PR #13's final head passed all required checks on Ubuntu, Windows, and Rust
+  MSRV 1.88, plus the dashboard generator, before squash merge.
+
+## Delivered in PR #13 (merged)
+
+- Added `executable_section_ranges`, derived from allocated `SHF_EXECINSTR`
+  sections, so discovery works on retail images whose only `PT_LOAD` is
+  writable and executable (ADR 0070).
+- Applied those ranges symmetrically: code words are decoded as code, non-code
+  words are read as pointers, and only section-executable addresses are
+  admitted as candidates. Falls back to the `PT_LOAD` `PF_X` rule when the
+  section table is absent or does not intersect the segments.
+- Added a regression fixture with one RWX `PT_LOAD`, split section permissions,
+  a pointer-shaped code word, and a `jal` encoding in `.data`.
+- Re-ran the Downhill Domination analysis and native probe; the former
+  `0x0025EF38` unresolved-control-flow stop is gone.
+- Passing host CI does not replace a real-title probe, and the probe is still a
+  bounded budget test, not a guest-visible stage.
 
 ## Delivered in PR #4 (merged)
 
@@ -74,7 +91,7 @@ Current bounded probe (2026-11-06, after ADR 0070 section-aware pointer discover
 - Boot ELF SHA-256:
   `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`
   (identical to the recorded digest). Entry `0x0010A008`.
-- Build: REPS2 `e4165c9` plus ADR 0070; `x86_64-pc-windows-msvc`; generated
+- Build: REPS2 `f691db7` (PR #13); `x86_64-pc-windows-msvc`; generated
   native module built with MSVC Release `/O2` as one dispatcher plus 8 parts.
 - Analysis (`analyze-elf --discover`): 364,352 code words and 49,148
   data-pointer words scanned (0 data words before ADR 0070); 2,491 pointer
