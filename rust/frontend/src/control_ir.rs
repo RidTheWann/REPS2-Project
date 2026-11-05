@@ -463,6 +463,7 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             delay_slot,
             link_register,
             return_pc,
+            .. // CFG-only resolved destination is consumed during block discovery.
         } => Ok(ControlTerminator::IndirectJump {
             guest_pc: instruction.pc,
             source_register: *source_register,
