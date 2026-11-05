@@ -78,7 +78,7 @@ No guest-visible boot stage was demonstrated.
         self.assertIn("Engineering progress", svg)
         self.assertIn("#090e19", svg)
         self.assertIn("#67e8f9", svg)
-        self.assertIn("pattern id=\\"grid\\"", svg)
+        self.assertIn('pattern id="grid"', svg)
         self.assertIn("Milestone map", svg)
         self.assertIn("Release gates", svg)
         self.assertNotIn('fill="#ffffff"', svg)
