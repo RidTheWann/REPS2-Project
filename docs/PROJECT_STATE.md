@@ -47,6 +47,9 @@ Downhill Domination probe with this resolver has not yet been run.
 - Added CFG fixtures for constant `JR` targets, a KSEG0 `JALR` target,
   `DADDIU` address construction, and a delay-slot write that must not alter
   the already-selected `JR` target.
+- Preserve resolved indirect destinations as explicit `Jump`/`Call` CFG edges;
+  known non-executable destinations remain visible in `external_targets`, and
+  `JR $zero` is treated as a constant transfer to address zero.
 - The latest source/test changes must remain subject to the required Windows,
   Ubuntu, and MSRV CI checks. A passing synthetic/host CI run does not replace
   a real-title probe.
@@ -78,7 +81,7 @@ Last recorded probe predates the FindAddress HLE implementation:
   `65768cade88bfbaf566b67a3ef7a0bda5a9669779833914ffe7cd73a3e45cccd`.
 - Boot ELF SHA-256:
   `141b05209570458af9c8e27ab1911f258da6353909d813cd572df026254ffe4c`.
-- Entry: `0x00100008); analysis: 101,956 blocks and 504,661 instructions.
+- Entry: `0x00100008`; analysis: 101,956 blocks and 504,661 instructions.
 - The old HLE-on probe reached FindAddress `0x83` at `0x0036D664`.
   The Black ELF was not available for a post-FindAddress re-probe.
 - No guest-visible boot stage was demonstrated.
