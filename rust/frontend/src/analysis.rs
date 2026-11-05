@@ -1974,6 +1974,45 @@ mod tests {
     }
 
     #[test]
+    fn indirect_jump_target_is_captured_before_delay_slot_clobber() {
+        // JR reads its target before the delay slot executes. The slot may
+        // overwrite the source register without changing the selected target.
+        //   lui  t9, 0x0010
+        //   ori  t9, t9, 0x0010
+        //   jr   t9
+        //   lui  t9, 0x0020       # delay slot clobbers t9 after target capture
+        //   addiu t1, zero, 1    # original target at 0x00100010
+        //   jr   ra
+        //   nop
+        let words = [
+            0x3C09_0010,
+            0x3529_0010,
+            0x0120_0008,
+            0x3C09_0020,
+            0x2401_0001,
+            0x03E0_0008,
+            0x0000_0000,
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("indirect jump with a clobbering delay slot");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_0010));
+        assert!(!graph.blocks.contains_key(&0x0020_0000));
+        assert_eq!(
+            graph.blocks[&0x0010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
     fn alias_roots_are_limited_and_contribute_distinct_blocks() {
         // The KSEG0 root aliases bytes of a direct-physical segment. It is
         // accepted as a distinct entry, gets its own block, and does not
