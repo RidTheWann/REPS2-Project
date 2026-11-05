@@ -415,6 +415,64 @@ Observed on the real title:
 - After registration, Downhill Domination reaches syscall `0x83` (`FindAddress`) at `pc=0x0025EF7C`, with `a0=0x80000000`, `a1=0x80080000`, `a2=0x0025EF38`, `a3=0x0029E580`. The bounded run reports `executed=2757047`, `syscalls=7`, `hle_handled=6`. This proves registration-boundary progress only; handler execution, BIOS completion, visible boot and playability remain unproven.
 - `FindAddress` is not safe to stub. ps2sdk names service `0x83` but exposes no public declaration or argument contract; `GetEntryAddress` (0x5B) is a separate service. The observed kernel-segment arguments do not distinguish address-range search, vector lookup or another kernel registry. ADR 0068 defers it pending return-register, memory-side-effect and caller-control-flow evidence.
 
+### Downhill Domination `FindAddress` wrapper and call sites
+
+`0x0025EF78` is a five-instruction wrapper for service `0x83` that passes
+`$a0..$a3` through unchanged:
+
+```
+0025ef78: 24030083   addiu $v1, $zero, 0x83
+0025ef7c: 0000000c   syscall
+0025ef80: 03e00008   jr    $ra
+0025ef84: 00000000   nop
+```
+
+Four call sites exist in the same routine. `$a1` is always
+`lui 0x8008` → `0x80080000` and `$a3` is `0x0029E580`:
+
+| site | `$a0` | `$a2` |
+|---|---|---|
+| `0x0025EFE4` | `lui $a0,0x8000` → `0x80000000` | `$s5 - 0x10C8` → `0x0025EF38` |
+| `0x0025EFF8` | `0x80000000` | `$s4 - 0x1100` → `0x0025EF00` |
+| `0x0025F024` | `$s3 + 4` | `0x0025EF38` |
+| `0x0025F040` | `$s2 + 4` | `0x0025EF00` |
+
+The bounded probe's last `0x83` boundary reports `a0=0x00000004`, so the two
+`$sN + 4` sites are reached last and `$s3`/`$s2` are zero there. The `$a2`
+offsets corroborate one shared base: `0x0025EF38 + 0x10C8` and
+`0x0025EF00 + 0x1100` are both `0x00260000`, so `$s4` and `$s5` hold that
+constant rather than unrelated values.
+
+The addressed routine is the word scan that ADR 0070 now translates:
+
+```
+0025ef38: 8c820000   lw    $v0, 0($a0)
+0025ef3c: 1046000b   beq   $v0, $a2, found
+0025ef40: 0085102b   sltu  $v0, $a0, $a1
+0025ef44: 5040000a   beql  $v0, $zero, leave
+0025ef48: 0002200a   movz  $a0, $zero, $v0
+0025ef4c: 24840004   addiu $a0, $a0, 4
+0025ef50: 8c820000   lw    $v0, 0($a0)      <- budget-exhausted PC window
+0025ef54: 10460005   beq   $v0, $a2, found
+0025ef58: 0085102b   sltu  $v0, $a0, $a1
+0025ef5c: 5440fffc   bnel  $v0, $zero, 0x0025EF50
+0025ef60: 24840004   addiu $a0, $a0, 4
+```
+
+It returns the address of the first word equal to `$a2`, or `0` when the range
+ends. Because `$a0` starts at `4` in KUSEG while `$a1` is `0x80080000` in KSEG0,
+the loop walks the whole KUSEG window instead of the 8 MiB of physical RAM the
+`0x80000000` form addresses. REPS2 currently services those reads without a
+fault, so the probe exhausts its budget rather than stopping.
+
+Unresolved:
+
+- Whether the two `$sN + 4` sites are legitimate (a module list whose base is
+  zero) or reflect a guest register that should be non-zero. Distinguishing the
+  two needs a syscall-sequence trace that records every boundary, not only the
+  last one.
+- Whether the real kernel faults on the unmapped KUSEG reads this range implies.
+
 ## Provenance rules
 
 

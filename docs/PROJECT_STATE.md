@@ -153,9 +153,10 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 1. **Investigate FindAddress argument `$a0` provenance**: the trace shows a guest
    call to the word-scan routine with `$a0=0x00000004` and budget exhaustion at
-   `0x0025EF5C`. Confirm whether this reflects correct HLE service return values
-   and proper register propagation after the previous syscall handler returned,
-   and document any fix.
+   `0x0025EF5C`. `docs/RESEARCH.md` records the four call sites: two pass
+   `0x80000000` and two pass `$sN + 4`. Confirm whether this reflects correct
+   HLE service return values and proper register propagation after the previous
+   syscall handler returned, and document any fix.
 2. Extend the native probe trace to record the syscall sequence, not only the
    last boundary, so the `$a0` path can be followed across handlers, and
    investigate any new unresolved edge separately.
