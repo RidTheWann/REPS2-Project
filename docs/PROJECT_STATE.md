@@ -16,9 +16,14 @@ for indirect `JR/JALR` source registers formed by `LUI`, `ORI`, `ADDIU`,
 `DADDIU`, `ANDI`, or `XORI`. Resolved destinations are explicit CFG
 `Jump`/`Call` edges; executable destinations are traversed, known
 non-executable destinations are retained in `external_targets`, and unknown
-register-derived destinations remain unresolved. This is static discovery,
-not a claim that a retail game has passed the former `0x0025EF38` boundary:
-a new Downhill Domination probe with this resolver has not yet been run.
+register-derived destinations remain unresolved.
+
+Pointer-table discovery now uses section-declared `SHF_EXECINSTR` ranges instead
+of the program-header `PF_X` flag, so retail images whose single `PT_LOAD` is
+writable and executable still yield stored code pointers (ADR 0070). With that
+change the former Downhill Domination `0x0025EF38` boundary is translated and
+executed; the current stop is budget exhaustion inside the guest's own
+word-scan loop, not unresolved control flow.
 
 ## Verified repository state
 
@@ -61,20 +66,42 @@ a new Downhill Domination probe with this resolver has not yet been run.
 
 ### Downhill Domination (USA) — SCUS_971.77
 
-Last verified bounded probe, before the indirect-target resolver was added:
+Current bounded probe (2026-11-06, after ADR 0070 section-aware pointer discovery):
 
-- Input ELF SHA-256:
-  `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`.
-- Entry: `0x0010A008`.
-- Analysis: 28,300 blocks, 146,425 instructions, 314 unsupported stops,
-  and 165 syscall/break traps.
-- HLE-on instruction budget: 5,000,000; native guest instructions executed:
-  2,757,047.
-- Seven syscalls observed; six handled (including FindAddress), and one
-  dispatched through a registered guest handler.
-- FindAddress at `0x0025EF7C` was handled. That probe then stopped with
-  `unresolved_control_flow` at `pc=0x0025EF38`.
+- Input: `Downhill Domination (USA).iso`, kept outside Git. The boot ELF was
+  re-extracted with `reps2 extract-boot-elf`; the ISO was opened read-only and
+  was not modified.
+- Boot ELF SHA-256:
+  `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`
+  (identical to the recorded digest). Entry `0x0010A008`.
+- Build: REPS2 `e4165c9` plus ADR 0070; `x86_64-pc-windows-msvc`; generated
+  native module built with MSVC Release `/O2` as one dispatcher plus 8 parts.
+- Analysis (`analyze-elf --discover`): 49,148 data-pointer words scanned (0
+  before ADR 0070), 3,812 pointer roots, 8,400 accepted roots, 61,333 basic
+  blocks, 314,561 decoded instructions, 1,798 unsupported stops, 629 unresolved
+  indirect targets.
+- `0x0025EF38` is now reported as `function: 0x0025EF38 (discovered)` and is
+  translated. It is a frameless leaf routine held only in a handler-descriptor
+  table at `0x00282218` (`(0x83 → 0x0025EF38)`, `(0x5A → 0x0025EF00)`), so
+  neither `JAL` nor stack-prologue discovery could reach it.
+- HLE-on native probe, instruction budget 5,000,000: `status=3`
+  (`budget_exhausted`), `pc=0x0025EF5C`, `executed=5,000,000`, `syscalls=9`,
+  `hle_handled=6`, `sema_live=2`.
+- The former `unresolved_control_flow` stop at `0x0025EF38` is gone. Execution
+  enters the guest's own word-scan routine and the final 16-PC window is the
+  scan loop `0x0025EF50` → `0x0025EF54` → `0x0025EF5C`.
+- Observed arguments at the last FindAddress boundary: `$a0=0x00000004`,
+  `$a1=0x80080000`, `$a2=0x0025EF38`, so the loop walks roughly
+  0x2002_0000 words. `$a0` provenance is the next investigation; the budget was
+  deliberately not raised to hide it.
 - No guest-visible boot stage was demonstrated.
+
+Previous bounded probe, before the indirect-target resolver (historical):
+
+- 28,300 blocks; 146,425 instructions; 314 unsupported stops; 165 syscall/break
+  traps. Budget 5,000,000 yielded 2,757,047 executed guest instructions, seven
+  syscalls, six handled. FindAddress at `0x0025EF7C` was handled, then the probe
+  stopped with `unresolved_control_flow` at `pc=0x0025EF38`.
 
 ### Black (USA) — SLUS_213.76
 
@@ -91,8 +118,9 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ### Evidence limits
 
-- The Downhill Domination stop at `0x0025EF38` is the previous probe result,
-  not evidence that the new static resolver still stops there or now passes it.
+- The `0x0025EF38` boundary is resolved (ADR 0070): it is a discovered function
+  root now translated and executed. Budget exhaustion occurs at `pc=0x0025EF5C`
+  inside its own scan loop; that is not an unresolved-control-flow stop.
 - A real-title re-probe requires the owner's legally obtained ISO/boot ELF in
   the local test environment. Game binaries and ISOs remain outside Git.
 - An independent reference-execution oracle for the complete runtime path is
@@ -101,9 +129,11 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ## Active backlog
 
-1. Run the bounded Downhill Domination probe with the new resolver and HLE.
-   Record the exact input digest, REPS2 commit, command/configuration, resolved
-   target, executed instruction count, and final stop/guest-visible stage.
+1. **Investigate FindAddress argument `$a0` provenance**: the trace shows a guest
+   call to the word-scan routine with `$a0=0x00000004` and budget exhaustion at
+   `0x0025EF5C`. Confirm whether this reflects correct HLE service return values
+   and proper register propagation after the previous syscall handler returned,
+   and document any fix.
 2. Inspect the target at `0x0025EF38` against the real ELF bytes and trace.
    Confirm it is an executable instruction address before treating CFG
    discovery as correct; investigate any new unresolved edge separately.

@@ -599,6 +599,47 @@ impl FunctionDiscovery {
     }
 }
 
+/// Section-declared executable byte ranges, sorted and merged.
+///
+/// Retail PS2 executables commonly place every loadable byte in a single
+/// writable-and-executable `PT_LOAD`, so the program-header `PF_X` flag cannot
+/// distinguish code from data. The section table still records `SHF_EXECINSTR`
+/// precisely (`.text`, `.vutext`, ...), so pointer-table discovery uses these
+/// ranges whenever the section table declares at least one.
+#[must_use]
+pub fn executable_section_ranges(image: &Image) -> Vec<(u32, u32)> {
+    let mut ranges = image
+        .section_headers
+        .iter()
+        .filter(|section| {
+            section.flags & elf::SHF_ALLOC != 0
+                && section.flags & elf::SHF_EXECINSTR != 0
+                && section.size != 0
+        })
+        .filter_map(|section| {
+            let start = section.virtual_address;
+            let end = start.checked_add(section.size)?;
+            Some((start, end))
+        })
+        .collect::<Vec<_>>();
+    ranges.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges {
+        match merged.last_mut() {
+            Some((_, last_end)) if start <= *last_end => {
+                *last_end = (*last_end).max(end);
+            }
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+/// True when `pc` lies inside one of the section-declared executable ranges.
+fn is_section_executable(ranges: &[(u32, u32)], pc: u32) -> bool {
+    ranges.iter().any(|&(start, end)| pc >= start && pc < end)
+}
+
 /// Scans file-backed executable bytes for function entry candidates.
 ///
 /// The scan reads each executable `PT_LOAD` segment in its declared alias view,
@@ -606,9 +647,14 @@ impl FunctionDiscovery {
 /// admitted only when the target is itself backed by file bytes in an
 /// executable segment; a prologue is admitted only from an executable,
 /// file-backed word.
+///
+/// Pointer tables are read from every file-backed word that
+/// `section_exec_ranges` does not declare executable. When that list is empty
+/// the program-header rule is retained: only non-executable segments are data.
 #[must_use]
 pub fn discover_function_roots(
     segments: &[LoadedSegment],
+    section_exec_ranges: &[(u32, u32)],
     limits: AnalysisLimits,
 ) -> FunctionDiscovery {
     let mut discovery = FunctionDiscovery::default();
@@ -654,12 +700,18 @@ pub fn discover_function_roots(
         }
     }
 
-    // Non-executable, initialized, file-backed segments hold pointer tables.
-    // A word that resolves into a file-backed executable segment is a candidate
-    // routine address: callback/vtable entries and, importantly for syscalls,
-    // the SetSyscall descriptor tables a title copies into kernel slots.
+    // File-backed words outside section-declared executable ranges hold pointer
+    // tables. A word that resolves into a file-backed executable segment is a
+    // candidate routine address: callback/vtable entries and, importantly for
+    // syscalls, the SetSyscall descriptor tables a title copies into kernel
+    // slots.
+    //
+    // A single writable+executable `PT_LOAD` cannot separate code from data, so
+    // when the section table declares executable ranges those ranges decide
+    // what is code and every other file-backed word is read.
+    let use_section_permissions = !section_exec_ranges.is_empty();
     for segment in segments {
-        if segment.flags & elf::PF_X != 0 {
+        if !use_section_permissions && segment.flags & elf::PF_X != 0 {
             continue;
         }
         let file_size = segment.file_size.min(segment.bytes.len());
@@ -672,6 +724,13 @@ pub fn discover_function_roots(
             if discovery.candidate_count() >= limits.max_function_roots {
                 discovery.truncated = true;
                 return discovery;
+            }
+            let Some(pc) = base.checked_add(offset as u32) else {
+                break;
+            };
+            if use_section_permissions && is_section_executable(section_exec_ranges, pc) {
+                offset += 4;
+                continue;
             }
             let value = u32::from_le_bytes(
                 segment.bytes[offset..offset + 4]
@@ -767,8 +826,7 @@ pub fn discover_elf_with_discovery(
         mut entry_points,
         roots: authoritative,
     } = prepare(image, file_bytes, limits)?;
-    let discovery = discover_function_roots(&segments, limits);
-
+    let discovery = discover_function_roots(&segments, &executable_section_ranges(image), limits);
     let authoritative_set: BTreeSet<u32> = authoritative.iter().copied().collect();
     let mut discovered_roots = Vec::new();
     for candidate in discovery.candidate_roots() {
@@ -2357,7 +2415,7 @@ mod tests {
             0x0C00_2400, // 0x1014: jal 0x9000, outside executable file bytes
         ];
         let segments = [segment(0x1000, &words)];
-        let discovery = discover_function_roots(&segments, AnalysisLimits::default());
+        let discovery = discover_function_roots(&segments, &[], AnalysisLimits::default());
 
         assert_eq!(discovery.scanned_words, 6);
         assert!(!discovery.truncated);
@@ -2424,7 +2482,7 @@ mod tests {
             max_function_roots: 1,
             ..Default::default()
         };
-        let discovery = discover_function_roots(&segments, limits);
+        let discovery = discover_function_roots(&segments, &[], limits);
 
         assert!(discovery.truncated);
         assert_eq!(discovery.scanned_words, 1);
@@ -2569,12 +2627,98 @@ mod tests {
             file_size: bytes.len(),
             bytes,
         };
-        let discovery = discover_function_roots(&[executable, data], AnalysisLimits::default());
+        let discovery =
+            discover_function_roots(&[executable, data], &[], AnalysisLimits::default());
         assert_eq!(discovery.scanned_data_words, 4);
         assert_eq!(
             discovery.data_pointer_candidates,
             BTreeSet::from([0x1000u32])
         );
         assert!(discovery.candidate_roots().contains(&0x1000u32));
+    }
+
+    #[test]
+    fn section_permissions_separate_code_from_pointer_tables_in_one_rwx_segment() {
+        // Retail PS2 executables place every loadable byte in one
+        // writable+executable PT_LOAD, so the program headers cannot say which
+        // words are code. The section table can. A syscall-handler descriptor
+        // in `.data` points at a frameless leaf routine that neither a `jal`
+        // nor a stack prologue reaches, and a code word whose encoding happens
+        // to look like a pointer must not be read as data.
+        let words: [u32; 10] = [
+            0x03E0_0008, // 0x100000 .text: jr $ra (ELF entry)
+            0x2484_0004, // 0x100004 .text: addiu $a0, $a0, 4
+            0x03E0_0008, // 0x100008 .text: jr $ra
+            0x0000_0000, // 0x10000C .text: nop
+            0x2484_0004, // 0x100010 .text: addiu $a0, $a0, 4 (handler)
+            0x03E0_0008, // 0x100014 .text: jr $ra
+            0x0000_0000, // 0x100018 .text: nop (delay slot)
+            0x0010_0014, // 0x10001C .text: code word that looks like 0x100014
+            0x0000_0083, // 0x100020 .data: syscall number 0x83
+            0x0010_0010, // 0x100024 .data: handler address
+        ];
+        let mut file_bytes = Vec::with_capacity(words.len() * 4);
+        for word in &words {
+            file_bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let file_size = u32::try_from(file_bytes.len()).expect("synthetic image size");
+
+        let section = |virtual_address: u32, size: u32, flags: u32| elf::SectionHeader {
+            name: String::new(),
+            name_offset: 0,
+            kind: elf::SHT_PROGBITS,
+            flags,
+            virtual_address,
+            offset: virtual_address - 0x0010_0000,
+            size,
+            link: 0,
+            info: 0,
+            alignment: 4,
+            entry_size: 0,
+        };
+        let image = Image {
+            file_type: elf::ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
+            machine: elf::EM_MIPS,
+            entry_point: 0x0010_0000,
+            flags: 0,
+            section_name_table_index: 0,
+            program_headers: vec![elf::ProgramHeader {
+                kind: elf::PT_LOAD,
+                offset: 0,
+                virtual_address: 0x0010_0000,
+                physical_address: 0x0010_0000,
+                file_size,
+                memory_size: file_size,
+                flags: elf::PF_R | elf::PF_W | elf::PF_X,
+                alignment: 4,
+            }],
+            section_headers: vec![
+                section(0x0010_0000, 0x20, elf::SHF_ALLOC | elf::SHF_EXECINSTR),
+                section(0x0010_0020, 8, elf::SHF_ALLOC | elf::SHF_WRITE),
+            ],
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+            mips_reginfo: Vec::new(),
+            mips_reginfo_segments: Vec::new(),
+            mips_abi_flags_segments: Vec::new(),
+            mips_abi_flags: Vec::new(),
+            mips_options: Vec::new(),
+        };
+
+        assert_eq!(
+            executable_section_ranges(&image),
+            vec![(0x0010_0000, 0x0010_0020)]
+        );
+
+        let analysis = discover_elf_with_discovery(&image, &file_bytes, AnalysisLimits::default())
+            .expect("single-segment synthetic ELF");
+        assert_eq!(
+            analysis.discovery.data_pointer_candidates,
+            BTreeSet::from([0x0010_0010])
+        );
+        assert!(analysis.discovery.candidate_roots().contains(&0x0010_0010));
+        assert!(analysis.graph.blocks.contains_key(&0x0010_0010));
     }
 }
