@@ -38,6 +38,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install dashboard rendering dependencies
+        run: python -m pip install -r scripts/dashboard-requirements.txt
+
       - name: Test dashboard generator
         run: python -m unittest discover -s scripts -p "test_progress_dashboard.py" -v
 
