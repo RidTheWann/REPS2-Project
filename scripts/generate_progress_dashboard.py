@@ -294,11 +294,13 @@ def render_index_html() -> str:
       min-height: 100vh;
       padding: 36px 20px;
       overflow-x: hidden;
+      position: relative;
+      isolation: isolate;
       background: #050a12;
     }
     .cover-wall {
       position: fixed;
-      z-index: -2;
+      z-index: -1;
       inset: 0;
       overflow: hidden;
       background: #050a12;
@@ -397,7 +399,7 @@ def render_index_html() -> str:
       <a href="progress.json">Progress data (JSON)</a>.
       Cover artwork is loaded directly from
       <a href="https://github.com/xlenore/ps2-covers">xlenore/ps2-covers</a>;
-      images remain hosted by the upstream project and are not vendored here.
+      images remain hosted by the upstream project and are not vendored here; artwork remains the property of its respective rights holders.
     </footer>
   </main>
   <script>
