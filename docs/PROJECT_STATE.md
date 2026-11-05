@@ -8,21 +8,20 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 
 ## Verified repository state
 
-- Branch: `main`
-- HEAD: `082ce4d` (PR #79 merged via rebase, linear history preserved)
+- Branch: `main` at HEAD `627c71f5` (CI green); feature branch `feat/ee-guest-syscall-handlers` with unmerged changes (below).
 - PR: `RidTheWann/REPS2-Project#79` (merged; all 6 CI checks passed: MSRV, Linux, Windows)
 - Cleanup PR: `RidTheWann/REPS2-Project#80` (open; remove `path/to/filename.js` placeholder)
-- Working tree: clean
-- Latest delivered work: rolling bounded instruction-PC tracing with PC-before-trace ordering fix, trace regression assertions, FindAddress caller correlation, ADR 0068 extended with retail trace evidence, Black title added to compatibility matrix, PR #79 merged to main.
+- Working tree: dirty on `feat/ee-guest-syscall-handlers` (6 files + ADR 0069 + docs, not yet committed)
+- Latest delivered work: EE guest syscall handler dispatch through SetSyscall (ADR 0069) — registered slots take precedence over host services, bounded handler frames with kseg3 sentinel return (`kEeSyscallHandlerReturnPc`), `syscall_handler_overflow` status, host/service and guest-handler separation preserved; static data-pointer root discovery for non-executable loaded segments; cfg fixture gains handler/caller roots 0xE600/0xE700; HLE smoke suite grows to 23 cases.
 
 ## Verified validation
 
-- Rust formatting: passed
-- Rust workspace tests: passed (270 tests, 0 failures)
-- Rust clippy: passed (no warnings)
+- Rust formatting: passed (`cargo fmt --check`)
+- Rust workspace tests: passed (271 tests, 0 failures)
+- Rust clippy: passed (no warnings, `-D warnings`)
 - Release native build: passed
-- Full CTest: 30/30 passed
-- `git diff --check`: passed
+- Full CTest: 30/30 passed (incl. `reps2_hle_syscall_codegen_smoke` 23 cases)
+- `git diff --check`: not re-run after uncommitted edits
 
 ## M4 evidence status
 
@@ -55,6 +54,7 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 2. Preserve caller correlation and trace regression assertions (delivered in PR #79); do not implement `FindAddress` without an oracle.
 3. Advance independent compiler/runtime workstreams not blocked by `FindAddress` (M4 is a priority, not the whole mission).
 4. Remove `path/to/filename.js` placeholder from main (PR #80 open; does not block M4).
+5. Commit/push `feat/ee-guest-syscall-handlers` and open its PR.
 
 ## Release-gate status
 

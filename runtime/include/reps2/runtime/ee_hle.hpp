@@ -44,6 +44,12 @@ inline constexpr std::uint32_t kEeSyscallFlushCache = 0x64U;
 // code the guest already expects rather than an invented one.
 inline constexpr std::uint32_t kEeSyscallFailure = 0xFFFF'FFFFU;
 
+// Sentinel PC meaning "the invoked guest handler executed jr $ra". It lies in
+// kseg3, outside every EE mapping, and is word-aligned so it can never be
+// confused with a fetchable guest address. The generated dispatcher recognises
+// it before the block lookup and never fetches from it.
+inline constexpr std::uint32_t kEeSyscallHandlerReturnPc = 0xFFFF'FFE0U;
+
 // SetupThread's documented "no caller stack" sentinel for $a1.
 inline constexpr std::uint32_t kEeSyscallStackSentinel = 0xFFFF'FFFFU;
 // The kernel keeps the top 4 KiB of main RAM out of the main-thread stack when
@@ -269,6 +275,103 @@ struct EeSyscallService {
     return Status::ok;
 }
 
+// Finish the optional syscall-boundary memory comparison, shared by host-serviced
+// calls and guest-handler returns so both report the same observation.
+inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
+    if (!state.hle.syscall_memory_trace_enabled
+        || state.hle.syscall_memory_trace_size == 0U) {
+        return;
+    }
+    std::uint32_t physical{};
+    if (resolve_ee_memory_access(
+            state.memory, state.hle.syscall_memory_trace_address,
+            state.hle.syscall_memory_trace_size, 1U, physical) == Status::ok) {
+        for (std::size_t index = 0; index < state.hle.syscall_memory_trace_size; ++index) {
+            const auto value = state.memory.main_ram[static_cast<std::size_t>(physical) + index];
+            state.hle.syscall_memory_after[index] = value;
+            if (value != state.hle.syscall_memory_before[index]) {
+                ++state.hle.syscall_memory_changed_bytes;
+            }
+        }
+    }
+}
+
+// Enter a guest routine installed through SetSyscall (0x74) for `slot`.
+//
+// Evidence: ps2sdk's GetSyscallHandler reads the kernel's syscall table by
+// number, SetSyscall writes the same slot, and ps2sdk itself installs a
+// kernel-side printf for service 0x75 that its `_print` wrapper reaches through
+// an ordinary SYSCALL. The handler therefore receives the caller's $a0..$a3
+// unchanged, returns through $ra, and its $v0 is the service result. REPS2 has
+// no privilege rings, so the handler runs as translated host code on the
+// current guest stack; that boundary is recorded in ADR 0069.
+[[nodiscard]] inline Status enter_ee_syscall_handler(
+    EeState& state,
+    std::uint32_t slot,
+    std::uint32_t handler_address,
+    std::uint32_t resume_pc
+) noexcept {
+    if (state.hle.syscall_handler_depth >= kEeMaxSyscallHandlerDepth) {
+        return Status::syscall_handler_overflow;
+    }
+    EeSyscallHandlerFrame& frame =
+        state.hle.syscall_handler_frames[state.hle.syscall_handler_depth];
+    frame.saved_gpr = state.gpr;
+    frame.saved_hi = state.hi;
+    frame.saved_lo = state.lo;
+    frame.saved_hi1 = state.hi1;
+    frame.saved_lo1 = state.lo1;
+    frame.saved_fpr = state.fpr;
+    frame.saved_acc = state.acc;
+    frame.saved_fcsr = state.fcsr;
+    frame.handler_address = handler_address;
+    frame.resume_pc = resume_pc;
+    frame.slot = slot;
+
+    ++state.hle.syscall_handler_depth;
+    ++state.hle.guest_handler_dispatches;
+    state.gpr[31].low = sign_extend_word(kEeSyscallHandlerReturnPc);
+    state.pc = handler_address;
+    return Status::ok;
+}
+
+[[nodiscard]] inline bool ee_syscall_handler_return_pending(const EeState& state) noexcept {
+    return state.hle.syscall_handler_depth != 0U
+        && state.pc == kEeSyscallHandlerReturnPc;
+}
+
+// Complete the innermost guest-handler invocation: restore the user context
+// saved at the SYSCALL and keep the handler's $v0 as the service result.
+[[nodiscard]] inline Status return_from_ee_syscall_handler(EeState& state) noexcept {
+    if (state.hle.syscall_handler_depth == 0U) {
+        return Status::unhandled_syscall;
+    }
+    const EeSyscallHandlerFrame& frame =
+        state.hle.syscall_handler_frames[state.hle.syscall_handler_depth - 1U];
+    const Gpr128 result = state.gpr[kEeSyscallResultRegister];
+    const std::uint32_t resume_pc = frame.resume_pc;
+
+    state.gpr = frame.saved_gpr;
+    state.gpr[0] = {};
+    state.gpr[kEeSyscallResultRegister] = result;
+    state.hi = frame.saved_hi;
+    state.lo = frame.saved_lo;
+    state.hi1 = frame.saved_hi1;
+    state.lo1 = frame.saved_lo1;
+    state.fpr = frame.saved_fpr;
+    state.acc = frame.saved_acc;
+    state.fcsr = frame.saved_fcsr;
+
+    --state.hle.syscall_handler_depth;
+    ++state.hle.guest_handler_returns;
+    finish_ee_syscall_memory_trace(state);
+    state.hle.last_syscall_v0_after =
+        static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
+    state.hle.last_syscall_resume_pc = resume_pc;
+    state.pc = resume_pc;
+    return Status::ok;
+}
+
 // Sorted by service number so a lookup can stop as soon as it passes the key.
 inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
@@ -360,6 +463,19 @@ inline constexpr std::size_t kEeSyscallServiceCount =
     state.hle.last_syscall_code = code;
     state.hle.last_syscall_number = number;
 
+    // A title-installed handler replaces the kernel slot, so it takes
+    // precedence over any host service for the same number. The handler is
+    // translated guest code and runs through the dispatcher; the HLE layer only
+    // services slots no guest handler has replaced.
+    if (number < kEeMaxSyscallSlots
+        && state.hle.syscall_registrations[number].in_use) {
+        return enter_ee_syscall_handler(
+            state,
+            number,
+            state.hle.syscall_registrations[number].handler_address,
+            resume_pc);
+    }
+
     const EeSyscallService* const service = find_ee_syscall_service(number);
     if (service == nullptr) {
         return Status::unhandled_syscall;
@@ -368,21 +484,7 @@ inline constexpr std::size_t kEeSyscallServiceCount =
     if (handler_status != Status::ok) {
         return handler_status;
     }
-    if (state.hle.syscall_memory_trace_enabled
-        && state.hle.syscall_memory_trace_size != 0U) {
-        std::uint32_t physical{};
-        if (resolve_ee_memory_access(
-                state.memory, state.hle.syscall_memory_trace_address,
-                state.hle.syscall_memory_trace_size, 1U, physical) == Status::ok) {
-            for (std::size_t index = 0; index < state.hle.syscall_memory_trace_size; ++index) {
-                const auto value = state.memory.main_ram[static_cast<std::size_t>(physical) + index];
-                state.hle.syscall_memory_after[index] = value;
-                if (value != state.hle.syscall_memory_before[index]) {
-                    ++state.hle.syscall_memory_changed_bytes;
-                }
-            }
-        }
-    }
+    finish_ee_syscall_memory_trace(state);
     ++state.hle.syscall_handled_count;
     state.pc = resume_pc;
     state.hle.last_syscall_v0_after =

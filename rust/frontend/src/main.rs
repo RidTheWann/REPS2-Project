@@ -416,10 +416,18 @@ fn analyze_elf(path: &Path, options: AnalyzeOptions) -> Result<(), String> {
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
         println!("  Root discovery: enabled (static scan of executable bytes)");
         println!("    Scanned words: {}", found.scanned_words);
+        println!(
+            "    Scanned data-pointer words: {}",
+            found.scanned_data_words
+        );
         println!("    JAL call-target roots: {}", found.call_targets.len());
         println!(
             "    Stack-prologue roots: {}",
             found.prologue_candidates.len()
+        );
+        println!(
+            "    Data-pointer roots: {}",
+            found.data_pointer_candidates.len()
         );
         println!("    Distinct candidates: {}", found.candidate_count());
         println!("    Truncated by limit: {}", found.truncated);
@@ -766,7 +774,9 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
                     candidate_count: found.candidate_count(),
                     call_target_count: found.call_targets.len(),
                     prologue_candidate_count: found.prologue_candidates.len(),
+                    data_pointer_candidate_count: found.data_pointer_candidates.len(),
                     scanned_words: found.scanned_words,
+                    scanned_data_words: found.scanned_data_words,
                     truncated: found.truncated,
                     accepted_root_count: *accepted_roots,
                     skipped_root_count: skipped_roots.len(),
@@ -1640,6 +1650,23 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x03E0_0008, // jr ra: no register write hides the void result
         0x0000_0000, // return delay slot
     ];
+    // A guest routine installed through SetSyscall (0x74): it receives the
+    // caller's $a0..$a3 unchanged, computes its own result in $v0, and returns
+    // through $ra. REPS2 reaches it through the normal dispatcher; $ra holds
+    // the syscall-return sentinel so the boundary completes back in HLE.
+    let hle_syscall_handler = [
+        0x2402_002A, // addiu v0, zero, 42: the handler's service result
+        0x03E0_0008, // jr ra: back to the HLE return sentinel
+        0x0000_0000, // return delay slot
+    ];
+    // A caller that reaches a registered slot through an ordinary SYSCALL; the
+    // HLE layer diverts it to the guest handler above, then execution continues
+    // at the instruction after the trap with the caller's context restored.
+    let hle_call_registered_handler = [
+        0x0000_000C, // syscall: service number from $v1
+        0x03E0_0008, // jr ra: back to the caller with the restored context
+        0x0000_0000, // return delay slot
+    ];
 
     let mut segments = vec![
         segment(0x1000, &branch_and_jump),
@@ -1675,6 +1702,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xE300, &hle_setup_heap),
         segment(0xE400, &hle_create_sema),
         segment(0xE500, &hle_set_syscall),
+        segment(0xE600, &hle_syscall_handler),
+        segment(0xE700, &hle_call_registered_handler),
     ];
     // Each conditional trap is an independent one-instruction segment, so a
     // false predicate retires to an untranslated boundary instead of flowing
@@ -1717,6 +1746,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xE300, "hle-setup-heap-fixture"),
         entry(0xE400, "hle-create-sema-fixture"),
         entry(0xE500, "hle-set-syscall-fixture"),
+        entry(0xE600, "hle-syscall-handler-fixture"),
+        entry(0xE700, "hle-call-registered-handler-fixture"),
     ];
     entries.extend(
         (0..conditional_traps.len())
@@ -1730,7 +1761,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         // Keep the continuation PCs as explicit fixture roots as a regression
         // guard for multi-root analysis; production CFG discovery also reaches
         // them through its lenient SyscallContinuation edges.
-        0xE004, 0xE104, 0xE304, 0xE404, 0xE504,
+        0xE004, 0xE104, 0xE304, 0xE404, 0xE504, 0xE600, 0xE604, 0xE700, 0xE704,
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);
