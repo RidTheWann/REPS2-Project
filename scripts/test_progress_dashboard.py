@@ -83,13 +83,31 @@ No guest-visible boot stage was demonstrated.
         self.assertIn("Release gates", svg)
         self.assertNotIn('fill="#ffffff"', svg)
 
-    def test_dashboard_page_uses_dark_systems_layout(self):
+    def test_dashboard_page_uses_translucent_ps2_cover_wall(self):
         page = render_index_html()
         self.assertIn("color-scheme: dark", page)
-        self.assertIn("progress.svg", page)
-        self.assertIn("#080c15", page)
-        self.assertIn("radial-gradient", page)
-        self.assertNotIn("box-shadow", page)
+        self.assertIn("progress-overlay.svg", page)
+        self.assertIn("cover-wall", page)
+        self.assertIn("wall-shade", page)
+        self.assertIn("backdrop-filter: blur(18px)", page)
+        self.assertIn("rgba(5, 10, 18, .30)", page)
+        self.assertIn("xlenore/ps2-covers", page)
+        self.assertEqual(
+            page.count(
+                "https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default/"
+            ),
+            28,
+        )
+
+    def test_glass_svg_is_translucent_while_readme_svg_stays_opaque(self):
+        data = build_dashboard_data(self.roadmap, self.project_state)
+        readme_svg = render_svg(data)
+        glass_svg = render_svg(data, glass=True)
+
+        ET.fromstring(readme_svg)
+        ET.fromstring(glass_svg)
+        self.assertNotIn('fill-opacity="0.56"', readme_svg)
+        self.assertIn('fill-opacity="0.56"', glass_svg)
 
     def test_empty_roadmap_is_rejected(self):
         with self.assertRaises(ValueError):
