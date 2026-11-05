@@ -61,8 +61,8 @@ No guest-visible boot stage was demonstrated.
         self.assertIn("Checklist completion only", svg)
 
     def test_svg_canvas_expands_for_additional_milestones(self):
-        roadmap = "# Roadmap\\n" + "\\n".join(
-            f"## M{i} — Stage {i}\\n- [x] Completed item" for i in range(9)
+        roadmap = "# Roadmap\n" + "\n".join(
+            f"## M{i} — Stage {i}\n- [x] Completed item" for i in range(9)
         )
         data = build_dashboard_data(roadmap, self.project_state)
         root = ET.fromstring(render_svg(data))
