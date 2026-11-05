@@ -69,23 +69,26 @@ No guest-visible boot stage was demonstrated.
         root = ET.fromstring(render_svg(data))
         self.assertGreater(int(root.attrib["height"]), 850)
 
-    def test_dashboard_uses_a_clean_light_visual_style(self):
+    def test_dashboard_uses_a_restrained_next_gen_systems_style(self):
         data = build_dashboard_data(self.roadmap, self.project_state)
         svg = render_svg(data)
         root = ET.fromstring(svg)
 
-        self.assertEqual(root.attrib["width"], "1080")
-        self.assertIn('fill="#ffffff"', svg)
-        self.assertIn("Development progress", svg)
-        self.assertIn("#2563eb", svg)
-        self.assertNotIn("linearGradient", svg)
-        self.assertNotIn("#111015", svg)
+        self.assertEqual(root.attrib["width"], "1160")
+        self.assertIn("Engineering progress", svg)
+        self.assertIn("#090e19", svg)
+        self.assertIn("#67e8f9", svg)
+        self.assertIn('pattern id="grid"', svg)
+        self.assertIn("Milestone map", svg)
+        self.assertIn("Release gates", svg)
+        self.assertNotIn('fill="#ffffff"', svg)
 
-    def test_dashboard_page_uses_simple_light_layout(self):
+    def test_dashboard_page_uses_dark_systems_layout(self):
         page = render_index_html()
-        self.assertIn("color-scheme: light", page)
+        self.assertIn("color-scheme: dark", page)
         self.assertIn("progress.svg", page)
-        self.assertIn("border: 1px solid #e2e8f0", page)
+        self.assertIn("#080c15", page)
+        self.assertIn("radial-gradient", page)
         self.assertNotIn("box-shadow", page)
 
     def test_empty_roadmap_is_rejected(self):
