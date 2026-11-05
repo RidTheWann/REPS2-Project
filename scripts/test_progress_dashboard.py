@@ -5,6 +5,7 @@ from generate_progress_dashboard import (
     build_dashboard_data,
     parse_roadmap,
     render_index_html,
+    render_readme_png,
     render_svg,
 )
 
@@ -89,7 +90,9 @@ No guest-visible boot stage was demonstrated.
         self.assertIn("progress-overlay.svg", page)
         self.assertIn("cover-wall", page)
         self.assertIn("wall-shade", page)
-        self.assertIn("backdrop-filter: blur(18px)", page)
+        self.assertIn("backdrop-filter: blur(3px) saturate(110%)", page)
+        self.assertIn("backdrop-filter: none", page)
+        self.assertNotIn("blur(18px)", page)
         self.assertIn("rgba(5, 10, 18, .30)", page)
         self.assertIn("xlenore/ps2-covers", page)
         self.assertEqual(
@@ -122,6 +125,26 @@ No guest-visible boot stage was demonstrated.
         self.assertIn('fill-opacity="0.2"', glass_svg)
         self.assertIn('fill-opacity="0.3"', glass_svg)
         self.assertNotIn('fill="url(#ambient)"', glass_svg)
+
+    def test_readme_png_contains_a_rendered_cover_wall(self):
+        from io import BytesIO
+
+        from PIL import Image
+
+        data = build_dashboard_data(self.roadmap, self.project_state)
+        cover = Image.new("RGB", (120, 180), (180, 40, 30))
+        cover_buffer = BytesIO()
+        cover.save(cover_buffer, format="JPEG")
+
+        preview = render_readme_png(
+            data,
+            cover_assets=[cover_buffer.getvalue()],
+        )
+        with Image.open(BytesIO(preview)) as rendered:
+            self.assertEqual(rendered.format, "PNG")
+            self.assertEqual(rendered.size, (1160, 696))
+            self.assertEqual(rendered.mode, "RGBA")
+            self.assertGreater(len(preview), 10_000)
 
     def test_empty_roadmap_is_rejected(self):
         with self.assertRaises(ValueError):
