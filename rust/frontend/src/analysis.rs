@@ -1978,21 +1978,21 @@ mod tests {
 
     #[test]
     fn follows_daddiu_indirect_jump_target() {
-        // DADDIU sign-extends its immediate, but the low 32 bits of the
-        // resulting EE address are still ordinary wrapping 32-bit addition.
-        //   lui    t9, 0x0010
-        //   daddiu t9, t9, 0x0040
+        // DADDIU sign-extends its immediate and performs 64-bit modulo
+        // arithmetic; JR consumes the low 32 bits of the resulting address.
+        //   lui    t9, 0x0011       # 0x00110000
+        //   daddiu t9, t9, -0x40   # 0x0010ffc0
         //   jr     t9
         //   nop
-        //   ... target at 0x00100040 ...
+        //   ... target at 0x0010ffc0 ...
         let mut words = [0u32; 19];
-        words[0] = 0x3C09_0010; // lui $t9, 0x0010
-        words[1] = 0x6529_0040; // daddiu $t9, $t9, 0x0040
+        words[0] = 0x3C09_0011; // lui $t9, 0x0011
+        words[1] = 0x6529_FFC0; // daddiu $t9, $t9, -0x40
         words[2] = 0x0120_0008; // jr $t9
-        words[16] = 0x2401_0001; // addiu $at, $zero, 1 at 0x00100040
+        words[16] = 0x2401_0001; // addiu $at, $zero, 1 at 0x0010ffc0
         words[17] = 0x03E0_0008; // jr $ra
-        let segments = [segment(0x0010_0000, &words)];
-        let entry_pc = 0x0010_0000;
+        let segments = [segment(0x0010_FF80, &words)];
+        let entry_pc = 0x0010_FF80;
         let graph = discover_cfg(
             &segments,
             vec![entry(entry_pc)],
@@ -2002,9 +2002,9 @@ mod tests {
         .expect("DADDIU-built indirect jump");
 
         assert!(graph.unresolved_indirect_jumps.is_empty());
-        assert!(graph.blocks.contains_key(&0x0010_0040));
+        assert!(graph.blocks.contains_key(&0x0010_FFC0));
         assert_eq!(
-            graph.blocks[&0x0010_0040].instructions[0].opcode,
+            graph.blocks[&0x0010_FFC0].instructions[0].opcode,
             Opcode::Addiu
         );
     }
