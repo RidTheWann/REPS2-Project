@@ -2010,6 +2010,40 @@ mod tests {
     }
 
     #[test]
+    fn follows_ori_xori_andi_indirect_jump_target() {
+        // Exercise the zero-extended logical-immediate transfer functions:
+        //   ori  t9, zero, 0xffff   # 0x0000ffff
+        //   xori t9, t9, 0x000f    # 0x0000fff0
+        //   andi t9, t9, 0xfff0    # 0x0000fff0
+        //   jr   t9
+        //   nop
+        // Target is inside this executable physical-RAM view at 0x0000fff0.
+        let mut words = [0u32; 63];
+        words[0] = 0x3409_FFFF;
+        words[1] = 0x3929_000F;
+        words[2] = 0x3129_FFF0;
+        words[3] = 0x0120_0008;
+        words[60] = 0x2401_0001; // addiu $at, $zero, 1 at 0x0000fff0
+        words[61] = 0x03E0_0008; // jr $ra
+        let segments = [segment(0x0000_FF00, &words)];
+        let entry_pc = 0x0000_FF00;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("logical-immediate indirect jump");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0000_FFF0));
+        assert_eq!(
+            graph.blocks[&0x0000_FFF0].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
     fn indirect_jump_target_is_captured_before_delay_slot_clobber() {
         // JR reads its target before the delay slot executes. The slot may
         // overwrite the source register without changing the selected target.
