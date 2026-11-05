@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   publish:
-    if: __DOLLAR__{{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -28,7 +28,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: __DOLLAR__{{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
