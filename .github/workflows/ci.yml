@@ -93,5 +93,7 @@ jobs:
         run: |
           python scripts/generate_progress_dashboard.py --output-dir build/progress-dashboard
           python -c "import xml.etree.ElementTree as ET; ET.parse('build/progress-dashboard/progress.svg')"
+          python -c "from PIL import Image; image = Image.open('build/progress-dashboard/progress.png'); image.verify()"
           test -s build/progress-dashboard/progress.json
+          test -s build/progress-dashboard/progress.png
           test -s build/progress-dashboard/index.html
