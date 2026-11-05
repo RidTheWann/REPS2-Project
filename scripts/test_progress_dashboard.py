@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from generate_progress_dashboard import (
     build_dashboard_data,
     parse_roadmap,
+    render_index_html,
     render_svg,
 )
 
@@ -67,6 +68,25 @@ No guest-visible boot stage was demonstrated.
         data = build_dashboard_data(roadmap, self.project_state)
         root = ET.fromstring(render_svg(data))
         self.assertGreater(int(root.attrib["height"]), 850)
+
+    def test_dashboard_uses_a_clean_light_visual_style(self):
+        data = build_dashboard_data(self.roadmap, self.project_state)
+        svg = render_svg(data)
+        root = ET.fromstring(svg)
+
+        self.assertEqual(root.attrib["width"], "1080")
+        self.assertIn('fill="#ffffff"', svg)
+        self.assertIn("Development progress", svg)
+        self.assertIn("#2563eb", svg)
+        self.assertNotIn("linearGradient", svg)
+        self.assertNotIn("#111015", svg)
+
+    def test_dashboard_page_uses_simple_light_layout(self):
+        page = render_index_html()
+        self.assertIn("color-scheme: light", page)
+        self.assertIn("progress.svg", page)
+        self.assertIn("border: 1px solid #e2e8f0", page)
+        self.assertNotIn("box-shadow", page)
 
     def test_empty_roadmap_is_rejected(self):
         with self.assertRaises(ValueError):
