@@ -103,7 +103,7 @@ The library must distinguish these states; no state implies a later one:
 - [x] Delay-slot-aware basic block and CFG construction for a bounded control-transfer subset.
 - [x] Decode, lift and AOT-lower R5900 branch-likely BEQL/BNEL/BLEZL/BGTZL and BLTZL/BGEZL/BLTZALL/BGEZALL with not-taken delay-slot annulment; verify taken/not-taken side effects and unconditional PC+8 link writes in generated native code.
 - [x] Direct branch/call recovery and unresolved indirect-edge tracking.
-- [x] Entry/function root discovery from ELF entry and STT_FUNC symbols, plus opt-in static discovery of `JAL` call targets and canonical `addiu $sp, $sp, -N` prologues for stripped retail executables. Discovered roots are labeled candidates rather than reachability claims; heuristic-only blocks that cannot decode are skipped and reported while authoritative roots still fail hard. Eight retail ELFs complete without truncation. See `docs/decisions/0026-static-function-discovery.md`.
+- [x] Entry/function root discovery from ELF entry and STT_FUNC symbols, plus opt-in static discovery of `JAL` call targets, canonical `addiu $sp, $sp, -N` prologues, and stored code pointers from file-backed words. Pointer scanning uses section-declared `SHF_EXECINSTR` ranges, so single writable+executable `PT_LOAD` retail images are covered instead of being skipped wholesale (ADR 0070). Discovered roots are labeled candidates rather than reachability claims; heuristic-only blocks that cannot decode are skipped and reported while authoritative roots still fail hard. See `docs/decisions/0026-static-function-discovery.md`.
 - [ ] Full documented R5900 branch, branch-likely, and control-transfer coverage.
 - [ ] Differential instruction corpus against documented behavior and an external oracle.
 
