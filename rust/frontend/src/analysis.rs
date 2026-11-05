@@ -139,6 +139,10 @@ pub enum Terminator {
         delay_slot: DecodedInstruction,
         link_register: Option<u8>,
         return_pc: Option<u32>,
+        /// Statically resolved target when the source register is constant
+        /// within this block. Even non-executable targets are retained so
+        /// they can be reported as external control flow.
+        resolved_target_pc: Option<u32>,
     },
     Return {
         instruction: DecodedInstruction,
@@ -223,16 +227,31 @@ impl Terminator {
                 edges
             }
             Self::IndirectJump {
+                resolved_target_pc,
                 link_register,
                 return_pc,
                 ..
-            } => match (link_register, return_pc) {
-                (Some(_), Some(return_pc)) => vec![Edge {
-                    from_block,
-                    to_pc: *return_pc,
-                    kind: EdgeKind::ReturnContinuation,
-                }],
-                _ => Vec::new(),
+            } => {
+                let mut edges = Vec::new();
+                if let Some(target_pc) = resolved_target_pc {
+                    edges.push(Edge {
+                        from_block,
+                        to_pc: *target_pc,
+                        kind: if link_register.is_some() {
+                            EdgeKind::Call
+                        } else {
+                            EdgeKind::Jump
+                        },
+                    });
+                }
+                if let (Some(_), Some(return_pc)) = (link_register, return_pc) {
+                    edges.push(Edge {
+                        from_block,
+                        to_pc: *return_pc,
+                        kind: EdgeKind::ReturnContinuation,
+                    });
+                }
+                edges
             },
             Self::Unsupported { instruction } => {
                 // A `SYSCALL` ends the block without an architectural successor:
@@ -1015,7 +1034,7 @@ fn build_cfg(
             });
         }
 
-        let block = match build_block(
+        let mut block = match build_block(
             segments,
             start_pc,
             &leaders,
@@ -1036,26 +1055,36 @@ fn build_cfg(
             Err(error) => return Err(error),
         };
 
-        register_block_owners(&block, &mut owners)?;
-        let mut next_targets = block_targets(&block);
-        let trap_continuations = lenient_block_targets(&block);
-        if let Terminator::IndirectJump {
-            instruction,
-            source_register,
-            ..
-        } = &block.terminator
-        {
-            match resolve_indirect_jump_target(&block, *source_register) {
-                Some(target) => {
-                    if is_executable_view(target) && !next_targets.contains(&target) {
-                        next_targets.push(target);
-                    }
-                }
-                None => {
-                    unresolved_indirect_jumps.insert(instruction.pc);
-                }
+        let indirect_target = match &block.terminator {
+            Terminator::IndirectJump {
+                instruction,
+                source_register,
+                ..
+            } => Some((
+                instruction.pc,
+                resolve_indirect_jump_target(&block, *source_register),
+            )),
+            _ => None,
+        };
+        if let Some((instruction_pc, target)) = indirect_target {
+            if let Terminator::IndirectJump {
+                resolved_target_pc,
+                ..
+            } = &mut block.terminator
+            {
+                *resolved_target_pc = target;
+            }
+            if target.is_none() {
+                unresolved_indirect_jumps.insert(instruction_pc);
             }
         }
+
+        register_block_owners(&block, &mut owners)?;
+        // A resolved indirect target is now an ordinary static edge. The
+        // common successor loop below either queues executable code or records
+        // a known non-executable destination as an external control-flow target.
+        let next_targets = block_targets(&block);
+        let trap_continuations = lenient_block_targets(&block);
         blocks.insert(start_pc, block);
 
         for target in next_targets {
@@ -1240,6 +1269,7 @@ fn build_block(
                     delay_slot,
                     link_register,
                     return_pc,
+                    resolved_target_pc: None,
                 };
             }
             _ => {}
@@ -1370,7 +1400,8 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
 /// instructions.
 fn resolve_indirect_jump_target(block: &BasicBlock, source_register: u8) -> Option<u32> {
     if source_register == 0 {
-        return None; // $zero is not a meaningful indirect target here
+        // JR $zero is still a statically known transfer to guest address zero.
+        return Some(0);
     }
     let mut constants: HashMap<u8, u32> = HashMap::new();
     for instruction in &block.instructions {
@@ -2080,6 +2111,62 @@ mod tests {
             graph.blocks[&0x0010_0010].instructions[0].opcode,
             Opcode::Addiu
         );
+    }
+
+    #[test]
+    fn records_resolved_non_executable_indirect_target_as_external() {
+        // A constant target outside every executable view is known, but it is
+        // not translatable code. Preserve it as an external edge instead of
+        // silently dropping it or calling the source unresolved.
+        let words = [
+            0x3C09_0020, // lui $t9, 0x0020 -> 0x00200000
+            0x0120_0008, // jr $t9
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("constant indirect jump to external address");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert_eq!(graph.external_targets, vec![0x0020_0000]);
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x0020_0000,
+            kind: EdgeKind::Jump,
+        }));
+    }
+
+    #[test]
+    fn resolves_indirect_jump_through_zero_register() {
+        // JR $zero has a constant target of guest address 0; if that address is
+        // backed by executable bytes, it should be discovered as a self-edge.
+        let words = [
+            0x0000_0008, // jr $zero
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x0000_0000, &words)];
+        let entry_pc = 0x0000_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("JR $zero target");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.external_targets.is_empty());
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0,
+            kind: EdgeKind::Jump,
+        }));
     }
 
     #[test]
