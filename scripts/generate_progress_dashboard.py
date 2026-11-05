@@ -19,6 +19,20 @@ MILESTONE_HEADER = re.compile(r"^##\s+(M\d+)\s+—\s+(.+?)\s*$")
 CHECKBOX = re.compile(r"^\s*-\s+\[([ xX])\]\s+(.+?)\s*$")
 GATE_LINE = re.compile(r"^\s*-\s*(Alpha|Public Beta|REPS2 1\.0):\s*(.+?)\s*$")
 
+# Decorative cover artwork is hotlinked from the upstream collection. The
+# images are not copied into this repository and do not imply game support.
+COVER_BASE_URL = "https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default"
+COVER_ARTWORK = (
+    ("Grand Theft Auto: San Andreas", "SLUS-20946"),
+    ("God of War II", "SCUS-97481"),
+    ("Shadow of the Colossus", "SCUS-97472"),
+    ("Gran Turismo 4", "SCUS-97328"),
+    ("Final Fantasy X", "SLUS-20312"),
+    ("Metal Gear Solid 3: Snake Eater", "SLUS-20915"),
+    ("Devil May Cry 3", "SLUS-20964"),
+    ("Resident Evil 4", "SLUS-21134"),
+)
+
 
 def parse_roadmap(source: str) -> dict[str, Any]:
     """Count checked and unchecked roadmap tasks, grouped by milestone."""
@@ -150,7 +164,7 @@ def render_svg(data: dict[str, Any]) -> str:
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
         "<title id=\"title\">REPS2 engineering progress</title>",
-        f"<desc id=\"desc\">{_esc(completed)} of {_esc(total)} roadmap checklist tasks completed ({_esc(percent)} percent). Checklist progress is not game compatibility or release readiness.</desc>",
+        f"<desc id=\"desc\">{_esc(completed)} of {_esc(total)} roadmap checklist tasks completed ({_esc(percent)} percent). Decorative PS2 cover artwork is not a compatibility claim. Checklist progress is not game compatibility or release readiness.</desc>",
         """<defs>
           <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stop-color="#101a2d"/>
@@ -168,16 +182,25 @@ def render_svg(data: dict[str, Any]) -> str:
             <path d="M32 0H0V32" fill="none" stroke="#8aa4c8" stroke-opacity=".055" stroke-width="1"/>
           </pattern>
         </defs>""",
-        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="url(#surface)" stroke="#26364d"/>',
+        f'<defs><clipPath id="coverClip"><rect x="0" y="0" width="{width}" height="{height}" rx="18"/></clipPath></defs>',
+        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="#05080f"/>',
+        '<g clip-path="url(#coverClip)">',
+        *[
+            f'<image href="{COVER_BASE_URL}/{serial}.jpg" x="{(index % 4) * 290}" y="{(index // 4) * (height / 2):.1f}" width="290" height="{height / 2:.1f}" preserveAspectRatio="xMidYMid slice" opacity=".82" aria-label="{_esc(title)} decorative cover art"/>'
+            for index, (title, serial) in enumerate(COVER_ARTWORK)
+        ],
+        '</g>',
+        f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="#030712" fill-opacity=".55"/>',
         f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#ambient)"/>',
         f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#grid)"/>',
+        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="none" stroke="#26364d"/>',
         '<path d="M40 124H1120" stroke="#26364d" stroke-width="1"/>',
         '<circle cx="48" cy="42" r="4" fill="#67e8f9"/>',
         '<text x="62" y="46" fill="#9bb1cd" font-family="Consolas,Menlo,monospace" font-size="11" font-weight="600" letter-spacing="1.2">REPS2  /  NATIVE RECOMPILATION</text>',
         f'<text x="1120" y="46" text-anchor="end" fill="#7185a2" font-family="Consolas,Menlo,monospace" font-size="10">REPOSITORY STATE  •  {_esc(generated)}</text>',
         '<text x="40" y="91" fill="#eef5ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="31" font-weight="650" letter-spacing="-.7">Engineering progress</text>',
         '<text x="42" y="111" fill="#8da1bd" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">A live view of the REPS2 roadmap, implementation gates and real-title evidence.</text>',
-        '<rect x="40" y="148" width="1080" height="151" rx="13" fill="#0b1220" fill-opacity=".82" stroke="#26364d"/>',
+        '<rect x="40" y="148" width="1080" height="151" rx="13" fill="#0b1220" fill-opacity=".72" stroke="#26364d"/>',
         '<text x="66" y="180" fill="#8fa6c3" font-family="Consolas,Menlo,monospace" font-size="10" font-weight="600" letter-spacing="1.4">ROADMAP COMPLETION</text>',
         f'<text x="64" y="245" fill="#e6f8ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="54" font-weight="700" letter-spacing="-2">{percent}<tspan fill="#67e8f9" font-size="27">%</tspan></text>',
         f'<text x="244" y="202" fill="#e2ebf8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="600">{completed:,} of {total:,} tasks completed</text>',
@@ -212,7 +235,7 @@ def render_svg(data: dict[str, Any]) -> str:
             stage_status = "PENDING"
             stage_color = "#8394ad"
         parts.extend([
-            f'<rect x="40" y="{y}" width="1080" height="42" rx="7" fill="#111b2b" fill-opacity=".58"/>',
+            f'<rect x="40" y="{y}" width="1080" height="42" rx="7" fill="#111b2b" fill-opacity=".50"/>',
             f'<text x="64" y="{y + 25}" fill="#67e8f9" font-family="Consolas,Menlo,monospace" font-size="11" font-weight="600">{milestone_id}</text>',
             f'<text x="112" y="{y + 25}" fill="#dce7f6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500">{title}</text>',
             f'<rect x="540" y="{y + 17}" width="350" height="6" rx="3" fill="#293a52"/>',
@@ -236,7 +259,7 @@ def render_svg(data: dict[str, Any]) -> str:
         status = gate["status"]
         status_color = "#7ee7c0" if status.lower() in {"met", "claimed"} else "#f6c777"
         parts.extend([
-            f'<rect x="{x}" y="{gates_top}" width="{column_width}" height="54" rx="8" fill="#101a29" stroke="#26364d"/>',
+            f'<rect x="{x}" y="{gates_top}" width="{column_width}" height="54" rx="8" fill="#101a29" fill-opacity=".74" stroke="#26364d"/>',
             f'<text x="{x + 15}" y="{gates_top + 20}" fill="#8298b5" font-family="Consolas,Menlo,monospace" font-size="9" font-weight="600" letter-spacing=".8">{_esc(gate["label"]).upper()}</text>',
             f'<text x="{x + 15}" y="{gates_top + 40}" fill="{status_color}" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="600">{_esc(_clip(status, 43))}</text>',
         ])
@@ -253,8 +276,8 @@ def render_svg(data: dict[str, Any]) -> str:
     return "\n".join(parts) + "\n"
 
 
-def render_index_html() -> str:
-    return """<!doctype html>
+def render_index_html(svg: str) -> str:
+    page = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -285,7 +308,7 @@ def render_index_html() -> str:
       border-radius: 16px;
       background: rgba(12,18,30,.88);
     }
-    img { display: block; width: 100%; height: auto; }
+    .dashboard-svg svg { display: block; width: 100%; height: auto; }
     footer {
       margin: 0 12px;
       padding: 14px 8px 8px;
@@ -305,18 +328,24 @@ def render_index_html() -> str:
 </head>
 <body>
   <main>
-    <img src="progress.svg" alt="REPS2 engineering progress dashboard">
+    <div class="dashboard-svg" aria-label="REPS2 live engineering progress dashboard">
+      <!-- DASHBOARD_SVG -->
+    </div>
     <footer>
       Live status generated from
       <a href="https://github.com/RidTheWann/REPS2-Project/blob/main/docs/ROADMAP.md">the engineering roadmap</a>
       and <a href="https://github.com/RidTheWann/REPS2-Project/blob/main/docs/PROJECT_STATE.md">verified project state</a>.
       Checklist completion is not a game compatibility or release-readiness score.
-      <a href="progress.json">Progress data (JSON)</a>.
+      Decorative PS2 cover artwork is hotlinked from
+      <a href="https://github.com/xlenore/ps2-covers">xlenore/ps2-covers</a>;
+      artwork rights remain with their respective owners and the covers are not stored in REPS2.
+      <a href="progress.svg">SVG snapshot</a> · <a href="progress.json">Progress data (JSON)</a>.
     </footer>
   </main>
 </body>
 </html>
 """
+    return page.replace("<!-- DASHBOARD_SVG -->", svg)
 
 
 def main() -> int:
@@ -331,11 +360,12 @@ def main() -> int:
         args.project_state.read_text(encoding="utf-8"),
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "progress.svg").write_text(render_svg(data), encoding="utf-8")
+    svg = render_svg(data)
+    (args.output_dir / "progress.svg").write_text(svg, encoding="utf-8")
     (args.output_dir / "progress.json").write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    (args.output_dir / "index.html").write_text(render_index_html(), encoding="utf-8")
+    (args.output_dir / "index.html").write_text(render_index_html(svg), encoding="utf-8")
     print(
         f"Generated dashboard: {data['totals']['completed']}/{data['totals']['total']} "
         f"tasks ({data['totals']['percent']}%) across {len(data['milestones'])} milestones."
