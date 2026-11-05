@@ -76,10 +76,15 @@ Current bounded probe (2026-11-06, after ADR 0070 section-aware pointer discover
   (identical to the recorded digest). Entry `0x0010A008`.
 - Build: REPS2 `e4165c9` plus ADR 0070; `x86_64-pc-windows-msvc`; generated
   native module built with MSVC Release `/O2` as one dispatcher plus 8 parts.
-- Analysis (`analyze-elf --discover`): 49,148 data-pointer words scanned (0
-  before ADR 0070), 3,812 pointer roots, 8,400 accepted roots, 61,333 basic
-  blocks, 314,561 decoded instructions, 1,798 unsupported stops, 629 unresolved
-  indirect targets.
+- Analysis (`analyze-elf --discover`): 364,352 code words and 49,148
+  data-pointer words scanned (0 data words before ADR 0070); 2,491 pointer
+  roots; 7,144 accepted roots; 59,922 basic blocks; 309,505 decoded
+  instructions; 784 unsupported blocks; 612 unresolved indirect jumps; 0
+  external targets; 9 skipped candidates and 24 skipped heuristic blocks.
+- Section permissions are applied symmetrically, so `.data` words are no longer
+  decoded as instructions. Compared with scanning them, unsupported blocks fell
+  from 1,874 to 784 and skipped heuristic blocks from 102 to 24, while
+  `0x0025EF38` is still discovered.
 - `0x0025EF38` is now reported as `function: 0x0025EF38 (discovered)` and is
   translated. It is a frameless leaf routine held only in a handler-descriptor
   table at `0x00282218` (`(0x83 → 0x0025EF38)`, `(0x5A → 0x0025EF00)`), so
@@ -134,9 +139,9 @@ Last recorded probe predates the FindAddress HLE implementation:
    `0x0025EF5C`. Confirm whether this reflects correct HLE service return values
    and proper register propagation after the previous syscall handler returned,
    and document any fix.
-2. Inspect the target at `0x0025EF38` against the real ELF bytes and trace.
-   Confirm it is an executable instruction address before treating CFG
-   discovery as correct; investigate any new unresolved edge separately.
+2. Extend the native probe trace to record the syscall sequence, not only the
+   last boundary, so the `$a0` path can be followed across handlers, and
+   investigate any new unresolved edge separately.
 3. Re-run the Black probe with HLE enabled using its matching legal input
    digest; do not infer its progress from Downhill Domination.
 4. Trace the caller's use of FindAddress `$v0` and verify that the

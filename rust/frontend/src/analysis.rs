@@ -657,9 +657,29 @@ pub fn discover_function_roots(
     section_exec_ranges: &[(u32, u32)],
     limits: AnalysisLimits,
 ) -> FunctionDiscovery {
+    // Section permissions replace the program-header rule only when they
+    // actually describe this image. A section table whose addresses live in a
+    // different address view than the segments would otherwise classify every
+    // code word as data.
+    let use_section_permissions = section_exec_ranges.iter().any(|&(start, end)| {
+        segments.iter().any(|segment| {
+            let segment_end = segment
+                .virtual_address
+                .saturating_add(segment.file_size as u32);
+            start < segment_end && segment.virtual_address < end
+        })
+    });
+
+    // A candidate is code when it is file-backed executable and, if the section
+    // table is usable, inside a section-declared executable range.
+    let admits_code = |pc: u32| {
+        crate::address::file_backed_executable_segment(segments, pc).is_some()
+            && (!use_section_permissions || is_section_executable(section_exec_ranges, pc))
+    };
+
     let mut discovery = FunctionDiscovery::default();
     for segment in segments {
-        if segment.flags & elf::PF_X == 0 {
+        if !use_section_permissions && segment.flags & elf::PF_X == 0 {
             continue;
         }
         let file_size = segment.file_size.min(segment.bytes.len());
@@ -673,20 +693,21 @@ pub fn discover_function_roots(
                 discovery.truncated = true;
                 return discovery;
             }
+            let Some(pc) = base.checked_add(offset as u32) else {
+                break;
+            };
+            if use_section_permissions && !is_section_executable(section_exec_ranges, pc) {
+                offset += 4;
+                continue;
+            }
             let word = u32::from_le_bytes(
                 segment.bytes[offset..offset + 4]
                     .try_into()
                     .expect("four-byte discovery window"),
             );
-            let Some(pc) = base.checked_add(offset as u32) else {
-                break;
-            };
             discovery.scanned_words += 1;
             let instruction = mips::decode(word, pc);
-            if instruction.opcode == Opcode::Jal
-                && crate::address::file_backed_executable_segment(segments, instruction.target)
-                    .is_some()
-            {
+            if instruction.opcode == Opcode::Jal && admits_code(instruction.target) {
                 discovery.call_targets.insert(instruction.target);
             }
             if instruction.opcode == Opcode::Addiu
@@ -701,15 +722,13 @@ pub fn discover_function_roots(
     }
 
     // File-backed words outside section-declared executable ranges hold pointer
-    // tables. A word that resolves into a file-backed executable segment is a
-    // candidate routine address: callback/vtable entries and, importantly for
-    // syscalls, the SetSyscall descriptor tables a title copies into kernel
-    // slots.
+    // tables. A word that resolves into executable bytes is a candidate routine
+    // address: callback/vtable entries and, importantly for syscalls, the
+    // SetSyscall descriptor tables a title copies into kernel slots.
     //
     // A single writable+executable `PT_LOAD` cannot separate code from data, so
     // when the section table declares executable ranges those ranges decide
     // what is code and every other file-backed word is read.
-    let use_section_permissions = !section_exec_ranges.is_empty();
     for segment in segments {
         if !use_section_permissions && segment.flags & elf::PF_X != 0 {
             continue;
@@ -738,9 +757,7 @@ pub fn discover_function_roots(
                     .expect("four-byte pointer window"),
             );
             discovery.scanned_data_words += 1;
-            if value & 3 == 0
-                && crate::address::file_backed_executable_segment(segments, value).is_some()
-            {
+            if value & 3 == 0 && admits_code(value) {
                 discovery.data_pointer_candidates.insert(value);
             }
             offset += 4;
@@ -2645,7 +2662,7 @@ mod tests {
         // in `.data` points at a frameless leaf routine that neither a `jal`
         // nor a stack prologue reaches, and a code word whose encoding happens
         // to look like a pointer must not be read as data.
-        let words: [u32; 10] = [
+        let words: [u32; 12] = [
             0x03E0_0008, // 0x100000 .text: jr $ra (ELF entry)
             0x2484_0004, // 0x100004 .text: addiu $a0, $a0, 4
             0x03E0_0008, // 0x100008 .text: jr $ra
@@ -2656,6 +2673,8 @@ mod tests {
             0x0010_0014, // 0x10001C .text: code word that looks like 0x100014
             0x0000_0083, // 0x100020 .data: syscall number 0x83
             0x0010_0010, // 0x100024 .data: handler address
+            0x0C00_0005, // 0x100028 .data: a word that decodes as jal 0x100014
+            0x0000_0000, // 0x10002C .data: padding
         ];
         let mut file_bytes = Vec::with_capacity(words.len() * 4);
         for word in &words {
@@ -2696,7 +2715,7 @@ mod tests {
             }],
             section_headers: vec![
                 section(0x0010_0000, 0x20, elf::SHF_ALLOC | elf::SHF_EXECINSTR),
-                section(0x0010_0020, 8, elf::SHF_ALLOC | elf::SHF_WRITE),
+                section(0x0010_0020, 0x10, elf::SHF_ALLOC | elf::SHF_WRITE),
             ],
             symbols: Vec::new(),
             relocations: Vec::new(),
@@ -2714,11 +2733,13 @@ mod tests {
 
         let analysis = discover_elf_with_discovery(&image, &file_bytes, AnalysisLimits::default())
             .expect("single-segment synthetic ELF");
+        assert!(analysis.graph.blocks.contains_key(&0x0010_0010));
         assert_eq!(
             analysis.discovery.data_pointer_candidates,
             BTreeSet::from([0x0010_0010])
         );
+        // The `jal 0x100014` encoding sitting in `.data` is data, not code.
+        assert!(analysis.discovery.call_targets.is_empty());
         assert!(analysis.discovery.candidate_roots().contains(&0x0010_0010));
-        assert!(analysis.graph.blocks.contains_key(&0x0010_0010));
     }
 }

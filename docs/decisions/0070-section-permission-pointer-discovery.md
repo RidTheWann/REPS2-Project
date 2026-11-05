@@ -50,11 +50,20 @@ the section table records `.text`/`.vutext` as `SHF_ALLOC | SHF_EXECINSTR` and
 
 `discover_function_roots` takes a list of section-declared executable virtual
 address ranges, computed by the new `executable_section_ranges` helper from
-allocated `SHF_EXECINSTR` sections (sorted and merged). The pointer scan then:
+allocated `SHF_EXECINSTR` sections (sorted and merged). When that list
+intersects the loaded segments, it decides both what is scanned as code and what
+is admitted as a candidate:
 
-- reads every file-backed word that is **not** inside one of those ranges, and
-- falls back to the previous program-header rule (skip `PF_X` segments) when the
-  section table declares no executable section at all.
+- the `JAL`/prologue scan reads only words inside those ranges, so `.data`
+  bytes are never decoded as instructions;
+- the pointer scan reads every file-backed word **outside** those ranges; and
+- a candidate is admitted only when it is file-backed executable **and** inside
+  a section-declared executable range.
+
+When the section table declares no executable section, or none of its ranges
+intersects a loaded segment, the previous program-header rule applies unchanged:
+`PF_X` segments are scanned as code, and non-`PF_X` segments are scanned for
+pointers.
 
 Only words that are naturally aligned, lie in a file-backed segment, and resolve
 into a file-backed executable segment become candidates. Candidates remain
@@ -64,11 +73,16 @@ decoded and reports it, and none of them is a reachability claim.
 ## Consequences
 
 - Downhill Domination discovery now scans 49,148 data words instead of 0 and
-  admits 3,812 pointer roots (8,400 accepted roots, 61,333 basic blocks,
-  314,561 decoded instructions). `0x0025EF38` is admitted as
+  admits 2,491 pointer roots (7,144 accepted roots, 59,922 basic blocks,
+  309,505 decoded instructions). `0x0025EF38` is admitted as
   `function: 0x0025EF38 (discovered)` and translated.
-- Images that already separate code and data with program headers behave as
-  before, because their data segments are scanned exactly as they were.
+- Because the same ranges gate the `JAL`/prologue scan, `.data` words are no
+  longer decoded as instructions: unsupported blocks fall from 1,874 to 784 and
+  skipped heuristic blocks from 102 to 24 on the same image.
+- Images without a usable section table keep the program-header rule, so their
+  discovery results are unchanged. Images that do carry section permissions gain
+  a data-word census as well, which can change `scanned_data_words` and root
+  counts even when the segment flags already separated code from data.
 - The scan is bounded by the existing `--max-roots` limit; the bound is still
   enforced through `candidate_count()`.
 - Code words are never read as pointers, so instruction encodings that happen to
