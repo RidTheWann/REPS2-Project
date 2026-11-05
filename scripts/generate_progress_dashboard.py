@@ -183,16 +183,16 @@ def render_svg(data: dict[str, Any], *, glass: bool = False) -> str:
             <path d="M32 0H0V32" fill="none" stroke="#8aa4c8" stroke-opacity=".055" stroke-width="1"/>
           </pattern>
         </defs>""",
-        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="url(#surface)" fill-opacity="{0.56 if glass else 1}" stroke="#26364d"/>',
-        f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#ambient)"/>',
-        f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#grid)"/>',
+        f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="{"none" if glass else "url(#surface)"}" stroke="#426078" stroke-opacity="{0.62 if glass else 1}"/>',
+        (f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="#050a12" fill-opacity=".035"/>' if glass else f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#ambient)"/>'),
+        (f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#grid)" opacity=".12"/>' if glass else f'<rect x="1" y="1" width="1158" height="{height - 2}" rx="17" fill="url(#grid)"/>'),
         '<path d="M40 124H1120" stroke="#26364d" stroke-width="1"/>',
         '<circle cx="48" cy="42" r="4" fill="#67e8f9"/>',
         '<text x="62" y="46" fill="#9bb1cd" font-family="Consolas,Menlo,monospace" font-size="11" font-weight="600" letter-spacing="1.2">REPS2  /  NATIVE RECOMPILATION</text>',
         f'<text x="1120" y="46" text-anchor="end" fill="#7185a2" font-family="Consolas,Menlo,monospace" font-size="10">REPOSITORY STATE  •  {_esc(generated)}</text>',
         '<text x="40" y="91" fill="#eef5ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="31" font-weight="650" letter-spacing="-.7">Engineering progress</text>',
         '<text x="42" y="111" fill="#8da1bd" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12">A live view of the REPS2 roadmap, implementation gates and real-title evidence.</text>',
-        f'<rect x="40" y="148" width="1080" height="151" rx="13" fill="#0b1220" fill-opacity="{0.68 if glass else 0.82}" stroke="#26364d"/>',
+        f'<rect x="40" y="148" width="1080" height="151" rx="13" fill="#050a12" fill-opacity="{0.34 if glass else 0.82}" stroke="#26364d"/>',
         '<text x="66" y="180" fill="#8fa6c3" font-family="Consolas,Menlo,monospace" font-size="10" font-weight="600" letter-spacing="1.4">ROADMAP COMPLETION</text>',
         f'<text x="64" y="245" fill="#e6f8ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="54" font-weight="700" letter-spacing="-2">{percent}<tspan fill="#67e8f9" font-size="27">%</tspan></text>',
         f'<text x="244" y="202" fill="#e2ebf8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="600">{completed:,} of {total:,} tasks completed</text>',
@@ -227,7 +227,7 @@ def render_svg(data: dict[str, Any], *, glass: bool = False) -> str:
             stage_status = "PENDING"
             stage_color = "#8394ad"
         parts.extend([
-            f'<rect x="40" y="{y}" width="1080" height="42" rx="7" fill="#111b2b" fill-opacity="{0.40 if glass else 0.58}"/>',
+            f'<rect x="40" y="{y}" width="1080" height="42" rx="7" fill="#050a12" fill-opacity="{0.20 if glass else 0.58}"/>',
             f'<text x="64" y="{y + 25}" fill="#67e8f9" font-family="Consolas,Menlo,monospace" font-size="11" font-weight="600">{milestone_id}</text>',
             f'<text x="112" y="{y + 25}" fill="#dce7f6" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" font-weight="500">{title}</text>',
             f'<rect x="540" y="{y + 17}" width="350" height="6" rx="3" fill="#293a52"/>',
@@ -251,7 +251,7 @@ def render_svg(data: dict[str, Any], *, glass: bool = False) -> str:
         status = gate["status"]
         status_color = "#7ee7c0" if status.lower() in {"met", "claimed"} else "#f6c777"
         parts.extend([
-            f'<rect x="{x}" y="{gates_top}" width="{column_width}" height="54" rx="8" fill="#101a29" fill-opacity="{0.62 if glass else 1}" stroke="#26364d"/>',
+            f'<rect x="{x}" y="{gates_top}" width="{column_width}" height="54" rx="8" fill="#050a12" fill-opacity="{0.30 if glass else 1}" stroke="#426078" stroke-opacity=".68"/>',
             f'<text x="{x + 15}" y="{gates_top + 20}" fill="#8298b5" font-family="Consolas,Menlo,monospace" font-size="9" font-weight="600" letter-spacing=".8">{_esc(gate["label"]).upper()}</text>',
             f'<text x="{x + 15}" y="{gates_top + 40}" fill="{status_color}" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="600">{_esc(_clip(status, 43))}</text>',
         ])
