@@ -70,3 +70,25 @@ jobs:
       - name: Unit tests
         working-directory: rust
         run: cargo test --workspace --locked
+
+  progress-dashboard:
+    name: Progress dashboard generator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dashboard unit tests
+        run: python -m unittest discover -s scripts -p "test_progress_dashboard.py" -v
+
+      - name: Render dashboard
+        run: |
+          python scripts/generate_progress_dashboard.py --output-dir build/progress-dashboard
+          python -c "import xml.etree.ElementTree as ET; ET.parse('build/progress-dashboard/progress.svg')"
+          test -s build/progress-dashboard/progress.json
+          test -s build/progress-dashboard/index.html
