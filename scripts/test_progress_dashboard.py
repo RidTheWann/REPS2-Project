@@ -83,10 +83,22 @@ No guest-visible boot stage was demonstrated.
         self.assertIn("Release gates", svg)
         self.assertNotIn('fill="#ffffff"', svg)
 
+    def test_svg_uses_hotlinked_ps2_cover_art_as_decorative_backdrop(self):
+        data = build_dashboard_data(self.roadmap, self.project_state)
+        svg = render_svg(data)
+        self.assertEqual(svg.count('<image href="https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default/'), 8)
+        self.assertIn('fill-opacity=".55"', svg)
+        self.assertIn("decorative cover art", svg)
+        self.assertIn("Shadow of the Colossus", svg)
+
     def test_dashboard_page_uses_dark_systems_layout(self):
-        page = render_index_html()
+        data = build_dashboard_data(self.roadmap, self.project_state)
+        page = render_index_html(render_svg(data))
         self.assertIn("color-scheme: dark", page)
         self.assertIn("progress.svg", page)
+        self.assertIn("<svg", page)
+        self.assertIn("xlenore/ps2-covers", page)
+        self.assertIn("backdrop-filter", page)
         self.assertIn("#080c15", page)
         self.assertIn("radial-gradient", page)
         self.assertNotIn("box-shadow", page)
