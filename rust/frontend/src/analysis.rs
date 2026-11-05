@@ -252,7 +252,7 @@ impl Terminator {
                     });
                 }
                 edges
-            },
+            }
             Self::Unsupported { instruction } => {
                 // A `SYSCALL` ends the block without an architectural successor:
                 // the trap vectors through COP0. A host HLE service still has to
@@ -1068,8 +1068,7 @@ fn build_cfg(
         };
         if let Some((instruction_pc, target)) = indirect_target {
             if let Terminator::IndirectJump {
-                resolved_target_pc,
-                ..
+                resolved_target_pc, ..
             } = &mut block.terminator
             {
                 *resolved_target_pc = target;
