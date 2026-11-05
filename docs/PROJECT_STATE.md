@@ -4,80 +4,121 @@ Updated: 2026-11-05
 
 ## Current objective
 
-Advance M4 real-title native execution. The EE `FindAddress` (0x83) HLE host service
-is implemented and merged to `main` (PR #2, commit `8b7cede`): an honest service
-that returns `0` = not found, never faked success, through the shared sorted
-`kEeSyscallServices` dispatch table with registered guest-handler slots taking
-precedence (ADR 0069). The Downhill Domination bounded probe now progresses past
-PC `0x0025EF7C` (FindAddress handled) and stops at an unrelated unresolved
-indirect-control-flow CFG gap at `pc=0x0025EF38`. Next step: investigate that
-CFG gap to resume execution toward a repeatable guest-visible boot stage.
+Advance M4 real-title native execution toward a repeatable guest-visible boot stage.
+The EE HLE layer now supports the observed early boot calls:
+`SetupThread` (0x3C), `SetupHeap` (0x3D), `CreateSema` (0x40),
+`FlushCache` (0x64), `SetSyscall` (0x74, including translated guest
+handlers), and `FindAddress` (0x83). Unsupported calls remain explicit stops;
+no success is fabricated.
+
+The frontend CFG now performs bounded, within-basic-block constant propagation
+for indirect `JR/JALR` source registers formed by `LUI`, `ORI`, `ADDIU`,
+`DADDIU`, `ANDI`, or `XORI`. Targets are queued only when the calculated
+32-bit address belongs to an executable view. This is static discovery, not a
+claim that a retail game has passed the former `0x0025EF38` boundary: a new
+Downhill Domination probe with this resolver has not yet been run.
 
 ## Verified repository state
 
-- Branch: `main` at HEAD `b966a96` (`docs: record FindAddress probe evidence and M4 unblocked`). CI green on Windows, Linux, and MSRV 1.88.
-- Merged work on `main`:
-  - PR #1 — EE guest syscall handlers via SetSyscall dispatch (commit `253ba31`, ADR 0069).
-  - PR #2 — EE FindAddress (0x83) HLE service (commit `8b7cede`, ADR 0068).
-  - Placeholder `path/to/filename.js` removed (commit `627c71f`).
-- Open PRs: none.
-- Active feature branches exist (e.g. `feat/m4-ee-findaddress-hle`, `feat/ee-syscall-hle-2026-11-04`, `feature/m4-native-execution-trace-2026-11-04`); none is "dirty" on `main`.
+- Default branch: `main` at `b966a96` (last verified main commit during this work).
+- PR #4 is the active integration branch, based on `main`; its changes include
+  the documentation corrections originally proposed by PR #3, EE syscall
+  context preservation, indirect-target analysis, and CFG regression tests.
+- PR #3 was **closed without a GitHub merge** after its documentation changes
+  were folded into PR #4. Do not describe PR #3 as independently merged.
+- `main` has branch protection enabled. Required checks are
+  `Rust frontend (ubuntu-latest)`, `Rust frontend (windows-latest)`, and
+  `Rust frontend (MSRV 1.88)`.
+- Do not merge PR #4 until the required checks for its final head commit pass
+  and the diff has been reviewed.
 
-## Verified validation
+## Delivered in the active PR #4
 
-- Rust formatting: passed (`cargo fmt --check`)
-- Rust workspace tests: passed (271 tests, 0 failures)
-- Rust clippy: passed (no warnings, `-D warnings`)
-- Release native build: passed
-- Full CTest: 30/30 passed (incl. `reps2_hle_syscall_codegen_smoke` 29 cases)
+- Corrected stale project-state descriptions and removed the superseded
+  FindAddress deferral text from ADR 0068.
+- Updated README and CAPABILITIES to describe translated guest-handler dispatch
+  through SetSyscall and the honest FindAddress HLE service.
+- Preserved `SA` and the COP0 register array across guest syscall-handler entry
+  and return; the handler's `$v0` remains the service result.
+- Added a regression test that clobbers `SA` and COP0 inside a guest handler
+  and checks they are restored.
+- Added conservative static target resolution for same-block constant
+  construction using `LUI/ORI/ADDIU/DADDIU/ANDI/XORI`.
+- Added CFG fixtures for constant `JR` targets, a KSEG0 `JALR` target,
+  `DADDIU` address construction, and a delay-slot write that must not alter
+  the already-selected `JR` target.
+- The latest source/test changes must remain subject to the required Windows,
+  Ubuntu, and MSRV CI checks. A passing synthetic/host CI run does not replace
+  a real-title probe.
 
-## M4 evidence status
+## M4 real-title evidence
 
-### Downhill Domination (USA) — SCUS_971.77 — bounded probe re-validated with HLE on (2026-11-05)
+### Downhill Domination (USA) — SCUS_971.77
 
-- Boot ELF: `dh.elf` (temp fixture, not in repo); Input SHA-256 `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`
-- Entry: `0x0010A008` (matches ELF entry)
-- Analysis: 28,300 blocks; 146,425 instructions; 314 unsupported stops; 165 syscall/break traps
-- HLE-on bounded probe (budget 5,000,000): `2,757,047` guest instructions executed natively
-- Services observed: `syscalls=7`, `hle_handled=6` (6 HLE-hosted incl. FindAddress; 1 via registered guest handler through SetSyscall)
-- `hle_pc=0x0025EF7C hle_number=0x83 hle_name=FindAddress hle_a0=0x80000000 hle_a1=0x80080000 hle_a2=0x0025EF38 hle_a3=0x0029E580` — matches the recorded call site
-- FindAddress (0x83) **handled by HLE** (honest host service; returns 0 = not found since REPS2 populates no kernel table)
-- Execution **progressed past the `0x0025EF7C` FindAddress boundary**; final stop `status=4` (`external_control_flow` / `unresolved_control_flow`) at `pc=0x0025EF38` — an unrelated CFG gap (indirect branch target not resolved), not the FindAddress boundary
-- Native probe CTest: `reps2_generated_probe` passed
-- No guest-visible boot stage demonstrated
+Last verified bounded probe, before the indirect-target resolver was added:
 
-### Black (USA) — SLUS_213.76 — native probe validated (2026-11-05)
+- Input ELF SHA-256:
+  `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`.
+- Entry: `0x0010A008`.
+- Analysis: 28,300 blocks, 146,425 instructions, 314 unsupported stops,
+  and 165 syscall/break traps.
+- HLE-on instruction budget: 5,000,000; native guest instructions executed:
+  2,757,047.
+- Seven syscalls observed; six handled (including FindAddress), and one
+  dispatched through a registered guest handler.
+- FindAddress at `0x0025EF7C` was handled. That probe then stopped with
+  `unresolved_control_flow` at `pc=0x0025EF38`.
+- No guest-visible boot stage was demonstrated.
 
-- ISO SHA-256 `65768cade88bfbaf566b67a3ef7a0bda5a9669779833914ffe7cd73a3e45cccd`; boot ELF SHA-256 `141b05209570458af9c8e27ab1911f258da6353909d813cd572df026254ffe4c`
-- Entry: `0x00100008` (matches ELF entry)
-- Analysis: 101,956 blocks; 504,661 instructions; 1,068 unsupported stops; 243 syscall/break traps
-- HLE-on bounded probe (budget 10,000,000): `290,344` guest instructions executed natively
-- Services serviced in order: `0x3C` SetupThread, `0x3D` SetupHeap, `0x40` CreateSema (x2), `0x74` SetSyscall
-- Previously stopped at unhandled `FindAddress` 0x83 at PC `0x0036D664`; same FindAddress contract as Downhill Domination applies. Black ELF not available locally for re-probe.
-- `syscalls=7`, `hle_handled=6`, `sema_live=2`, `sema_id=1`
-- No guest-visible boot stage demonstrated
+### Black (USA) — SLUS_213.76
 
-### M4 boundary (both titles)
+Last recorded probe predates the FindAddress HLE implementation:
 
-- `FindAddress` service 0x83 ABI: **RESOLVED** via independent behavioral reference (PS2Recomp `9e4fd79`, research only — no source copied). Contract: `$a0`=table start (inclusive), `$a1`=table end (exclusive), `$a2`=target; scans word entries in `[a0, a1)`, returns the guest address of the first matching word or `0` when none matches; KSEG0/KSEG1 aliasing (`addr & 0x1FFFFFFF`); memory-validated reads; unreadable entry ends the scan.
-- Downhill Domination bounded probe re-run with HLE on: execution progresses past PC `0x0025EF7C` (FindAddress handled); stops at an unrelated `unresolved_control_flow` CFG gap at `pc=0x0025EF38`.
-- Black ELF not available locally for re-probe; same FindAddress contract applies.
-- Trustworthy local reference-execution oracle: not available.
-- Repeatable guest-visible boot stage: not demonstrated.
-- M4 boundary: **UNBLOCKED** — FindAddress no longer stops execution; remaining blocker is an unresolved indirect control flow target (CFG coverage), outside the FindAddress syscall scope.
+- ISO SHA-256:
+  `65768cade88bfbaf566b67a3ef7a0bda5a9669779833914ffe7cd73a3e45cccd`.
+- Boot ELF SHA-256:
+  `141b05209570458af9c8e27ab1911f258da6353909d813cd572df026254ffe4c`.
+- Entry: `0x00100008); analysis: 101,956 blocks and 504,661 instructions.
+- The old HLE-on probe reached FindAddress `0x83` at `0x0036D664`.
+  The Black ELF was not available for a post-FindAddress re-probe.
+- No guest-visible boot stage was demonstrated.
+
+### Evidence limits
+
+- The Downhill Domination stop at `0x0025EF38` is the previous probe result,
+  not evidence that the new static resolver still stops there or now passes it.
+- A real-title re-probe requires the owner's legally obtained ISO/boot ELF in
+  the local test environment. Game binaries and ISOs remain outside Git.
+- An independent reference-execution oracle for the complete runtime path is
+  not currently recorded.
+- No Playable or multi-game compatibility claim is justified.
 
 ## Active backlog
 
-1. Investigate the unresolved indirect-control-flow CFG gap at `pc=0x0025EF38` (Downhill Domination) to resume execution past the FindAddress boundary.
-2. Re-run bounded Downhill Domination and Black probes with HLE on after CFG coverage improves; target a repeatable guest-visible boot stage.
-3. Audit syscall handler context preservation (`EeSyscallHandlerFrame` omits `sa` and `cop0`; confirm whether the modeled EE syscall path requires them).
-4. Enforce branch protection and formal review on `main`; two recent PRs merged without formal review submissions.
-5. Advance independent compiler/runtime workstreams not blocked by `FindAddress` (M4 is a priority, not the whole mission).
+1. Run the bounded Downhill Domination probe with the new resolver and HLE.
+   Record the exact input digest, REPS2 commit, command/configuration, resolved
+   target, executed instruction count, and final stop/guest-visible stage.
+2. Inspect the target at `0x0025EF38` against the real ELF bytes and trace.
+   Confirm it is an executable instruction address before treating CFG
+   discovery as correct; investigate any new unresolved edge separately.
+3. Re-run the Black probe with HLE enabled using its matching legal input
+   digest; do not infer its progress from Downhill Domination.
+4. Trace the caller's use of FindAddress `$v0` and verify that the
+   not-found result is handled correctly by each title.
+5. Continue runtime work only from observed guest paths; do not implement
+   unrelated PS2 devices or claim compatibility from synthetic fixtures.
+6. After one repeatable guest-visible boot stage, proceed to the next required
+   service/device boundary and retain exact reproducibility evidence.
+7. Establish the minimum multi-game proof using a second distinct title on
+   the same shared compiler/runtime path.
 
 ## Release-gate status
 
-- Alpha: not claimed; end-to-end native execution exists, but supported guest-program scope and runtime coverage remain limited.
-- Public Beta: not met; no three-title gameplay validation, installable desktop application, or sustained supported sessions.
+- Alpha: not claimed; end-to-end native execution exists, but the supported
+  real-title scope and runtime coverage remain limited.
+- Public Beta: not met; no repeatable guest-visible boot stage, three-title
+  gameplay validation, installable desktop application, or sustained
+  supported sessions.
 - REPS2 1.0: not met.
 
 This document records verified state, not intentions or compatibility claims.
