@@ -4,24 +4,24 @@ Updated: 2026-11-05
 
 ## Current objective
 
-Advance M4 real-title native execution without inventing the unresolved EE `FindAddress` (0x83) ABI, while preserving the shared multi-game architecture.
+Advance M4 real-title native execution without inventing the unresolved EE `FindAddress` (0x83) ABI, while preserving the shared multi-game architecture. The M4 instruction-window tracing work has been delivered and pushed to PR #79; the next step is Black native probe validation, then shared runtime services required by observed traces.
 
 ## Verified repository state
 
 - Branch: `feat/m4-syscall-boundary-diagnostics`
-- HEAD: `9a3d412` (caller correlation documented; trace regression assertions added locally)
-- PR: `RidTheWann/REPS2-Project#79` (open; CI checks green; merge state clean)
+- HEAD: `2bf22b9` (8 commits ahead of origin; pushed, PR #79 updated)
+- PR: `RidTheWann/REPS2-Project#79` (open; CI checks pending after push; merge state clean)
 - Working tree: clean
-- Latest delivered work: large retail probe support and rolling bounded instruction-PC tracing.
+- Latest delivered work: rolling bounded instruction-PC tracing with PC-before-trace ordering fix, trace regression assertions, FindAddress caller correlation, ADR 0068 extended with retail trace evidence, Black title added to compatibility matrix.
 
 ## Verified validation
 
 - Rust formatting: passed
-- Rust workspace tests: passed
+- Rust workspace tests: passed (270 tests, 0 failures)
+- Rust clippy: passed (no warnings)
 - Release native build: passed
 - Full CTest: 30/30 passed
 - `git diff --check`: passed
-- GitHub CI: MSRV, Linux, and Windows checks passed
 
 ## M4 evidence status
 
@@ -34,9 +34,10 @@ Advance M4 real-title native execution without inventing the unresolved EE `Find
 
 ## Active backlog
 
-1. Build and execute the generated Black native probe with a bounded budget; record the result without claiming boot.
-2. Preserve the caller correlation and trace regression assertions in the next PR update; do not implement `FindAddress` without an oracle.
+1. Build and execute the generated Black native probe with a bounded budget; record the result without claiming boot. (Black: SLUS_213.76, 101,956 blocks; 504,661 instructions; CFG-aware C++ generated; native build/execution not yet tested.)
+2. Preserve the caller correlation and trace regression assertions (delivered in PR #79); do not implement `FindAddress` without an oracle.
 3. After M4 evidence is exhausted, prioritize shared runtime services required by observed traces, then second-title validation.
+4. Remove `path/to/filename.js` placeholder from main (separate cleanup PR; does not block M4).
 
 ## Release-gate status
 
