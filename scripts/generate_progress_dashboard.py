@@ -11,6 +11,10 @@ import argparse
 import html
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -335,7 +339,7 @@ def render_index_html() -> str:
       background:
         radial-gradient(ellipse at 50% 18%, rgba(16, 42, 73, .12), transparent 55%),
         linear-gradient(180deg, rgba(2, 6, 13, .48), rgba(2, 6, 13, .72));
-      backdrop-filter: blur(1.5px);
+      backdrop-filter: none;
     }
     main {
       width: min(1160px, 100%);
@@ -345,8 +349,8 @@ def render_index_html() -> str:
       border-radius: 16px;
       background: rgba(5, 10, 18, .30);
       box-shadow: 0 24px 80px rgba(0, 0, 0, .38);
-      backdrop-filter: blur(18px) saturate(125%);
-      -webkit-backdrop-filter: blur(18px) saturate(125%);
+      backdrop-filter: blur(3px) saturate(110%);
+      -webkit-backdrop-filter: blur(3px) saturate(110%);
     }
     main > img {
       display: block;
@@ -413,6 +417,144 @@ def render_index_html() -> str:
     return page.replace("{{COVER_TILES}}", cover_tiles)
 
 
+def _download_cover_asset(url: str) -> bytes | None:
+    """Fetch one upstream cover with a strict timeout and response-size cap."""
+    request = Request(
+        url,
+        headers={"User-Agent": "REPS2-Progress-Dashboard/1.0"},
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = response.read(2_000_001)
+        if not payload or len(payload) > 2_000_000:
+            return None
+        return payload
+    except (OSError, URLError, TimeoutError, ValueError):
+        return None
+
+
+def download_cover_assets() -> list[bytes]:
+    """Download cover thumbnails transiently for the README PNG composite."""
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(_download_cover_asset, COVER_IMAGE_URLS))
+    assets = [payload for payload in results if payload is not None]
+    if not assets:
+        raise RuntimeError(
+            "Unable to download any PS2 cover thumbnails from xlenore/ps2-covers."
+        )
+    if len(assets) != len(COVER_IMAGE_URLS):
+        print(
+            f"Warning: downloaded {len(assets)}/{len(COVER_IMAGE_URLS)} "
+            "PS2 cover thumbnails; missing covers will be filled by available images."
+        )
+    return assets
+
+
+def render_readme_png(
+    data: dict[str, Any],
+    *,
+    cover_assets: list[bytes] | None = None,
+) -> bytes:
+    """Rasterize the transparent SVG over a PS2-cover wall for GitHub README.
+
+    GitHub/browser SVG image contexts do not reliably load external SVG
+    sub-resources. A PNG composite keeps the game-cover wallpaper visible in
+    README while the standalone SVG and HTML dashboard remain available.
+    """
+    try:
+        import cairosvg
+        from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
+    except ImportError as exc:
+        raise RuntimeError(
+            "README preview generation requires CairoSVG and Pillow; "
+            "install scripts/dashboard-requirements.txt."
+        ) from exc
+
+    if cover_assets is None:
+        cover_assets = download_cover_assets()
+    if not cover_assets:
+        raise ValueError("At least one cover image is required for the README preview.")
+
+    glass_svg = render_svg(data, glass=True)
+    svg_root = ET.fromstring(glass_svg)
+    width = int(svg_root.attrib["width"])
+    height = int(svg_root.attrib["height"])
+
+    # Match the Pages wallpaper's seven-column PS2 cover mosaic.
+    columns = 7
+    tile_width = 174
+    tile_height = 236
+    gap = 10
+    rows = max(4, (height + tile_height + gap - 1) // (tile_height + gap) + 1)
+    wall_width = columns * tile_width + (columns + 1) * gap
+    wall_height = rows * tile_height + (rows + 1) * gap
+    wall = Image.new("RGB", (wall_width, wall_height), (5, 10, 18))
+    draw = ImageDraw.Draw(wall)
+
+    for index in range(rows * columns):
+        payload = cover_assets[index % len(cover_assets)]
+        try:
+            with Image.open(BytesIO(payload)) as source:
+                cover = ImageOps.fit(
+                    source.convert("RGB"),
+                    (tile_width, tile_height),
+                    method=Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+        except (OSError, ValueError):
+            continue
+
+        cover = ImageEnhance.Color(cover).enhance(0.82)
+        cover = ImageEnhance.Brightness(cover).enhance(0.72)
+        x = gap + (index % columns) * (tile_width + gap)
+        y = gap + (index // columns) * (tile_height + gap)
+
+        mask = Image.new("L", (tile_width, tile_height), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, tile_width - 1, tile_height - 1), radius=9, fill=255
+        )
+        wall.paste(cover, (x, y), mask)
+        draw.rounded_rectangle(
+            (x, y, x + tile_width - 1, y + tile_height - 1),
+            radius=9,
+            outline=(174, 204, 240),
+            width=1,
+        )
+
+    # Slight angle and restrained dark veil retain the same atmosphere as Pages.
+    wall = wall.rotate(
+        -3,
+        resample=Image.Resampling.BICUBIC,
+        expand=False,
+        fillcolor=(5, 10, 18),
+    )
+    crop_left = max(0, (wall_width - width) // 2)
+    crop_top = max(0, (wall_height - height) // 2)
+    wall = wall.crop((crop_left, crop_top, crop_left + width, crop_top + height))
+
+    shade = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    shade_pixels = shade.load()
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        alpha = round(122 + ratio * 46)
+        for x in range(width):
+            shade_pixels[x, y] = (2, 6, 13, alpha)
+    background = Image.alpha_composite(wall.convert("RGBA"), shade)
+    background = background.filter(ImageFilter.GaussianBlur(radius=3))
+
+    overlay_png = cairosvg.svg2png(
+        bytestring=glass_svg.encode("utf-8"),
+        output_width=width,
+        output_height=height,
+    )
+    overlay = Image.open(BytesIO(overlay_png)).convert("RGBA")
+    composite = Image.alpha_composite(background, overlay)
+
+    output = BytesIO()
+    composite.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roadmap", type=Path, default=Path("docs/ROADMAP.md"))
@@ -429,6 +571,7 @@ def main() -> int:
     (args.output_dir / "progress-overlay.svg").write_text(
         render_svg(data, glass=True), encoding="utf-8"
     )
+    (args.output_dir / "progress.png").write_bytes(render_readme_png(data))
     (args.output_dir / "progress.json").write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
