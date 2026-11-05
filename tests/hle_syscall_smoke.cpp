@@ -665,6 +665,40 @@ int test_guest_handler_restore_preserves_service_result() {
     return 0;
 }
 
+int test_guest_handler_restore_preserves_sa_and_cop0() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    const std::uint32_t handler = 0x1000U;
+    const std::uint32_t resume = 0x2000U;
+    state.sa = 0xAAAAAAAAAAAAAAAAULL;
+    state.cop0[reps2::runtime::kCop0Status] = 0x12345678U;
+    state.cop0[reps2::runtime::kCop0Cause] = 0x9ABCDEF0U;
+    state.cop0[reps2::runtime::kCop0Epc] = 0xDEADBEEFU;
+    state.gpr[4].low = 0x1111'1111U;
+    state.hle.syscall_handler_depth = 0U;
+
+    if (reps2::runtime::enter_ee_syscall_handler(state, 0x83U, handler, resume)
+        != Status::ok) {
+        return 300;
+    }
+    // The handler clobbers SA and COP0; they must be restored on return.
+    state.sa = 0;
+    state.cop0.fill(0);
+    state.gpr[2].low = 42ULL;
+    if (reps2::runtime::return_from_ee_syscall_handler(state) != Status::ok) {
+        return 301;
+    }
+    if (state.pc != resume) return 302;
+    if (state.sa != 0xAAAAAAAAAAAAAAAAULL) return 303;
+    if (state.cop0[reps2::runtime::kCop0Status] != 0x12345678U) return 304;
+    if (state.cop0[reps2::runtime::kCop0Cause] != 0x9ABCDEF0U) return 305;
+    if (state.cop0[reps2::runtime::kCop0Epc] != 0xDEADBEEFU) return 306;
+    if (state.gpr[2].low != 42ULL) return 307;
+    if (state.hle.syscall_handler_depth != 0U) return 308;
+    return 0;
+}
+
 int test_guest_handler_overflow_refuses_instead_of_recursing() {
     EeState state{};
     state.hle.syscall_handler_depth = reps2::runtime::kEeMaxSyscallHandlerDepth;
@@ -922,6 +956,8 @@ int main() {
         {"syscall memory trace", &test_syscall_memory_trace_records_changes},
         {"registered handler runs through the dispatcher", &test_registered_handler_runs_through_the_dispatcher},
         {"guest handler restore preserves service result", &test_guest_handler_restore_preserves_service_result},
+        {"guest handler restore preserves sa and cop0",
+         &test_guest_handler_restore_preserves_sa_and_cop0},
         {"guest handler overflow refuses recursion", &test_guest_handler_overflow_refuses_instead_of_recursing},
     };
 

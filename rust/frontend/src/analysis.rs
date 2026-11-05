@@ -1,6 +1,6 @@
 //! Reachability-guided executable analysis and delay-slot-aware control-flow graphs.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 
 use crate::elf::{self, Image, LoadedSegment};
@@ -139,6 +139,10 @@ pub enum Terminator {
         delay_slot: DecodedInstruction,
         link_register: Option<u8>,
         return_pc: Option<u32>,
+        /// Statically resolved target when the source register is constant
+        /// within this block. Even non-executable targets are retained so
+        /// they can be reported as external control flow.
+        resolved_target_pc: Option<u32>,
     },
     Return {
         instruction: DecodedInstruction,
@@ -223,17 +227,32 @@ impl Terminator {
                 edges
             }
             Self::IndirectJump {
+                resolved_target_pc,
                 link_register,
                 return_pc,
                 ..
-            } => match (link_register, return_pc) {
-                (Some(_), Some(return_pc)) => vec![Edge {
-                    from_block,
-                    to_pc: *return_pc,
-                    kind: EdgeKind::ReturnContinuation,
-                }],
-                _ => Vec::new(),
-            },
+            } => {
+                let mut edges = Vec::new();
+                if let Some(target_pc) = resolved_target_pc {
+                    edges.push(Edge {
+                        from_block,
+                        to_pc: *target_pc,
+                        kind: if link_register.is_some() {
+                            EdgeKind::Call
+                        } else {
+                            EdgeKind::Jump
+                        },
+                    });
+                }
+                if let (Some(_), Some(return_pc)) = (link_register, return_pc) {
+                    edges.push(Edge {
+                        from_block,
+                        to_pc: *return_pc,
+                        kind: EdgeKind::ReturnContinuation,
+                    });
+                }
+                edges
+            }
             Self::Unsupported { instruction } => {
                 // A `SYSCALL` ends the block without an architectural successor:
                 // the trap vectors through COP0. A host HLE service still has to
@@ -1015,7 +1034,7 @@ fn build_cfg(
             });
         }
 
-        let block = match build_block(
+        let mut block = match build_block(
             segments,
             start_pc,
             &leaders,
@@ -1036,12 +1055,35 @@ fn build_cfg(
             Err(error) => return Err(error),
         };
 
+        let indirect_target = match &block.terminator {
+            Terminator::IndirectJump {
+                instruction,
+                source_register,
+                ..
+            } => Some((
+                instruction.pc,
+                resolve_indirect_jump_target(&block, *source_register),
+            )),
+            _ => None,
+        };
+        if let Some((instruction_pc, target)) = indirect_target {
+            if let Terminator::IndirectJump {
+                resolved_target_pc, ..
+            } = &mut block.terminator
+            {
+                *resolved_target_pc = target;
+            }
+            if target.is_none() {
+                unresolved_indirect_jumps.insert(instruction_pc);
+            }
+        }
+
         register_block_owners(&block, &mut owners)?;
+        // A resolved indirect target is now an ordinary static edge. The
+        // common successor loop below either queues executable code or records
+        // a known non-executable destination as an external control-flow target.
         let next_targets = block_targets(&block);
         let trap_continuations = lenient_block_targets(&block);
-        if let Terminator::IndirectJump { instruction, .. } = &block.terminator {
-            unresolved_indirect_jumps.insert(instruction.pc);
-        }
         blocks.insert(start_pc, block);
 
         for target in next_targets {
@@ -1226,6 +1268,7 @@ fn build_block(
                     delay_slot,
                     link_register,
                     return_pc,
+                    resolved_target_pc: None,
                 };
             }
             _ => {}
@@ -1345,6 +1388,66 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
 
 /// Successors the analysis must translate because guest register state requires
 /// them: the architectural successors of the terminator.
+/// Within-block constant propagation for the address register used by an
+/// indirect jump. Recognises the common address-loading idiom (e.g.
+/// `lui $t9, hi; ori $t9, $t9, lo` followed by `jr $t9` or `jalr $t9`) so a
+/// statically-known indirect target can be discovered as a normal block
+/// instead of an unresolved stop.
+///
+/// Conservative: never invents a target. Returns `None` when the source
+/// register's value cannot be determined from the block's immediate-forming
+/// instructions.
+fn resolve_indirect_jump_target(block: &BasicBlock, source_register: u8) -> Option<u32> {
+    if source_register == 0 {
+        // JR $zero is still a statically known transfer to guest address zero.
+        return Some(0);
+    }
+    let mut constants: HashMap<u8, u32> = HashMap::new();
+    for instruction in &block.instructions {
+        match instruction.opcode {
+            Opcode::Lui => {
+                constants.insert(instruction.rt, (instruction.immediate as u32) << 16);
+            }
+            Opcode::Ori | Opcode::Addiu | Opcode::Daddiu | Opcode::Andi | Opcode::Xori => {
+                let base = if instruction.rs == 0 {
+                    Some(0u32)
+                } else {
+                    constants.get(&instruction.rs).copied()
+                };
+                match base {
+                    Some(base) => {
+                        let result = match instruction.opcode {
+                            Opcode::Ori => base | instruction.immediate as u32,
+                            Opcode::Addiu | Opcode::Daddiu => {
+                                // JR/JALR consume the low 32-bit guest address;
+                                // the low lane is identical for wrapping 32-bit
+                                // addition and the EE's sign-extended DADDIU.
+                                base.wrapping_add(instruction.signed_immediate() as u32)
+                            }
+                            Opcode::Andi => base & instruction.immediate as u32,
+                            Opcode::Xori => base ^ instruction.immediate as u32,
+                            _ => unreachable!(),
+                        };
+                        constants.insert(instruction.rt, result);
+                    }
+                    None => {
+                        // Result depends on an unknown register.
+                        constants.remove(&instruction.rt);
+                    }
+                }
+            }
+            Opcode::Nop => {}
+            _ => {
+                // Any other instruction may clobber a register we do not
+                // precisely track; drop all tracked constants rather than
+                // risk a stale value.
+                constants.clear();
+            }
+        }
+    }
+    constants.get(&source_register).copied()
+}
+
 fn block_targets(block: &BasicBlock) -> Vec<u32> {
     block
         .terminator
@@ -1822,14 +1925,24 @@ mod tests {
         )
         .expect("KSEG0 control flow");
 
-        // The call block and the callee block are reachable statically. A
-        // register-indirect `jr` return has no static destination, so no
-        // continuation block is invented for it.
+        // The call block and the callee block are reachable statically: the
+        // `jalr $8` target is resolved from the `lui`/`addiu` address load, so
+        // no indirect jump is left unresolved. The register-indirect `jr $ra`
+        // return has a runtime destination, so it is a `Return` terminator,
+        // not an unresolved indirect jump.
         assert_eq!(graph.blocks.len(), 2);
-        // Only the `jalr` target is unresolved; the callee itself was reached
-        // statically because the same image contains it.
-        assert_eq!(graph.unresolved_indirect_jumps, vec![0x8010_0008]);
+        assert!(graph.unresolved_indirect_jumps.is_empty());
         assert!(graph.external_targets.is_empty());
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x8010_0010,
+            kind: EdgeKind::Call,
+        }));
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x8010_0010,
+            kind: EdgeKind::ReturnContinuation,
+        }));
         assert!(matches!(
             graph.blocks[&0x8010_0000].terminator,
             Terminator::IndirectJump {
@@ -1837,20 +1950,15 @@ mod tests {
                 ..
             }
         ));
-        let callee = discover_cfg(
-            &segments,
-            vec![entry(0x8010_0010)],
-            &[0x8010_0010],
-            AnalysisLimits::default(),
-        )
-        .expect("KSEG0 callee");
-        assert_eq!(callee.blocks[&0x8010_0010].instructions.len(), 1);
+        // The callee is reached through the resolved indirect call, not
+        // through a separate manual root.
+        assert!(graph.blocks.contains_key(&0x8010_0010));
         assert_eq!(
-            callee.blocks[&0x8010_0010].instructions[0].opcode,
+            graph.blocks[&0x8010_0010].instructions[0].opcode,
             Opcode::Addiu
         );
         assert!(matches!(
-            callee.blocks[&0x8010_0010].terminator,
+            graph.blocks[&0x8010_0010].terminator,
             Terminator::Return { .. }
         ));
 
@@ -1860,6 +1968,214 @@ mod tests {
         // by the image, not guessed by the analyzer.
         assert!(!contains_executable_address(&segments, 0x0010_0010));
         assert!(contains_executable_address(&segments, 0x8010_0010));
+    }
+
+    #[test]
+    fn follows_constant_indirect_jump_target() {
+        //   lui  t9, 0x0010      # t9 = 0x00100000
+        //   ori  t9, t9, 0x0010  # t9 = 0x00100010
+        //   jr   t9              # indirect jump to 0x00100010
+        //   nop                  # delay slot
+        //   addiu t1, zero, 1    # target block at 0x00100010
+        //   jr   ra              # return
+        //   nop                  # return delay slot
+        let words = [
+            0x3C09_0010, // lui  $9, 0x0010
+            0x3529_0010, // ori  $9, $9, 0x0010
+            0x0120_0008, // jr   $9
+            0x0000_0000, // delay slot
+            0x2401_0001, // target: addiu $1, $0, 1
+            0x03E0_0008, // jr $ra
+            0x0000_0000, // return delay slot
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("constant indirect jump");
+
+        // The `jr $9` target is resolved to 0x00100010, so the target block is
+        // discovered and no indirect jump is left unresolved.
+        assert_eq!(graph.blocks.len(), 2);
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_0010));
+        assert!(matches!(
+            graph.blocks[&0x0010_0000].terminator,
+            Terminator::IndirectJump {
+                source_register: 9,
+                ..
+            }
+        ));
+        assert_eq!(
+            graph.blocks[&0x0010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn follows_daddiu_indirect_jump_target() {
+        // DADDIU sign-extends its immediate and performs 64-bit modulo
+        // arithmetic; JR consumes the low 32 bits of the resulting address.
+        //   lui    t9, 0x0011       # 0x00110000
+        //   daddiu t9, t9, -0x40   # 0x0010ffc0
+        //   jr     t9
+        //   nop
+        //   ... target at 0x0010ffc0 ...
+        let mut words = [0u32; 19];
+        words[0] = 0x3C09_0011; // lui $t9, 0x0011
+        words[1] = 0x6529_FFC0; // daddiu $t9, $t9, -0x40
+        words[2] = 0x0120_0008; // jr $t9
+        words[16] = 0x2401_0001; // addiu $at, $zero, 1 at 0x0010ffc0
+        words[17] = 0x03E0_0008; // jr $ra
+        let segments = [segment(0x0010_FF80, &words)];
+        let entry_pc = 0x0010_FF80;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("DADDIU-built indirect jump");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_FFC0));
+        assert_eq!(
+            graph.blocks[&0x0010_FFC0].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn follows_ori_xori_andi_indirect_jump_target() {
+        // Exercise the zero-extended logical-immediate transfer functions:
+        //   ori  t9, zero, 0xffff   # 0x0000ffff
+        //   xori t9, t9, 0x000f    # 0x0000fff0
+        //   andi t9, t9, 0xfff0    # 0x0000fff0
+        //   jr   t9
+        //   nop
+        // Target is inside this executable physical-RAM view at 0x0000fff0.
+        let mut words = [0u32; 63];
+        words[0] = 0x3409_FFFF;
+        words[1] = 0x3929_000F;
+        words[2] = 0x3129_FFF0;
+        words[3] = 0x0120_0008;
+        words[60] = 0x2401_0001; // addiu $at, $zero, 1 at 0x0000fff0
+        words[61] = 0x03E0_0008; // jr $ra
+        let segments = [segment(0x0000_FF00, &words)];
+        let entry_pc = 0x0000_FF00;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("logical-immediate indirect jump");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0000_FFF0));
+        assert_eq!(
+            graph.blocks[&0x0000_FFF0].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn indirect_jump_target_is_captured_before_delay_slot_clobber() {
+        // JR reads its target before the delay slot executes. The slot may
+        // overwrite the source register without changing the selected target.
+        //   lui  t9, 0x0010
+        //   ori  t9, t9, 0x0010
+        //   jr   t9
+        //   lui  t9, 0x0020       # delay slot clobbers t9 after target capture
+        //   addiu t1, zero, 1    # original target at 0x00100010
+        //   jr   ra
+        //   nop
+        let words = [
+            0x3C09_0010,
+            0x3529_0010,
+            0x0120_0008,
+            0x3C09_0020,
+            0x2401_0001,
+            0x03E0_0008,
+            0x0000_0000,
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("indirect jump with a clobbering delay slot");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_0010));
+        assert!(!graph.blocks.contains_key(&0x0020_0000));
+        assert_eq!(
+            graph.blocks[&0x0010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn records_resolved_non_executable_indirect_target_as_external() {
+        // A constant target outside every executable view is known, but it is
+        // not translatable code. Preserve it as an external edge instead of
+        // silently dropping it or calling the source unresolved.
+        let words = [
+            0x3C09_0020, // lui $t9, 0x0020 -> 0x00200000
+            0x0120_0008, // jr $t9
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("constant indirect jump to external address");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert_eq!(graph.external_targets, vec![0x0020_0000]);
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x0020_0000,
+            kind: EdgeKind::Jump,
+        }));
+    }
+
+    #[test]
+    fn resolves_indirect_jump_through_zero_register() {
+        // JR $zero has a constant target of guest address 0; if that address is
+        // backed by executable bytes, it should be discovered as a self-edge.
+        let words = [
+            0x0000_0008, // jr $zero
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x0000_0000, &words)];
+        let entry_pc = 0x0000_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("JR $zero target");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.external_targets.is_empty());
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0,
+            kind: EdgeKind::Jump,
+        }));
     }
 
     #[test]

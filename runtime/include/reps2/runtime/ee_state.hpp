@@ -110,6 +110,8 @@ struct EeSyscallHandlerFrame {
     std::array<std::uint32_t, 32> saved_fpr{};
     std::uint32_t saved_acc{};
     std::uint32_t saved_fcsr{};
+    std::uint64_t saved_sa{};
+    std::array<std::uint32_t, 32> saved_cop0{};
     std::uint32_t handler_address{};
     std::uint32_t resume_pc{};
     std::uint32_t slot{};
