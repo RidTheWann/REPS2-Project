@@ -182,9 +182,9 @@ def render_svg(data: dict[str, Any]) -> str:
             <path d="M32 0H0V32" fill="none" stroke="#8aa4c8" stroke-opacity=".055" stroke-width="1"/>
           </pattern>
         </defs>""",
-        f'<defs><clipPath id="coverClip"><rect x="0" y="0" width="{width}" height="{height}" rx="18"/></clipPath></defs>',
+        f'<defs><clipPath id="coverClip"><rect x="0" y="0" width="{width}" height="{height}" rx="18"/></clipPath><filter id="coverSoft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="1.2"/></filter></defs>',
         f'<rect x="0.5" y="0.5" width="1159" height="{height - 1}" rx="18" fill="#05080f"/>',
-        '<g clip-path="url(#coverClip)">',
+        '<g clip-path="url(#coverClip)" filter="url(#coverSoft)">',
         *[
             f'<image href="{COVER_BASE_URL}/{serial}.jpg" x="{(index % 4) * 290}" y="{(index // 4) * (height / 2):.1f}" width="290" height="{height / 2:.1f}" preserveAspectRatio="xMidYMid slice" opacity=".82" aria-label="{_esc(title)} decorative cover art"/>'
             for index, (title, serial) in enumerate(COVER_ARTWORK)
