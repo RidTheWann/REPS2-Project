@@ -754,6 +754,43 @@ Observed result after servicing the chain (2026-11-06):
   13..15, sets bit 13, writes, reads back, restores, and reports whether bits
   13..14 are zero. `SetOsdConfigParam` (0x4A) is part of the same probe.
 
+### EE OSD configuration services (ADR 0077)
+
+Facts:
+
+- ps2sdk declares `void GetOsdConfigParam(void *addr)` and
+  `void SetOsdConfigParam(void *addr)`; both return void. The game's wrappers at
+  `0x0025A790` and `0x0025A780` carry service numbers 0x4B and 0x4A.
+- The observed call passes a 4-byte stack buffer at `$a0=0x0093C7C0`. The
+  caller at `0x0025F148` reads it, clears bits 13..15 (`& 0xFFFF1FFF`), sets bit
+  13 (`| 0x2000`), writes it with 0x4A, reads it back with 0x4B, restores the
+  original with 0x4A again, and returns `(((value >> 13) & 7) < 1)`.
+- The kernel's backing store is NVRAM/EEPROM, which REPS2 does not have and
+  must not claim.
+
+Decision and limits:
+
+- One 32-bit host-session word, initialized to 0, is served by 0x4B and stored
+  verbatim by 0x4A through the validated EE address path.
+- Refusals (unmapped, unsupported physical window, misalignment) record a
+  reason and change nothing. `$v0 = -1` is diagnostic only because the documented
+  return type is void.
+- Persistence, board-specific defaults and bit policy are not implemented or
+  invented. Services depending on language/aspect bits see the zeroed default.
+
+Observed result (2026-11-06):
+
+- `status=4` (`unresolved_control_flow`), `pc=0x80075000`,
+  `executed=2,948,141`, `syscalls=42`, `hle_handled=30`.
+- Both directions of the OSD probe are handled twice, then boot installs its
+  second copy path: `SetSyscall(0x5A, 0x0025F570)`, a translated guest copy of
+  0x330 bytes from `0x002831A0` to `0x80075000`, two `FlushCache` calls,
+  `SetSyscall(0x5B, 0x80075000)` and `SetSyscall(0x54, 0x0025F940)`.
+- Service 0x5B then dispatches into the copied blob. The region is not declared
+  for translation, so the probe reports unresolved control flow at
+  `0x80075000`. The next dependency is `--relocated-code` coverage, not another
+  service.
+
 ## Provenance rules
 
 

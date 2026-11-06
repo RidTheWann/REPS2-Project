@@ -50,6 +50,18 @@ word-scan loop, not unresolved control flow.
 
 ## Delivered in this change (branch, unmerged)
 
+- `GetOsdConfigParam` (0x4B) writes a 32-bit host-session OSD configuration word
+  (initial 0) to a validated, aligned 4-byte guest buffer. `SetOsdConfigParam`
+  (0x4A) reads and stores the value verbatim. Refusals record
+  `unreadable_buffer`/`unwritable_buffer` and change nothing (ADR 0077).
+- The word is not persisted and no board-specific bit policy is invented. The
+  observed caller's Set/Get read-back probe over bits 13..15 is coherent.
+- `kEeSyscallServices` now has a compile-time assertion that it is strictly
+  ascending, because lookup stops at the first larger number.
+- `reps2_hle_syscall_codegen_smoke` grew from 47 to 52 cases.
+
+## Delivered in PR #19 (merged)
+
 - `StartThread` (0x22) accepts only an existing DORMANT record, stores the opaque
   argv pointer, sets the documented `THS_READY` status and inserts the id into a
   bounded ready queue ordered by ascending current priority with FIFO among
@@ -163,11 +175,10 @@ Current bounded probe (2026-11-06, branch at ADRs 0072–0075):
   59,927 basic blocks, 309,425 instructions, 715 unsupported stops, 255 guest
   trap stops, 612 unresolved indirect targets, 0 external targets, and one
   relocated region `0x80076000 <- 0x002829F8 (0x740 bytes)`.
-- Probe result: `status=14` (`unhandled_syscall`), `pc=0x0025A794`,
-  `executed=2,946,399`, `syscalls=32`, `hle_handled=21`,
-  `hle_number=0x4B` (`GetOsdConfigParam`), `hle_a0=0x0093C7C0`,
-  `hle_a1=0x00000001`, `hle_a2=0x00000400`, `hle_sp=0x0093C7C0`,
-  `sema_calls=3`, `sema_live=3`.
+- Probe result: `status=4` (`unresolved_control_flow`), `pc=0x80075000`,
+  `executed=2,948,141`, `syscalls=42`, `hle_handled=30`,
+  `hle_number=0x5B`, `hle_a0=0x00000055`, `hle_a1=0x0025F940`,
+  `hle_sp=0x0093C800`, `sema_calls=3`, `sema_live=3`.
 - The sequence shows the full InitAlarm patch: `SetSyscall(0x5A, kCopy)`,
   copies to `0x80076000` (0x740 bytes) and `0x00082000` (0x28 bytes),
   `FlushCache` twice, `SetSyscall(0x5B, 0x80076000)`, then six
@@ -191,19 +202,29 @@ Current bounded probe (2026-11-06, branch at ADRs 0072–0075):
   (`GetThreadId`), and
   `0x0025A574:41:H:0x00000001:0x00000001:0x00000400:0x0029E580:0x00000001`
   (`ChangeThreadPriority` with `$a0=1`, the id `GetThreadId` returned).
-- It then calls `GetOsdConfigParam` (0x4B) at `pc=0x0025A794` with
-  `$a0=0x0093C7C0`, a 4-byte stack buffer. The caller at `0x0025F148` performs
-  Get → mask `0xFFFF1FFF` and set `0x2000` → Set → Get → restore, then reports
-  whether bits 13..14 read back zero. OSD configuration storage is not
-  implemented, so this is the exact next boundary.
-- The translated blob contains its own six-entry `(number, handler)` table at
-  `0x80076710`; the observed returns match entries in that table, which is only
-  correct if the guest's `Copy` and the translated lookup share the same RAM
-  image.
+- The OSD probe is fully serviced:
+  `0x0025A794:75:H:0x0093C7C0:...` (Get),
+  `0x0025A784:74:H:0x0093C7C4:...:0xFFFF1FFF` (Set of the masked word),
+  `0x0025A794:75:H:0x0093C7C4:...` (read-back) and
+  `0x0025A784:74:H:0x0093C7C0:...` (restore). The guest's helper therefore
+  observes a coherent store and returns the "bits not zero" result.
+- The translated alarm blob contains its own six-entry `(number, handler)` table
+  at `0x80076710`; the observed returns match entries in that table, which is
+  only correct if the guest's `Copy` and the translated lookup share the same
+  RAM image.
+- Boot then installs a second copy path: `SetSyscall(0x5A, 0x0025F570)`, the
+  translated guest copy handler runs as `0x0025F564:90:G:0x80075000:0x002831A0:0x00000330`
+  (copy 0x330 bytes to `0x80075000`), `FlushCache` runs twice, then
+  `SetSyscall(0x5B, 0x80075000)` and `SetSyscall(0x54, 0x0025F940)` install
+  guest handlers. Service 0x5B is then invoked and dispatches into the copied
+  blob at `0x80075000`, which is not a declared translated region, so the probe
+  stops as `unresolved_control_flow` with no fabricated execution.
+- The next dependency is analysis coverage, not a new service: the newly copied
+  region `0x80075000 <- 0x002831A0 (0x330 bytes)` must be declared with
+  `--relocated-code` like the alarm blob.
 - No guest-visible boot stage is demonstrated yet. The thread services create a
-  ready queue and priority state but never dispatch; the next required service is
-  `GetOsdConfigParam` (0x4B) together with `SetOsdConfigParam` (0x4A), which the
-  observed caller uses as a read-back capability probe.
+  ready queue and priority state but never dispatch, and OSD configuration is a
+  host-session word rather than NVRAM.
 
 Previous bounded probe (ADR 0070 baseline, historical):
 
@@ -248,14 +269,13 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ## Active backlog
 
-1. **Implement `GetOsdConfigParam` (0x4B) and `SetOsdConfigParam` (0x4A)**:
-   the current stop. ps2sdk declares `void GetOsdConfigParam(void *addr)` and
-   `void SetOsdConfigParam(void *addr)`. The caller at `0x0025F148` reads four
-   bytes, clears bits 13..15, sets bit 13, writes the value back, reads it
-   again, restores the original and reports whether bits 13..14 read back zero.
-   Model a coherent 32-bit host-session configuration word with explicit buffer
-   and alignment validation, document that it is not NVRAM-backed, and choose a
-   documented default. Do not fabricate a hardware-specific value.
+1. **Declare the newly copied region**: the current stop is
+   `unresolved_control_flow` at `0x80075000`. The guest copied 0x330 bytes from
+   `0x002831A0` there and registered a guest handler that dispatches into it.
+   Extend the probe with
+   `--relocated-code 80075000:2831A0:330` alongside the alarm region, re-run the
+   frontend and native probe, and record the next boundary. This is analysis
+   coverage, not a new runtime service.
 2. **Thread dispatch**: `StartThread` records READY and a queue position but no
    service switches context. A dispatcher must save and restore a full guest
    context (GPRs, HI/LO, COP0 state, delay-slot state, PC) and execute translated

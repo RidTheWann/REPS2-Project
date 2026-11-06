@@ -81,3 +81,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0074](0074-relocated-code-regions.md) | Relocated code regions for runtime-copied guest code | Accepted |
 | [0075](0075-ee-createthread-dormant-records.md) | EE CreateThread dormant-thread records | Accepted |
 | [0076](0076-ee-start-thread-ready-queue.md) | EE StartThread ready-queue model with GetThreadId and ChangeThreadPriority | Accepted |
+| [0077](0077-ee-osd-config-host-store.md) | EE OSD configuration services as a documented host-session store | Accepted |
