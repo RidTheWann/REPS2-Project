@@ -106,6 +106,18 @@ inline constexpr std::size_t kEeMaxThreads = 16;
 inline constexpr std::uint32_t kEeMainThreadId = 1U;
 inline constexpr std::uint32_t kEeFirstCreatedThreadId = 2U;
 
+// Host-visible thread status values. ps2sdk documents `THS_RUN 0x01`,
+// `THS_READY 0x02`, `THS_WAIT 0x04`, `THS_SUSPEND 0x08`,
+// `THS_WAITSUSPEND 0x0C` and `THS_DORMANT 0x10`. REPS2 models only the
+// transitions its implemented services perform: CreateThread leaves a record
+// DORMANT and StartThread moves it to READY. NO other status is fabricated.
+inline constexpr std::uint32_t kEeThreadStatusReady = 0x02U;
+inline constexpr std::uint32_t kEeThreadStatusDormant = 0x10U;
+
+// ps2sdk's thread example guards a priority change with `priority < 128`, so
+// 0..127 is the documented priority range in the observed usage.
+inline constexpr std::int32_t kEeMaxThreadPriority = 128;
+
 /// Why CreateThread (0x20) returned the failure code instead of an id.
 enum class EeThreadRejection : std::uint8_t {
     none,
@@ -132,20 +144,62 @@ enum class EeThreadRejection : std::uint8_t {
     return "unknown";
 }
 
-/// A created but never scheduled thread. ps2sdk's `ee_thread_t` is nine 32-bit
-/// words: status, func, stack, stack_size, gp_reg, initial_priority,
-/// current_priority, attr, option. The kernel owns `status` and the current
-/// priority; the guest's status word is uninitialized in the observed call and
-/// is never read. No status, stack contents or args block is initialized here.
+/// Why StartThread (0x22) returned the failure code.
+enum class EeThreadStartRejection : std::uint8_t {
+    none,
+    invalid_id,
+    not_dormant,
+    queue_full,
+};
+
+[[nodiscard]] constexpr const char* ee_thread_start_rejection_name(
+    EeThreadStartRejection rejection
+) noexcept {
+    switch (rejection) {
+    case EeThreadStartRejection::none: return "none";
+    case EeThreadStartRejection::invalid_id: return "invalid_id";
+    case EeThreadStartRejection::not_dormant: return "not_dormant";
+    case EeThreadStartRejection::queue_full: return "queue_full";
+    }
+    return "unknown";
+}
+
+/// Why ChangeThreadPriority (0x29) returned the failure code.
+enum class EeThreadPriorityRejection : std::uint8_t {
+    none,
+    invalid_id,
+    invalid_priority,
+};
+
+[[nodiscard]] constexpr const char* ee_thread_priority_rejection_name(
+    EeThreadPriorityRejection rejection
+) noexcept {
+    switch (rejection) {
+    case EeThreadPriorityRejection::none: return "none";
+    case EeThreadPriorityRejection::invalid_id: return "invalid_id";
+    case EeThreadPriorityRejection::invalid_priority: return "invalid_priority";
+    }
+    return "unknown";
+}
+
+/// A created thread record. ps2sdk's `ee_thread_t` is nine 32-bit words:
+/// status, func, stack, stack_size, gp_reg, initial_priority, current_priority,
+/// attr, option. The kernel owns `status` and the current priority; the guest's
+/// status, current-priority, attr and option words are uninitialized in the
+/// observed call and are never interpreted. `status` here is host state, not a
+/// guest-memory write. No stack contents or args block is initialized.
 struct EeThread {
     bool in_use{};
+    std::uint32_t status{};
     std::uint32_t function{};
     std::uint32_t stack{};
     std::uint32_t stack_size{};
     std::uint32_t gp{};
     std::uint32_t initial_priority{};
+    std::uint32_t current_priority{};
     std::uint32_t attr{};
     std::uint32_t option{};
+    std::uint32_t argv{};
 };
 // Host registrations for the documented 0..255 service range are indexed
 // directly. ps2sdk's `alarm.c` InitAlarm also patches slot 0x12C
@@ -358,6 +412,23 @@ struct EeHleState {
     std::uint32_t last_thread_option{};
     EeThreadRejection last_thread_rejection{};
     std::array<EeThread, kEeMaxThreads> threads{};
+    // StartThread (0x22), GetThreadId (0x2F) and ChangeThreadPriority (0x29).
+    // The ready queue is a host model: StartThread records READY and inserts by
+    // priority, but no dispatcher switches contexts yet, so the boot thread
+    // keeps executing. `get_thread_id_calls` always observes the boot thread.
+    std::uint64_t start_thread_calls{};
+    std::uint32_t last_start_thread_id{};
+    std::uint32_t last_start_thread_args{};
+    EeThreadStartRejection last_start_rejection{};
+    std::uint32_t ready_count{};
+    std::array<std::uint32_t, kEeMaxThreads> ready_queue{};
+    std::uint64_t get_thread_id_calls{};
+    std::uint64_t change_priority_calls{};
+    std::uint32_t last_priority_thread_id{};
+    std::int32_t last_priority_value{};
+    EeThreadPriorityRejection last_priority_rejection{};
+    // ps2tek: boot "creates a thread with priority 0 (main thread)".
+    std::uint32_t main_thread_priority{};
     // CreateSema (0x40) observation. `semaphore_count` counts live objects, not
     // ids handed out: nothing deletes objects yet, so the two happen to agree.
     std::uint64_t create_sema_calls{};
