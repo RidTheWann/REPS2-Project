@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use reps2_frontend::analysis::{self, AnalysisLimits};
-use reps2_frontend::build_manifest::{BuildManifest, DiscoveryStats, ProgramStats};
+use reps2_frontend::build_manifest::{
+    BuildManifest, DiscoveryStats, ManifestRelocatedCode, ProgramStats,
+};
 use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
@@ -736,6 +738,33 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
     let limits = options.limits.to_limits();
     let ram_image = elf::build_main_ram_image(&bytes, &image)
         .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
+
+    // Runtime-copied code is data in the input image. Read it from the initial
+    // RAM image at its source virtual address and hand it to analysis as an
+    // executable root at the destination. The RAM image itself is unchanged:
+    // the guest's own copy stays an observable side effect.
+    let mut relocated_regions = Vec::new();
+    for spec in &options.relocated_code {
+        let physical = elf::ee_main_ram_physical_address(spec.source).ok_or_else(|| {
+            format!(
+                "relocated-code source 0x{:08X} is not mapped in EE main RAM",
+                spec.source
+            )
+        })?;
+        let start = physical as usize;
+        let size = spec.size as usize;
+        if start + size > ram_image.bytes.len() {
+            return Err(format!(
+                "relocated-code source 0x{:08X}+0x{:X} exceeds the EE main-RAM image",
+                spec.source, spec.size
+            ));
+        }
+        relocated_regions.push(analysis::RelocatedCodeRegion {
+            destination: spec.destination,
+            bytes: ram_image.bytes[start..start + size].to_vec(),
+        });
+    }
+
     let (graph, discovery) = if options.discover {
         let analysis::DiscoveryAnalysis {
             graph,
@@ -743,15 +772,21 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             accepted_roots,
             skipped_roots,
             skipped_blocks,
-        } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
-            .map_err(analysis_error_message)?;
+        } = analysis::discover_elf_with_discovery_and_relocated(
+            &image,
+            &bytes,
+            limits,
+            &relocated_regions,
+        )
+        .map_err(analysis_error_message)?;
         (
             graph,
             Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
         )
     } else {
         let graph =
-            analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
+            analysis::discover_elf_with_relocated(&image, &bytes, limits, &relocated_regions)
+                .map_err(analysis_error_message)?;
         (graph, None)
     };
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
@@ -811,6 +846,15 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
         part_outputs: part_outputs.clone(),
         ram_output: ram_output_name.clone(),
         ram_image_bytes: ram_image.bytes.len(),
+        relocated_code: options
+            .relocated_code
+            .iter()
+            .map(|spec| ManifestRelocatedCode {
+                destination: spec.destination,
+                source: spec.source,
+                size: spec.size,
+            })
+            .collect(),
     };
     let manifest_output = output.with_extension("manifest.json");
     fs::write(&manifest_output, manifest.to_json()).map_err(|error| {
@@ -851,6 +895,15 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
     }
     println!("  ELF entry point: 0x{:08X}", image.entry_point);
     println!("  PT_LOAD segments placed: {}", ram_image.segments.len());
+    if !relocated_regions.is_empty() {
+        println!("  Relocated code regions: {}", relocated_regions.len());
+        for spec in &options.relocated_code {
+            println!(
+                "    0x{:08X} <- 0x{:08X} (0x{:X} bytes)",
+                spec.destination, spec.source, spec.size
+            );
+        }
+    }
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
         println!(
             "  Root discovery: enabled ({} candidate(s), {accepted_roots} accepted, {} candidate(s) skipped, {} heuristic block(s) skipped)",
@@ -999,14 +1052,25 @@ fn parse_analyze_options(arguments: &[String]) -> Result<AnalyzeOptions, String>
     Ok(options)
 }
 
-/// Parsed `recompile-elf` options.
+/// A runtime-copied code image declared on the command line. `source` is a
+/// virtual address inside an input PT_LOAD; `size` bytes are copied from the
+/// initial RAM image and analysed as code at `destination`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RelocatedCodeSpec {
+    destination: u32,
+    source: u32,
+    size: u32,
+}
+
+/// Parsed `recompile-elf` options.
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct RecompileOptions {
     discover: bool,
     translation_units: usize,
     native_build: bool,
     probe_budget: u64,
     hle_syscalls: bool,
+    relocated_code: Vec<RelocatedCodeSpec>,
     limits: LimitOptions,
 }
 
@@ -1018,9 +1082,42 @@ impl Default for RecompileOptions {
             native_build: false,
             probe_budget: 0,
             hle_syscalls: false,
+            relocated_code: Vec::new(),
             limits: LimitOptions::default(),
         }
     }
+}
+
+/// Parses `destination:source:size`, all hexadecimal. The destination must be
+/// word-aligned and the size a nonzero multiple of four.
+fn parse_relocated_code(value: &str) -> Result<RelocatedCodeSpec, String> {
+    let parts: Vec<&str> = value.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "invalid relocated-code spec {value:?}; expected destination:source:size in hexadecimal"
+        ));
+    }
+    let destination = parse_hex(parts[0])
+        .map_err(|error| format!("invalid relocated-code destination {value:?}: {error}"))?;
+    let source = parse_hex(parts[1])
+        .map_err(|error| format!("invalid relocated-code source {value:?}: {error}"))?;
+    let size = parse_hex(parts[2])
+        .map_err(|error| format!("invalid relocated-code size {value:?}: {error}"))?;
+    if destination & 3 != 0 {
+        return Err(format!(
+            "relocated-code destination {value:?} is not word-aligned"
+        ));
+    }
+    if size == 0 || size & 3 != 0 {
+        return Err(format!(
+            "relocated-code size {value:?} must be a nonzero multiple of four bytes"
+        ));
+    }
+    Ok(RelocatedCodeSpec {
+        destination,
+        source,
+        size,
+    })
 }
 
 fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, String> {
@@ -1063,6 +1160,13 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
                     .get(index + 1)
                     .ok_or_else(|| format!("{flag} requires a value"))?;
                 parse_limit_option(flag, value, &mut options.limits)?;
+                index += 2;
+            }
+            "--relocated-code" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--relocated-code requires a value".to_owned())?;
+                options.relocated_code.push(parse_relocated_code(value)?);
                 index += 2;
             }
             other => return Err(format!("unknown recompile-elf option {other:?}")),
@@ -1885,6 +1989,9 @@ fn usage() {
         "--hle-syscalls enables the runtime EE syscall HLE layer in the generated probe (without it a guest SYSCALL delivers the architectural Level-1 exception). The probe trace then also reports hle, syscalls, hle_handled, hle_number and hle_name; an unimplemented service number stops as status=unhandled_syscall instead of being faked."
     );
     println!(
+        "--relocated-code DEST:SOURCE:SIZE (hexadecimal, repeatable) analyses SIZE bytes read from the input image at virtual address SOURCE as executable guest code at DEST. Use it for code a title copies into RAM at run time; the guest's own copy stays observable and the initial RAM image is unchanged."
+    );
+    println!(
         "--max-blocks/--max-instructions/--max-roots override the default analysis bounds (250000 blocks, 2000000 instructions, 500000 discovered roots). Overrides must be positive and stay below the CLI ceilings."
     );
     println!(
@@ -1966,6 +2073,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_relocated_code_specs_and_rejects_bad_shapes() {
+        let spec = parse_relocated_code("80076000:2829F8:740").expect("valid spec");
+        assert_eq!(
+            spec,
+            RelocatedCodeSpec {
+                destination: 0x8007_6000,
+                source: 0x0028_29F8,
+                size: 0x740,
+            }
+        );
+        assert!(parse_relocated_code("80076000:2829F8").is_err());
+        assert!(parse_relocated_code("80076002:2829F8:740").is_err());
+        assert!(parse_relocated_code("80076000:2829F8:0").is_err());
+        assert!(parse_relocated_code("80076000:2829F8:742").is_err());
+        assert!(parse_relocated_code("zzz:2829F8:740").is_err());
+    }
+
+    #[test]
     fn parses_recompile_options_in_any_order() {
         let options = parse_recompile_options(&[
             "--tu-count".to_owned(),
@@ -1990,6 +2115,7 @@ mod tests {
                 native_build: true,
                 probe_budget: 4096,
                 hle_syscalls: false,
+                relocated_code: Vec::new(),
                 limits: LimitOptions {
                     max_blocks: 300_000,
                     max_instructions: 2_500_000,

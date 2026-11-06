@@ -11,7 +11,7 @@ The CLI is the developer and automation interface. This reference was moved out 
     reps2 elf-info <elf-file>
     reps2 analyze-elf <elf-file> [--discover] [--max-blocks N] [--max-instructions N] [--max-roots N]
     reps2 profile-elf <elf-file>
-    reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls] [--max-blocks N] [--max-instructions N] [--max-roots N]
+    reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE]... [--max-blocks N] [--max-instructions N] [--max-roots N]
     reps2 decode <instruction-word-hex> [pc-hex]
     reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...
 
@@ -69,6 +69,8 @@ The probe prints one machine-readable trace line: `entry`, `status` (the `Status
 `--hle-syscalls` enables the runtime EE syscall HLE layer in the generated probe (see `docs/decisions/0062-ee-syscall-hle-dispatch.md`). Without it a guest `syscall` delivers the architectural Level-1 exception exactly as before the layer existed. With it, the service numbered by `$v1` is looked up in the host table: a serviced call resumes after the trap (or at the branch target/fallthrough for a delay slot) and the trace gains `hle`, `syscalls`, `hle_handled`, `hle_pc`, `hle_number`, `hle_v0_before`, `hle_a0`, `hle_a1`, `hle_a2`, `hle_a3`, `hle_sp` and `hle_name`; a service number with no handler stops as `status=unhandled_syscall` with the PC still on the `syscall` and no COP0 context. The layer never returns success for a service it does not implement. The added register fields are host observations captured before dispatch (ADR 0065). The `CreateSema` boundary is reported separately: `sema_calls`, `sema_live`, `sema_param`, `sema_init`, `sema_max`, `sema_attr`, `sema_option`, `sema_id` and `sema_refused` describe the last CreateSema call, where `sema_id=-1` with a `sema_refused` reason means the service returned the documented failure code and allocated nothing (ADR 0066). The trace also carries `syscall_seq_count` and `syscall_seq`: up to 16 recent boundaries as `pc:number:path:a0:a1:a2:a3:v0` records joined by `;`, where `path` is `G` (registered guest handler), `H` (host service) or `U` (unhandled). See `docs/decisions/0071-syscall-sequence-trace.md`. SetSyscall registration is reported through the runtime state and never implies that the registered guest handler executed (ADR 0067).
 
 The generated files contain no absolute paths or timestamps.
+
+`--relocated-code DEST:SOURCE:SIZE` (hexadecimal, repeatable) analyses bytes that a title copies into RAM at run time. `SIZE` bytes are read from the initial EE main-RAM image at virtual address `SOURCE` and analysed as executable guest code at `DEST`; `DEST` must be word-aligned and `SIZE` a nonzero multiple of four. The region becomes an authoritative analysis root and is recorded in the manifest (version 3). The initial RAM image is unchanged, so the guest's own copy remains an observable action; code that is not declared still stops at that address as `unresolved_control_flow`. See `docs/decisions/0074-relocated-code-regions.md`.
 
 ### Related decisions
 

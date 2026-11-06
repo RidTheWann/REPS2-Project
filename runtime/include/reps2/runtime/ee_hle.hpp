@@ -36,9 +36,39 @@ inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
+inline constexpr std::uint32_t kEeSyscallGetEntryAddress = 0x5BU;
 inline constexpr std::uint32_t kEeSyscallSetSyscall = 0x74U;
 inline constexpr std::uint32_t kEeSyscallFlushCache = 0x64U;
 inline constexpr std::uint32_t kEeSyscallFindAddress = 0x83U;
+
+// The EE kernel keeps its syscall handler table in low main RAM as a flat array
+// of 32-bit pointers indexed by service number. ps2sdk's `libosd_full.c` names
+// 0x80011F80 as the start of the syscall table and computes an entry as
+// `0x80011F80 + number * 4`; a ps2dev probe recovers the same base by scanning
+// low EE RAM for two registered handler values. Real BIOS builds may place the
+// table elsewhere, but in HLE REPS2 is the kernel: it fixes the documented base
+// and the guest recovers it dynamically, as the observed Downhill Domination
+// init does (`handler_slot - number * 4`).
+inline constexpr std::uint32_t kEeSyscallTableBase = 0x8001'1F80U;
+inline constexpr std::uint32_t kEeSyscallTableSize =
+    static_cast<std::uint32_t>(kEeSyscallTableSlots) * 4U;
+
+// GetEntryAddress (0x5B): return the guest address of a syscall-table slot.
+//
+// ps2sdk `kernel.h` declares `void *GetEntryAddress(int syscall)` next to
+// SetSyscall under "Helper functions for kernel patching". Its `libosd.c`
+// patch table pins the arithmetic: the entry for the special slot 0xFFFFC402
+// documents `0x80011F80 + (-15358 * 4) = 0x80002F88`, i.e. the result is the
+// slot address itself, not the handler stored there. The computation is
+// 32-bit modular; the guest is allowed to address outside the 512 slots REPS2
+// models, so no range check is imposed here.
+[[nodiscard]] inline Status hle_get_entry_address(EeState& state) noexcept {
+    const std::uint32_t slot = static_cast<std::uint32_t>(
+        state.gpr[kEeSyscallArgumentBase].low);
+    const std::uint32_t address = kEeSyscallTableBase + slot * 4U;
+    state.gpr[kEeSyscallResultRegister].low = sign_extend_word(address);
+    return Status::ok;
+}
 
 // The public description of CreateSema states that the call returns the new
 // semaphore's id on success and -1 on failure, so -1 is a guest-visible failure
@@ -71,6 +101,30 @@ struct EeSyscallService {
 [[nodiscard]] inline std::uint32_t ee_syscall_argument(const EeState& state, std::uint8_t index) noexcept {
     return static_cast<std::uint32_t>(
         state.gpr[static_cast<std::size_t>(kEeSyscallArgumentBase) + index].low);
+}
+
+/// Unified view over indexed (0..255) and sparse extended registrations.
+struct EeSyscallRegistrationView {
+    bool in_use{};
+    std::uint32_t handler_address{};
+};
+
+[[nodiscard]] inline EeSyscallRegistrationView find_ee_syscall_registration(
+    const EeHleState& hle,
+    std::uint32_t number
+) noexcept {
+    if (number < kEeMaxSyscallSlots) {
+        const EeSyscallRegistration& registration =
+            hle.syscall_registrations[number];
+        return {registration.in_use, registration.handler_address};
+    }
+    for (const EeExtendedSyscallRegistration& registration :
+         hle.extended_syscall_registrations) {
+        if (registration.in_use && registration.number == number) {
+            return {true, registration.handler_address};
+        }
+    }
+    return {};
 }
 
 // SetupThread (0x3C): SetupThread(gp, stack, stack_size, args, root_func).
@@ -257,13 +311,43 @@ struct EeSyscallService {
         state.hle.last_set_syscall_rejection = reason;
         return Status::ok;
     };
-    if (slot >= kEeMaxSyscallSlots) {
+    if (slot >= kEeSyscallTableSlots) {
         return refuse(EeSetSyscallRejection::invalid_slot);
     }
     std::uint32_t physical_handler{};
     if (handler == 0U || (handler & 3U) != 0U
         || !resolve_ee_main_ram_address(handler, physical_handler)) {
         return refuse(EeSetSyscallRejection::invalid_handler);
+    }
+    // Reserve the host-side registration before touching guest memory so a
+    // refusal cannot leave a half-applied registration.
+    EeExtendedSyscallRegistration* extended = nullptr;
+    if (slot >= kEeMaxSyscallSlots) {
+        for (EeExtendedSyscallRegistration& registration :
+             state.hle.extended_syscall_registrations) {
+            if (registration.in_use && registration.number == slot) {
+                extended = &registration;
+                break;
+            }
+            if (!registration.in_use && extended == nullptr) {
+                extended = &registration;
+            }
+        }
+        if (extended == nullptr) {
+            return refuse(EeSetSyscallRejection::registration_table_full);
+        }
+    }
+    // The kernel-visible half of the registration: the guest can read and patch
+    // the table directly, so the pointer must be present in guest RAM itself.
+    if (store_u32(state.memory, kEeSyscallTableBase + slot * 4U, handler)
+        != Status::ok) {
+        return refuse(EeSetSyscallRejection::table_unwritable);
+    }
+    if (extended != nullptr) {
+        extended->in_use = true;
+        extended->number = slot;
+        extended->handler_address = handler;
+        return Status::ok;
     }
     auto& registration = state.hle.syscall_registrations[slot];
     registration.in_use = true;
@@ -296,11 +380,11 @@ struct EeSyscallService {
 // only and writes nothing; an unreadable entry ends the scan.
 //
 // This is an honest, bounded table scan: it returns 0 ("not found") for an
-// empty, inverted, or unpopulated window rather than inventing a match. REPS2
-// does not populate a kernel table, so a retail title whose window contains no
-// matching entry observes 0 and must handle that result itself. The observed
-// Downhill Domination and Black call sites pass a kernel window
-// (0x80000000..0x80080000) and a code address as the target.
+// empty, inverted, or unpopulated window rather than inventing a match.
+// SetSyscall (0x74) publishes handler pointers into the guest-visible table at
+// kEeSyscallTableBase, so a window covering that table reports the slots the
+// guest registered. The observed Downhill Domination and Black call sites pass
+// a kernel window (0x80000000..0x80080000) and a code address as the target.
 [[nodiscard]] inline Status hle_find_address(EeState& state) noexcept {
     const std::uint32_t table_start = ee_syscall_argument(state, 0);
     const std::uint32_t table_end = ee_syscall_argument(state, 1);
@@ -440,6 +524,7 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
     {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
     {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},
+    {kEeSyscallGetEntryAddress, "GetEntryAddress", &hle_get_entry_address},
     {kEeSyscallFlushCache, "FlushCache", &hle_flush_cache},
     {kEeSyscallSetSyscall, "SetSyscall", &hle_set_syscall},
     {kEeSyscallFindAddress, "FindAddress", &hle_find_address},
@@ -531,8 +616,9 @@ inline constexpr std::size_t kEeSyscallServiceCount =
     // precedence over any host service for the same number. The handler is
     // translated guest code and runs through the dispatcher; the HLE layer only
     // services slots no guest handler has replaced.
-    const bool guest_handler = number < kEeMaxSyscallSlots
-        && state.hle.syscall_registrations[number].in_use;
+    const EeSyscallRegistrationView registration =
+        find_ee_syscall_registration(state.hle, number);
+    const bool guest_handler = registration.in_use;
     const EeSyscallService* const service =
         guest_handler ? nullptr : find_ee_syscall_service(number);
 
@@ -559,7 +645,7 @@ inline constexpr std::size_t kEeSyscallServiceCount =
         return enter_ee_syscall_handler(
             state,
             number,
-            state.hle.syscall_registrations[number].handler_address,
+            registration.handler_address,
             resume_pc);
     }
 

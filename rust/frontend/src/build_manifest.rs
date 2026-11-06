@@ -13,7 +13,7 @@ use crate::json::json_string;
 use crate::{BUILD_TARGET, VERSION};
 
 /// Schema version of the build manifest rendered by this module.
-pub const MANIFEST_VERSION: u32 = 2;
+pub const MANIFEST_VERSION: u32 = 3;
 
 /// Bounded analysis limits that produced the program.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,6 +93,16 @@ pub struct BuildManifest {
     pub part_outputs: Vec<String>,
     pub ram_output: String,
     pub ram_image_bytes: usize,
+    /// Runtime-copied code images declared for analysis (destination, source
+    /// virtual address and byte size). Empty when none were supplied.
+    pub relocated_code: Vec<ManifestRelocatedCode>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManifestRelocatedCode {
+    pub destination: u32,
+    pub source: u32,
+    pub size: u32,
 }
 
 impl BuildManifest {
@@ -277,6 +287,22 @@ impl BuildManifest {
         ));
         output.push_str("  },\n");
 
+        output.push_str("  \"relocated_code\": [");
+        if self.relocated_code.is_empty() {
+            output.push_str("],\n");
+        } else {
+            for (index, region) in self.relocated_code.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                output.push_str(&format!(
+                    "\n    {{\"destination\": {}, \"source\": {}, \"size\": {}}}",
+                    region.destination, region.source, region.size
+                ));
+            }
+            output.push_str("\n  ],\n");
+        }
+
         output.push_str("  \"playable\": false\n");
         output.push_str("}\n");
         output
@@ -313,6 +339,7 @@ mod tests {
             part_outputs: Vec::new(),
             ram_output: "game.ram.bin".to_owned(),
             ram_image_bytes: 32 * 1024 * 1024,
+            relocated_code: Vec::new(),
         }
     }
 
@@ -325,7 +352,7 @@ mod tests {
     #[test]
     fn records_versioned_identity_and_non_playable_status() {
         let json = sample().to_json();
-        assert!(json.contains("\"manifest_version\": 2"));
+        assert!(json.contains("\"manifest_version\": 3"));
         assert!(json.contains("\"guest_exception_count\": 0"));
         assert!(json.contains(&format!("\"version\": \"{VERSION}\"")));
         assert!(json.contains(&format!("\"host_target\": \"{BUILD_TARGET}\"")));

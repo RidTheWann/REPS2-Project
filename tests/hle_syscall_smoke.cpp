@@ -43,9 +43,13 @@ constexpr std::uint32_t kFindAddress = reps2::runtime::kEeSyscallFindAddress;
 // per case is unnecessary: main RAM is a span, so a small aligned window proves
 // the same address-resolution and bounds behavior.
 using RamWindow = std::array<std::uint8_t, 0x1000>;
+// SetSyscall publishes handlers into the guest syscall table at 0x80011F80, so
+// these cases need RAM that covers its 256 entries (KSEG0 alias 0x11F80).
+using SyscallTableWindow = std::array<std::uint8_t, 0x20000>;
 constexpr std::uint32_t kSemaParameters = 0x0000'0100U;
 
-void store_word(RamWindow& ram, std::uint32_t address, std::uint32_t value) {
+template <typename Ram>
+void store_word(Ram& ram, std::uint32_t address, std::uint32_t value) {
     const auto offset = static_cast<std::size_t>(address);
     ram[offset] = static_cast<std::uint8_t>(value);
     ram[offset + 1U] = static_cast<std::uint8_t>(value >> 8U);
@@ -53,7 +57,8 @@ void store_word(RamWindow& ram, std::uint32_t address, std::uint32_t value) {
     ram[offset + 3U] = static_cast<std::uint8_t>(value >> 24U);
 }
 
-std::uint32_t load_word(const RamWindow& ram, std::uint32_t address) {
+template <typename Ram>
+std::uint32_t load_word(const Ram& ram, std::uint32_t address) {
     const auto offset = static_cast<std::size_t>(address);
     return static_cast<std::uint32_t>(ram[offset])
         | (static_cast<std::uint32_t>(ram[offset + 1U]) << 8U)
@@ -562,7 +567,9 @@ int test_create_sema_table_is_bounded() {
 }
 
 int test_set_syscall_registers_guest_handler() {
+    SyscallTableWindow ram{};
     EeState state{};
+    state.memory.main_ram = ram;
     state.pc = 0xE500U;
     state.hle.syscall_enabled = true;
     state.gpr[3].low = kSetSyscall;
@@ -575,6 +582,87 @@ int test_set_syscall_registers_guest_handler() {
     if (!registration.in_use || registration.handler_address != 0x0025EF38U) return 161;
     if (state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::none) return 162;
     if (state.gpr[2].low != 0U || state.gpr[3].low != kSetSyscall) return 163;
+    // The handler is also published into the guest-visible kernel table, which
+    // is what lets a title recover the table base by scanning low EE RAM.
+    const std::uint32_t slot_offset = 0x83U * 4U;
+    std::uint32_t table_word = 0;
+    if (reps2::runtime::load_u32(
+            state.memory,
+            reps2::runtime::kEeSyscallTableBase + slot_offset,
+            table_word) != Status::ok
+        || table_word != 0x0025EF38U) return 164;
+    if (load_word(ram, 0x0001'1F80U + slot_offset) != 0x0025EF38U) return 165;
+    return 0;
+}
+
+int test_get_entry_address_returns_slot_address() {
+    EeState state{};
+    state.gpr[4].low = 0x12CU;
+    if (reps2::runtime::hle_get_entry_address(state) != Status::ok
+        || static_cast<std::uint32_t>(state.gpr[2].low)
+            != reps2::runtime::kEeSyscallTableBase + 0x12CU * 4U) return 195;
+    // libosd documents the 32-bit modular form for a negative slot:
+    // 0x80011F80 + (-15358 * 4) == 0x80002F88.
+    state.gpr[4].low = 0xFFFF'C402U;
+    if (reps2::runtime::hle_get_entry_address(state) != Status::ok
+        || static_cast<std::uint32_t>(state.gpr[2].low) != 0x8000'2F88U) return 196;
+    return 0;
+}
+
+int test_set_syscall_accepts_extended_alarm_slot() {
+    SyscallTableWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    // ps2sdk InitAlarm patches slot 0x12C (Intc12Handler) with the address
+    // returned by GetEntryAddress(0x12C).
+    state.gpr[4].low = 0x12CU;
+    state.gpr[5].low = reps2::runtime::kEeSyscallTableBase + 0x12CU * 4U;
+    if (reps2::runtime::hle_set_syscall(state) != Status::ok
+        || state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::none) return 197;
+    if (load_word(ram, 0x0001'1F80U + 0x12CU * 4U) != 0x8001'24'30U) return 198;
+    const auto extended =
+        reps2::runtime::find_ee_syscall_registration(state.hle, 0x12CU);
+    if (!extended.in_use || extended.handler_address != 0x8001'2430U) return 199;
+    return 0;
+}
+
+int test_timer3_mode_guard_register() {
+    SyscallTableWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    std::uint32_t value = 0xFFFF'FFFFU;
+    if (reps2::runtime::load_u32(state.memory, 0x1000'1810U, value) != Status::ok
+        || value != 0U) return 200;
+    // Documented writable mode bits (CLKS, GATE, GATS, GATM, ZRET, CUE, CMPE,
+    // OVFE) are retained; the EQUF/OVFF status bits stay clear.
+    if (reps2::runtime::store_u32(state.memory, 0x1000'1810U, 0x0000'0FDFU) != Status::ok
+        || reps2::runtime::load_u32(state.memory, 0x1000'1810U, value) != Status::ok
+        || value != 0x0000'03DFU) return 201;
+    return 0;
+}
+
+int test_set_syscall_rejection_leaves_the_table_untouched() {
+    SyscallTableWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    constexpr std::uint32_t kHandlerSlot = 0x0001'1F80U + 0x83U * 4U;
+    store_word(ram, kHandlerSlot, 0xCAFE'F00DU);
+    state.gpr[4].low = 0x83U;
+    state.gpr[5].low = 0x1002U; // misaligned handler
+    if (reps2::runtime::hle_set_syscall(state) != Status::ok
+        || state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::invalid_handler) return 190;
+    if (load_word(ram, kHandlerSlot) != 0xCAFE'F00DU) return 191;
+    // A valid KSEG0 handler is stored verbatim; the guest normalizes aliases.
+    state.gpr[5].low = 0x8010'0000U;
+    if (reps2::runtime::hle_set_syscall(state) != Status::ok
+        || state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::none) return 192;
+    if (load_word(ram, kHandlerSlot) != 0x8010'0000U) return 193;
+    std::uint32_t alias_word = 0;
+    if (reps2::runtime::load_u32(
+            state.memory,
+            reps2::runtime::kEeSyscallTableBase + 0x83U * 4U,
+            alias_word) != Status::ok
+        || alias_word != 0x8010'0000U) return 194;
     return 0;
 }
 
@@ -582,7 +670,7 @@ int test_set_syscall_rejects_invalid_registration() {
     RamWindow ram{};
     EeState state{};
     state.memory.main_ram = ram;
-    state.gpr[4].low = 256U;
+    state.gpr[4].low = reps2::runtime::kEeSyscallTableSlots;
     state.gpr[5].low = 0x1000U;
     if (reps2::runtime::hle_set_syscall(state) != Status::ok
         || state.hle.last_set_syscall_rejection != reps2::runtime::EeSetSyscallRejection::invalid_slot) return 170;
@@ -1002,6 +1090,11 @@ int main() {
         {"create sema table bound", &test_create_sema_table_is_bounded},
         {"set syscall registers handler", &test_set_syscall_registers_guest_handler},
         {"set syscall rejects invalid registration", &test_set_syscall_rejects_invalid_registration},
+        {"set syscall rejection leaves the table untouched",
+         &test_set_syscall_rejection_leaves_the_table_untouched},
+        {"set syscall accepts extended alarm slot", &test_set_syscall_accepts_extended_alarm_slot},
+        {"get entry address returns slot address", &test_get_entry_address_returns_slot_address},
+        {"timer 3 mode guard register", &test_timer3_mode_guard_register},
         {"service table names", &test_service_table_reports_names},
         {"find address matching entry", &test_find_address_returns_matching_entry_address},
         {"find address kseg alias match", &test_find_address_matches_kseg_aliases},

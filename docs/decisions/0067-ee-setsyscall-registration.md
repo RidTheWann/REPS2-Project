@@ -1,6 +1,7 @@
 # ADR 0067: EE SetSyscall registration boundary
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by ADR 0072, which also publishes the handler
+  pointer into the guest-visible syscall table.
 - **Date:** 2026-11-05
 - **Scope:** opt-in EE syscall HLE layer
 

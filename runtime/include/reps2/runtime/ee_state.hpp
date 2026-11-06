@@ -21,6 +21,11 @@ inline constexpr std::uint32_t kEeMainRamSize = 32U * 1024U * 1024U;
 
 struct EeMemory {
     std::span<std::uint8_t> main_ram{};
+    // EE Timer 3 mode (0x10001810). No timer counting or interrupts are
+    // modelled: the register keeps only the documented writable mode bits so a
+    // guest that configures and reads it back sees its own value. Reset is 0,
+    // as no clock source is enabled out of reset. See ADR 0073.
+    std::uint32_t timer3_mode{};
 };
 
 // FCR31 (the condition, cause and sticky flags plus their hardwired fields) is
@@ -84,10 +89,25 @@ enum class AddressErrorCode : std::uint8_t { InstructionFetch = 4, Load = 4, Sto
 // ps2sdk's documented kernel limit (`MAX_SEMAPHORES 256`). Sema ids are indices
 // into this table, so the bound is the same one the guest sees.
 inline constexpr std::size_t kEeMaxSemaphores = 256;
+// Host registrations for the documented 0..255 service range are indexed
+// directly. ps2sdk's `alarm.c` InitAlarm also patches slot 0x12C
+// ("Intc12Handler"), which is held in the small sparse list below so EeState
+// stays a fixed, compact value; tests and probes keep many states on the stack.
 inline constexpr std::size_t kEeMaxSyscallSlots = 256;
+// The guest-visible table is addressed arithmetically (`base + number*4`) and
+// covers 512 entries, including the extended slots used by kernel patches.
+inline constexpr std::size_t kEeSyscallTableSlots = 512;
+inline constexpr std::size_t kEeMaxExtendedSyscallSlots = 8;
 
 struct EeSyscallRegistration {
     bool in_use{};
+    std::uint32_t handler_address{};
+};
+
+/// A registration outside the indexed 0..255 range.
+struct EeExtendedSyscallRegistration {
+    bool in_use{};
+    std::uint32_t number{};
     std::uint32_t handler_address{};
 };
 
@@ -125,6 +145,8 @@ enum class EeSetSyscallRejection : std::uint8_t {
     none,
     invalid_slot,
     invalid_handler,
+    table_unwritable,
+    registration_table_full,
 };
 
 [[nodiscard]] constexpr const char* ee_set_syscall_rejection_name(
@@ -134,6 +156,8 @@ enum class EeSetSyscallRejection : std::uint8_t {
     case EeSetSyscallRejection::none: return "none";
     case EeSetSyscallRejection::invalid_slot: return "invalid_slot";
     case EeSetSyscallRejection::invalid_handler: return "invalid_handler";
+    case EeSetSyscallRejection::table_unwritable: return "table_unwritable";
+    case EeSetSyscallRejection::registration_table_full: return "registration_table_full";
     }
     return "unknown";
 }
@@ -279,14 +303,17 @@ struct EeHleState {
     EeSetSyscallRejection last_set_syscall_rejection{};
     // FindAddress (0x83) observation. The service scans a guest word table for a
     // target entry and reports the match address; it writes nothing to guest
-    // memory. No kernel table is populated by REPS2, so an unpopulated window
-    // reports "not found" (0) rather than inventing a match.
+    // memory. SetSyscall (0x74) publishes handler pointers into the guest
+    // syscall table, so a window covering that table reports real matches; an
+    // unpopulated window still reports "not found" (0).
     bool find_address_called{};
     std::uint32_t last_find_address_start{};
     std::uint32_t last_find_address_end{};
     std::uint32_t last_find_address_target{};
     std::uint32_t last_find_address_result{};
     std::array<EeSyscallRegistration, kEeMaxSyscallSlots> syscall_registrations{};
+    std::array<EeExtendedSyscallRegistration, kEeMaxExtendedSyscallSlots>
+        extended_syscall_registrations{};
     // Guest-handler invocation, distinct from host-serviced HLE calls: the
     // handler itself is translated guest code and runs through the dispatcher.
     std::array<EeSyscallHandlerFrame, kEeMaxSyscallHandlerDepth> syscall_handler_frames{};
@@ -517,6 +544,7 @@ enum class Status : std::uint8_t {
     }
 
     std::copy(initial_main_ram.begin(), initial_main_ram.end(), state.memory.main_ram.begin());
+    state.memory.timer3_mode = 0;
     state.gpr = {};
     state.gpr[0] = {};
     state.hi = 0;
@@ -631,11 +659,24 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Status::ok;
 }
 
+// EE Timer 3 mode register. ps2sdk `timer.h` defines
+// `T3_MODE ((volatile unsigned int *)0x10001810)`; ps2tek documents bit 8 as
+// "compare interrupt enable" and bit 7 as "timer enable". Only the mode word is
+// modelled: no clock source, counting, compare match or interrupt is
+// implemented. Bits 0..9 are the documented writable mode bits; the EQUF/OVFF
+// status bits read as zero because no event can set them yet. Reset is zero.
+inline constexpr std::uint32_t kEeTimer3ModeAddress{0x1000'1810U};
+inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
+
 [[nodiscard]] inline Status load_u32(
     const EeMemory& memory,
     std::uint32_t address,
     std::uint32_t& value
 ) noexcept {
+    if (address == kEeTimer3ModeAddress) {
+        value = memory.timer3_mode;
+        return Status::ok;
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 4U, 4U, physical);
     if (status != Status::ok) return status;
@@ -716,6 +757,10 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint32_t value
 ) noexcept {
+    if (address == kEeTimer3ModeAddress) {
+        memory.timer3_mode = value & kEeTimer3ModeWritableMask;
+        return Status::ok;
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 4U, 4U, physical);
     if (status != Status::ok) return status;
