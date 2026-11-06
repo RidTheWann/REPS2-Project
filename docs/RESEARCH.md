@@ -622,9 +622,84 @@ With the blob translated, the probe executes the full patch:
   `CreateThread` (0x20) at `pc=0x0025A4E4` with `$a0=0x0093C7B0`,
   `$a1=0x002A40F0`, `$a2=0x00000400`.
 
-`CreateThread` is not implemented, so the probe stops there as
-`unhandled_syscall`. The earlier scan-loop and Timer 3 stops are gone. This is
-real guest-path progress, not a visible boot stage.
+`CreateThread` was the next stop; it is now serviced and the probe stops one
+service later. The earlier scan-loop and Timer 3 stops are gone. This is real
+guest-path progress, not a visible boot stage.
+
+### EE `CreateThread` boundary and dormant records (ADR 0075)
+
+Facts:
+
+- ps2sdk `kernel.h` declares `s32 CreateThread(ee_thread_t *thread)`, and
+  `ee_thread_t` is nine 32-bit words: `status`, `func`, `stack`, `stack_size`,
+  `gp_reg`, `initial_priority`, `current_priority`, `attr`, `option`. The same
+  header documents `MAX_THREADS 256` and names thread 0 as the idle thread.
+- The retail caller at `0x0025B1A8` (the game's `InitThread`) builds the block
+  on its own stack, leaves `status` uninitialized, calls `CreateThread`, stores
+  the returned id at `0x00282150`, and then calls `StartThread` with an argv
+  block at `0x00761208`.
+- The observed call is `pc=0x0025A4E4`, service `0x20`, with
+  `$a0=0x0093C7B0` (the block, equal to `$sp`), `$a1=0x002A40F0`,
+  `$a2=0x00000400`, `$a3=0x0029E580`. The block holds `func=0x0025B0D0`,
+  `stack=0x00760E00`, `stack_size=0x400`, `gp=0x002A40F0`,
+  `initial_priority=0`. All of those resolve inside EE main RAM.
+- ps2sdk `kernel.S` wraps the service as an ordinary `syscall`, and callers test
+  the `s32` result for `< 0`; no specific negative code is documented.
+
+Decision and limits:
+
+- REPS2 validates the block and returns an id from a bounded host record table
+  (ids start at 1). Any refusal returns `-1`, allocates nothing, and records an
+  explicit reason.
+- No guest memory is written. The parameter block is input only; the guest's
+  uninitialized `status` word is never read or rewritten.
+- No thread status, stack image, argv block, ready-queue entry or scheduler
+  state is created. `StartThread`, `ExitThread`, `ReferThreadStatus`, priority
+  changes and deletion remain unimplemented; their guest-visible contracts are
+  not inferred.
+
+Observed result after servicing the call:
+
+- The probe reports `syscalls=29`, `hle_handled=18`, `status=14`
+  (`unhandled_syscall`) at `pc=0x0025A504`, `executed=2,946,363`.
+- Sequence records:
+  `0x0025A4E4:32:H:0x0093C7B0:0x002A40F0:0x00000400:0x0029E580:0x0025B0D0`
+  (handled `CreateThread`), then
+  `0x0025A504:34:U:0x00000002:0x00761208:0x00000400:0x0029E580:0x00760000`
+  (unhandled `StartThread`, `$a0=2` = the returned id, `$a1` = argv).
+
+Public behavioural references (retrieved 2026-11-06):
+
+- ps2sdk `ee/kernel/include/kernel.h` fixes the struct offsets (`status` 0x00,
+  `func` 0x04, `stack` 0x08, `stack_size` 0x0C, `gp_reg` 0x10,
+  `initial_priority` 0x14, `current_priority` 0x18, `attr` 0x1C,
+  `option` 0x20, documented "Do not use - officially documented to not work"),
+  `MAX_THREADS 256` with "Thread 0 is always the idle thread", and the status
+  encoding `THS_RUN 0x01`, `THS_READY 0x02`, `THS_WAIT 0x04`,
+  `THS_SUSPEND 0x08`, `THS_WAITSUSPEND 0x0C`, `THS_DORMANT 0x10`.
+- ps2sdk `ee/kernel/src/thread.c` leaves `ee_thread_t.status` unset, checks
+  `(topId = CreateThread(&thread)) < 0`, calls
+  `StartThread(topId, &topArg)` without testing the result, then
+  `ChangeThreadPriority(GetThreadId(), 1)`; its guard uses `priority < 128`.
+  The second call proves the running thread and the newly created thread must
+  have distinct ids.
+- ps2tek's kernel documentation states that boot "creates a thread with
+  priority 0 (main thread)" before guest code runs.
+- Open PS2 Loader patch notes record titles that hardcode the main thread id for
+  `WakeupThread`, so exact id values can matter to titles outside this probe;
+  REPS2 therefore keeps ids explicit and never derives them from an opaque
+  pointer.
+
+Open questions for the next increment:
+
+- `StartThread` semantics: ps2sdk declares `s32 StartThread(s32 thid, void
+  *args)` and documents a DORMANT→READY transition with ready-queue insertion;
+  whether the call may switch immediately to a higher-priority thread is a
+  scheduler property, not a return-value property.
+- How argv is exposed to the new thread (`$a0`/`$sp` layout) and when
+  `root_func` from `SetupThread` is consumed.
+- `attr`/`option` bits, stack guard behaviour, and the exact negative failure
+  codes beyond the documented "negative means failure".
 
 ## Provenance rules
 

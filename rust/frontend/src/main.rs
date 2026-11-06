@@ -1947,7 +1947,7 @@ fn usage() {
     );
     println!("  reps2 profile-elf <elf-file>");
     println!(
-        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE] [--max-blocks N] [--max-instructions N] [--max-roots N]"
     );
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!(

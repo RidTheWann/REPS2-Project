@@ -6,18 +6,20 @@ Updated: 2026-11-06
 
 Advance M4 real-title native execution toward a repeatable guest-visible boot stage.
 The EE HLE layer now supports the observed early boot calls:
-`SetupThread` (0x3C), `SetupHeap` (0x3D), `CreateSema` (0x40),
-`GetEntryAddress` (0x5B), `FlushCache` (0x64), `SetSyscall` (0x74,
-including translated guest handlers and the guest-visible 512-slot table at
-`0x80011F80`), and `FindAddress` (0x83). The documented Timer 3 mode word
-(`0x10001810`) is modelled without counting or interrupts, and the frontend can
-analyse runtime-copied code declared with `--relocated-code`. Unsupported calls
-remain explicit stops; no success is fabricated.
+`SetupThread` (0x3C), `SetupHeap` (0x3D), `CreateThread` (0x20, dormant host
+records only), `CreateSema` (0x40), `GetEntryAddress` (0x5B), `FlushCache`
+(0x64), `SetSyscall` (0x74, including translated guest handlers and the
+guest-visible 512-slot table at `0x80011F80`), and `FindAddress` (0x83). The
+documented Timer 3 mode word (`0x10001810`) is modelled without counting or
+interrupts, and the frontend can analyse runtime-copied code declared with
+`--relocated-code`. Unsupported calls remain explicit stops; no success is
+fabricated.
 
 With these changes Downhill Domination completes the ps2sdk `InitAlarm` kernel
-patch, executes the copied alarm blob at `0x80076000`, and stops at
-`CreateThread` (0x20) — the next unimplemented service. That is real
-guest-visible progress, not a visible boot stage.
+patch, executes the copied alarm blob at `0x80076000`, obtains a thread id from
+`CreateThread` (0x20), and stops at `StartThread` (0x22) — the next
+unimplemented service. That is real guest-visible progress, not a visible boot
+stage.
 
 The frontend CFG now performs bounded, within-basic-block constant propagation
 for indirect `JR/JALR` source registers formed by `LUI`, `ORI`, `ADDIU`,
@@ -35,18 +37,37 @@ word-scan loop, not unresolved control flow.
 
 ## Verified repository state
 
-- Default branch: `main` at `026d43f` (PR #16 squash-merged on 2026-11-06).
-- PR #16 adds the bounded EE syscall-boundary sequence trace (ADR 0071).
-  PR #15 recorded the FindAddress wrapper call sites; PR #14 reconciled the
-  project state. PRs #12 and earlier are historical.
-- The change described in this document is on a feature branch, not yet merged.
-  Until it merges, `main` does not contain the syscall table, `GetEntryAddress`,
-  Timer 3 mode, or `--relocated-code` support.
-- `main` remains protected. Required checks are
+- Default branch: `main` at `f3419d1` (PR #17 squash-merged on 2026-11-06).
+- PR #17 publishes validated syscall handlers into the guest-visible table and
+  executes the Downhill Domination `InitAlarm` patch path (ADRs 0072–0074).
+  PR #16 added the bounded EE syscall-boundary sequence trace (ADR 0071).
+  PRs #15 and earlier are historical.
+- The `CreateThread` change described in this document is on a feature branch,
+  not yet merged.
+- `main` remains protected and requires strict, up-to-date checks:
   `Rust frontend (ubuntu-latest)`, `Rust frontend (windows-latest)`, and
   `Rust frontend (MSRV 1.88)`.
 
 ## Delivered in this change (branch, unmerged)
+
+- `CreateThread` (0x20) reads the documented nine-word `ee_thread_t` parameter
+  block through the normal EE memory path, validates `func`, `stack`,
+  `stack_size`, `gp` and `initial_priority`, and returns the lowest free id from
+  a bounded host record table (ids start at 1; thread 0 is the documented idle
+  thread). Every refusal returns `-1`, allocates nothing and records an explicit
+  reason (ADR 0075).
+- The parameter block is input only: no guest memory is written, the caller's
+  uninitialized `status` word is never interpreted, and no thread status,
+  stack image, argv block, ready-queue entry or scheduler state is created.
+- `reps2_hle_syscall_codegen_smoke` grew from 35 to 39 cases: a valid call
+  returns id 1, every invalid parameter class is refused, the table bound is
+  enforced, and the generated dispatcher routes service 0x20.
+- The real-title probe now services `CreateThread` at `pc=0x0025A4E4` and stops
+  at `StartThread` (0x22) at `pc=0x0025A504` with `$a0=0x00000002` (the returned
+  id) and `$a1=0x00761208` (the argv block). This is one observed service
+  further along the same guest path, not a thread-scheduling claim.
+
+## Delivered in PR #17 (merged)
 
 - `SetSyscall` (0x74) now publishes the validated handler pointer into the
   guest-visible syscall table at `0x80011F80` (4-byte entries indexed by service
@@ -64,8 +85,9 @@ word-scan loop, not unresolved control flow.
   manifest (version 3) records each region (ADR 0074).
 - `reps2_hle_syscall_codegen_smoke` grew from 31 to 35 cases; Rust unit tests
   cover relocated-segment decoding and the manifest version bump.
-- The Downhill Domination probe now completes the ps2sdk `InitAlarm` patch and
-  stops at `CreateThread` (0x20) instead of budget-exhausting in a scan loop.
+- The Downhill Domination probe completes the ps2sdk `InitAlarm` patch and stops
+  at the then-unimplemented `CreateThread` (0x20) instead of budget-exhausting
+  in a scan loop.
 
 ## Delivered in PR #13 (merged)
 
@@ -108,7 +130,7 @@ word-scan loop, not unresolved control flow.
 
 ### Downhill Domination (USA) — SCUS_971.77
 
-Current bounded probe (2026-11-06, branch at ADRs 0072–0074):
+Current bounded probe (2026-11-06, branch at ADRs 0072–0075):
 
 - Input: `Downhill Domination (USA).iso`, kept outside Git. Boot ELF extracted
   with `reps2 extract-boot-elf`; ISO opened read-only, not modified. Boot ELF
@@ -123,10 +145,10 @@ Current bounded probe (2026-11-06, branch at ADRs 0072–0074):
   59,927 basic blocks, 309,425 instructions, 715 unsupported stops, 255 guest
   trap stops, 612 unresolved indirect targets, 0 external targets, and one
   relocated region `0x80076000 <- 0x002829F8 (0x740 bytes)`.
-- Probe result: `status=14` (`unhandled_syscall`), `pc=0x0025A4E4`,
-  `executed=2,946,350`, `syscalls=28`, `hle_handled=17`,
-  `hle_number=0x20` (`CreateThread`), `hle_a0=0x0093C7B0`,
-  `hle_a1=0x002A40F0`, `hle_a2=0x00000400`, `hle_sp=0x0093C7B0`,
+- Probe result: `status=14` (`unhandled_syscall`), `pc=0x0025A504`,
+  `executed=2,946,363`, `syscalls=29`, `hle_handled=18`,
+  `hle_number=0x22` (`StartThread`), `hle_a0=0x00000002`,
+  `hle_a1=0x00761208`, `hle_a2=0x00000400`, `hle_sp=0x0093C7B0`,
   `sema_calls=3`, `sema_live=3`.
 - The sequence shows the full InitAlarm patch: `SetSyscall(0x5A, kCopy)`,
   copies to `0x80076000` (0x740 bytes) and `0x00082000` (0x28 bytes),
@@ -135,14 +157,22 @@ Current bounded probe (2026-11-06, branch at ADRs 0072–0074):
   by `SetSyscall(slot, stub)`:
   0xFC→`0x80076440`, 0xFE→`0x80076440`, 0xFD→`0x800762A0`,
   0xFF→`0x800762A0`, 0x12C→`0x80076488`, 0x08→`0x800766C0`.
-  A further `FlushCache` and a third `CreateSema` precede the `CreateThread`
-  stop.
+  A further `FlushCache` and a third `CreateSema` precede `CreateThread`.
+- `CreateThread` is now serviced at `pc=0x0025A4E4` with the recorded
+  `$a0=0x0093C7B0`, `$a1=0x002A40F0`, `$a2=0x00000400`, `$a3=0x0029E580`.
+  The raw sequence record is
+  `0x0025A4E4:32:H:0x0093C7B0:0x002A40F0:0x00000400:0x0029E580:0x0025B0D0`.
+  The guest stores the returned id and immediately calls `StartThread` (0x22),
+  recorded as
+  `0x0025A504:34:U:0x00000002:0x00761208:0x00000400:0x0029E580:0x00760000`:
+  `$a0=2` is the id REPS2 returned and `$a1=0x00761208` is the argv block.
 - The translated blob contains its own six-entry `(number, handler)` table at
   `0x80076710`; the observed returns match entries in that table, which is only
   correct if the guest's `Copy` and the translated lookup share the same RAM
   image.
-- No visible boot stage is demonstrated yet; the next required service is
-  `CreateThread` (0x20), which needs a thread control block and a scheduler.
+- No guest-visible boot stage is demonstrated yet. `CreateThread` only created a
+  dormant host record; the next required service is `StartThread` (0x22), which
+  needs a ready queue and a defined scheduler interaction.
 
 Previous bounded probe (ADR 0070 baseline, historical):
 
@@ -187,12 +217,13 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ## Active backlog
 
-1. **Implement `CreateThread` (0x20)**: the current stop. The observed call
-   passes `$a0=0x0093C7B0` (thread/parameter pointer), `$a1=0x002A40F0`
-   (entry), `$a2=0x00000400` (stack size) and `$a3=0x0029E580`. A faithful
-   implementation needs a thread control block, argument handling, a ready
-   queue and scheduler interaction. Do not return a fabricated successful id
-   without them.
+1. **Implement `StartThread` (0x22)**: the current stop. The observed call is
+   `StartThread(thid=1, args=0x00761208)` where `1` is the id REPS2 returned
+   from `CreateThread`. A faithful implementation needs at least a ready-state
+   transition, a priority-ordered ready queue, stored argv context, and an
+   explicit decision about scheduler interaction (the guest assumes the new
+   thread can later be dispatched). Do not claim the thread runs until a
+   dispatcher executes translated guest code for it.
 2. Extend relocated-code coverage only as execution reaches it: the alarm blob's
    other functions (0x80076038 onward) and the `eenull` stub at `0x00082000`
    are not yet translated; declare them when an observed call needs them.

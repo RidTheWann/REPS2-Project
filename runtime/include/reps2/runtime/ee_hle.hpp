@@ -33,6 +33,7 @@ inline constexpr std::uint8_t kEeSyscallResultRegister = 2;
 inline constexpr std::uint8_t kEeSyscallArgumentBase = 4;
 inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 
+inline constexpr std::uint32_t kEeSyscallCreateThread = 0x20U;
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
@@ -127,8 +128,111 @@ struct EeSyscallRegistrationView {
     return {};
 }
 
-// SetupThread (0x3C): SetupThread(gp, stack, stack_size, args, root_func).
+// CreateThread (0x20): CreateThread(ee_thread_t *thread).
 //
+// ps2sdk declares `s32 CreateThread(ee_thread_t *thread)`; the struct is nine
+// 32-bit words (status, func, stack, stack_size, gp_reg, initial_priority,
+// current_priority, attr, option). The kernel owns `status` and the current
+// priority: the observed retail call leaves `status` uninitialized, so it is
+// read for bounds only and never interpreted. Returning a negative value means
+// failure; -1 is used for every refusal and allocates nothing.
+//
+// This creates a dormant record only. No thread status, stack contents, argv
+// block, ready queue or scheduler state is created, and no guest memory is
+// written; StartThread (0x22) is the next required service and is not modelled.
+// Thread 0 is the documented idle thread and id 1 is reserved for the running
+// boot thread (kEeMainThreadId), so created ids start at 2. The host record
+// table is bounded (kEeMaxThreads); a full table is refused rather than
+// fabricating an id. See ADR 0075.
+[[nodiscard]] inline Status hle_create_thread(EeState& state) noexcept {
+    constexpr std::size_t kParameterWords = 9U;
+    constexpr std::size_t kParameterBytes = kParameterWords * 4U;
+    constexpr std::uint32_t kMaxPriority = 128U; // ps2sdk MAX_PRIORITY
+
+    const std::uint32_t parameters = ee_syscall_argument(state, 0);
+    ++state.hle.create_thread_calls;
+    state.hle.last_thread_parameter_address = parameters;
+    state.hle.last_thread_id = -1;
+    state.hle.last_thread_rejection = EeThreadRejection::none;
+
+    const auto refuse = [&state](EeThreadRejection reason) {
+        state.hle.last_thread_rejection = reason;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    };
+
+    std::uint32_t physical{};
+    if (resolve_ee_memory_access(state.memory, parameters, kParameterBytes, 4U, physical)
+        != Status::ok) {
+        return refuse(EeThreadRejection::unreadable_parameters);
+    }
+    std::array<std::uint32_t, kParameterWords> words{};
+    for (std::size_t index = 0; index < kParameterWords; ++index) {
+        const std::size_t offset = static_cast<std::size_t>(physical) + index * 4U;
+        words[index] = static_cast<std::uint32_t>(state.memory.main_ram[offset])
+            | (static_cast<std::uint32_t>(state.memory.main_ram[offset + 1U]) << 8U)
+            | (static_cast<std::uint32_t>(state.memory.main_ram[offset + 2U]) << 16U)
+            | (static_cast<std::uint32_t>(state.memory.main_ram[offset + 3U]) << 24U);
+    }
+
+    const std::uint32_t function = words[1];
+    const std::uint32_t stack = words[2];
+    const std::uint32_t stack_size = words[3];
+    const std::uint32_t gp = words[4];
+    const auto initial_priority = static_cast<std::int32_t>(words[5]);
+    state.hle.last_thread_function = function;
+    state.hle.last_thread_stack = stack;
+    state.hle.last_thread_stack_size = stack_size;
+    state.hle.last_thread_gp = gp;
+    state.hle.last_thread_initial_priority = initial_priority;
+    state.hle.last_thread_attr = words[7];
+    state.hle.last_thread_option = words[8];
+
+    std::uint32_t physical_function{};
+    if (function == 0U || (function & 3U) != 0U
+        || !resolve_ee_main_ram_address(function, physical_function)) {
+        return refuse(EeThreadRejection::invalid_func);
+    }
+    std::uint32_t physical_stack{};
+    if (stack == 0U || (stack & 3U) != 0U || stack_size == 0U
+        || !resolve_ee_main_ram_address(stack, physical_stack)
+        || stack_size > kEeMainRamSize - physical_stack) {
+        return refuse(EeThreadRejection::invalid_stack);
+    }
+    if (gp != 0U) {
+        std::uint32_t physical_gp{};
+        if (!resolve_ee_main_ram_address(gp, physical_gp)) {
+            return refuse(EeThreadRejection::invalid_gp);
+        }
+    }
+    if (initial_priority < 0
+        || static_cast<std::uint32_t>(initial_priority) >= kMaxPriority) {
+        return refuse(EeThreadRejection::invalid_priority);
+    }
+
+    for (std::size_t index = 0; index < kEeMaxThreads; ++index) {
+        EeThread& thread = state.hle.threads[index];
+        if (thread.in_use) {
+            continue;
+        }
+        thread.in_use = true;
+        thread.function = function;
+        thread.stack = stack;
+        thread.stack_size = stack_size;
+        thread.gp = gp;
+        thread.initial_priority = static_cast<std::uint32_t>(initial_priority);
+        thread.attr = words[7];
+        thread.option = words[8];
+        ++state.hle.thread_count;
+        const auto id = static_cast<std::uint32_t>(kEeFirstCreatedThreadId + index);
+        state.hle.last_thread_id = static_cast<std::int32_t>(id);
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(id);
+        return Status::ok;
+    }
+    return refuse(EeThreadRejection::table_full);
+}
+
+// SetupThread (0x3C): SetupThread(gp, stack, stack_size, args, root_func).
 // The guest-visible contract this implementation honors is the documented one:
 // the call returns the initial stack pointer in $v0, computed from $a1/$a2 with
 // the 0xFFFFFFFF sentinel meaning "place the stack below the top of main RAM",
@@ -521,6 +625,7 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
 
 // Sorted by service number so a lookup can stop as soon as it passes the key.
 inline constexpr EeSyscallService kEeSyscallServices[] = {
+    {kEeSyscallCreateThread, "CreateThread", &hle_create_thread},
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
     {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
     {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},
