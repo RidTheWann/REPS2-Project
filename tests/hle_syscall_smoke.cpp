@@ -88,6 +88,32 @@ void store_sema_parameters(
     store_word(ram, address + 20U, option);
 }
 
+// Writes the nine documented ee_thread_t words. `status` is deliberately
+// supplied by the caller because the observed retail call leaves it
+// uninitialized; the HLE layer must not interpret it.
+void store_thread_parameters(
+    RamWindow& ram,
+    std::uint32_t address,
+    std::uint32_t status,
+    std::uint32_t function,
+    std::uint32_t stack,
+    std::uint32_t stack_size,
+    std::uint32_t gp,
+    std::uint32_t initial_priority,
+    std::uint32_t attr = 0U,
+    std::uint32_t option = 0U
+) {
+    store_word(ram, address + 0x00U, status);
+    store_word(ram, address + 0x04U, function);
+    store_word(ram, address + 0x08U, stack);
+    store_word(ram, address + 0x0CU, stack_size);
+    store_word(ram, address + 0x10U, gp);
+    store_word(ram, address + 0x14U, initial_priority);
+    store_word(ram, address + 0x18U, initial_priority);
+    store_word(ram, address + 0x1CU, attr);
+    store_word(ram, address + 0x20U, option);
+}
+
 // A serviced call resumes at the instruction after the trap and the following
 // register write proves the guest continued past the SYSCALL.
 int test_disabled_layer_keeps_the_architectural_exception() {
@@ -626,6 +652,107 @@ int test_set_syscall_accepts_extended_alarm_slot() {
     return 0;
 }
 
+int test_create_thread_returns_dormant_id() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    constexpr std::uint32_t kParameters = 0x0000'0100U;
+    store_thread_parameters(
+        ram, kParameters, 0xDEAD'BEEFU, 0x0000'E600U, 0x0000'0800U,
+        0x0000'0100U, 0x0000'E700U, 1U);
+    state.gpr[4].low = kParameters;
+    if (reps2::runtime::hle_create_thread(state) != Status::ok) return 202;
+    if (state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::none) return 203;
+    if (state.hle.last_thread_id != 1 || state.hle.thread_count != 1U) return 204;
+    if (state.gpr[2].low != 1U) return 205;
+    const auto& thread = state.hle.threads[0];
+    if (!thread.in_use || thread.function != 0xE600U || thread.stack != 0x800U
+        || thread.stack_size != 0x100U || thread.gp != 0xE700U
+        || thread.initial_priority != 1U) return 206;
+    // The guest parameter block is input only: the uninitialized status word is
+    // never interpreted or rewritten.
+    if (load_word(ram, kParameters) != 0xDEAD'BEEFU) return 207;
+    return 0;
+}
+
+int test_create_thread_rejects_invalid_parameters() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    constexpr std::uint32_t kParameters = 0x0000'0100U;
+
+    state.gpr[4].low = 0x0000'1000U; // parameter block starts past the window
+    if (reps2::runtime::hle_create_thread(state) != Status::ok
+        || state.hle.last_thread_rejection
+            != reps2::runtime::EeThreadRejection::unreadable_parameters) return 210;
+
+    store_thread_parameters(
+        ram, kParameters, 0U, 0U, 0x800U, 0x100U, 0xE700U, 1U);
+    state.gpr[4].low = kParameters;
+    if (reps2::runtime::hle_create_thread(state) != Status::ok
+        || state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::invalid_func) return 211;
+
+    store_thread_parameters(
+        ram, kParameters, 0U, 0xE600U, 0x800U, 0U, 0xE700U, 1U);
+    if (reps2::runtime::hle_create_thread(state) != Status::ok
+        || state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::invalid_stack) return 212;
+
+    store_thread_parameters(
+        ram, kParameters, 0U, 0xE600U, 0x0FFF'F000U, 0x2000U, 0xE700U, 1U);
+    if (reps2::runtime::hle_create_thread(state) != Status::ok
+        || state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::invalid_stack) return 213;
+
+    store_thread_parameters(
+        ram, kParameters, 0U, 0xE600U, 0x800U, 0x100U, 0xFFF0'0000U, 1U);
+    if (reps2::runtime::hle_create_thread(state) != Status::ok
+        || state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::invalid_gp) return 214;
+
+    store_thread_parameters(
+        ram, kParameters, 0U, 0xE600U, 0x800U, 0x100U, 0xE700U, 128U);
+    if (reps2::runtime::hle_create_thread(state) != Status::ok
+        || state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::invalid_priority) return 215;
+
+    if (state.hle.thread_count != 0U || state.hle.last_thread_id != -1
+        || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL) return 216;
+    return 0;
+}
+
+int test_create_thread_table_is_bounded() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    constexpr std::uint32_t kParameters = 0x0000'0100U;
+    store_thread_parameters(
+        ram, kParameters, 0U, 0xE600U, 0x800U, 0x100U, 0xE700U, 1U);
+    state.gpr[4].low = kParameters;
+    for (std::uint32_t index = 1; index <= reps2::runtime::kEeMaxThreads; ++index) {
+        if (reps2::runtime::hle_create_thread(state) != Status::ok
+            || state.gpr[2].low != index) return 217;
+    }
+    if (reps2::runtime::hle_create_thread(state) != Status::ok
+        || state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::table_full
+        || state.hle.thread_count != reps2::runtime::kEeMaxThreads
+        || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL) return 218;
+    return 0;
+}
+
+int test_create_thread_via_dispatch() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.pc = 0xE000U;
+    state.hle.syscall_enabled = true;
+    constexpr std::uint32_t kParameters = 0x0000'0100U;
+    store_thread_parameters(
+        ram, kParameters, 0U, 0xE600U, 0x800U, 0x100U, 0xE700U, 1U);
+    state.gpr[3].low = reps2::runtime::kEeSyscallCreateThread;
+    state.gpr[4].low = kParameters;
+    state.gpr[31].low = kUnreachableReturnPc;
+    if (reps2::generated::execute_cfg(state, 32U) != Status::external_control_flow
+        || state.hle.thread_count != 1U || state.hle.last_thread_id != 1) return 219;
+    return 0;
+}
+
 int test_timer3_mode_guard_register() {
     SyscallTableWindow ram{};
     EeState state{};
@@ -1094,6 +1221,11 @@ int main() {
          &test_set_syscall_rejection_leaves_the_table_untouched},
         {"set syscall accepts extended alarm slot", &test_set_syscall_accepts_extended_alarm_slot},
         {"get entry address returns slot address", &test_get_entry_address_returns_slot_address},
+        {"create thread returns dormant id", &test_create_thread_returns_dormant_id},
+        {"create thread rejects invalid parameters",
+         &test_create_thread_rejects_invalid_parameters},
+        {"create thread table is bounded", &test_create_thread_table_is_bounded},
+        {"create thread via dispatch", &test_create_thread_via_dispatch},
         {"timer 3 mode guard register", &test_timer3_mode_guard_register},
         {"service table names", &test_service_table_reports_names},
         {"find address matching entry", &test_find_address_returns_matching_entry_address},

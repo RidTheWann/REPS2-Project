@@ -89,6 +89,54 @@ enum class AddressErrorCode : std::uint8_t { InstructionFetch = 4, Load = 4, Sto
 // ps2sdk's documented kernel limit (`MAX_SEMAPHORES 256`). Sema ids are indices
 // into this table, so the bound is the same one the guest sees.
 inline constexpr std::size_t kEeMaxSemaphores = 256;
+// Host records for created threads. ps2sdk documents `MAX_THREADS 256` and says
+// thread 0 is the idle thread; the host keeps a compact sparse table because
+// EeState is held on the stack by tests and probes. A title that needs more
+// concurrent thread records than this is refused honestly rather than
+// fabricating an id.
+inline constexpr std::size_t kEeMaxThreads = 16;
+
+/// Why CreateThread (0x20) returned the failure code instead of an id.
+enum class EeThreadRejection : std::uint8_t {
+    none,
+    unreadable_parameters,
+    invalid_func,
+    invalid_stack,
+    invalid_gp,
+    invalid_priority,
+    table_full,
+};
+
+[[nodiscard]] constexpr const char* ee_thread_rejection_name(
+    EeThreadRejection rejection
+) noexcept {
+    switch (rejection) {
+    case EeThreadRejection::none: return "none";
+    case EeThreadRejection::unreadable_parameters: return "unreadable_parameters";
+    case EeThreadRejection::invalid_func: return "invalid_func";
+    case EeThreadRejection::invalid_stack: return "invalid_stack";
+    case EeThreadRejection::invalid_gp: return "invalid_gp";
+    case EeThreadRejection::invalid_priority: return "invalid_priority";
+    case EeThreadRejection::table_full: return "table_full";
+    }
+    return "unknown";
+}
+
+/// A created but never scheduled thread. ps2sdk's `ee_thread_t` is nine 32-bit
+/// words: status, func, stack, stack_size, gp_reg, initial_priority,
+/// current_priority, attr, option. The kernel owns `status` and the current
+/// priority; the guest's status word is uninitialized in the observed call and
+/// is never read. No status, stack contents or args block is initialized here.
+struct EeThread {
+    bool in_use{};
+    std::uint32_t function{};
+    std::uint32_t stack{};
+    std::uint32_t stack_size{};
+    std::uint32_t gp{};
+    std::uint32_t initial_priority{};
+    std::uint32_t attr{};
+    std::uint32_t option{};
+};
 // Host registrations for the documented 0..255 service range are indexed
 // directly. ps2sdk's `alarm.c` InitAlarm also patches slot 0x12C
 // ("Intc12Handler"), which is held in the small sparse list below so EeState
@@ -285,6 +333,21 @@ struct EeHleState {
     std::uint32_t setup_heap_start{};
     std::uint32_t setup_heap_size{};
     std::uint32_t setup_heap_end{};
+    // CreateThread (0x20) observation. `thread_count` counts records, not ids
+    // handed out; nothing deletes threads yet.
+    std::uint64_t create_thread_calls{};
+    std::uint32_t thread_count{};
+    std::uint32_t last_thread_parameter_address{};
+    std::int32_t last_thread_id{-1};
+    std::uint32_t last_thread_function{};
+    std::uint32_t last_thread_stack{};
+    std::uint32_t last_thread_stack_size{};
+    std::uint32_t last_thread_gp{};
+    std::int32_t last_thread_initial_priority{};
+    std::uint32_t last_thread_attr{};
+    std::uint32_t last_thread_option{};
+    EeThreadRejection last_thread_rejection{};
+    std::array<EeThread, kEeMaxThreads> threads{};
     // CreateSema (0x40) observation. `semaphore_count` counts live objects, not
     // ids handed out: nothing deletes objects yet, so the two happen to agree.
     std::uint64_t create_sema_calls{};
