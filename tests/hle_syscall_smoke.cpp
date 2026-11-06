@@ -756,6 +756,210 @@ int test_create_thread_via_dispatch() {
     return 0;
 }
 
+// Creates one thread through the handler and returns its id, or 0 when the
+// handler refused. Ids start at 2, so 0 is unambiguous as a failure marker.
+std::uint32_t create_thread_with_priority(
+    EeState& state,
+    RamWindow& ram,
+    std::uint32_t priority
+) {
+    constexpr std::uint32_t kThreadParameters = 0x0000'0100U;
+    store_thread_parameters(
+        ram, kThreadParameters, 0U, 0xE600U, 0x800U, 0x100U, 0xE700U, priority);
+    state.gpr[4].low = kThreadParameters;
+    if (reps2::runtime::hle_create_thread(state) != Status::ok) {
+        return 0U;
+    }
+    return static_cast<std::uint32_t>(state.gpr[2].low);
+}
+
+int test_start_thread_transitions_to_ready() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    const std::uint32_t id = create_thread_with_priority(state, ram, 1U);
+    if (id == 0U) return 230;
+    if (state.hle.threads[id - reps2::runtime::kEeFirstCreatedThreadId].status
+        != reps2::runtime::kEeThreadStatusDormant) return 231;
+    state.gpr[4].low = id;
+    state.gpr[5].low = 0x0076'1208U;
+    if (reps2::runtime::hle_start_thread(state) != Status::ok) return 232;
+    if (state.gpr[2].low != 0U) return 233;
+    const auto& thread =
+        state.hle.threads[id - reps2::runtime::kEeFirstCreatedThreadId];
+    if (thread.status != reps2::runtime::kEeThreadStatusReady) return 234;
+    if (thread.argv != 0x0076'1208U) return 235;
+    if (state.hle.ready_count != 1U || state.hle.ready_queue[0] != id) return 236;
+    if (state.hle.last_start_rejection
+        != reps2::runtime::EeThreadStartRejection::none) return 237;
+    return 0;
+}
+
+int test_start_thread_rejects_invalid_and_non_dormant() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    const std::uint32_t bad_ids[] = {
+        0U,
+        reps2::runtime::kEeMainThreadId,
+        reps2::runtime::kEeFirstCreatedThreadId
+            + static_cast<std::uint32_t>(reps2::runtime::kEeMaxThreads),
+    };
+    for (const std::uint32_t id : bad_ids) {
+        state.gpr[4].low = id;
+        if (reps2::runtime::hle_start_thread(state) != Status::ok
+            || state.hle.last_start_rejection
+                != reps2::runtime::EeThreadStartRejection::invalid_id
+            || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL) return 238;
+    }
+    const std::uint32_t id = create_thread_with_priority(state, ram, 3U);
+    if (id == 0U) return 239;
+    state.gpr[4].low = id;
+    if (reps2::runtime::hle_start_thread(state) != Status::ok
+        || state.hle.last_start_rejection
+            != reps2::runtime::EeThreadStartRejection::none) return 240;
+    if (reps2::runtime::hle_start_thread(state) != Status::ok
+        || state.hle.last_start_rejection
+            != reps2::runtime::EeThreadStartRejection::not_dormant
+        || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL
+        || state.hle.ready_count != 1U) return 241;
+    return 0;
+}
+
+int test_start_thread_orders_ready_queue_by_priority() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    const std::uint32_t low = create_thread_with_priority(state, ram, 5U);
+    const std::uint32_t high = create_thread_with_priority(state, ram, 1U);
+    const std::uint32_t middle = create_thread_with_priority(state, ram, 3U);
+    if (low == 0U || high == 0U || middle == 0U) return 242;
+    const std::uint32_t order[] = {low, high, middle};
+    for (const std::uint32_t id : order) {
+        state.gpr[4].low = id;
+        if (reps2::runtime::hle_start_thread(state) != Status::ok) return 243;
+    }
+    if (state.hle.ready_count != 3U) return 244;
+    if (state.hle.ready_queue[0] != high || state.hle.ready_queue[1] != middle
+        || state.hle.ready_queue[2] != low) return 245;
+    return 0;
+}
+
+int test_start_thread_keeps_equal_priority_fifo() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    const std::uint32_t first = create_thread_with_priority(state, ram, 7U);
+    const std::uint32_t second = create_thread_with_priority(state, ram, 7U);
+    if (first == 0U || second == 0U) return 246;
+    const std::uint32_t pair[] = {first, second};
+    for (const std::uint32_t id : pair) {
+        state.gpr[4].low = id;
+        if (reps2::runtime::hle_start_thread(state) != Status::ok) return 247;
+    }
+    if (state.hle.ready_count != 2U || state.hle.ready_queue[0] != first
+        || state.hle.ready_queue[1] != second) return 248;
+    return 0;
+}
+
+int test_get_thread_id_reports_the_boot_thread() {
+    EeState state{};
+    state.gpr[2].low = 0xDEAD'BEEFULL;
+    if (reps2::runtime::hle_get_thread_id(state) != Status::ok) return 249;
+    if (state.gpr[2].low != reps2::runtime::kEeMainThreadId) return 250;
+    if (state.hle.get_thread_id_calls != 1U) return 251;
+    return 0;
+}
+
+int test_change_thread_priority_updates_main_and_queue() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.gpr[4].low = reps2::runtime::kEeMainThreadId;
+    state.gpr[5].low = 1U;
+    if (reps2::runtime::hle_change_thread_priority(state) != Status::ok
+        || state.gpr[2].low != 0U
+        || state.hle.main_thread_priority != 1U
+        || state.hle.last_priority_rejection
+            != reps2::runtime::EeThreadPriorityRejection::none) return 252;
+
+    const std::uint32_t first = create_thread_with_priority(state, ram, 5U);
+    const std::uint32_t second = create_thread_with_priority(state, ram, 9U);
+    if (first == 0U || second == 0U) return 253;
+    const std::uint32_t pair[] = {first, second};
+    for (const std::uint32_t id : pair) {
+        state.gpr[4].low = id;
+        if (reps2::runtime::hle_start_thread(state) != Status::ok) return 254;
+    }
+    if (state.hle.ready_queue[0] != first || state.hle.ready_queue[1] != second) {
+        return 255;
+    }
+    state.gpr[4].low = second;
+    state.gpr[5].low = 1U;
+    if (reps2::runtime::hle_change_thread_priority(state) != Status::ok
+        || state.gpr[2].low != 0U) return 256;
+    if (state.hle.ready_count != 2U || state.hle.ready_queue[0] != second
+        || state.hle.ready_queue[1] != first) return 257;
+    if (state.hle.threads[second - reps2::runtime::kEeFirstCreatedThreadId]
+            .current_priority != 1U) return 258;
+    return 0;
+}
+
+int test_change_thread_priority_rejects_invalid() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.gpr[4].low = reps2::runtime::kEeMainThreadId;
+    state.gpr[5].low = 128U;
+    if (reps2::runtime::hle_change_thread_priority(state) != Status::ok
+        || state.hle.last_priority_rejection
+            != reps2::runtime::EeThreadPriorityRejection::invalid_priority
+        || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL
+        || state.hle.main_thread_priority != 0U) return 259;
+    state.gpr[4].low = reps2::runtime::kEeFirstCreatedThreadId
+        + static_cast<std::uint32_t>(reps2::runtime::kEeMaxThreads);
+    state.gpr[5].low = 3U;
+    if (reps2::runtime::hle_change_thread_priority(state) != Status::ok
+        || state.hle.last_priority_rejection
+            != reps2::runtime::EeThreadPriorityRejection::invalid_id
+        || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL) return 260;
+    return 0;
+}
+
+int test_thread_services_via_dispatch() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    const std::uint32_t id = create_thread_with_priority(state, ram, 2U);
+    if (id == 0U) return 261;
+
+    state.pc = 0xE000U;
+    state.gpr[3].low = reps2::runtime::kEeSyscallStartThread;
+    state.gpr[4].low = id;
+    state.gpr[5].low = 0x0076'1208U;
+    state.gpr[31].low = kUnreachableReturnPc;
+    if (reps2::generated::execute_cfg(state, 32U) != Status::external_control_flow
+        || state.hle.ready_count != 1U) return 262;
+
+    state.pc = 0xE000U;
+    state.gpr[2].low = 0U;
+    state.gpr[3].low = reps2::runtime::kEeSyscallGetThreadId;
+    state.gpr[31].low = kUnreachableReturnPc;
+    if (reps2::generated::execute_cfg(state, 32U) != Status::external_control_flow
+        || state.gpr[2].low != reps2::runtime::kEeMainThreadId) return 263;
+
+    state.pc = 0xE000U;
+    state.gpr[3].low = reps2::runtime::kEeSyscallChangeThreadPriority;
+    state.gpr[4].low = reps2::runtime::kEeMainThreadId;
+    state.gpr[5].low = 1U;
+    state.gpr[31].low = kUnreachableReturnPc;
+    if (reps2::generated::execute_cfg(state, 32U) != Status::external_control_flow
+        || state.hle.main_thread_priority != 1U) return 264;
+    return 0;
+}
+
+
 int test_timer3_mode_guard_register() {
     SyscallTableWindow ram{};
     EeState state{};
@@ -1229,6 +1433,20 @@ int main() {
          &test_create_thread_rejects_invalid_parameters},
         {"create thread table is bounded", &test_create_thread_table_is_bounded},
         {"create thread via dispatch", &test_create_thread_via_dispatch},
+        {"start thread transitions to ready", &test_start_thread_transitions_to_ready},
+        {"start thread rejects invalid and non-dormant",
+         &test_start_thread_rejects_invalid_and_non_dormant},
+        {"start thread orders ready queue by priority",
+         &test_start_thread_orders_ready_queue_by_priority},
+        {"start thread keeps equal priority fifo",
+         &test_start_thread_keeps_equal_priority_fifo},
+        {"get thread id reports the boot thread",
+         &test_get_thread_id_reports_the_boot_thread},
+        {"change thread priority updates main and queue",
+         &test_change_thread_priority_updates_main_and_queue},
+        {"change thread priority rejects invalid",
+         &test_change_thread_priority_rejects_invalid},
+        {"thread services via dispatch", &test_thread_services_via_dispatch},
         {"timer 3 mode guard register", &test_timer3_mode_guard_register},
         {"service table names", &test_service_table_reports_names},
         {"find address matching entry", &test_find_address_returns_matching_entry_address},

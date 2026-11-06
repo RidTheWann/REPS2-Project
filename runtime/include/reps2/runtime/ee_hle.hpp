@@ -34,6 +34,9 @@ inline constexpr std::uint8_t kEeSyscallArgumentBase = 4;
 inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 
 inline constexpr std::uint32_t kEeSyscallCreateThread = 0x20U;
+inline constexpr std::uint32_t kEeSyscallStartThread = 0x22U;
+inline constexpr std::uint32_t kEeSyscallChangeThreadPriority = 0x29U;
+inline constexpr std::uint32_t kEeSyscallGetThreadId = 0x2FU;
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
@@ -216,13 +219,16 @@ struct EeSyscallRegistrationView {
             continue;
         }
         thread.in_use = true;
+        thread.status = kEeThreadStatusDormant;
         thread.function = function;
         thread.stack = stack;
         thread.stack_size = stack_size;
         thread.gp = gp;
         thread.initial_priority = static_cast<std::uint32_t>(initial_priority);
+        thread.current_priority = thread.initial_priority;
         thread.attr = words[7];
         thread.option = words[8];
+        thread.argv = 0U;
         ++state.hle.thread_count;
         const auto id = static_cast<std::uint32_t>(kEeFirstCreatedThreadId + index);
         state.hle.last_thread_id = static_cast<std::int32_t>(id);
@@ -230,6 +236,159 @@ struct EeSyscallRegistrationView {
         return Status::ok;
     }
     return refuse(EeThreadRejection::table_full);
+}
+
+// Insert a READY thread id after every queued thread whose current priority is
+// less than or equal to its own. Lower numbers are higher priority on the PS2,
+// and equal priorities keep their relative order. Returns false for an id
+// outside the created range or a full queue; callers validate the id first.
+[[nodiscard]] inline bool ee_insert_ready_thread(
+    EeHleState& hle,
+    std::uint32_t id
+) noexcept {
+    if (id < kEeFirstCreatedThreadId
+        || id >= kEeFirstCreatedThreadId + kEeMaxThreads) {
+        return false;
+    }
+    if (hle.ready_count >= kEeMaxThreads) {
+        return false;
+    }
+    const std::uint32_t priority =
+        hle.threads[id - kEeFirstCreatedThreadId].current_priority;
+    std::size_t position = hle.ready_count;
+    while (position > 0U) {
+        const std::uint32_t previous_id = hle.ready_queue[position - 1U];
+        const std::uint32_t previous_priority =
+            hle.threads[previous_id - kEeFirstCreatedThreadId].current_priority;
+        if (previous_priority <= priority) {
+            break;
+        }
+        hle.ready_queue[position] = previous_id;
+        --position;
+    }
+    hle.ready_queue[position] = id;
+    ++hle.ready_count;
+    return true;
+}
+
+// StartThread (0x22): StartThread(thread_id, args).
+//
+// ps2sdk declares `s32 StartThread(s32 thread_id, void *args)`. Its thread
+// example calls it without checking the result and then lowers the *main*
+// thread's priority, which shows the running thread and the started thread are
+// distinct. The kernel-visible effect modeled here is the documented
+// DORMANT -> READY transition and priority-ordered ready-queue insertion; the
+// `args` pointer is stored opaquely because the kernel does not dereference it
+// until the thread runs. Returns 0 on success and -1 on refusal.
+//
+// This implementation deliberately does NOT switch to the new thread: REPS2 has
+// no dispatcher that can execute a second translated context, and claiming one
+// had run would fabricate execution. The boot thread keeps executing and later
+// observes itself through GetThreadId.
+[[nodiscard]] inline Status hle_start_thread(EeState& state) noexcept {
+    ++state.hle.start_thread_calls;
+    state.hle.last_start_thread_id = ee_syscall_argument(state, 0);
+    state.hle.last_start_thread_args = ee_syscall_argument(state, 1);
+    state.hle.last_start_rejection = EeThreadStartRejection::none;
+
+    const auto refuse = [&state](EeThreadStartRejection reason) {
+        state.hle.last_start_rejection = reason;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    };
+
+    const std::uint32_t id = state.hle.last_start_thread_id;
+    if (id < kEeFirstCreatedThreadId
+        || id >= kEeFirstCreatedThreadId + kEeMaxThreads) {
+        return refuse(EeThreadStartRejection::invalid_id);
+    }
+    EeThread& thread = state.hle.threads[id - kEeFirstCreatedThreadId];
+    if (!thread.in_use) {
+        return refuse(EeThreadStartRejection::invalid_id);
+    }
+    if (thread.status != kEeThreadStatusDormant) {
+        return refuse(EeThreadStartRejection::not_dormant);
+    }
+    if (state.hle.ready_count >= kEeMaxThreads) {
+        return refuse(EeThreadStartRejection::queue_full);
+    }
+    thread.argv = state.hle.last_start_thread_args;
+    thread.status = kEeThreadStatusReady;
+    if (!ee_insert_ready_thread(state.hle, id)) {
+        return refuse(EeThreadStartRejection::queue_full);
+    }
+    state.gpr[kEeSyscallResultRegister].low = 0U;
+    return Status::ok;
+}
+
+// GetThreadId (0x2F): GetThreadId(void).
+//
+// ps2sdk declares `s32 GetThreadId(void)` and examples use it to refer to the
+// calling thread. REPS2 executes only one guest context, so the caller is
+// always the boot thread, whose id is kEeMainThreadId. A future dispatcher must
+// replace this with the running record's id; until then the value is honest but
+// limited.
+[[nodiscard]] inline Status hle_get_thread_id(EeState& state) noexcept {
+    ++state.hle.get_thread_id_calls;
+    state.gpr[kEeSyscallResultRegister].low = kEeMainThreadId;
+    return Status::ok;
+}
+
+// ChangeThreadPriority (0x29): ChangeThreadPriority(thread_id, priority).
+//
+// ps2sdk declares `s32 ChangeThreadPriority(s32 thread_id, s32 priority)` and
+// its thread example guards the value with `priority < 128`. The boot thread has
+// no created record, so its priority is kept separately. A READY thread is
+// removed and re-inserted so the queue stays ordered. Returns 0 on success and
+// -1 on refusal; a refused call changes nothing.
+[[nodiscard]] inline Status hle_change_thread_priority(EeState& state) noexcept {
+    ++state.hle.change_priority_calls;
+    state.hle.last_priority_thread_id = ee_syscall_argument(state, 0);
+    state.hle.last_priority_value =
+        static_cast<std::int32_t>(ee_syscall_argument(state, 1));
+    state.hle.last_priority_rejection = EeThreadPriorityRejection::none;
+
+    const auto refuse = [&state](EeThreadPriorityRejection reason) {
+        state.hle.last_priority_rejection = reason;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    };
+
+    const std::int32_t priority = state.hle.last_priority_value;
+    if (priority < 0 || priority >= kEeMaxThreadPriority) {
+        return refuse(EeThreadPriorityRejection::invalid_priority);
+    }
+    const std::uint32_t id = state.hle.last_priority_thread_id;
+    if (id == kEeMainThreadId) {
+        state.hle.main_thread_priority = static_cast<std::uint32_t>(priority);
+        state.gpr[kEeSyscallResultRegister].low = 0U;
+        return Status::ok;
+    }
+    if (id < kEeFirstCreatedThreadId
+        || id >= kEeFirstCreatedThreadId + kEeMaxThreads) {
+        return refuse(EeThreadPriorityRejection::invalid_id);
+    }
+    EeThread& thread = state.hle.threads[id - kEeFirstCreatedThreadId];
+    if (!thread.in_use) {
+        return refuse(EeThreadPriorityRejection::invalid_id);
+    }
+    thread.current_priority = static_cast<std::uint32_t>(priority);
+    if (thread.status == kEeThreadStatusReady) {
+        std::uint32_t write = 0U;
+        for (std::uint32_t read = 0U; read < state.hle.ready_count; ++read) {
+            if (state.hle.ready_queue[read] == id) {
+                continue;
+            }
+            state.hle.ready_queue[write] = state.hle.ready_queue[read];
+            ++write;
+        }
+        state.hle.ready_count = write;
+        if (!ee_insert_ready_thread(state.hle, id)) {
+            return refuse(EeThreadPriorityRejection::invalid_id);
+        }
+    }
+    state.gpr[kEeSyscallResultRegister].low = 0U;
+    return Status::ok;
 }
 
 // SetupThread (0x3C): SetupThread(gp, stack, stack_size, args, root_func).
@@ -626,6 +785,9 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
 // Sorted by service number so a lookup can stop as soon as it passes the key.
 inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallCreateThread, "CreateThread", &hle_create_thread},
+    {kEeSyscallStartThread, "StartThread", &hle_start_thread},
+    {kEeSyscallChangeThreadPriority, "ChangeThreadPriority", &hle_change_thread_priority},
+    {kEeSyscallGetThreadId, "GetThreadId", &hle_get_thread_id},
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
     {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
     {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},

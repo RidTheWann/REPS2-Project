@@ -701,6 +701,59 @@ Open questions for the next increment:
 - `attr`/`option` bits, stack guard behaviour, and the exact negative failure
   codes beyond the documented "negative means failure".
 
+### EE `StartThread`, `GetThreadId` and `ChangeThreadPriority` (ADR 0076)
+
+Facts from the same caller (`0x0025B1A8`) and the syscall wrappers:
+
+- `0x0025A4E0` is `li $v1,0x20; syscall` (CreateThread). `0x0025A500` is
+  `li $v1,0x22; syscall` (StartThread). `0x0025A5D0` is `li $v1,0x2F; syscall`
+  (GetThreadId). `0x0025A570` is `li $v1,0x29; syscall`
+  (ChangeThreadPriority). Each wrapper returns immediately with `jr $ra`.
+- After `CreateThread($sp)` the code tests the result with `bgez`; on success it
+  stores the id at `0x00282150`, zeroes the two-word argv block at
+  `0x00761208`, and calls `StartThread(id, 0x00761208)`.
+- It then calls `GetThreadId()`, moves `$v0` into `$a0`, and calls
+  `ChangeThreadPriority(that_id, 1)`.
+- At creation time the guest passes `initial_priority=0`; ps2tek records that
+  boot creates the main thread with priority 0, so the started thread and the
+  running thread begin at equal priority. Equal priorities are queued FIFO, so
+  no immediate switch is implied by the observed sequence.
+
+Public references: see the ps2sdk and ps2tek entries in the CreateThread section.
+ps2sdk defines `THS_DORMANT 0x10` and `THS_READY 0x02`, and its example calls
+`ChangeThreadPriority(GetThreadId(), 1)` right after starting a thread, which
+requires the running thread and the created thread to have different ids.
+
+Decision and limits:
+
+- `StartThread` accepts only an existing DORMANT record, stores `args` opaquely,
+  sets READY and inserts by ascending current priority. Refusals return `-1`.
+- `GetThreadId` returns the boot thread id (1) because REPS2 has one context.
+- `ChangeThreadPriority` accepts 0..127 and re-orders a READY thread.
+- No service switches context. The boot thread continues; a later blocking
+  service is where a dispatcher becomes observable, and it stays unimplemented
+  until that service's contract is established.
+
+Observed result after servicing the chain (2026-11-06):
+
+- `status=14`, `pc=0x0025A794`, `executed=2,946,399`, `syscalls=32`,
+  `hle_handled=21`.
+- Records: `StartThread`
+  `0x0025A504:34:H:0x00000002:0x00761208:0x00000400:0x0029E580:0x00760000`,
+  `GetThreadId`
+  `0x0025A5D4:47:H:0x00000002:0x00761208:0x00000400:0x0029E580:0x00000000`,
+  `ChangeThreadPriority`
+  `0x0025A574:41:H:0x00000001:0x00000001:0x00000400:0x0029E580:0x00000001`,
+  then unhandled `0x0025A794:75:U:0x0093C7C0:0x00000001:0x00000400:0x0029E580:0x00000002`.
+- The `ChangeThreadPriority` arguments confirm `GetThreadId` returned 1 (the
+  boot thread) and the guest lowered that thread to priority 1. The created
+  thread record (id 2) stays at priority 0, so it would outrank the boot thread
+  if a dispatcher existed. The guest then performs the OSD configuration probe.
+- Next boundary: `GetOsdConfigParam` (0x4B) at `pc=0x0025A794` with
+  `$a0=0x0093C7C0`. The caller at `0x0025F148` reads four bytes, clears bits
+  13..15, sets bit 13, writes, reads back, restores, and reports whether bits
+  13..14 are zero. `SetOsdConfigParam` (0x4A) is part of the same probe.
+
 ## Provenance rules
 
 
