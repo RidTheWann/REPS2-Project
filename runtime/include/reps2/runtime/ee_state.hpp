@@ -144,6 +144,24 @@ enum class EeThreadRejection : std::uint8_t {
     return "unknown";
 }
 
+/// Why GetOsdConfigParam (0x4B) or SetOsdConfigParam (0x4A) refused its buffer.
+enum class EeOsdConfigRejection : std::uint8_t {
+    none,
+    unreadable_buffer,
+    unwritable_buffer,
+};
+
+[[nodiscard]] constexpr const char* ee_osd_config_rejection_name(
+    EeOsdConfigRejection rejection
+) noexcept {
+    switch (rejection) {
+    case EeOsdConfigRejection::none: return "none";
+    case EeOsdConfigRejection::unreadable_buffer: return "unreadable_buffer";
+    case EeOsdConfigRejection::unwritable_buffer: return "unwritable_buffer";
+    }
+    return "unknown";
+}
+
 /// Why StartThread (0x22) returned the failure code.
 enum class EeThreadStartRejection : std::uint8_t {
     none,
@@ -429,6 +447,17 @@ struct EeHleState {
     EeThreadPriorityRejection last_priority_rejection{};
     // ps2tek: boot "creates a thread with priority 0 (main thread)".
     std::uint32_t main_thread_priority{};
+    // GetOsdConfigParam (0x4B) and SetOsdConfigParam (0x4A). The kernel keeps
+    // this word in NVRAM; REPS2 has no NVRAM, so it is a host-session value
+    // initialized to zero. The observed caller at 0x0025F148 uses Set/Get
+    // read-back over bits 13..15, so a coherent store is the guest-visible
+    // contract; persistence across runs is explicitly not provided.
+    std::uint32_t osd_config_param{};
+    std::uint64_t get_osd_config_calls{};
+    std::uint64_t set_osd_config_calls{};
+    std::uint32_t last_osd_config_address{};
+    std::uint32_t last_osd_config_value{};
+    EeOsdConfigRejection last_osd_config_rejection{};
     // CreateSema (0x40) observation. `semaphore_count` counts live objects, not
     // ids handed out: nothing deletes objects yet, so the two happen to agree.
     std::uint64_t create_sema_calls{};

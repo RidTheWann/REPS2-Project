@@ -37,6 +37,8 @@ inline constexpr std::uint32_t kEeSyscallCreateThread = 0x20U;
 inline constexpr std::uint32_t kEeSyscallStartThread = 0x22U;
 inline constexpr std::uint32_t kEeSyscallChangeThreadPriority = 0x29U;
 inline constexpr std::uint32_t kEeSyscallGetThreadId = 0x2FU;
+inline constexpr std::uint32_t kEeSyscallSetOsdConfigParam = 0x4AU;
+inline constexpr std::uint32_t kEeSyscallGetOsdConfigParam = 0x4BU;
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
@@ -387,6 +389,53 @@ struct EeSyscallRegistrationView {
             return refuse(EeThreadPriorityRejection::invalid_id);
         }
     }
+    state.gpr[kEeSyscallResultRegister].low = 0U;
+    return Status::ok;
+}
+
+// GetOsdConfigParam (0x4B): GetOsdConfigParam(void *addr).
+//
+// ps2sdk declares `void GetOsdConfigParam(void *addr)`; the observed caller at
+// 0x0025F148 passes a 4-byte stack buffer and reads it immediately. The kernel
+// serves the board configuration from NVRAM; REPS2 has no NVRAM, so this writes
+// a host-session word initialized to zero. The documented return type is void,
+// so `$v0` is not part of the contract; a refused buffer reports -1 for
+// diagnostics and writes nothing.
+[[nodiscard]] inline Status hle_get_osd_config_param(EeState& state) noexcept {
+    ++state.hle.get_osd_config_calls;
+    const std::uint32_t address = ee_syscall_argument(state, 0);
+    state.hle.last_osd_config_address = address;
+    state.hle.last_osd_config_value = state.hle.osd_config_param;
+    state.hle.last_osd_config_rejection = EeOsdConfigRejection::none;
+    if (store_u32(state.memory, address, state.hle.osd_config_param) != Status::ok) {
+        state.hle.last_osd_config_rejection = EeOsdConfigRejection::unwritable_buffer;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    }
+    state.gpr[kEeSyscallResultRegister].low = 0U;
+    return Status::ok;
+}
+
+// SetOsdConfigParam (0x4A): SetOsdConfigParam(void *addr).
+//
+// ps2sdk declares `void SetOsdConfigParam(void *addr)`. The observed guest
+// stores a modified 32-bit configuration and reads it back with 0x4B, so the
+// guest-visible contract is a coherent store. The value is retained verbatim
+// for the host session and is never persisted; no hardware-specific bit policy
+// is invented.
+[[nodiscard]] inline Status hle_set_osd_config_param(EeState& state) noexcept {
+    ++state.hle.set_osd_config_calls;
+    const std::uint32_t address = ee_syscall_argument(state, 0);
+    state.hle.last_osd_config_address = address;
+    state.hle.last_osd_config_rejection = EeOsdConfigRejection::none;
+    std::uint32_t value{};
+    if (load_u32(state.memory, address, value) != Status::ok) {
+        state.hle.last_osd_config_rejection = EeOsdConfigRejection::unreadable_buffer;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    }
+    state.hle.osd_config_param = value;
+    state.hle.last_osd_config_value = value;
     state.gpr[kEeSyscallResultRegister].low = 0U;
     return Status::ok;
 }
@@ -791,6 +840,8 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
     {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
     {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},
+    {kEeSyscallSetOsdConfigParam, "SetOsdConfigParam", &hle_set_osd_config_param},
+    {kEeSyscallGetOsdConfigParam, "GetOsdConfigParam", &hle_get_osd_config_param},
     {kEeSyscallGetEntryAddress, "GetEntryAddress", &hle_get_entry_address},
     {kEeSyscallFlushCache, "FlushCache", &hle_flush_cache},
     {kEeSyscallSetSyscall, "SetSyscall", &hle_set_syscall},
@@ -798,6 +849,22 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
 };
 inline constexpr std::size_t kEeSyscallServiceCount =
     sizeof(kEeSyscallServices) / sizeof(kEeSyscallServices[0]);
+
+// Lookup below stops at the first number greater than the target, so the table
+// must be strictly ascending. A duplicate or out-of-order entry would silently
+// hide every later service; keep this a compile-time property.
+[[nodiscard]] constexpr bool ee_syscall_services_are_ascending() noexcept {
+    for (std::size_t index = 1; index < kEeSyscallServiceCount; ++index) {
+        if (kEeSyscallServices[index - 1U].number
+            >= kEeSyscallServices[index].number) {
+            return false;
+        }
+    }
+    return true;
+}
+static_assert(
+    ee_syscall_services_are_ascending(),
+    "kEeSyscallServices must be strictly ascending by service number");
 
 [[nodiscard]] inline const EeSyscallService* find_ee_syscall_service(
     std::uint32_t number

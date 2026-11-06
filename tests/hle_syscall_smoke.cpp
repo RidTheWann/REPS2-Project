@@ -960,6 +960,119 @@ int test_thread_services_via_dispatch() {
 }
 
 
+int test_get_osd_config_param_writes_default() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    store_word(ram, 0x0000'0100U, 0xDEAD'BEEFU);
+    state.gpr[4].low = 0x0000'0100U;
+    if (reps2::runtime::hle_get_osd_config_param(state) != Status::ok) return 270;
+    if (state.gpr[2].low != 0U) return 271;
+    if (load_word(ram, 0x0000'0100U) != 0U) return 272;
+    if (state.hle.get_osd_config_calls != 1U) return 273;
+    if (state.hle.osd_config_param != 0U) return 274;
+    if (state.hle.last_osd_config_rejection
+        != reps2::runtime::EeOsdConfigRejection::none) return 275;
+    return 0;
+}
+
+int test_osd_config_round_trip_preserves_bits() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    constexpr std::uint32_t kWritten = 0xA5A5'2001U;
+    store_word(ram, 0x0000'0100U, kWritten);
+    state.gpr[4].low = 0x0000'0100U;
+    if (reps2::runtime::hle_set_osd_config_param(state) != Status::ok
+        || state.gpr[2].low != 0U
+        || state.hle.osd_config_param != kWritten) return 276;
+    state.gpr[4].low = 0x0000'0200U;
+    if (reps2::runtime::hle_get_osd_config_param(state) != Status::ok
+        || state.gpr[2].low != 0U) return 277;
+    if (load_word(ram, 0x0000'0200U) != kWritten) return 278;
+    return 0;
+}
+
+// Mirrors the observed helper at 0x0025F148: read, clear bits 13..15, set bit
+// 13, write, read back, restore, and report whether bits 13..14 read back zero.
+int test_osd_config_read_back_probe() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    constexpr std::uint32_t kOriginal = 0x0000'0000U;
+    store_word(ram, 0x0000'0100U, kOriginal);
+    state.gpr[4].low = 0x0000'0100U;
+    if (reps2::runtime::hle_get_osd_config_param(state) != Status::ok) return 279;
+    const std::uint32_t read_back = load_word(ram, 0x0000'0100U);
+    const std::uint32_t modified = (read_back & 0xFFFF'1FFFU) | 0x0000'2000U;
+    store_word(ram, 0x0000'0104U, modified);
+    state.gpr[4].low = 0x0000'0104U;
+    if (reps2::runtime::hle_set_osd_config_param(state) != Status::ok) return 280;
+    state.gpr[4].low = 0x0000'0108U;
+    if (reps2::runtime::hle_get_osd_config_param(state) != Status::ok) return 281;
+    const std::uint32_t observed = load_word(ram, 0x0000'0108U);
+    if (observed != modified) return 282;
+    // The guest computes ((observed >> 13) & 7) < 1; a coherent store makes
+    // bit 13 stick, so that expression is false.
+    if (((observed >> 13U) & 7U) < 1U) return 283;
+    store_word(ram, 0x0000'010CU, read_back);
+    state.gpr[4].low = 0x0000'010CU;
+    if (reps2::runtime::hle_set_osd_config_param(state) != Status::ok
+        || state.hle.osd_config_param != read_back) return 284;
+    return 0;
+}
+
+int test_osd_config_refuses_bad_buffers() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.gpr[4].low = 0x1000'0000U;
+    if (reps2::runtime::hle_get_osd_config_param(state) != Status::ok
+        || state.hle.last_osd_config_rejection
+            != reps2::runtime::EeOsdConfigRejection::unwritable_buffer
+        || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL) return 285;
+
+    state.hle.osd_config_param = 0x1234'5678U;
+    state.gpr[4].low = 0x1000'0000U;
+    if (reps2::runtime::hle_set_osd_config_param(state) != Status::ok
+        || state.hle.last_osd_config_rejection
+            != reps2::runtime::EeOsdConfigRejection::unreadable_buffer
+        || state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFULL
+        || state.hle.osd_config_param != 0x1234'5678U) return 286;
+
+    store_word(ram, 0x0000'0102U, 0xCAFE'F00DU);
+    state.gpr[4].low = 0x0000'0102U;
+    if (reps2::runtime::hle_set_osd_config_param(state) != Status::ok
+        || state.hle.last_osd_config_rejection
+            != reps2::runtime::EeOsdConfigRejection::unreadable_buffer
+        || state.hle.osd_config_param != 0x1234'5678U) return 287;
+    return 0;
+}
+
+int test_osd_config_via_dispatch() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    store_word(ram, 0x0000'0100U, 0x0000'2003U);
+
+    state.pc = 0xE000U;
+    state.gpr[3].low = reps2::runtime::kEeSyscallSetOsdConfigParam;
+    state.gpr[4].low = 0x0000'0100U;
+    state.gpr[31].low = kUnreachableReturnPc;
+    if (reps2::generated::execute_cfg(state, 32U) != Status::external_control_flow
+        || state.hle.osd_config_param != 0x0000'2003U) return 288;
+
+    state.pc = 0xE000U;
+    state.gpr[3].low = reps2::runtime::kEeSyscallGetOsdConfigParam;
+    state.gpr[4].low = 0x0000'0200U;
+    state.gpr[31].low = kUnreachableReturnPc;
+    if (reps2::generated::execute_cfg(state, 32U) != Status::external_control_flow
+        || load_word(ram, 0x0000'0200U) != 0x0000'2003U) return 289;
+    return 0;
+}
+
+
 int test_timer3_mode_guard_register() {
     SyscallTableWindow ram{};
     EeState state{};
@@ -1447,6 +1560,13 @@ int main() {
         {"change thread priority rejects invalid",
          &test_change_thread_priority_rejects_invalid},
         {"thread services via dispatch", &test_thread_services_via_dispatch},
+        {"get osd config writes default",
+         &test_get_osd_config_param_writes_default},
+        {"osd config round trip preserves bits",
+         &test_osd_config_round_trip_preserves_bits},
+        {"osd config read-back probe", &test_osd_config_read_back_probe},
+        {"osd config refuses bad buffers", &test_osd_config_refuses_bad_buffers},
+        {"osd config via dispatch", &test_osd_config_via_dispatch},
         {"timer 3 mode guard register", &test_timer3_mode_guard_register},
         {"service table names", &test_service_table_reports_names},
         {"find address matching entry", &test_find_address_returns_matching_entry_address},
