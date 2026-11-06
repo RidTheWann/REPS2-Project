@@ -542,6 +542,90 @@ Unresolved:
   last one.
 - Whether the real kernel faults on the unmapped KUSEG reads this range implies.
 
+### EE kernel syscall table (resolved, ADR 0072)
+
+The unresolved questions above are answered by the guest routine itself and by
+public evidence:
+
+- The guest offsets are exactly service-number scaled: `-0x20C = -0x83*4` and
+  `-0x168 = -0x5A*4`. Subtracting the slot index from a found handler address
+  yields the base of a flat array of 32-bit handler pointers.
+- ps2sdk `ee/kernel/src/libosd_full.c` documents the same layout: "The address
+  is relative to the start of the syscall table, and is in units of 32-bit
+  pointers (4 bytes)", and its table comment names `0x80011F80` as "the start of
+  the syscall table" (`0x80011F80 + (-15358*4) = 0x80002F88`).
+- A ps2dev forum probe installs marker handlers for services `0xFE`/`0xFF`, scans
+  `0x80000000..0x80080000` in 4-byte steps, and computes the base as
+  `address - syscall_number * 4`. The same thread reports that the base varies
+  between BIOS versions, which is consistent with the guest recovering it at
+  runtime instead of hardcoding it.
+
+Consequence for HLE: `SetSyscall` must write the registered handler pointer into
+guest memory, not only into host state. REPS2 fixes the documented base
+`0x80011F80` (1 KiB for 256 entries), writes `handler` at `base + slot*4` after
+the existing validation, and refuses with `table_unwritable` if the slot cannot
+be written. Entries REPS2 does not service stay zero; no kernel handler address
+is fabricated.
+
+Open issues:
+
+- The HLE base is the documented ps2sdk value; a real BIOS may use another
+  address. Because the title recovers the base from its own handlers, the
+  recovery path is unaffected, but code that hardcodes a different BIOS base is
+  not modelled.
+- Direct guest writes to the table are visible in main RAM but are not yet
+  consulted by HLE dispatch; a title that patches an unregistered slot directly
+  needs a separate observed contract before REPS2 honors it.
+
+### Downhill Domination `InitAlarm` boundary (ADR 0073)
+
+Once the guest-visible syscall table exists, the `0x0025EF90` init completes:
+both FindAddress searches find the registered handlers at
+`0x80011F80 + 0x83*4` and `+ 0x5A*4`, compute the same base, and store it at
+`0x00282210`. The next stop moved from the former scan loop to
+`pc=0x0025F34C`, which is `lw $v1, 0($v0)` with `$v0 = 0x10001810` — the Timer 3
+mode register.
+
+The routine at `0x0025F330` is ps2sdk's `InitAlarm` (`ee/kernel/src/alarm.c`):
+
+- it applies the patch only when `(*T3_MODE) & 0x100 == 0` (compare interrupt
+  disabled);
+- it registers `kCopy` as service 0x5A, copies a 0x740-byte blob to
+  `0x80076000` and the 0x28-byte `eenull` to `0x00082000`, flushes the cache, and
+  registers 0x5B;
+- it then calls `setup(slot, GetEntryAddress(slot))` for 0xFC, 0xFE, 0xFD, 0xFF,
+  0x12C (`Intc12Handler`) and 0x08.
+
+The descriptor table at `0x00283160` matches that source exactly:
+`(0x5A, 0x0025F2E8)`, `(0x5B, 0x80076000)`, then the six slots above. Slot
+0x12C is beyond the 256 entries assumed in ADR 0067, which is why the host
+bound was raised to 512.
+
+`GetEntryAddress`'s arithmetic is pinned by ps2sdk `libosd.c`: its special slot
+`0xFFFFC402` documents `0x80011F80 + (-15358*4) = 0x80002F88`, so the call
+returns the slot address `base + number*4`, not the handler stored there.
+
+Modelling only the documented Timer 3 mode word (reset 0, writable mode bits
+retained, no counting or interrupts) and the 0x5B slot-address service lets the
+patch path proceed. The blob itself is copied at run time and is data in the
+ELF, so it was admitted with the frontend's explicit `--relocated-code`
+`0x80076000:0x002829F8:0x740` input (ADR 0074).
+
+With the blob translated, the probe executes the full patch:
+
+- the translated `0x5B` handler searches the six-entry `(number, handler)`
+  table embedded at `0x80076710` and returns 0xFC→`0x80076440`,
+  0xFE→`0x80076440`, 0xFD→`0x800762A0`, 0xFF→`0x800762A0`,
+  0x12C→`0x80076488`, 0x08→`0x800766C0`;
+- each result is written back through `SetSyscall` at the matching slot;
+- after another `FlushCache` and a third `CreateSema`, execution reaches
+  `CreateThread` (0x20) at `pc=0x0025A4E4` with `$a0=0x0093C7B0`,
+  `$a1=0x002A40F0`, `$a2=0x00000400`.
+
+`CreateThread` is not implemented, so the probe stops there as
+`unhandled_syscall`. The earlier scan-loop and Timer 3 stops are gone. This is
+real guest-path progress, not a visible boot stage.
+
 ## Provenance rules
 
 

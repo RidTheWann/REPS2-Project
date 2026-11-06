@@ -76,3 +76,6 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0069](0069-ee-guest-syscall-handlers.md) | EE guest syscall handlers invoked through SetSyscall | Accepted |
 | [0070](0070-section-permission-pointer-discovery.md) | Section-declared executable ranges drive pointer-table discovery | Accepted |
 | [0071](0071-syscall-sequence-trace.md) | Bounded EE syscall-boundary sequence trace | Accepted |
+| [0072](0072-guest-visible-ee-syscall-table.md) | Guest-visible EE syscall table written by SetSyscall | Accepted |
+| [0073](0073-ee-initalarm-kernel-patch-path.md) | EE InitAlarm kernel-patch path (`T3_MODE` guard and 0x5B) | Accepted |
+| [0074](0074-relocated-code-regions.md) | Relocated code regions for runtime-copied guest code | Accepted |

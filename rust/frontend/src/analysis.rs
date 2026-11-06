@@ -773,16 +773,55 @@ struct PreparedImage {
     roots: Vec<u32>,
 }
 
+/// A code image the guest copies into main RAM at run time.
+///
+/// Self-relocating drivers (for example ps2sdk's alarm patch blob) live in the
+/// ELF as data and are copied to an executable address before being called.
+/// Static analysis cannot infer that copy, so the caller supplies the
+/// destination address and the bytes already read from the input image. The
+/// destination becomes an authoritative root and an executable segment, but the
+/// initial RAM image is not changed: the guest's own copy remains observable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelocatedCodeRegion {
+    pub destination: u32,
+    pub bytes: Vec<u8>,
+}
+
+/// Appends each relocated region as an executable segment and an authoritative
+/// root. Extracted so synthetic tests can exercise the placement without an
+/// ELF wrapper.
+fn append_relocated_code(
+    segments: &mut Vec<LoadedSegment>,
+    entry_points: &mut Vec<EntryPoint>,
+    relocated: &[RelocatedCodeRegion],
+) {
+    for region in relocated {
+        segments.push(LoadedSegment {
+            virtual_address: region.destination,
+            flags: elf::PF_R | elf::PF_W | elf::PF_X,
+            file_size: region.bytes.len(),
+            bytes: region.bytes.clone(),
+        });
+        entry_points.push(EntryPoint {
+            address: region.destination,
+            labels: vec!["relocated".to_owned()],
+            is_elf_entry: false,
+        });
+    }
+}
+
 /// Materializes PT_LOAD segments and collects the authoritative entry points
 /// (the ELF entry and any `STT_FUNC` symbols that map to executable bytes).
 fn prepare(
     image: &Image,
     file_bytes: &[u8],
     limits: AnalysisLimits,
+    relocated: &[RelocatedCodeRegion],
 ) -> Result<PreparedImage, AnalysisError> {
-    let segments = elf::load_segments(file_bytes, image, limits.max_loaded_memory)
+    let mut segments = elf::load_segments(file_bytes, image, limits.max_loaded_memory)
         .map_err(|error| AnalysisError::Elf(error.to_string()))?;
-    let entry_points = collect_entry_points(image, &segments);
+    let mut entry_points = collect_entry_points(image, &segments);
+    append_relocated_code(&mut segments, &mut entry_points, relocated);
     let roots = entry_points
         .iter()
         .map(|entry| entry.address)
@@ -801,11 +840,22 @@ pub fn discover_elf(
     file_bytes: &[u8],
     limits: AnalysisLimits,
 ) -> Result<ControlFlowGraph, AnalysisError> {
+    discover_elf_with_relocated(image, file_bytes, limits, &[])
+}
+
+/// As [`discover_elf`], additionally treating each supplied relocated region as
+/// executable code at its destination address.
+pub fn discover_elf_with_relocated(
+    image: &Image,
+    file_bytes: &[u8],
+    limits: AnalysisLimits,
+    relocated: &[RelocatedCodeRegion],
+) -> Result<ControlFlowGraph, AnalysisError> {
     let PreparedImage {
         segments,
         entry_points,
         roots,
-    } = prepare(image, file_bytes, limits)?;
+    } = prepare(image, file_bytes, limits, relocated)?;
     discover_cfg(&segments, entry_points, &roots, limits)
 }
 
@@ -838,11 +888,22 @@ pub fn discover_elf_with_discovery(
     file_bytes: &[u8],
     limits: AnalysisLimits,
 ) -> Result<DiscoveryAnalysis, AnalysisError> {
+    discover_elf_with_discovery_and_relocated(image, file_bytes, limits, &[])
+}
+
+/// As [`discover_elf_with_discovery`], additionally treating each supplied
+/// relocated region as executable code at its destination address.
+pub fn discover_elf_with_discovery_and_relocated(
+    image: &Image,
+    file_bytes: &[u8],
+    limits: AnalysisLimits,
+    relocated: &[RelocatedCodeRegion],
+) -> Result<DiscoveryAnalysis, AnalysisError> {
     let PreparedImage {
         segments,
         mut entry_points,
         roots: authoritative,
-    } = prepare(image, file_bytes, limits)?;
+    } = prepare(image, file_bytes, limits, relocated)?;
     let discovery = discover_function_roots(&segments, &executable_section_ranges(image), limits);
     let authoritative_set: BTreeSet<u32> = authoritative.iter().copied().collect();
     let mut discovered_roots = Vec::new();
@@ -1707,6 +1768,36 @@ mod tests {
             labels: vec!["synthetic-entry".to_owned()],
             is_elf_entry: true,
         }
+    }
+
+    #[test]
+    fn relocated_region_becomes_an_executable_root() {
+        // addiu v0, zero, 1; jr ra; nop
+        let words = [0x2402_0001u32, 0x03E0_0008, 0x0000_0000];
+        let mut bytes = Vec::new();
+        for word in words {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let relocated = [RelocatedCodeRegion {
+            destination: 0x8000_2000,
+            bytes,
+        }];
+        let mut segments: Vec<LoadedSegment> = Vec::new();
+        let mut entries: Vec<EntryPoint> = Vec::new();
+        append_relocated_code(&mut segments, &mut entries, &relocated);
+        let roots = entries
+            .iter()
+            .map(|entry| entry.address)
+            .collect::<Vec<_>>();
+        let graph = discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
+            .expect("relocated code decodes");
+        let block = graph
+            .blocks
+            .get(&0x8000_2000)
+            .expect("relocated destination is a block");
+        // addiu is the single non-control instruction; `jr $ra` plus its `nop`
+        // delay slot form the block terminator.
+        assert_eq!(block.instructions.len(), 1);
     }
 
     #[test]

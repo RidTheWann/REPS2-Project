@@ -7,9 +7,17 @@ Updated: 2026-11-06
 Advance M4 real-title native execution toward a repeatable guest-visible boot stage.
 The EE HLE layer now supports the observed early boot calls:
 `SetupThread` (0x3C), `SetupHeap` (0x3D), `CreateSema` (0x40),
-`FlushCache` (0x64), `SetSyscall` (0x74, including translated guest
-handlers), and `FindAddress` (0x83). Unsupported calls remain explicit stops;
-no success is fabricated.
+`GetEntryAddress` (0x5B), `FlushCache` (0x64), `SetSyscall` (0x74,
+including translated guest handlers and the guest-visible 512-slot table at
+`0x80011F80`), and `FindAddress` (0x83). The documented Timer 3 mode word
+(`0x10001810`) is modelled without counting or interrupts, and the frontend can
+analyse runtime-copied code declared with `--relocated-code`. Unsupported calls
+remain explicit stops; no success is fabricated.
+
+With these changes Downhill Domination completes the ps2sdk `InitAlarm` kernel
+patch, executes the copied alarm blob at `0x80076000`, and stops at
+`CreateThread` (0x20) — the next unimplemented service. That is real
+guest-visible progress, not a visible boot stage.
 
 The frontend CFG now performs bounded, within-basic-block constant propagation
 for indirect `JR/JALR` source registers formed by `LUI`, `ORI`, `ADDIU`,
@@ -27,20 +35,37 @@ word-scan loop, not unresolved control flow.
 
 ## Verified repository state
 
-- Default branch: `main` at `f691db7` (PR #13 squash-merged on 2026-11-05).
-- PR #13 is **closed and merged**. It adds section-permission-driven function
-  and pointer discovery (ADR 0070) and the M4 evidence below.
-- Before PR #13, `main` was at `3409a10` (PR #4 squash-merge).
-- PR #4 is **closed and merged**; it contains the M4 documentation,
-  syscall-handler context preservation, indirect-target CFG analysis, and
-  regression tests.
-- PR #3 was **closed without a GitHub merge** after its documentation changes
-  were folded into PR #4. Do not describe PR #3 as independently merged.
+- Default branch: `main` at `026d43f` (PR #16 squash-merged on 2026-11-06).
+- PR #16 adds the bounded EE syscall-boundary sequence trace (ADR 0071).
+  PR #15 recorded the FindAddress wrapper call sites; PR #14 reconciled the
+  project state. PRs #12 and earlier are historical.
+- The change described in this document is on a feature branch, not yet merged.
+  Until it merges, `main` does not contain the syscall table, `GetEntryAddress`,
+  Timer 3 mode, or `--relocated-code` support.
 - `main` remains protected. Required checks are
   `Rust frontend (ubuntu-latest)`, `Rust frontend (windows-latest)`, and
   `Rust frontend (MSRV 1.88)`.
-- PR #13's final head passed all required checks on Ubuntu, Windows, and Rust
-  MSRV 1.88, plus the dashboard generator, before squash merge.
+
+## Delivered in this change (branch, unmerged)
+
+- `SetSyscall` (0x74) now publishes the validated handler pointer into the
+  guest-visible syscall table at `0x80011F80` (4-byte entries indexed by service
+  number), in addition to the host registration. The table covers 512 slots so
+  the documented extended services used by client kernel patches are accepted;
+  registration is refused if the computed slot is not writable (ADRs 0072 and
+  0073).
+- `GetEntryAddress` (0x5B) returns `0x80011F80 + number * 4` with 32-bit modular
+  arithmetic, matching ps2sdk's documented patch arithmetic (ADR 0073).
+- EE Timer 3 mode (`0x10001810`) is modelled as the documented 32-bit mode word:
+  reset 0, only the writable mode bits retained, no counting or interrupts
+  (ADR 0073).
+- `recompile-elf --relocated-code DEST:SOURCE:SIZE` admits runtime-copied guest
+  code as an authoritative CFG root; the initial RAM image is unchanged and the
+  manifest (version 3) records each region (ADR 0074).
+- `reps2_hle_syscall_codegen_smoke` grew from 31 to 35 cases; Rust unit tests
+  cover relocated-segment decoding and the manifest version bump.
+- The Downhill Domination probe now completes the ps2sdk `InitAlarm` patch and
+  stops at `CreateThread` (0x20) instead of budget-exhausting in a scan loop.
 
 ## Delivered in PR #13 (merged)
 
@@ -83,50 +108,49 @@ word-scan loop, not unresolved control flow.
 
 ### Downhill Domination (USA) — SCUS_971.77
 
-Current bounded probe (2026-11-06, after ADR 0070 section-aware pointer discovery):
+Current bounded probe (2026-11-06, branch at ADRs 0072–0074):
 
-- Input: `Downhill Domination (USA).iso`, kept outside Git. The boot ELF was
-  re-extracted with `reps2 extract-boot-elf`; the ISO was opened read-only and
-  was not modified.
-- Boot ELF SHA-256:
-  `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`
-  (identical to the recorded digest). Entry `0x0010A008`.
-- Build: REPS2 `f691db7` (PR #13); `x86_64-pc-windows-msvc`; generated
-  native module built with MSVC Release `/O2` as one dispatcher plus 8 parts.
-- Analysis (`analyze-elf --discover`): 364,352 code words and 49,148
-  data-pointer words scanned (0 data words before ADR 0070); 2,491 pointer
-  roots; 7,144 accepted roots; 59,922 basic blocks; 309,505 decoded
-  instructions; 784 unsupported blocks; 612 unresolved indirect jumps; 0
-  external targets; 9 skipped candidates and 24 skipped heuristic blocks.
-- Section permissions are applied symmetrically, so `.data` words are no longer
-  decoded as instructions. Compared with scanning them, unsupported blocks fell
-  from 1,874 to 784 and skipped heuristic blocks from 102 to 24, while
-  `0x0025EF38` is still discovered.
-- `0x0025EF38` is now reported as `function: 0x0025EF38 (discovered)` and is
-  translated. It is a frameless leaf routine held only in a handler-descriptor
-  table at `0x00282218` (`(0x83 → 0x0025EF38)`, `(0x5A → 0x0025EF00)`), so
-  neither `JAL` nor stack-prologue discovery could reach it.
-- HLE-on native probe, instruction budget 5,000,000: `status=3`
-  (`budget_exhausted`), `pc=0x0025EF5C`, `executed=5,000,000`, `syscalls=9`,
-  `hle_handled=6`, `sema_live=2`.
-- The former `unresolved_control_flow` stop at `0x0025EF38` is gone. Execution
-  enters the guest's own word-scan routine and the final 16-PC window is the
-  scan loop `0x0025EF50` → `0x0025EF54` → `0x0025EF5C`.
-- Observed arguments at the last FindAddress boundary: `$a0=0x00000004`,
-  `$a1=0x80080000`, `$a2=0x0025EF38`, so the loop walks roughly
-  0x2002_0000 words. The budget was deliberately not raised to hide it.
-- Syscall-sequence trace (ADR 0071) records nine boundaries: `0x3C` SetupThread,
-  `0x3D` SetupHeap, `0x64` FlushCache twice, `0x74` SetSyscall for `0x83` and
-  `0x5A`, then three `0x83` guest-handler dispatches at `0x0025EF7C` with
-  `$a0` = `0x80000000`, `0x80000000`, `0x00000004`.
-- This **disproves** a register-restoration defect: `$a0` survives handler entry
-  and return unchanged for the first two dispatches. The third matches call site
-  `0x0025F024` (`addiu $a0,$s3,4`) with `$s3 == 0`, so `4` is produced by guest
-  code. Only that call has a KUSEG start, and it is the one that exhausts the
-  budget.
-- No guest-visible boot stage was demonstrated.
+- Input: `Downhill Domination (USA).iso`, kept outside Git. Boot ELF extracted
+  with `reps2 extract-boot-elf`; ISO opened read-only, not modified. Boot ELF
+  SHA-256 `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`
+  (matches the recorded digest), entry `0x0010A008`.
+- Frontend rebuilt from the branch; generated probe built with MSVC Release
+  `/O2`, one dispatcher plus 8 parts, C++20.
+- Analysis:
+  `reps2 recompile-elf dd.elf dd.cpp --discover --tu-count 8 --native-build
+  --probe-budget 5000000 --hle-syscalls --relocated-code 80076000:2829F8:740`
+  reported 7,152 candidates, 7,145 accepted roots (7,144 ELF + 1 relocated),
+  59,927 basic blocks, 309,425 instructions, 715 unsupported stops, 255 guest
+  trap stops, 612 unresolved indirect targets, 0 external targets, and one
+  relocated region `0x80076000 <- 0x002829F8 (0x740 bytes)`.
+- Probe result: `status=14` (`unhandled_syscall`), `pc=0x0025A4E4`,
+  `executed=2,946,350`, `syscalls=28`, `hle_handled=17`,
+  `hle_number=0x20` (`CreateThread`), `hle_a0=0x0093C7B0`,
+  `hle_a1=0x002A40F0`, `hle_a2=0x00000400`, `hle_sp=0x0093C7B0`,
+  `sema_calls=3`, `sema_live=3`.
+- The sequence shows the full InitAlarm patch: `SetSyscall(0x5A, kCopy)`,
+  copies to `0x80076000` (0x740 bytes) and `0x00082000` (0x28 bytes),
+  `FlushCache` twice, `SetSyscall(0x5B, 0x80076000)`, then six
+  `GetEntryAddress` calls served by the translated blob handler, each followed
+  by `SetSyscall(slot, stub)`:
+  0xFC→`0x80076440`, 0xFE→`0x80076440`, 0xFD→`0x800762A0`,
+  0xFF→`0x800762A0`, 0x12C→`0x80076488`, 0x08→`0x800766C0`.
+  A further `FlushCache` and a third `CreateSema` precede the `CreateThread`
+  stop.
+- The translated blob contains its own six-entry `(number, handler)` table at
+  `0x80076710`; the observed returns match entries in that table, which is only
+  correct if the guest's `Copy` and the translated lookup share the same RAM
+  image.
+- No visible boot stage is demonstrated yet; the next required service is
+  `CreateThread` (0x20), which needs a thread control block and a scheduler.
 
-Previous bounded probe, before the indirect-target resolver (historical):
+Previous bounded probe (ADR 0070 baseline, historical):
+
+- 7,144 accepted roots, 59,922 blocks, 309,411 instructions; the probe stopped
+  as `unsupported_memory_access` at `pc=0x0025F34C` (Timer 3 mode read) after
+  completing the `0x0025EF90` handler-table recovery.
+
+Earlier bounded probe (before the syscall table, historical):
 
 - 28,300 blocks; 146,425 instructions; 314 unsupported stops; 165 syscall/break
   traps. Budget 5,000,000 yielded 2,757,047 executed guest instructions, seven
@@ -148,9 +172,13 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ### Evidence limits
 
-- The `0x0025EF38` boundary is resolved (ADR 0070): it is a discovered function
-  root now translated and executed. Budget exhaustion occurs at `pc=0x0025EF5C`
-  inside its own scan loop; that is not an unresolved-control-flow stop.
+- The former `0x0025EF5C` budget-exhaustion stop and the `0x0025F34C` Timer 3
+  read stop are both resolved on the branch. The current stop is
+  `unhandled_syscall` for `CreateThread` (0x20), which is a genuine
+  unimplemented service, not an unresolved control flow or memory gap.
+- The relocated alarm blob is developer-declared input (`--relocated-code`);
+  its translation is not automatic inference. Only the entry function reachable
+  from the declared root is translated.
 - A real-title re-probe requires the owner's legally obtained ISO/boot ELF in
   the local test environment. Game binaries and ISOs remain outside Git.
 - An independent reference-execution oracle for the complete runtime path is
@@ -159,22 +187,21 @@ Last recorded probe predates the FindAddress HLE implementation:
 
 ## Active backlog
 
-1. **Model the guest-visible side effect of `SetSyscall`**: the routine at
-   `0x0025EF90` registers `(0x83 → 0x0025EF38)` and `(0x5A → 0x0025EF00)`, then
-   searches low EE RAM for those handler values to recover object headers
-   (`$s3 - 0x20C`, `$s2 - 0x168`). Neither value exists in the searched 512 KiB
-   window, so both searches return `0` and the fallback scans from address `4`.
-   The kernel-side table address, capacity and entry layout must come from
-   evidence, never a guess, because the fixed offsets assume a specific object
-   layout.
-2. Decide whether the two `0x83` lookups should succeed. Both search only the
-   512 KiB window `[0x80000000, 0x80080000)` and return `0`; the guest then
-   continues on its not-found path. Modeling a kernel-populated lookup table
-   needs observed contract evidence, never a fabricated match.
-3. Re-run the Black probe with HLE enabled using its matching legal input
+1. **Implement `CreateThread` (0x20)**: the current stop. The observed call
+   passes `$a0=0x0093C7B0` (thread/parameter pointer), `$a1=0x002A40F0`
+   (entry), `$a2=0x00000400` (stack size) and `$a3=0x0029E580`. A faithful
+   implementation needs a thread control block, argument handling, a ready
+   queue and scheduler interaction. Do not return a fabricated successful id
+   without them.
+2. Extend relocated-code coverage only as execution reaches it: the alarm blob's
+   other functions (0x80076038 onward) and the `eenull` stub at `0x00082000`
+   are not yet translated; declare them when an observed call needs them.
+3. Decide whether HLE dispatch should honour direct guest writes to the
+   syscall-table slots. The table is real guest RAM, but dispatch currently
+   consults only host registrations; no observed title has patched a slot
+   directly yet.
+4. Re-run the Black probe with HLE enabled using its matching legal input
    digest; do not infer its progress from Downhill Domination.
-4. Trace the caller's use of FindAddress `$v0` and verify that the
-   not-found result is handled correctly by each title.
 5. Continue runtime work only from observed guest paths; do not implement
    unrelated PS2 devices or claim compatibility from synthetic fixtures.
 6. After one repeatable guest-visible boot stage, proceed to the next required
