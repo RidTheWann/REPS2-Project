@@ -140,9 +140,10 @@ struct EeSyscallRegistrationView {
 // This creates a dormant record only. No thread status, stack contents, argv
 // block, ready queue or scheduler state is created, and no guest memory is
 // written; StartThread (0x22) is the next required service and is not modelled.
-// Thread ids start at 1 because ps2sdk documents thread 0 as the idle thread.
-// The host record table is bounded (kEeMaxThreads); a full table is refused
-// rather than fabricating an id. See ADR 0075.
+// Thread 0 is the documented idle thread and id 1 is reserved for the running
+// boot thread (kEeMainThreadId), so created ids start at 2. The host record
+// table is bounded (kEeMaxThreads); a full table is refused rather than
+// fabricating an id. See ADR 0075.
 [[nodiscard]] inline Status hle_create_thread(EeState& state) noexcept {
     constexpr std::size_t kParameterWords = 9U;
     constexpr std::size_t kParameterBytes = kParameterWords * 4U;
@@ -223,7 +224,7 @@ struct EeSyscallRegistrationView {
         thread.attr = words[7];
         thread.option = words[8];
         ++state.hle.thread_count;
-        const auto id = static_cast<std::uint32_t>(index + 1U);
+        const auto id = static_cast<std::uint32_t>(kEeFirstCreatedThreadId + index);
         state.hle.last_thread_id = static_cast<std::int32_t>(id);
         state.gpr[kEeSyscallResultRegister].low = sign_extend_word(id);
         return Status::ok;

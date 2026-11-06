@@ -665,8 +665,30 @@ Observed result after servicing the call:
 - Sequence records:
   `0x0025A4E4:32:H:0x0093C7B0:0x002A40F0:0x00000400:0x0029E580:0x0025B0D0`
   (handled `CreateThread`), then
-  `0x0025A504:34:U:0x00000001:0x00761208:0x00000400:0x0029E580:0x00760000`
-  (unhandled `StartThread`, `$a0=1` = the returned id, `$a1` = argv).
+  `0x0025A504:34:U:0x00000002:0x00761208:0x00000400:0x0029E580:0x00760000`
+  (unhandled `StartThread`, `$a0=2` = the returned id, `$a1` = argv).
+
+Public behavioural references (retrieved 2026-11-06):
+
+- ps2sdk `ee/kernel/include/kernel.h` fixes the struct offsets (`status` 0x00,
+  `func` 0x04, `stack` 0x08, `stack_size` 0x0C, `gp_reg` 0x10,
+  `initial_priority` 0x14, `current_priority` 0x18, `attr` 0x1C,
+  `option` 0x20, documented "Do not use - officially documented to not work"),
+  `MAX_THREADS 256` with "Thread 0 is always the idle thread", and the status
+  encoding `THS_RUN 0x01`, `THS_READY 0x02`, `THS_WAIT 0x04`,
+  `THS_SUSPEND 0x08`, `THS_WAITSUSPEND 0x0C`, `THS_DORMANT 0x10`.
+- ps2sdk `ee/kernel/src/thread.c` leaves `ee_thread_t.status` unset, checks
+  `(topId = CreateThread(&thread)) < 0`, calls
+  `StartThread(topId, &topArg)` without testing the result, then
+  `ChangeThreadPriority(GetThreadId(), 1)`; its guard uses `priority < 128`.
+  The second call proves the running thread and the newly created thread must
+  have distinct ids.
+- ps2tek's kernel documentation states that boot "creates a thread with
+  priority 0 (main thread)" before guest code runs.
+- Open PS2 Loader patch notes record titles that hardcode the main thread id for
+  `WakeupThread`, so exact id values can matter to titles outside this probe;
+  REPS2 therefore keeps ids explicit and never derives them from an opaque
+  pointer.
 
 Open questions for the next increment:
 

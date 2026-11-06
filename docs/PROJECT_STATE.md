@@ -63,7 +63,7 @@ word-scan loop, not unresolved control flow.
   returns id 1, every invalid parameter class is refused, the table bound is
   enforced, and the generated dispatcher routes service 0x20.
 - The real-title probe now services `CreateThread` at `pc=0x0025A4E4` and stops
-  at `StartThread` (0x22) at `pc=0x0025A504` with `$a0=0x00000001` (the returned
+  at `StartThread` (0x22) at `pc=0x0025A504` with `$a0=0x00000002` (the returned
   id) and `$a1=0x00761208` (the argv block). This is one observed service
   further along the same guest path, not a thread-scheduling claim.
 
@@ -147,7 +147,7 @@ Current bounded probe (2026-11-06, branch at ADRs 0072–0075):
   relocated region `0x80076000 <- 0x002829F8 (0x740 bytes)`.
 - Probe result: `status=14` (`unhandled_syscall`), `pc=0x0025A504`,
   `executed=2,946,363`, `syscalls=29`, `hle_handled=18`,
-  `hle_number=0x22` (`StartThread`), `hle_a0=0x00000001`,
+  `hle_number=0x22` (`StartThread`), `hle_a0=0x00000002`,
   `hle_a1=0x00761208`, `hle_a2=0x00000400`, `hle_sp=0x0093C7B0`,
   `sema_calls=3`, `sema_live=3`.
 - The sequence shows the full InitAlarm patch: `SetSyscall(0x5A, kCopy)`,
@@ -164,8 +164,8 @@ Current bounded probe (2026-11-06, branch at ADRs 0072–0075):
   `0x0025A4E4:32:H:0x0093C7B0:0x002A40F0:0x00000400:0x0029E580:0x0025B0D0`.
   The guest stores the returned id and immediately calls `StartThread` (0x22),
   recorded as
-  `0x0025A504:34:U:0x00000001:0x00761208:0x00000400:0x0029E580:0x00760000`:
-  `$a0=1` is the id REPS2 returned and `$a1=0x00761208` is the argv block.
+  `0x0025A504:34:U:0x00000002:0x00761208:0x00000400:0x0029E580:0x00760000`:
+  `$a0=2` is the id REPS2 returned and `$a1=0x00761208` is the argv block.
 - The translated blob contains its own six-entry `(number, handler)` table at
   `0x80076710`; the observed returns match entries in that table, which is only
   correct if the guest's `Copy` and the translated lookup share the same RAM

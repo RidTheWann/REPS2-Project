@@ -46,8 +46,14 @@ thread context switching exists in the runtime.
    resolve, or a priority outside `0..127` is refused with `-1`, and nothing is
    allocated. The reason is recorded for diagnostics.
 2. Allocate the lowest free record in a bounded host table and return
-   `index + 1`, so ids start at 1 and never collide with the documented idle
-   thread 0. A full table is refused with `-1` rather than fabricating an id.
+   `kEeFirstCreatedThreadId + index` = `2 + index`. Thread 0 is the documented
+   idle thread, and id 1 is reserved for the guest's primordial thread
+   (`kEeMainThreadId`): the kernel creates the main thread at boot, and ps2sdk's
+   thread example lowers the *main* thread's priority with
+   `ChangeThreadPriority(GetThreadId(), 1)` immediately after starting a new
+   one, so the two handles must differ. Hardware numbering is not independently
+   verified; this is a host id-space decision recorded as such. A full table is
+   refused with `-1` rather than fabricating an id.
 3. Record `func`, `stack`, `stack_size`, `gp`, initial priority, `attr` and
    `option`. Do not write guest memory: the parameter block is input only, and
    the guest's `status` word is never read or rewritten.
@@ -69,16 +75,16 @@ thread context switching exists in the runtime.
 
 ## Verification
 
-- `reps2_hle_syscall_codegen_smoke` grew to 39 cases: a valid call returns id 1
-  and records the fields while leaving the uninitialized status word untouched;
-  each invalid parameter class is refused with `-1` and allocates nothing; the
-  table bound returns ids 1..16 and then `table_full`; the generated dispatcher
-  routes service 0x20 to the handler.
+- `reps2_hle_syscall_codegen_smoke` grew to 39 cases: a valid call returns
+  `kEeFirstCreatedThreadId` (2) and records the fields while leaving the
+  uninitialized status word untouched; each invalid parameter class is refused
+  with `-1` and allocates nothing; the table bound returns ids 2..17 and then
+  `table_full`; the generated dispatcher routes service 0x20 to the handler.
 - Real-title probe (2026-11-06, boot ELF SHA-256
   `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`):
   `status=14` (`unhandled_syscall`), `executed=2,946,363`, `syscalls=29`,
   `hle_handled=18`. `CreateThread` is handled at `pc=0x0025A4E4` and the guest
-  continues to `StartThread` (0x22) at `pc=0x0025A504` with `$a0=0x00000001`
+  continues to `StartThread` (0x22) at `pc=0x0025A504` with `$a0=0x00000002`
   (the returned id) and `$a1=0x00761208` (the argv block). The next stop is
   exactly one service beyond the previous boundary.
 - Real-title evidence is recorded in `docs/PROJECT_STATE.md` and

@@ -96,6 +96,16 @@ inline constexpr std::size_t kEeMaxSemaphores = 256;
 // fabricating an id.
 inline constexpr std::size_t kEeMaxThreads = 16;
 
+/// Id reserved for the guest's primordial thread. The kernel creates the main
+/// thread at boot before any user thread, and ps2sdk's thread example lowers the
+/// *main* thread's priority with `ChangeThreadPriority(GetThreadId(), 1)` after
+/// starting a new one, so the two handles must differ. Thread 0 is the
+/// documented idle thread. Exact hardware numbering is not independently
+/// verified; REPS2 reserves 1 for the running boot thread and allocates created
+/// ids from 2.
+inline constexpr std::uint32_t kEeMainThreadId = 1U;
+inline constexpr std::uint32_t kEeFirstCreatedThreadId = 2U;
+
 /// Why CreateThread (0x20) returned the failure code instead of an id.
 enum class EeThreadRejection : std::uint8_t {
     none,

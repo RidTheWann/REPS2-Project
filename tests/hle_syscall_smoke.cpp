@@ -663,8 +663,9 @@ int test_create_thread_returns_dormant_id() {
     state.gpr[4].low = kParameters;
     if (reps2::runtime::hle_create_thread(state) != Status::ok) return 202;
     if (state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::none) return 203;
-    if (state.hle.last_thread_id != 1 || state.hle.thread_count != 1U) return 204;
-    if (state.gpr[2].low != 1U) return 205;
+    if (state.hle.last_thread_id != reps2::runtime::kEeFirstCreatedThreadId
+        || state.hle.thread_count != 1U) return 204;
+    if (state.gpr[2].low != reps2::runtime::kEeFirstCreatedThreadId) return 205;
     const auto& thread = state.hle.threads[0];
     if (!thread.in_use || thread.function != 0xE600U || thread.stack != 0x800U
         || thread.stack_size != 0x100U || thread.gp != 0xE700U
@@ -725,9 +726,10 @@ int test_create_thread_table_is_bounded() {
     store_thread_parameters(
         ram, kParameters, 0U, 0xE600U, 0x800U, 0x100U, 0xE700U, 1U);
     state.gpr[4].low = kParameters;
-    for (std::uint32_t index = 1; index <= reps2::runtime::kEeMaxThreads; ++index) {
+    for (std::uint32_t offset = 0; offset < reps2::runtime::kEeMaxThreads; ++offset) {
+        const std::uint32_t expected = reps2::runtime::kEeFirstCreatedThreadId + offset;
         if (reps2::runtime::hle_create_thread(state) != Status::ok
-            || state.gpr[2].low != index) return 217;
+            || state.gpr[2].low != expected) return 217;
     }
     if (reps2::runtime::hle_create_thread(state) != Status::ok
         || state.hle.last_thread_rejection != reps2::runtime::EeThreadRejection::table_full
@@ -749,7 +751,8 @@ int test_create_thread_via_dispatch() {
     state.gpr[4].low = kParameters;
     state.gpr[31].low = kUnreachableReturnPc;
     if (reps2::generated::execute_cfg(state, 32U) != Status::external_control_flow
-        || state.hle.thread_count != 1U || state.hle.last_thread_id != 1) return 219;
+        || state.hle.thread_count != 1U
+        || state.hle.last_thread_id != reps2::runtime::kEeFirstCreatedThreadId) return 219;
     return 0;
 }
 
