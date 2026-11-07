@@ -57,6 +57,81 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/cargo-target/release/reps2 version
 
+      - name: Developer diagnostics smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $logRoot = Join-Path $env:RUNNER_TEMP 'reps2-dev-diagnostics'
+          $successRoot = Join-Path $logRoot 'success'
+          $failureRoot = Join-Path $logRoot 'failure'
+          & .\build\cargo-target\release\reps2.exe --dev --log-dir $successRoot version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sessions = @(Get-ChildItem -LiteralPath $successRoot -Directory)
+          if ($sessions.Count -ne 1) { throw "Expected one successful diagnostics session, found $($sessions.Count)" }
+          foreach ($name in @('session.log', 'events.jsonl', 'session.json')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $sessions[0].FullName $name) -PathType Leaf)) {
+              throw "Missing diagnostics artifact: $name"
+            }
+          }
+          $events = Get-Content -LiteralPath (Join-Path $sessions[0].FullName 'events.jsonl') -Raw
+          if ($events -notmatch '"event":"session.finished"') { throw 'Missing terminal session event' }
+          $manifest = Get-Content -LiteralPath (Join-Path $sessions[0].FullName 'session.json') -Raw | ConvertFrom-Json
+          if ($manifest.outcome -ne 'succeeded') { throw "Unexpected session outcome: $($manifest.outcome)" }
+          $eventRecords = @(Get-Content -LiteralPath (Join-Path $sessions[0].FullName 'events.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+          if ($eventRecords.Count -lt 2) { throw 'Expected session start and finish event records' }
+          if ($eventRecords[-1].event -ne 'session.finished') { throw 'Last event is not the terminal session event' }
+
+          & .\build\cargo-target\release\reps2.exe --log-dir $failureRoot invalid-command
+          if ($LASTEXITCODE -ne 1) { throw "Expected invalid command exit code 1, received $LASTEXITCODE" }
+          $failedSessions = @(Get-ChildItem -LiteralPath $failureRoot -Directory)
+          if ($failedSessions.Count -ne 1) { throw "Expected one failed diagnostics session, found $($failedSessions.Count)" }
+          $failedManifest = Get-Content -LiteralPath (Join-Path $failedSessions[0].FullName 'session.json') -Raw | ConvertFrom-Json
+          if ($failedManifest.outcome -ne 'failed') { throw "Unexpected failed-session outcome: $($failedManifest.outcome)" }
+          $failedEvents = @(Get-Content -LiteralPath (Join-Path $failedSessions[0].FullName 'events.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+          if ($failedEvents[-1].event -ne 'session.finished' -or $failedEvents[-1].severity -ne 'error') {
+            throw 'Failed session does not end with an error event'
+          }
+          if ($failedEvents[-1].context.error -ne 'invalid command-line arguments') {
+            throw 'Failed session did not preserve the command error'
+          }
+          exit 0
+
+      - name: Developer diagnostics smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          log_root="$RUNNER_TEMP/reps2-dev-diagnostics"
+          success_root="$log_root/success"
+          failure_root="$log_root/failure"
+          ./build/cargo-target/release/reps2 --dev --log-dir "$success_root" version
+          session_dir="$(find "$success_root" -mindepth 1 -maxdepth 1 -type d -name 'session-*' -print -quit)"
+          test -n "$session_dir"
+          test -s "$session_dir/session.log"
+          test -s "$session_dir/events.jsonl"
+          test -s "$session_dir/session.json"
+          grep -q '"event":"session.finished"' "$session_dir/events.jsonl"
+          grep -q '"outcome": "succeeded"' "$session_dir/session.json"
+          python -c 'import json, pathlib, sys; p=pathlib.Path(sys.argv[1]); data=json.loads(p.read_text()); assert data["outcome"] == "succeeded"' "$session_dir/session.json"
+          python -c 'import json, pathlib, sys; rows=[json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]; assert len(rows) >= 2 and rows[-1]["event"] == "session.finished"; assert rows[-1]["sequence"] == len(rows)' "$session_dir/events.jsonl"
+
+          set +e
+          ./build/cargo-target/release/reps2 --log-dir "$failure_root" invalid-command >/dev/null 2>&1
+          failure_status=$?
+          set -e
+          test "$failure_status" -eq 1
+          failed_session_dir="$(find "$failure_root" -mindepth 1 -maxdepth 1 -type d -name 'session-*' -print -quit)"
+          test -n "$failed_session_dir"
+          python -c 'import json, pathlib, sys; p=pathlib.Path(sys.argv[1]); data=json.loads(p.read_text()); assert data["outcome"] == "failed"' "$failed_session_dir/session.json"
+          python -c 'import json, pathlib, sys; rows=[json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]; final=rows[-1]; assert final["event"] == "session.finished" and final["severity"] == "error"; assert final["context"]["error"] == "invalid command-line arguments"' "$failed_session_dir/events.jsonl"
+
+      - name: Upload developer diagnostics smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reps2-developer-diagnostics-${{ runner.os }}
+          path: ${{ runner.temp }}/reps2-dev-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
   msrv:
     name: Rust frontend (MSRV 1.88)
     runs-on: ubuntu-latest

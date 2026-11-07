@@ -44,6 +44,12 @@ A narrow C ABI or CXX bridge may be introduced later only when a measured use ca
 
 CMake orchestrates the build, Cargo builds/tests the Rust frontend, and CMake's C++20 toolchain compiles generated code and runtime components. Corrosion is available for importing Rust executables or libraries into CMake; it is not required merely to invoke a standalone Rust frontend.
 
+## Developer diagnostics
+
+The developer CLI can capture a host-side command session with --dev or an explicit --log-dir. The initial diagnostics contract is session-scoped and versioned: a readable session.log, structured events.jsonl, and a session.json outcome manifest. Each event carries a session ID, sequence, wall-clock timestamp, elapsed time, severity, category, subsystem, event name, message, and string context.
+
+This first layer records frontend orchestration and command outcomes; it is not evidence of guest execution or device fidelity. Runtime events must be emitted at coarse subsystem boundaries and guest tracing must use bounded buffers, filters, or sampling. Do not add per-instruction file I/O or a per-instruction Rust/C++ FFI bridge for diagnostics. Diagnostic artifacts must preserve explicit unsupported/failure outcomes rather than converting them into apparent success.
+
 ## Pipeline
 
     Owned disc image (local only)

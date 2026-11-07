@@ -1,9 +1,10 @@
 # REPS2 command-line reference
 
-The CLI is the developer and automation interface. This reference was moved out of the README; the text is unchanged apart from headings and paragraph breaks.
+The CLI is the developer and automation interface. This reference covers the command surface and session-scoped developer diagnostics.
 
 ## Commands
 
+    reps2 [--dev] [--log-dir <directory>] <command> [command options]
     reps2 version
     reps2 disc-info <disc-image.iso>
     reps2 add-game <disc-image.iso> [--library <directory>]
@@ -21,6 +22,24 @@ Example:
     reps2 recompile-elf "D:\List Games\some-owned-game\SLUS_123.45" build\game.cpp
     reps2 decode 0x2485FFFC 0x00100000
     reps2 compile-words output.cpp 0x00100000 0x24080005 0x24090007 0x01095021
+
+## Developer diagnostics
+
+Global developer options appear before the command:
+
+    reps2 --dev version
+    reps2 --dev --log-dir "D:\REPS2-Diagnostics" add-game "D:\List Games\owned-game.iso"
+    reps2 --log-dir .\diagnostics disc-info "D:\List Games\owned-game.iso"
+
+--dev enables session-scoped diagnostics in the per-user diagnostics directory. --log-dir selects an explicit root and also enables capture without requiring --dev. The default root is %LOCALAPPDATA%\REPS2\Logs on Windows, ~/Library/Logs/REPS2 on macOS, and $XDG_STATE_HOME/reps2/logs or ~/.local/state/reps2/logs on Linux. REPS2_LOG_DIR may override the default root.
+
+Each command creates a unique session directory containing:
+
+- session.log: one-line human-readable host-side events.
+- events.jsonl: versioned structured events with a session identifier, monotonically increasing sequence, Unix timestamp, elapsed milliseconds, severity, category, subsystem, event name, message, and string-valued context.
+- session.json: session metadata and final outcome (running, succeeded, or failed).
+
+The first slice records the frontend command/session lifecycle and final command errors. It does not yet trace every guest instruction or claim that C++ device/runtime events are captured. Runtime tracing will be added as a separate bounded facility so diagnostics cannot turn into per-instruction disk I/O. Error messages can contain local file paths; review diagnostic files before sharing them publicly.
 
 ## add-game
 

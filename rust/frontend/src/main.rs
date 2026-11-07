@@ -13,6 +13,7 @@ use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::coverage;
+use reps2_frontend::diagnostics;
 use reps2_frontend::digest;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
@@ -1937,6 +1938,7 @@ fn usage() {
     println!("REPS2 - PlayStation 2 static recompilation frontend");
     println!();
     println!("Usage:");
+    println!("  reps2 [--dev] [--log-dir <directory>] <command> [command options]");
     println!("  reps2 version");
     println!("  reps2 disc-info <disc-image.iso>");
     println!("  reps2 add-game <disc-image.iso> [--library <directory>]");
@@ -1954,6 +1956,13 @@ fn usage() {
         "  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls]"
     );
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
+    println!();
+    println!("Global developer options must appear before the command:");
+    println!("  --dev                 enable a session-scoped developer diagnostics capture");
+    println!(
+        "  --log-dir <directory> write diagnostics under an explicit directory (also enables capture)"
+    );
+    println!("A session contains session.log, events.jsonl, and session.json.");
     println!();
     println!(
         "add-game imports one ISO into the default per-user REPS2 library; --library overrides the location."
@@ -1999,8 +2008,7 @@ fn usage() {
     );
 }
 
-fn run() -> Result<(), String> {
-    let arguments: Vec<String> = env::args().collect();
+fn run_command(arguments: &[String]) -> Result<(), String> {
     match arguments.get(1).map(String::as_str) {
         Some("version") if arguments.len() == 2 => {
             println!(
@@ -2041,10 +2049,100 @@ fn run() -> Result<(), String> {
             usage();
             Ok(())
         }
+        Some("help") if arguments.len() == 2 => {
+            usage();
+            Ok(())
+        }
         _ => {
             usage();
             Err("invalid command-line arguments".to_owned())
         }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct GlobalOptions {
+    developer_mode: bool,
+    log_dir: Option<PathBuf>,
+}
+
+fn parse_global_options(arguments: &[String]) -> Result<(GlobalOptions, Vec<String>), String> {
+    let mut options = GlobalOptions::default();
+    let mut filtered = Vec::with_capacity(arguments.len());
+    if let Some(program) = arguments.first() {
+        filtered.push(program.clone());
+    }
+
+    let mut index = 1;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--dev" => {
+                options.developer_mode = true;
+                index += 1;
+            }
+            "--log-dir" => {
+                if options.log_dir.is_some() {
+                    return Err("--log-dir may be supplied only once".to_owned());
+                }
+                let value = arguments
+                    .get(index + 1)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "--log-dir requires a directory path".to_owned())?;
+                options.log_dir = Some(PathBuf::from(value));
+                index += 2;
+            }
+            _ => {
+                filtered.extend_from_slice(&arguments[index..]);
+                break;
+            }
+        }
+    }
+
+    Ok((options, filtered))
+}
+
+fn run() -> Result<(), String> {
+    let raw_arguments: Vec<String> = env::args().collect();
+    let (options, arguments) = parse_global_options(&raw_arguments)?;
+    if !options.developer_mode && options.log_dir.is_none() {
+        return run_command(&arguments);
+    }
+
+    let command = arguments.get(1).map(String::as_str).unwrap_or("help");
+    let log_root = match options.log_dir {
+        Some(path) => path,
+        None => diagnostics::default_log_root()
+            .map_err(|error| format!("cannot resolve the REPS2 diagnostics directory: {error}"))?,
+    };
+    let mut session = diagnostics::SessionLogger::start(
+        &log_root,
+        command,
+        reps2_frontend::VERSION,
+        env::consts::OS,
+    )
+    .map_err(|error| format!("cannot start developer diagnostics: {error}"))?;
+
+    println!("Diagnostics session: {}", session.directory().display());
+    if options.developer_mode {
+        println!("Developer diagnostics: enabled");
+    }
+
+    let result = run_command(&arguments);
+    let (outcome, error_text) = match &result {
+        Ok(()) => ("succeeded", None),
+        Err(error) => ("failed", Some(error.as_str())),
+    };
+    let finish_result = session.finish(outcome, error_text);
+
+    match (result, finish_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(command_error), Ok(())) => Err(command_error),
+        (Ok(()), Err(log_error)) => Err(format!(
+            "command completed, but diagnostics could not be finalized: {log_error}"
+        )),
+        (Err(command_error), Err(log_error)) => Err(format!(
+            "{command_error}; additionally, diagnostics could not be finalized: {log_error}"
+        )),
     }
 }
 
@@ -2235,6 +2333,41 @@ mod tests {
         assert!(parse_recompile_options(&["--tu-count".to_owned(), "many".to_owned()]).is_err());
         assert!(parse_recompile_options(&["--unknown".to_owned()]).is_err());
         assert!(parse_analyze_options(&["--unknown".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn parses_global_developer_options_before_the_command() {
+        let arguments = [
+            "reps2".to_owned(),
+            "--dev".to_owned(),
+            "--log-dir".to_owned(),
+            "diagnostics".to_owned(),
+            "version".to_owned(),
+        ];
+        let (options, filtered) = parse_global_options(&arguments).expect("valid global options");
+        assert_eq!(
+            options,
+            GlobalOptions {
+                developer_mode: true,
+                log_dir: Some(PathBuf::from("diagnostics")),
+            }
+        );
+        assert_eq!(filtered, ["reps2", "version"]);
+    }
+
+    #[test]
+    fn rejects_missing_or_repeated_diagnostics_directory_options() {
+        assert!(parse_global_options(&["reps2".to_owned(), "--log-dir".to_owned()]).is_err());
+        assert!(
+            parse_global_options(&[
+                "reps2".to_owned(),
+                "--log-dir".to_owned(),
+                "one".to_owned(),
+                "--log-dir".to_owned(),
+                "two".to_owned(),
+            ])
+            .is_err()
+        );
     }
 
     #[test]
