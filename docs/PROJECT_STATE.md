@@ -13,16 +13,16 @@ The architectural split remains:
 
 The product goal remains broader than one title and broader than an ELF-launch utility. Importing an ISO, extracting BOOT.ELF, translating functions, building C++ or passing synthetic tests does not establish that a PS2 game boots or is playable.
 
-## Repository baseline and handoff branch
+## Verified repository state
 
-At the start of PR #22, default branch `main` was at `9653ad128a6c6a5187f038b6e927bee66fe0febe` (`9653ad1`), with PRs #17–#21 merged. The current change set is isolated in PR #22:
+- Default branch: `main` at `4d1420588fafdc9e85793036280108caf08a36f9` (PR #22 squash-merged).
+- PR #22: https://github.com/RidTheWann/REPS2-Project/pull/22 — merged on 2026-11-07.
+- The merge adds the guarded EE DMAC D_STAT contract, generated-code CTest coverage, ADR 0079, updated research/roadmap, the REA workflow, and root agent instructions.
+- No open PRs or issues were returned by the repository search at this snapshot.
+- PR #22 CI completed successfully on the merged head: Rust frontend Ubuntu, Windows, MSRV 1.88, and progress dashboard. Ubuntu and Windows both passed CMake configure/build and CTest; Windows also passed the `reps2.exe version` CLI smoke test. The PR's generated D_STAT test is included in that CTest run.
+- The optional Codex PR review could not execute because the repository reached the review usage limit. It did not produce a code review result; CI validation is separate from that optional review.
 
-- PR: https://github.com/RidTheWann/REPS2-Project/pull/22
-- Branch: `feat/dmac-dstat-contract-rea-handoff`
-- Scope: bounded EE DMAC D_STAT register contract, generated-code regression test, ADR/research/roadmap update, REA workflow, and repository agent instructions.
-- This state note is part of the same PR branch. CI must pass before the PR is merged.
-
-Do not use the baseline SHA above as a claim about a later `main` after PR #22 is merged. Re-read the actual GitHub default-branch head when starting a new task.
+Re-read the actual GitHub default-branch head and live PR/issue state for every later task rather than treating this timestamped snapshot as permanent.
 
 ## M4 real-title evidence
 
@@ -52,13 +52,13 @@ The merged M4 path includes:
 
 See `docs/ROADMAP.md`, `docs/CAPABILITIES.md`, `docs/COMPATIBILITY_MATRIX.md`, and the relevant ADRs for exact scope and validation.
 
-## PR #22 implementation boundary
+## Integrated D_STAT register contract
 
-PR #22 adds `runtime/include/reps2/runtime/ee_dmac.hpp` as the owner for D_STAT state and W1C/mask-toggle behavior. A default register state is unknown. Synthetic tests may explicitly seed a known state to verify the documented register transformations, but production runtime does not assume a hardware reset value and does not synthesize DMA events.
+PR #22 is merged. `runtime/include/reps2/runtime/ee_dmac.hpp` owns D_STAT state and the bounded W1C/mask-toggle behavior. A default register state is unknown. Synthetic tests explicitly seed a known value to verify documented register transformations, but production runtime does not assume a hardware reset value and does not synthesize DMA events.
 
-The PR adds a generated-code smoke test for the currently observed `lui/ori/lw/andi/sw` access sequence. The new test is not a real-title probe and does not prove the SIF0 pending bit is present. Unknown D_STAT reads/writes and writes to the unmodelled status fields remain explicit failures. The follow-up M4 requirement is a verified SIF0 event producer and its CHCR/IOP interaction, not merely a register accessor.
+A generated-code CTest fixture exercises the observed `lui/ori/lw/andi/sw` access sequence. It verifies fail-closed behavior for unknown state, SIF0 bit-5 acknowledgement for a seeded synthetic state, mask-toggle semantics, and no partial mutation for unmodelled status writes. It is not a real-title probe and does not prove that the SIF0 pending bit is present during the target trace.
 
-No local Windows/MSVC execution was available to this GitHub-only handoff. Use PR #22 CI to validate Ubuntu, Windows, MSRV and dashboard checks before merge.
+PR #22 CI passed on Ubuntu and Windows, including CMake build, CTest, and platform CLI smoke tests, plus the MSRV and progress-dashboard jobs. The follow-up M4 requirement remains a verified SIF0 event producer and its CHCR/IOP interaction, not merely a register accessor.
 
 ## REA investigation handoff
 
