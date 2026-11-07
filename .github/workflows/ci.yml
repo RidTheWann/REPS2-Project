@@ -95,12 +95,12 @@ jobs:
             throw 'Failed session did not preserve the command error'
           }
 
-          $sessionList = & .\\build\\cargo-target\\release\\reps2.exe --log-dir $failureRoot dev sessions --limit 5 | ConvertFrom-Json
+          $sessionList = & .\build\\cargo-target\\release\\reps2.exe --log-dir $failureRoot dev sessions --limit 5 | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw "dev sessions failed with exit code $LASTEXITCODE" }
           if ($sessionList.kind -ne 'reps2.developer.session_list' -or $sessionList.count -ne 1) {
             throw 'dev sessions did not return the expected JSON session list'
           }
-          $inspection = & .\\build\\cargo-target\\release\\reps2.exe --log-dir $failureRoot dev inspect latest | ConvertFrom-Json
+          $inspection = & .\build\\cargo-target\\release\\reps2.exe --log-dir $failureRoot dev inspect latest | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw "dev inspect failed with exit code $LASTEXITCODE" }
           if ($inspection.kind -ne 'reps2.developer.session_inspection' -or -not $inspection.complete) {
             throw 'dev inspect did not return a complete session inspection'
@@ -109,6 +109,12 @@ jobs:
           if ($commandFailure.Count -ne 1) { throw "Expected one command.failed diagnostic, found $($commandFailure.Count)" }
           if ($commandFailure[0].subsystem -ne 'cli' -or $commandFailure[0].context.error_code -ne 'REPS2_COMMAND_FAILED') {
             throw 'Command failure is missing subsystem attribution or stable error code'
+          }
+          $missingReport = & .\build\cargo-target\release\reps2.exe --log-dir $failureRoot dev inspect session-9999999999999-1-0 2>$null
+          $missingStatus = $LASTEXITCODE
+          $missingJson = $missingReport | ConvertFrom-Json
+          if ($missingStatus -ne 1 -or $missingJson.error.code -ne 'REPS2_DEV_SESSION_INSPECTION_FAILED') {
+            throw 'Missing-session inspection did not return a machine-readable error and non-zero exit code'
           }
           exit 0
 
@@ -144,6 +150,12 @@ jobs:
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["kind"]=="reps2.developer.session_list" and d["count"]==1' "$session_list_json"
           session_inspection_json="$(./build/cargo-target/release/reps2 --log-dir "$failure_root" dev inspect latest)"
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["kind"]=="reps2.developer.session_inspection" and d["complete"]; f=[e for e in d["diagnostics"] if e["event"]=="command.failed"]; assert len(f)==1 and f[0]["subsystem"]=="cli" and f[0]["context"]["error_code"]=="REPS2_COMMAND_FAILED"; assert d["event_count"]>=4' "$session_inspection_json"
+          set +e
+          missing_report="$(./build/cargo-target/release/reps2 --log-dir "$failure_root" dev inspect session-9999999999999-1-0 2>/dev/null)"
+          missing_status=$?
+          set -e
+          test "$missing_status" -eq 1
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["kind"]=="reps2.developer.error" and d["status"]=="error" and d["error"]["code"]=="REPS2_DEV_SESSION_INSPECTION_FAILED"' "$missing_report"
 
       - name: Upload developer diagnostics smoke artifact
         if: always()
