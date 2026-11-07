@@ -813,7 +813,8 @@ mod tests {
         assert!(project
             .cmake_lists
             .contains("compiler_launcher_config_sha256"));
-        assert!(!project.cmake_lists.contains("CMAKE_CXX_COMPILER_ARG1}"));
+        assert!(!project.cmake_lists.contains("compiler_arg1 \""));
+        assert!(!project.cmake_lists.contains("compiler_launcher \""));
     }
 
     #[test]
