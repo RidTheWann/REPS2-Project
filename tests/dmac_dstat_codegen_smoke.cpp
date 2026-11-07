@@ -16,8 +16,11 @@ constexpr std::uint32_t kDStat = reps2::runtime::kEeDmacDStatAddress;
 
 int test_unknown_state_fails_closed() {
     EeState state{};
-    std::uint32_t value = 0xA5A5'5A5AU;
+    state.gpr[3].low = 0xA5A5'5A5AU;
+    if (reps2::generated::execute(state) != Status::unsupported_memory_access) return 1;
+    if (state.pc != 0x0000'F008U || state.gpr[3].low != 0xA5A5'5A5AU) return 2;
 
+    std::uint32_t value = 0xA5A5'5A5AU;
     if (reps2::runtime::load_u32(state.memory, kDStat, value)
         != Status::unsupported_memory_access) return 1;
     if (value != 0xA5A5'5A5AU) return 2;
@@ -80,9 +83,10 @@ int test_channel_ack_and_mask_toggle_are_distinct() {
     if ((state.memory.dmac.d_stat & (1U << 29U)) == 0U) return 30;
 
     // Status flags outside channel bits 0..9 are preserved by this bounded model.
-    if (reps2::runtime::store_u32(state.memory, kDStat, 1U << 14U) != Status::ok)
-        return 31;
-    if ((state.memory.dmac.d_stat & (1U << 14U)) != 0U) return 32;
+    const auto before_unsupported_status_write = state.memory.dmac.d_stat;
+    if (reps2::runtime::store_u32(state.memory, kDStat, 1U << 14U)
+        != Status::unsupported_memory_access) return 31;
+    if (state.memory.dmac.d_stat != before_unsupported_status_write) return 32;
     return 0;
 }
 
