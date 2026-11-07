@@ -57,6 +57,47 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/cargo-target/release/reps2 version
 
+      - name: Developer diagnostics smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $logRoot = Join-Path $env:RUNNER_TEMP 'reps2-dev-diagnostics'
+          & .\build\cargo-target\release\reps2.exe --dev --log-dir $logRoot version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sessions = @(Get-ChildItem -LiteralPath $logRoot -Directory)
+          if ($sessions.Count -ne 1) { throw "Expected one diagnostics session, found $($sessions.Count)" }
+          foreach ($name in @('session.log', 'events.jsonl', 'session.json')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $sessions[0].FullName $name) -PathType Leaf)) {
+              throw "Missing diagnostics artifact: $name"
+            }
+          }
+          $events = Get-Content -LiteralPath (Join-Path $sessions[0].FullName 'events.jsonl') -Raw
+          if ($events -notmatch '"event":"session.finished"') { throw 'Missing terminal session event' }
+          $manifest = Get-Content -LiteralPath (Join-Path $sessions[0].FullName 'session.json') -Raw | ConvertFrom-Json
+          if ($manifest.outcome -ne 'succeeded') { throw "Unexpected session outcome: $($manifest.outcome)" }
+
+      - name: Developer diagnostics smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          log_root="$RUNNER_TEMP/reps2-dev-diagnostics"
+          ./build/cargo-target/release/reps2 --dev --log-dir "$log_root" version
+          session_dir="$(find "$log_root" -mindepth 1 -maxdepth 1 -type d -name 'session-*' -print -quit)"
+          test -n "$session_dir"
+          test -s "$session_dir/session.log"
+          test -s "$session_dir/events.jsonl"
+          test -s "$session_dir/session.json"
+          grep -q '"event":"session.finished"' "$session_dir/events.jsonl"
+          grep -q '"outcome": "succeeded"' "$session_dir/session.json"
+
+      - name: Upload developer diagnostics smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reps2-developer-diagnostics-${{ runner.os }}
+          path: ${{ runner.temp }}/reps2-dev-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
   msrv:
     name: Rust frontend (MSRV 1.88)
     runs-on: ubuntu-latest
