@@ -34,7 +34,7 @@
         "sequence": { "type": "integer", "minimum": 1 },
         "timestamp_unix_ms": { "type": "integer", "minimum": 0 },
         "elapsed_ms": { "type": "integer", "minimum": 0 },
-        "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+        "severity": { "type": "string" },
         "category": { "type": "string" },
         "subsystem": { "type": "string" },
         "event": { "type": "string" },
