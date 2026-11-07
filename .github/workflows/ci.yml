@@ -97,8 +97,8 @@ jobs:
 
           $sessionList = & .\build\cargo-target\release\reps2.exe --log-dir $failureRoot dev sessions --limit 5 | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw "dev sessions failed with exit code $LASTEXITCODE" }
-          if ($sessionList.kind -ne 'reps2.developer.session_list' -or $sessionList.count -ne 1) {
-            throw 'dev sessions did not return the expected JSON session list'
+          if ($sessionList.kind -ne 'reps2.developer.session_list' -or $sessionList.count -ne 1 -or $sessionList.available_count -ne 1 -or $sessionList.truncated) {
+            throw 'dev sessions did not return the expected JSON session list and truncation metadata'
           }
           $inspection = & .\build\cargo-target\release\reps2.exe --log-dir $failureRoot dev inspect latest | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw "dev inspect failed with exit code $LASTEXITCODE" }
@@ -147,7 +147,7 @@ jobs:
 
 
           session_list_json="$(./build/cargo-target/release/reps2 --log-dir "$failure_root" dev sessions --limit 5)"
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["kind"]=="reps2.developer.session_list" and d["count"]==1' "$session_list_json"
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["kind"]=="reps2.developer.session_list" and d["count"]==1 and d["available_count"]==1 and not d["truncated"]' "$session_list_json"
           session_inspection_json="$(./build/cargo-target/release/reps2 --log-dir "$failure_root" dev inspect latest)"
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["kind"]=="reps2.developer.session_inspection" and d["complete"]; f=[e for e in d["diagnostics"] if e["event"]=="command.failed"]; assert len(f)==1 and f[0]["subsystem"]=="cli" and f[0]["context"]["error_code"]=="REPS2_COMMAND_FAILED"; assert d["event_count"]>=4' "$session_inspection_json"
           set +e
