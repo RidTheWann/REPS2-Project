@@ -62,7 +62,7 @@ The library must distinguish these states; no state implies a later one:
 - [ ] Complete PS2-specific ABI enforcement, the broader MIPS processor-specific section set, and title-specific ELF compatibility diagnostics.
 - [x] Default EE main-RAM physical mapping for supported direct, uncached, accelerated and KSEG PT_LOAD aliases.
 - [x] PT_LOAD-to-32 MiB initial RAM image construction with BSS zeroing and physical alias overlap checks.
-- [x] Coalesce pure BSS PT_LOAD program headers and skip empty segments for SN Systems ProDG linker compatibility; verified against 100% of retail test ELFs (ADR 0024).
+- [x] Coalesce pure BSS PT_LOAD program headers and skip empty segments for SN Systems ProDG linker compatibility; reject range growth that overlaps other PT_LOADs independent of program-header order (ADR 0024).
 - [ ] Full address-space permissions and COP0/TLB mapping.
 - [x] Read-only ISO 9660 inspection and SYSTEM.CNF BOOT2/BOOT ELF extraction for raw 2048-byte-sector images; reject unsupported containers and directory features explicitly.
 - [x] Content-addressed, per-game ISO import manifest with internally extracted boot ELF and bounded analysis/code-generation status; original ISO remains external and no game binaries are committed.

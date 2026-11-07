@@ -51,6 +51,11 @@ These projects have different goals and different completion levels. Their demos
 - Synthetic fixture words include `0x70021F88` (PEXT5 r3,r2), `0x70033FC8` (PPAC5 r7,r3), and `0x700127C8` (PPAC5 r4,r1), at guest PC `0xD000`. Source bits are routed independently using the manual's concatenation positions, covering all 128 bits and discarded bits. The CFG fixture at `0xD200` covers taken/annulled likely and return delays in both output layouts.
 - Continued remote implementation `b5c3140` on base `eca41b5`; review corrected a PEXEW sibling expectation, a fixture destination encoding, and an entry-GPR0 postcondition. Verified by synthetic generated-code native fixtures locally on Windows/MSVC (Release CTest 33/33) and in Ubuntu/Linux CI (CMake build and CTest); Rust frontend checks additionally verified on Rust MSRV 1.88 in CI. This is synthetic semantic evidence, not hardware differential validation or retail boot evidence.
 
+## ELF PT_LOAD BSS coalescing and overlap validation
+
+- Source-derived defect at base `eca41b50332a536194ace65ca3f1d4785b335d26`: `elf::load_segments` enlarged an existing same-base pure-BSS PT_LOAD and updated range accounting without checking collisions with other PT_LOAD ranges. Header order `[BSS A, initialized B, expanded A]` accepted overlapping virtual ranges, while another order rejected them. The synthetic regression uses A=`[0x00100010,0x00100014)`, B=`[0x00100020,0x00100024)`, then extends A to `0x00100040`; the defect was reproduced before correction.
+- Fix validates the proposed maximal BSS range against all other admitted ranges before allocating or mutating state. Tests cover all six program-header permutations, initialized/BSS B, legal exact adjacency, zero fill, merged permissions, and load-size boundaries. This establishes loader consistency only; existing RAM-image mapping has separate validation.
+
 ## EE memory and load/store cross-checks
 
 - The public PS2 memory map identifies 32 MiB main RAM at virtual 0x00000000, an uncached alias at 0x20000000, and an accelerated alias at 0x30100000 for the upper 31 MiB. It separately identifies EE I/O registers, VU memories, privileged GS registers, IOP RAM, BIOS and scratchpad.

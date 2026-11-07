@@ -20,7 +20,7 @@ Detailed status and capability list, moved out of the README. The roadmap in [RO
 - Parse bounded .MIPS.options descriptor streams, decode the 24-byte ELF32_RegInfo payload of ODK_REGINFO, and retain raw kind, size, affected-section index, info word and opaque-payload length for other or unknown descriptor kinds. This is diagnostic metadata, not ABI admission policy.
 - Preserve EI_OSABI and EI_ABIVERSION; report the generic OS ABI registry label and raw ABI-version byte, and classify standard ELF object types plus OS-specific/processor-specific e_type ranges while retaining unknown codes.
 - Preserve ELF special symbol section indices such as SHN_ABS/SHN_COMMON and resolve SHN_XINDEX through a validated SHT_SYMTAB_SHNDX table. Resolve e_shnum/e_shstrndx and PN_XNUM extended values through section-header zero, with configurable section and program-header count limits.
-- Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges.
+- Materialize PT_LOAD segments with zero-filled memory-only tails; reject overlapping guest virtual ranges, including overlaps introduced by same-base pure-BSS coalescing regardless of program-header order.
 - Decode an explicitly scoped base-MIPS integer subset, including BEQ/BNE/BLEZ/BGTZ and REGIMM BLTZ/BGEZ branch families.
 - Expose conservative per-instruction GPR/HI-LO dependencies, memory/control-flow effects, and possible synchronous exceptions; unsupported encodings remain explicitly opaque.
 - Decode, lift and AOT-lower base EE MTHI/MTLO/MFHI/MFLO plus R5900 three-operand MULT/MULTU; preserve HI/LO, the optional GPR destination, and both EE GPR lanes.
