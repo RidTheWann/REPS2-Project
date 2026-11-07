@@ -1,4 +1,4 @@
-# ADR 0084: Keep CFG resource and invariant failures fatal on speculative paths
+# ADR 0085: Keep CFG resource and invariant failures fatal on speculative paths
 
 - **Status:** Accepted
 - **Date:** 2026-11-07

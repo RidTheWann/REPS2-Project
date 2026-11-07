@@ -89,3 +89,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0082](0082-pipeline-stage-diagnostics.md) | Frontend pipeline-stage diagnostics for agent triage | Accepted |
 | [0083](0083-native-build-identity-fingerprint.md) | Native build identity and configuration-specific cache fingerprint | Accepted |
 | [0084](0084-ee-mmi0-pext5-ppac5.md) | EE MMI0 PEXT5/PPAC5 5-bit color conversion | Accepted |
+| [0085](0085-fatal-cfg-analysis-limits.md) | Keep CFG resource and invariant failures fatal on speculative paths | Accepted |
