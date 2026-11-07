@@ -9,7 +9,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::diagnostics;
 use crate::json::json_string;
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
@@ -346,6 +345,7 @@ fn is_json_value(source: &str) -> bool {
 struct JsonValidator<'a> {
     bytes: &'a [u8],
     position: usize,
+    depth: usize,
 }
 
 impl JsonValidator<'_> {
@@ -371,8 +371,24 @@ impl JsonValidator<'_> {
     fn parse_value(&mut self) -> bool {
         self.skip_whitespace();
         match self.bytes.get(self.position).copied() {
-            Some(b'{') => self.parse_object(),
-            Some(b'[') => self.parse_array(),
+            Some(b'{') => {
+                if self.depth >= 128 {
+                    return false;
+                }
+                self.depth += 1;
+                let valid = self.parse_object();
+                self.depth -= 1;
+                valid
+            }
+            Some(b'[') => {
+                if self.depth >= 128 {
+                    return false;
+                }
+                self.depth += 1;
+                let valid = self.parse_array();
+                self.depth -= 1;
+                valid
+            }
             Some(b'"') => self.parse_string(),
             Some(b't') => self.parse_literal(b"true"),
             Some(b'f') => self.parse_literal(b"false"),
@@ -585,6 +601,9 @@ mod tests {
         ] {
             assert!(is_json_value(valid), "{valid}");
         }
+        let deeply_nested = format!("{}0{}", "[".repeat(129), "]".repeat(129));
+        assert!(!is_json_value(&deeply_nested));
+
         for invalid in [
             r#"{"x":}"#,
             r#"{"x":1,}"#,
