@@ -476,6 +476,34 @@ impl fmt::Display for AnalysisError {
 
 impl std::error::Error for AnalysisError {}
 
+impl AnalysisError {
+    /// Whether a failure only says that a speculative block start does not
+    /// decode as a representable CFG block.
+    ///
+    /// Heuristic roots and SYSCALL continuations are guesses about content, so
+    /// these content failures may be skipped and reported. Resource limits,
+    /// input/segment validation and internal ownership invariants are global
+    /// analysis failures and must never be converted into a partial success.
+    /// The match is exhaustive so every new error must be classified.
+    fn is_tolerable_speculative_decode_failure(&self) -> bool {
+        match self {
+            Self::MissingDelaySlot { .. }
+            | Self::UnsupportedDelaySlot { .. }
+            | Self::ControlTransferInDelaySlot { .. }
+            | Self::TargetEntersDelaySlot { .. } => true,
+            Self::Elf(_)
+            | Self::NoExecutableEntryPoints
+            | Self::EntryPointNotExecutable(_)
+            | Self::InvalidLoadedSegment { .. }
+            | Self::GuestPcOverflow(_)
+            | Self::InstructionLimitExceeded { .. }
+            | Self::BlockLimitExceeded { .. }
+            | Self::AliasedViewLimitExceeded { .. }
+            | Self::InternalBlockOwnershipError(_) => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OwnerLocation {
     Body(usize),
@@ -1142,21 +1170,15 @@ fn build_cfg(
                     owning_control_pc,
                 });
             }
-            if let Err(error) = split_block_at(start_pc, owner, &mut blocks, &mut owners) {
-                if lenient {
-                    skipped_blocks.push(start_pc);
-                    if heuristic_roots.contains(&start_pc) {
-                        rejected_roots.push(start_pc);
-                    }
-                    continue;
-                }
-                return Err(error);
-            }
-            if blocks.len() > limits.max_blocks {
+            // Delay-slot guesses were handled above. All remaining split
+            // failures are ownership invariants, never tolerable speculation.
+            // A split adds one block; check capacity before mutating the graph.
+            if start_pc != owner.block_start && blocks.len() >= limits.max_blocks {
                 return Err(AnalysisError::BlockLimitExceeded {
                     limit: limits.max_blocks,
                 });
             }
+            split_block_at(start_pc, owner, &mut blocks, &mut owners)?;
             continue;
         }
 
@@ -1181,7 +1203,7 @@ fn build_cfg(
             limits,
         ) {
             Ok(block) => block,
-            Err(_) if lenient => {
+            Err(error) if lenient && error.is_tolerable_speculative_decode_failure() => {
                 skipped_blocks.push(start_pc);
                 if heuristic_roots.contains(&start_pc) {
                     rejected_roots.push(start_pc);
@@ -1433,12 +1455,11 @@ fn read_instruction_word(segments: &[LoadedSegment], pc: u32) -> Option<u32> {
 }
 
 fn increment_instruction_count(count: &mut usize, limit: usize) -> Result<(), AnalysisError> {
-    *count = count
-        .checked_add(1)
-        .ok_or(AnalysisError::InstructionLimitExceeded { limit })?;
-    if *count > limit {
+    if *count >= limit {
         return Err(AnalysisError::InstructionLimitExceeded { limit });
     }
+    // count < limit <= usize::MAX, so this cannot overflow.
+    *count += 1;
     Ok(())
 }
 
@@ -2678,6 +2699,198 @@ mod tests {
             vec![0x0010_0000, 0x0010_0010, 0x0010_001C, 0x0010_0030]
         );
         assert_eq!(analysis.graph.decoded_instruction_count, 10);
+    }
+
+    #[test]
+    fn syscall_continuation_cannot_swallow_instruction_limit() {
+        let segments = [segment(0x1000, &[0x0000_000C, 0, 0])]; // syscall; nop; nop
+        for limit in [1, 2] {
+            let result = discover_cfg(
+                &segments,
+                vec![entry(0x1000)],
+                &[0x1000],
+                AnalysisLimits {
+                    max_instructions: limit,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                result,
+                Err(AnalysisError::InstructionLimitExceeded { limit }),
+                "a speculative continuation must not turn budget exhaustion into success"
+            );
+        }
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &[0x1000],
+            AnalysisLimits {
+                max_instructions: 3,
+                ..Default::default()
+            },
+        )
+        .expect("exact instruction budget admits the continuation");
+        assert_eq!(graph.decoded_instruction_count, 3);
+        assert_eq!(graph.blocks.len(), 2);
+    }
+
+    #[test]
+    fn instruction_count_rejects_exhaustion_without_mutation() {
+        for (initial, limit) in [(0, 0), (1, 1), (2, 1), (usize::MAX, usize::MAX)] {
+            let mut count = initial;
+            assert_eq!(
+                increment_instruction_count(&mut count, limit),
+                Err(AnalysisError::InstructionLimitExceeded { limit })
+            );
+            assert_eq!(count, initial, "a refused instruction consumes no capacity");
+        }
+        for limit in [1, usize::MAX] {
+            let mut count = limit - 1;
+            increment_instruction_count(&mut count, limit).expect("last available instruction");
+            assert_eq!(count, limit);
+        }
+    }
+
+    #[test]
+    fn heuristic_and_authoritative_roots_enforce_instruction_limits() {
+        // Exercise exhaustion in both ordinary instructions and delay slots.
+        for words in [[0, 0], [0x03E0_0008, 0]] {
+            let segments = [segment(0x1000, &[0x0000_000D]), segment(0x2000, &words)];
+            for heuristic in [BTreeSet::new(), BTreeSet::from([0x2000])] {
+                for limit in [1, 2, 3] {
+                    let result = build_cfg(
+                        &segments,
+                        vec![entry(0x1000), entry(0x2000)],
+                        &[0x1000, 0x2000],
+                        &heuristic,
+                        AnalysisLimits {
+                            max_instructions: limit,
+                            ..Default::default()
+                        },
+                    )
+                    .map(|built| built.graph);
+                    if limit < 3 {
+                        assert_eq!(
+                            result,
+                            Err(AnalysisError::InstructionLimitExceeded { limit })
+                        );
+                    } else {
+                        let graph = result.expect("exact budget admits both roots");
+                        assert_eq!(graph.decoded_instruction_count, 3);
+                        assert_eq!(graph.blocks.len(), 2);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn speculative_decode_errors_remain_tolerable_but_authoritative_errors_do_not() {
+        for (words, expected) in [
+            (
+                vec![0x03E0_0008],
+                AnalysisError::MissingDelaySlot {
+                    control_pc: 0x2000,
+                    delay_pc: 0x2004,
+                },
+            ),
+            (
+                vec![0x03E0_0008, 0x4200_0018],
+                AnalysisError::UnsupportedDelaySlot {
+                    control_pc: 0x2000,
+                    delay_pc: 0x2004,
+                },
+            ),
+            (
+                vec![0x03E0_0008, 0x03E0_0008],
+                AnalysisError::ControlTransferInDelaySlot {
+                    control_pc: 0x2000,
+                    delay_pc: 0x2004,
+                },
+            ),
+        ] {
+            let segments = [segment(0x1000, &[0x0000_000D]), segment(0x2000, &words)];
+            for heuristic in [BTreeSet::new(), BTreeSet::from([0x2000])] {
+                let result = build_cfg(
+                    &segments,
+                    vec![entry(0x1000), entry(0x2000)],
+                    &[0x1000, 0x2000],
+                    &heuristic,
+                    AnalysisLimits::default(),
+                );
+                if heuristic.is_empty() {
+                    assert_eq!(result.err(), Some(expected.clone()));
+                } else {
+                    let built = result.expect("only the speculative content error is skipped");
+                    assert_eq!(built.skipped_blocks, vec![0x2000]);
+                    assert_eq!(built.rejected_roots, vec![0x2000]);
+                    assert_eq!(built.graph.blocks.len(), 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resource_and_invariant_errors_are_not_tolerable_speculation() {
+        for error in [
+            AnalysisError::Elf("load limit".to_owned()),
+            AnalysisError::NoExecutableEntryPoints,
+            AnalysisError::EntryPointNotExecutable(0x1000),
+            AnalysisError::InvalidLoadedSegment {
+                virtual_address: 0x1000,
+                file_size: 8,
+                memory_size: 4,
+            },
+            AnalysisError::GuestPcOverflow(u32::MAX - 3),
+            AnalysisError::InstructionLimitExceeded { limit: 1 },
+            AnalysisError::BlockLimitExceeded { limit: 1 },
+            AnalysisError::AliasedViewLimitExceeded { limit: 1 },
+            AnalysisError::InternalBlockOwnershipError(0x1000),
+        ] {
+            assert!(
+                !error.is_tolerable_speculative_decode_failure(),
+                "{error:?}"
+            );
+        }
+        assert!(
+            AnalysisError::TargetEntersDelaySlot {
+                target_pc: 0x1004,
+                owning_control_pc: 0x1000,
+            }
+            .is_tolerable_speculative_decode_failure()
+        );
+    }
+
+    #[test]
+    fn splitting_lenient_and_authoritative_blocks_enforces_block_limit() {
+        // The backward jump discovers an interior leader after decoding the block.
+        let segments = [segment(0x1000, &[0, 0, 0x0800_0401, 0])];
+        for heuristic in [BTreeSet::new(), BTreeSet::from([0x1000])] {
+            for limit in [1, 2] {
+                let result = build_cfg(
+                    &segments,
+                    vec![entry(0x1000)],
+                    &[0x1000],
+                    &heuristic,
+                    AnalysisLimits {
+                        max_blocks: limit,
+                        max_instructions: 4,
+                        ..Default::default()
+                    },
+                )
+                .map(|built| built.graph);
+                if limit == 1 {
+                    assert_eq!(result, Err(AnalysisError::BlockLimitExceeded { limit }));
+                } else {
+                    let graph = result.expect("split fits the exact block budget");
+                    assert_eq!(
+                        graph.blocks.keys().copied().collect::<Vec<_>>(),
+                        vec![0x1000, 0x1004]
+                    );
+                    assert_eq!(graph.decoded_instruction_count, 4);
+                }
+            }
+        }
     }
 
     #[test]
