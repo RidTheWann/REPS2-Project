@@ -35,4 +35,4 @@ The current C++ runtime is not a complete PS2 runtime. Logging must not imply th
 ## Validation
 
 - Unit tests verify JSON escaping, event ordering, context preservation, readable output, success/failure manifests, and unique session directories.
-- CI smoke tests invoke the built CLI in developer mode on Windows and Linux and verify the emitted files and successful terminal event.
+- CI smoke tests invoke the built CLI on Windows and Linux for both success and invalid-command failure; they parse the emitted JSON, verify the final outcome/error event, and archive the artifacts.
