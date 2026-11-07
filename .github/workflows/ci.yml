@@ -75,6 +75,9 @@ jobs:
           if ($events -notmatch '"event":"session.finished"') { throw 'Missing terminal session event' }
           $manifest = Get-Content -LiteralPath (Join-Path $sessions[0].FullName 'session.json') -Raw | ConvertFrom-Json
           if ($manifest.outcome -ne 'succeeded') { throw "Unexpected session outcome: $($manifest.outcome)" }
+          $eventRecords = @(Get-Content -LiteralPath (Join-Path $sessions[0].FullName 'events.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+          if ($eventRecords.Count -lt 2) { throw 'Expected session start and finish event records' }
+          if ($eventRecords[-1].event -ne 'session.finished') { throw 'Last event is not the terminal session event' }
 
       - name: Developer diagnostics smoke test (Linux)
         if: runner.os == 'Linux'
@@ -88,6 +91,8 @@ jobs:
           test -s "$session_dir/session.json"
           grep -q '"event":"session.finished"' "$session_dir/events.jsonl"
           grep -q '"outcome": "succeeded"' "$session_dir/session.json"
+          python -c 'import json, pathlib, sys; p=pathlib.Path(sys.argv[1]); data=json.loads(p.read_text()); assert data["outcome"] == "succeeded"' "$session_dir/session.json"
+          python -c 'import json, pathlib, sys; rows=[json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]; assert len(rows) >= 2 and rows[-1]["event"] == "session.finished"; assert rows[-1]["sequence"] == len(rows)' "$session_dir/events.jsonl"
 
       - name: Upload developer diagnostics smoke artifact
         if: always()
