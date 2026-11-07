@@ -24,7 +24,7 @@ The session-scoped diagnostics introduced by ADR 0080 are useful to a person ope
 ## Consequences
 
 - An IDE, agent, or model can run a normal REPS2 command with `--dev`, then call `reps2 dev inspect latest` and consume structured JSON.
-- Diagnostic events are available as both a complete `events` array and a filtered `diagnostics` array containing warning/error events.
+- Diagnostic events are available as both a complete `events` array and a filtered `diagnostics` array containing warning/error events while excluding the duplicate terminal session summary.
 - Interrupted or damaged sessions remain inspectable but are explicitly marked incomplete and include integrity errors.
 - Local paths and original error strings may be present. Reports must be reviewed before being shared publicly.
 - The new commands provide an automation boundary, not a TUI or graphical Developer Inspector.
