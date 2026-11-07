@@ -1,6 +1,6 @@
 # REPS2 command-line reference
 
-The CLI is the developer and automation interface. This reference was moved out of the README; the text is unchanged apart from headings and paragraph breaks.
+The CLI is the developer and automation interface. This reference covers the command surface and session-scoped developer diagnostics.
 
 ## Commands
 
