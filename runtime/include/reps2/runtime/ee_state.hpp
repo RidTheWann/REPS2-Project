@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <span>
 
+#include "reps2/runtime/ee_dmac.hpp"
 #include "reps2/runtime/ee_fpu.hpp"
 
 namespace reps2::runtime {
@@ -49,6 +50,7 @@ struct EeMemory {
     // guest that configures and reads it back sees its own value. Reset is 0,
     // as no clock source is enabled out of reset. See ADR 0073.
     std::uint32_t timer3_mode{};
+    EeDmacState dmac{};
 };
 
 // FCR31 (the condition, cause and sticky flags plus their hardwired fields) is
@@ -873,6 +875,10 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     std::uint32_t address,
     std::uint32_t& value
 ) noexcept {
+    if (address == kEeDmacDStatAddress) {
+        return memory.dmac.read_d_stat(value)
+            ? Status::ok : Status::unsupported_memory_access;
+    }
     if (address == kEeTimer3ModeAddress) {
         value = memory.timer3_mode;
         return Status::ok;
@@ -957,6 +963,10 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     std::uint32_t address,
     std::uint32_t value
 ) noexcept {
+    if (address == kEeDmacDStatAddress) {
+        return memory.dmac.write_d_stat(value)
+            ? Status::ok : Status::unsupported_memory_access;
+    }
     if (address == kEeTimer3ModeAddress) {
         memory.timer3_mode = value & kEeTimer3ModeWritableMask;
         return Status::ok;
