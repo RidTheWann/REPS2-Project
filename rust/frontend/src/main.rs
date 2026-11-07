@@ -2438,6 +2438,18 @@ mod tests {
     }
 
     #[test]
+    fn maps_commands_to_their_diagnostic_subsystems() {
+        assert_eq!(command_diagnostic_subsystem("disc-info"), "iso9660");
+        assert_eq!(command_diagnostic_subsystem("extract-boot-elf"), "iso9660");
+        assert_eq!(command_diagnostic_subsystem("add-game"), "library");
+        assert_eq!(command_diagnostic_subsystem("analyze-elf"), "analysis");
+        assert_eq!(command_diagnostic_subsystem("profile-elf"), "coverage");
+        assert_eq!(command_diagnostic_subsystem("recompile-elf"), "recompiler");
+        assert_eq!(command_diagnostic_subsystem("compile-words"), "codegen");
+        assert_eq!(command_diagnostic_subsystem("invalid-command"), "cli");
+    }
+
+    #[test]
     fn rejects_missing_or_repeated_diagnostics_directory_options() {
         assert!(parse_global_options(&["reps2".to_owned(), "--log-dir".to_owned()]).is_err());
         assert!(
