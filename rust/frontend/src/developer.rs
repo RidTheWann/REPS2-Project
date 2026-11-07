@@ -736,8 +736,10 @@ mod tests {
         fs::write(outside.join("events.jsonl"), "").expect("write outside event stream");
         symlink(&outside, temp.0.join("session-4000-42-0")).expect("create session symlink");
 
-        let error = load_session(&temp.0, "session-4000-42-0")
-            .expect_err("session symlink must not be followed");
+        let error = match load_session(&temp.0, "session-4000-42-0") {
+            Ok(_) => panic!("session symlink must not be followed"),
+            Err(error) => error,
+        };
         assert!(error.contains("not a real directory"));
     }
 
