@@ -45,13 +45,15 @@
     },
     "sessionList": {
       "type": "object",
-      "required": ["schema_version", "kind", "status", "log_root", "count", "sessions"],
+      "required": ["schema_version", "kind", "status", "log_root", "count", "available_count", "truncated", "sessions"],
       "properties": {
         "schema_version": { "const": 1 },
         "kind": { "const": "reps2.developer.session_list" },
         "status": { "const": "ok" },
         "log_root": { "type": "string" },
-        "count": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0, "description": "Number of sessions included in this response." },
+        "available_count": { "type": "integer", "minimum": 0, "description": "Number of session directories discovered before applying the requested limit." },
+        "truncated": { "type": "boolean", "description": "True when not every discovered session is included in this response." },
         "sessions": {
           "type": "array",
           "items": {
