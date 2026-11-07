@@ -27,6 +27,7 @@ struct SessionData {
 impl SessionData {
     fn is_complete(&self) -> bool {
         self.manifest_json.is_some()
+            && self.integrity_errors.is_empty()
             && self
                 .events
                 .last()
@@ -189,7 +190,9 @@ fn load_session(root: &Path, id: &str) -> Result<SessionData, String> {
     let mut integrity_errors = Vec::new();
     let manifest_path = directory.join("session.json");
     let manifest_json = match fs::read_to_string(&manifest_path) {
-        Ok(contents) if is_json_value(contents.trim()) => Some(contents.trim().to_owned()),
+        Ok(contents) if contents.trim().starts_with('{') && is_json_value(contents.trim()) => {
+            Some(contents.trim().to_owned())
+        },
         Ok(_) => {
             integrity_errors.push("session.json is not valid JSON".to_owned());
             None
@@ -333,6 +336,7 @@ fn is_json_value(source: &str) -> bool {
     let mut parser = JsonValidator {
         bytes: source.as_bytes(),
         position: 0,
+        depth: 0,
     };
     parser.skip_whitespace();
     if !parser.parse_value() {
@@ -676,6 +680,7 @@ mod tests {
         let session = load_session(&temp.0, id).expect("load session");
         assert_eq!(session.events.len(), 1);
         assert_eq!(session.integrity_errors.len(), 1);
+        assert!(!session.is_complete());
         let report = session_inspection_json(&session);
         assert!(is_json_value(&report));
         assert!(report.contains("events.jsonl line 2"));
