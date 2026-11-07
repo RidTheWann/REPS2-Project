@@ -1933,6 +1933,13 @@ pub fn load_segments(
                 .find(|s| s.virtual_address == header.virtual_address && s.file_size == 0)
             {
                 if memory_size > existing.bytes.len() {
+                    let start = u64::from(header.virtual_address);
+                    let new_end = start + u64::from(header.memory_size);
+                    if ranges.iter().any(|range| {
+                        range.start != start && start < range.end && range.start < new_end
+                    }) {
+                        return Err(Error::new("ELF PT_LOAD virtual memory ranges overlap"));
+                    }
                     let additional = memory_size - existing.bytes.len();
                     total = total
                         .checked_add(additional)
@@ -1943,8 +1950,6 @@ pub fn load_segments(
                         ));
                     }
                     existing.bytes.resize(memory_size, 0);
-                    let start = u64::from(header.virtual_address);
-                    let new_end = start + u64::from(header.memory_size);
                     for r in &mut ranges {
                         if r.start == start {
                             if new_end > r.end {
@@ -3745,6 +3750,99 @@ mod tests {
         assert_eq!(loaded[1].virtual_address, 0x0010_0010);
         assert_eq!(loaded[1].file_size, 0);
         assert_eq!(loaded[1].bytes.len(), 32);
+    }
+
+    // Three synthetic PT_LOADs: same-base BSS A and A-expanded, plus B.
+    // Every permutation must agree about overlap admission.
+    fn bss_extension_elf(order: [usize; 3], expanded_size: u32, other_file_size: u32) -> Vec<u8> {
+        let mut bytes = minimal_elf();
+        bytes.resize(152, 0);
+        put_u16(&mut bytes, 44, 3);
+        put_u32(&mut bytes, 24, 0x0010_0020);
+        let headers = [
+            (0x0010_0010, 0, 4, PF_R),
+            (0x0010_0020, other_file_size, 4, PF_R | PF_X),
+            (0x0010_0010, 0, expanded_size, PF_W),
+        ];
+        for (index, source) in order.into_iter().enumerate() {
+            let (address, file_size, memory_size, flags) = headers[source];
+            let offset = 52 + 32 * index;
+            for (field, value) in [
+                PT_LOAD,
+                148,
+                address,
+                address,
+                file_size,
+                memory_size,
+                flags,
+                1,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                put_u32(&mut bytes, offset + 4 * field, value);
+            }
+        }
+        put_u32(&mut bytes, 148, 0x0000_000D); // break in initialized B
+        bytes
+    }
+
+    const BSS_HEADER_ORDERS: [[usize; 3]; 6] = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+
+    #[test]
+    fn rejects_bss_extension_overlaps_in_every_header_order() {
+        for order in BSS_HEADER_ORDERS {
+            for other_file_size in [0, 4] {
+                let bytes = bss_extension_elf(order, 0x30, other_file_size);
+                let image = parse(&bytes, ParseLimits::default()).expect("bounded headers parse");
+                let error = load_segments(&bytes, &image, 1024)
+                    .expect_err("BSS growth must not cross another initialized or BSS segment");
+                assert_eq!(
+                    error.to_string(),
+                    "ELF PT_LOAD virtual memory ranges overlap"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bss_extension_preserves_adjacency_flags_zero_fill_and_limits() {
+        for order in BSS_HEADER_ORDERS {
+            for other_file_size in [0, 4] {
+                let bytes = bss_extension_elf(order, 0x10, other_file_size);
+                let image = parse(&bytes, ParseLimits::default()).expect("bounded headers parse");
+                let mut loaded = load_segments(&bytes, &image, 36).expect("adjacency is legal");
+                loaded.sort_by_key(|segment| segment.virtual_address);
+                assert_eq!(loaded.len(), 2);
+                assert_eq!(loaded[0].virtual_address, 0x0010_0010);
+                assert_eq!(loaded[0].file_size, 0);
+                assert_eq!(loaded[0].bytes, vec![0; 16]);
+                assert_eq!(loaded[0].flags, PF_R | PF_W);
+                assert_eq!(loaded[1].virtual_address, 0x0010_0020);
+                assert_eq!(loaded[1].file_size, other_file_size as usize);
+                assert_eq!(
+                    loaded[1].bytes,
+                    if other_file_size == 0 {
+                        vec![0; 4]
+                    } else {
+                        vec![13, 0, 0, 0]
+                    }
+                );
+                let error =
+                    load_segments(&bytes, &image, 19).expect_err("only merged bytes are charged");
+                assert_eq!(
+                    error.to_string(),
+                    "ELF PT_LOAD memory exceeds configured load limit"
+                );
+            }
+        }
     }
 
     /// Deterministic xorshift64 so mutation tests are reproducible without
