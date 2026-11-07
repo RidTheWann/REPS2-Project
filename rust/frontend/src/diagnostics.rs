@@ -174,7 +174,7 @@ impl SessionLogger {
         let manifest = format!(
             concat!(
                 "{{\n",
-                "  \"schema_version\": {DIAGNOSTICS_SCHEMA_VERSION},\n",
+                "  \"schema_version\": {},\n",
                 "  \"session_id\": {},\n",
                 "  \"command\": {},\n",
                 "  \"tool_version\": {},\n",
@@ -189,6 +189,7 @@ impl SessionLogger {
                 "  }}\n",
                 "}}\n"
             ),
+            DIAGNOSTICS_SCHEMA_VERSION,
             json_string(&self.session_id),
             json_string(&self.command),
             json_string(&self.tool_version),
