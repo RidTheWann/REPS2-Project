@@ -22,7 +22,7 @@ This is the correctness-critical input and transformation pipeline. Rust's check
 ### C++20 runtime
 
 C++20 owns the native runtime and platform-facing subsystem implementations:
-- EE state and memory interfaces.
+- EE state and memory interfaces, with device-owned MMIO state isolated behind runtime modules such as `ee_dmac.hpp`.
 - VU0/VU1 execution interfaces.
 - GS submission and rendering integration.
 - IOP, DMA, SPU2/audio, controller, optical media, and memory-card services.
