@@ -45,6 +45,20 @@ impl Fpr {
     }
 }
 
+/// A validated VU0 vector register index. VF0 reads as the hardwired constant
+/// `{0.0, 0.0, 0.0, 1.0}` and ignores writes, so the emitter must never write
+/// `vf[0]` directly.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Vf(u8);
+
+impl Vf {
+    /// Returns the architectural register number.
+    #[must_use]
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
+
 /// The only FPU control registers the EE defines. FCR1..FCR30 are reserved and
 /// accessing them is not representable in this IR.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -166,6 +180,16 @@ pub enum Operation {
     },
     StoreFpuWord {
         src: Fpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadVu0Quadword {
+        dst: Vf,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreVu0Quadword {
+        src: Vf,
         base: Gpr,
         offset: u16,
     },
@@ -823,6 +847,11 @@ fn gpr(index: u8) -> Gpr {
 fn fpr(index: u8) -> Fpr {
     // Decoder register fields are five bits wide by construction.
     Fpr(index & 0x1F)
+}
+
+fn vf(index: u8) -> Vf {
+    // Decoder register fields are five bits wide by construction.
+    Vf(index & 0x1F)
 }
 
 /// Lifts a sequential decoded instruction stream into the supported IR.
@@ -1525,6 +1554,16 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 base: gpr(instruction.rs),
                 offset: instruction.immediate,
             },
+            Opcode::Lqc2 => Operation::LoadVu0Quadword {
+                dst: vf(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
+            },
+            Opcode::Sqc2 => Operation::StoreVu0Quadword {
+                src: vf(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1588,6 +1627,8 @@ mod tests {
             (0x2B << 26) | (4 << 21) | (7 << 16) | 4,
             (0x1E << 26) | (4 << 21) | (11 << 16) | 8,
             (0x1F << 26) | (4 << 21) | (12 << 16) | 12,
+            (0x36 << 26) | (4 << 21) | (13 << 16) | 0x0010,
+            (0x3E << 26) | (4 << 21) | (14 << 16) | 0x0020,
         ];
         let stream = words
             .iter()
@@ -1624,6 +1665,16 @@ mod tests {
             program.instructions()[10].operation,
             Operation::StoreQuadword { src, base, offset: 12 }
                 if src.index() == 12 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[11].operation,
+            Operation::LoadVu0Quadword { dst, base, offset: 0x10 }
+                if dst.index() == 13 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[12].operation,
+            Operation::StoreVu0Quadword { src, base, offset: 0x20 }
+                if src.index() == 14 && base.index() == 4
         ));
     }
 

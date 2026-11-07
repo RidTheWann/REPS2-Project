@@ -927,6 +927,46 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_cop1_codegen_smoke COMMAND reps2_cop1_codegen_smoke)
 
+    set(REPS2_COP2_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop2_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_COP2_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_COP2_GENERATED_CPP}"
+            0x0000E000
+            # SQC2 $vf0, 0x10($a0) -> stores hardwired constant {0,0,0,1.0f} at +0x10
+            0xF8800010
+            # LQC2 $vf5, 0x20($a0) -> loads preset pattern from +0x20 into VF5
+            0xD8850020
+            # SQC2 $vf5, 0x30($a0) -> stores VF5 back at +0x30
+            0xF8850030
+            # LQC2 $vf0, 0x40($a0) -> must NOT overwrite VF0 constant
+            0xD8800040
+            # SQC2 $vf0, 0x50($a0) -> stores constant again at +0x50
+            0xF8800050
+            0x00000000  # nop    delay-slot padding
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the synthetic R5900 COP2 data-movement block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_COP2_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_cop2_codegen_fixture DEPENDS "${REPS2_COP2_GENERATED_CPP}")
+    add_executable(reps2_cop2_codegen_smoke
+        "${REPS2_COP2_GENERATED_CPP}"
+        tests/cop2_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_cop2_codegen_smoke reps2_cop2_codegen_fixture)
+    target_link_libraries(reps2_cop2_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cop2_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cop2_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cop2_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_cop2_codegen_smoke COMMAND reps2_cop2_codegen_smoke)
+
     set(REPS2_COP1_ARITH_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/cop1_arith_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_ARITH_GENERATED_CPP}"
@@ -1047,6 +1087,11 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
 
     add_test(NAME reps2_cfg_codegen_smoke COMMAND reps2_cfg_codegen_smoke)
+    if(MSVC)
+        # This smoke keeps many architectural state snapshots live in one test.
+        # The EE state grew with VU0 state, exceeding MSVC's default stack.
+        target_link_options(reps2_cfg_codegen_smoke PRIVATE /STACK:4194304)
+    endif()
 
     # EE syscall HLE dispatch: the same generated fixture, driven with the HLE
     # layer enabled and disabled, pins resume-after-service, delay-slot resume
@@ -1115,6 +1160,9 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
 
     add_test(NAME reps2_cfg_split_codegen_smoke COMMAND reps2_cfg_split_codegen_smoke)
+    if(MSVC)
+        target_link_options(reps2_cfg_split_codegen_smoke PRIVATE /STACK:4194304)
+    endif()
 
     # The emitted `<stem>.native/` project must configure, compile and run the
     # same split fixture through its generated probe, with no hand-written

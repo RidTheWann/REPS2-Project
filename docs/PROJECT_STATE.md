@@ -1,6 +1,6 @@
 # REPS2 autonomous engineering state
 
-Updated: 2026-11-06
+Updated: 2026-11-07
 
 ## Current objective
 
@@ -14,6 +14,22 @@ documented Timer 3 mode word (`0x10001810`) is modelled without counting or
 interrupts, and the frontend can analyse runtime-copied code declared with
 `--relocated-code`. Unsupported calls remain explicit stops; no success is
 fabricated.
+
+The probe with both declared relocated regions then reached `pc=0x00169EC4`
+(`SQC2 $vf0, 0x10($a0)`, raw `0xF8800010`) after 3,126,787 guest instructions;
+this was an unsupported-instruction boundary, not a boot stage. The bounded
+COP2 data-movement slice now decodes, lifts and lowers LQC2/SQC2 with an
+independent 32-register VU0 VF file and hardwired VF0. Synthetic native tests
+cover VF0 constant stores, VF5 round-trip, and ignored loads into VF0 (ADR 0078).
+The full local Windows CMake/CTest suite passes after raising the stack for the
+large CFG smoke snapshots. A fresh post-COP2 probe rebuilt from the local ELF (SHA-256
+`adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`) and both
+relocated regions reached `pc=0x0025C274` after 3,168,708 guest instructions, then stopped with
+`unsupported_memory_access`. The preceding instructions form `0x1000E010`,
+PS2SDK's `A_EE_D_STAT` (DMAC status) register. The next guest instructions
+mask bit `0x20` (SIF0) and conditionally write the same register, so this is a
+DMA/SIF state boundary, not ordinary RAM. No DMAC status value or write
+behavior is fabricated; no guest-visible boot stage is established.
 
 With these changes Downhill Domination completes the ps2sdk `InitAlarm` kernel
 patch, executes the copied alarm blob at `0x80076000`, obtains a thread id from
@@ -42,8 +58,8 @@ word-scan loop, not unresolved control flow.
   executes the Downhill Domination `InitAlarm` patch path (ADRs 0072–0074).
   PR #16 added the bounded EE syscall-boundary sequence trace (ADR 0071).
   PRs #15 and earlier are historical.
-- The `CreateThread` change described in this document is on a feature branch,
-  not yet merged.
+- This branch contains the unmerged `GetOsdConfigParam` and `SetOsdConfigParam`
+  work, plus the COP2 data-movement slice recorded in ADR 0078.
 - `main` remains protected and requires strict, up-to-date checks:
   `Rust frontend (ubuntu-latest)`, `Rust frontend (windows-latest)`, and
   `Rust frontend (MSRV 1.88)`.
