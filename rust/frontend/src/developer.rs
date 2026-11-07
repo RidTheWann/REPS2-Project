@@ -222,8 +222,9 @@ fn load_session(root: &Path, id: &str) -> Result<SessionData, String> {
                     continue;
                 }
                 let event = line.to_owned();
-                if event.contains("\"severity\":\"error\"")
-                    || event.contains("\"severity\":\"warning\"")
+                if event.contains("\"severity\":\"warning\"")
+                    || (event.contains("\"severity\":\"error\"")
+                        && !event.contains("\"event\":\"session.finished\""))
                 {
                     diagnostic_events.push(event.clone());
                 }
@@ -280,11 +281,12 @@ fn session_list_json(root: &Path, limit: usize) -> io::Result<String> {
 
     Ok(format!(
         concat!(
-            "{{\"schema_version\":{REPORT_SCHEMA_VERSION},",
+            "{{\"schema_version\":{},",
             "\"kind\":\"reps2.developer.session_list\",",
             "\"status\":\"ok\",\"log_root\":{},",
             "\"count\":{},\"sessions\":[{}]}}"
         ),
+        REPORT_SCHEMA_VERSION,
         json_string(&root.to_string_lossy()),
         entries.len(),
         entries.join(","),
@@ -295,7 +297,7 @@ fn session_inspection_json(session: &SessionData) -> String {
     let manifest = session.manifest_json.as_deref().unwrap_or("null");
     format!(
         concat!(
-            "{{\"schema_version\":{REPORT_SCHEMA_VERSION},",
+            "{{\"schema_version\":{},",
             "\"kind\":\"reps2.developer.session_inspection\",",
             "\"status\":\"ok\",\"session_id\":{},",
             "\"session_directory\":{},\"complete\":{},",
@@ -303,6 +305,7 @@ fn session_inspection_json(session: &SessionData) -> String {
             "\"diagnostic_count\":{},\"diagnostics\":[{}],",
             "\"integrity_errors\":{}}}"
         ),
+        REPORT_SCHEMA_VERSION,
         json_string(&session.id),
         json_string(&session.directory.to_string_lossy()),
         session.is_complete(),
