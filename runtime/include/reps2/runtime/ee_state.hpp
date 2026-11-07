@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <span>
 
+#include "reps2/runtime/abi_version.hpp"
 #include "reps2/runtime/ee_dmac.hpp"
 #include "reps2/runtime/ee_fpu.hpp"
 

@@ -13,6 +13,8 @@
 //! generated project references its sibling translation files through `..`, so
 //! the translation directory and `<stem>.native/` move together.
 
+use crate::build_manifest::MANIFEST_VERSION;
+use crate::control_ir::CONTROL_IR_SCHEMA_VERSION;
 use crate::VERSION;
 
 /// Rendered native build project.
@@ -39,8 +41,22 @@ pub fn render(
     probe_budget: u64,
     hle_syscalls: bool,
 ) -> NativeProject {
+    render_with_identity(project_stem, sources, ram_image, probe_budget, hle_syscalls, None)
+}
+
+/// Renders a native project with the exact source boot-ELF digest.
+/// Synthetic fixtures pass None.
+#[must_use]
+pub fn render_with_identity(
+    project_stem: &str,
+    sources: &[String],
+    ram_image: Option<&str>,
+    probe_budget: u64,
+    hle_syscalls: bool,
+    input_elf_sha256: Option<&str>,
+) -> NativeProject {
     NativeProject {
-        cmake_lists: render_cmake_lists(project_stem, sources, ram_image),
+        cmake_lists: render_cmake_lists(project_stem, sources, ram_image, input_elf_sha256),
         probe_source: render_probe_source(ram_image, probe_budget, hle_syscalls),
     }
 }
@@ -93,7 +109,7 @@ fn cpp_string_literal(value: &str) -> String {
     output
 }
 
-fn render_cmake_lists(project_stem: &str, sources: &[String], ram_image: Option<&str>) -> String {
+fn render_cmake_lists(project_stem: &str, sources: &[String], ram_image: Option<&str>, input_elf_sha256: Option<&str>) -> String {
     let source_lines = sources
         .iter()
         .map(|name| format!("    \"../{}\"", cmake_quote(name)))
@@ -120,8 +136,11 @@ if(NOT REPS2_RUNTIME_INCLUDE)
     message(FATAL_ERROR "Set -DREPS2_RUNTIME_INCLUDE=<path>/runtime/include")
 endif()
 
-add_executable(reps2_probe
+set(REPS2_TRANSLATION_SOURCES
 @SOURCES@
+)
+add_executable(reps2_probe
+    ${REPS2_TRANSLATION_SOURCES}
     "probe_main.cpp"
 )
 target_include_directories(reps2_probe PRIVATE "${REPS2_RUNTIME_INCLUDE}")
@@ -167,12 +186,78 @@ foreach(option IN LISTS REPS2_TARGET_COMPILE_OPTIONS)
 endforeach()
 string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON "]")
 
+# Hash the actual compiler/linker binaries, without recording local paths.
+if(NOT EXISTS "${CMAKE_CXX_COMPILER}")
+    message(FATAL_ERROR "Configured C++ compiler executable is missing")
+endif()
+file(SHA256 "${CMAKE_CXX_COMPILER}" REPS2_COMPILER_EXECUTABLE_SHA256)
+set(REPS2_LINKER_EXECUTABLE_SHA256 "")
+if(CMAKE_LINKER AND EXISTS "${CMAKE_LINKER}")
+    file(SHA256 "${CMAKE_LINKER}" REPS2_LINKER_EXECUTABLE_SHA256)
+endif()
+
+# The runtime ABI and contents of every public runtime header affect the binary.
+set(REPS2_RUNTIME_ABI_HEADER "${REPS2_RUNTIME_INCLUDE}/reps2/runtime/abi_version.hpp")
+if(NOT EXISTS "${REPS2_RUNTIME_ABI_HEADER}")
+    message(FATAL_ERROR "Missing REPS2 runtime ABI header")
+endif()
+file(STRINGS "${REPS2_RUNTIME_ABI_HEADER}" REPS2_RUNTIME_ABI_LINE
+    REGEX "^#define REPS2_RUNTIME_ABI_VERSION [0-9]+$")
+if(NOT REPS2_RUNTIME_ABI_LINE MATCHES "^#define REPS2_RUNTIME_ABI_VERSION ([0-9]+)$")
+    message(FATAL_ERROR "Cannot read REPS2_RUNTIME_ABI_VERSION")
+endif()
+set(REPS2_RUNTIME_ABI_VERSION "${CMAKE_MATCH_1}")
+file(GLOB_RECURSE REPS2_RUNTIME_HEADERS LIST_DIRECTORIES FALSE
+    "${REPS2_RUNTIME_INCLUDE}/reps2/runtime/*.hpp")
+list(SORT REPS2_RUNTIME_HEADERS)
+if(NOT REPS2_RUNTIME_HEADERS)
+    message(FATAL_ERROR "No REPS2 runtime headers found")
+endif()
+set(REPS2_RUNTIME_HEADER_MATERIAL "")
+foreach(header IN LISTS REPS2_RUNTIME_HEADERS)
+    file(SHA256 "${header}" header_sha256)
+    file(RELATIVE_PATH header_relative "${REPS2_RUNTIME_INCLUDE}" "${header}")
+    string(APPEND REPS2_RUNTIME_HEADER_MATERIAL "${header_relative}:${header_sha256}\n")
+endforeach()
+string(SHA256 REPS2_RUNTIME_HEADERS_SHA256 "${REPS2_RUNTIME_HEADER_MATERIAL}")
+
+# Hash the ordered generated dispatcher/part sources and optional initial RAM.
+set(REPS2_TRANSLATION_SOURCE_MATERIAL "")
+foreach(source IN LISTS REPS2_TRANSLATION_SOURCES)
+    set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+    if(NOT EXISTS "${source_path}")
+        message(FATAL_ERROR "Missing generated translation source: ${source}")
+    endif()
+    file(SHA256 "${source_path}" source_sha256)
+    string(APPEND REPS2_TRANSLATION_SOURCE_MATERIAL "${source}:${source_sha256}\n")
+endforeach()
+string(SHA256 REPS2_TRANSLATION_SOURCES_SHA256 "${REPS2_TRANSLATION_SOURCE_MATERIAL}")
+set(REPS2_INPUT_ELF_SHA256 "@INPUT_ELF_SHA256@")
+if(NOT REPS2_INPUT_ELF_SHA256 STREQUAL "")
+    string(LENGTH "${REPS2_INPUT_ELF_SHA256}" input_digest_length)
+    if(NOT input_digest_length EQUAL 64 OR NOT REPS2_INPUT_ELF_SHA256 MATCHES "^[0-9a-fA-F]+$")
+        message(FATAL_ERROR "Input ELF SHA-256 must contain 64 hexadecimal digits")
+    endif()
+endif()
+set(REPS2_RAM_IMAGE_SHA256 "")
+if(NOT "@RAM_IMAGE@" STREQUAL "")
+    set(REPS2_RAM_IMAGE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../@RAM_IMAGE@")
+    if(NOT EXISTS "${REPS2_RAM_IMAGE_PATH}")
+        message(FATAL_ERROR "Missing initial RAM image: @RAM_IMAGE@")
+    endif()
+    file(SHA256 "${REPS2_RAM_IMAGE_PATH}" REPS2_RAM_IMAGE_SHA256)
+endif()
+
 set(REPS2_COMPILER_JSON "{}")
 reps2_json_set_string(REPS2_COMPILER_JSON id "${CMAKE_CXX_COMPILER_ID}")
 reps2_json_set_string(REPS2_COMPILER_JSON version "${CMAKE_CXX_COMPILER_VERSION}")
 reps2_json_set_string(REPS2_COMPILER_JSON target "${CMAKE_CXX_COMPILER_TARGET}")
 reps2_json_set_string(REPS2_COMPILER_JSON frontend_variant "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}")
 reps2_json_set_string(REPS2_COMPILER_JSON architecture_id "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+reps2_json_set_string(REPS2_COMPILER_JSON executable_sha256 "${REPS2_COMPILER_EXECUTABLE_SHA256}")
+reps2_json_set_string(REPS2_COMPILER_JSON compiler_arg1 "${CMAKE_CXX_COMPILER_ARG1}")
+reps2_json_set_string(REPS2_COMPILER_JSON compiler_launcher "${CMAKE_CXX_COMPILER_LAUNCHER}")
+reps2_json_set_string(REPS2_COMPILER_JSON linker_executable_sha256 "${REPS2_LINKER_EXECUTABLE_SHA256}")
 
 set(REPS2_CMAKE_JSON "{}")
 reps2_json_set_string(REPS2_CMAKE_JSON version "${CMAKE_VERSION}")
@@ -200,6 +285,25 @@ reps2_json_set_string(REPS2_COMPILE_JSON release_executable_linker_flags "${CMAK
 reps2_json_set_string(REPS2_COMPILE_JSON relwithdebinfo_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}")
 reps2_json_set_string(REPS2_COMPILE_JSON minsizerel_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_MINSIZEREL}")
 
+set(REPS2_RUNTIME_JSON "{}")
+string(JSON REPS2_RUNTIME_JSON SET "${REPS2_RUNTIME_JSON}" abi_version "${REPS2_RUNTIME_ABI_VERSION}")
+reps2_json_set_string(REPS2_RUNTIME_JSON headers_sha256 "${REPS2_RUNTIME_HEADERS_SHA256}")
+set(REPS2_FRONTEND_JSON "{}")
+string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" manifest_schema_version @MANIFEST_SCHEMA_VERSION@)
+string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" control_ir_schema_version @CONTROL_IR_SCHEMA_VERSION@)
+reps2_json_set_string(REPS2_FRONTEND_JSON input_kind "@INPUT_KIND@")
+if(REPS2_INPUT_ELF_SHA256 STREQUAL "")
+    string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" input_elf_sha256 null)
+else()
+    reps2_json_set_string(REPS2_FRONTEND_JSON input_elf_sha256 "${REPS2_INPUT_ELF_SHA256}")
+endif()
+reps2_json_set_string(REPS2_FRONTEND_JSON translation_sources_sha256 "${REPS2_TRANSLATION_SOURCES_SHA256}")
+if(REPS2_RAM_IMAGE_SHA256 STREQUAL "")
+    string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" ram_image_sha256 null)
+else()
+    reps2_json_set_string(REPS2_FRONTEND_JSON ram_image_sha256 "${REPS2_RAM_IMAGE_SHA256}")
+endif()
+
 set(REPS2_NATIVE_TOOLCHAIN_JSON "{}")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" schema_version 1)
 reps2_json_set_string(REPS2_NATIVE_TOOLCHAIN_JSON tool "reps2-native-build")
@@ -207,10 +311,33 @@ reps2_json_set_string(REPS2_NATIVE_TOOLCHAIN_JSON frontend_version "@VERSION@")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" compiler "${REPS2_COMPILER_JSON}")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" cmake "${REPS2_CMAKE_JSON}")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" compile "${REPS2_COMPILE_JSON}")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" runtime "${REPS2_RUNTIME_JSON}")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" frontend "${REPS2_FRONTEND_JSON}")
 file(GENERATE
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reps2-native-toolchain-$<CONFIG>.json"
     CONTENT "${REPS2_NATIVE_TOOLCHAIN_JSON}\n"
 )
+
+# Hash the report only after file(GENERATE) has materialized the active config.
+# Each configuration receives a distinct report and SHA-256 identity.
+set(REPS2_IDENTITY_SCRIPT [=[
+file(READ "@OUTPUT_DIR@/reps2-native-toolchain-@CONFIG@.json" toolchain_json)
+string(SHA256 cache_key_sha256 "${toolchain_json}")
+file(WRITE "@OUTPUT_DIR@/reps2-native-build-identity-@CONFIG@.json"
+    "{\n  \"schema_version\": 1,\n  \"kind\": \"reps2.native_build_identity\",\n  \"cache_key_sha256\": \"${cache_key_sha256}\",\n  \"toolchain_report\": \"reps2-native-toolchain-@CONFIG@.json\"\n}\n")
+]=])
+string(REPLACE "@OUTPUT_DIR@" "${CMAKE_CURRENT_BINARY_DIR}" REPS2_IDENTITY_SCRIPT "${REPS2_IDENTITY_SCRIPT}")
+string(REPLACE "@CONFIG@" "$<CONFIG>" REPS2_IDENTITY_SCRIPT "${REPS2_IDENTITY_SCRIPT}")
+file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reps2-write-native-identity-$<CONFIG>.cmake"
+    CONTENT "${REPS2_IDENTITY_SCRIPT}"
+)
+add_custom_target(reps2_native_build_identity
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_BINARY_DIR}/reps2-write-native-identity-$<CONFIG>.cmake"
+    COMMENT "Writing REPS2 native build identity"
+    VERBATIM
+)
+add_dependencies(reps2_probe reps2_native_build_identity)
 
 enable_testing()
 @TEST@
@@ -227,6 +354,11 @@ set_tests_properties(reps2_generated_probe PROPERTIES
         .replace("@VERSION@", VERSION)
         .replace("@PROJECT@", &project_name(project_stem))
         .replace("@SOURCES@", &source_lines)
+        .replace("@INPUT_ELF_SHA256@", input_elf_sha256.unwrap_or(""))
+        .replace("@INPUT_KIND@", if input_elf_sha256.is_some() { "boot_elf" } else { "synthetic_fixture" })
+        .replace("@RAM_IMAGE@", &ram_image.map(cmake_quote).unwrap_or_default())
+        .replace("@MANIFEST_SCHEMA_VERSION@", &MANIFEST_VERSION.to_string())
+        .replace("@CONTROL_IR_SCHEMA_VERSION@", &CONTROL_IR_SCHEMA_VERSION.to_string())
         .replace("@TEST@", &test)
 }
 
