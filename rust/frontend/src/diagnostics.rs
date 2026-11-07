@@ -110,8 +110,9 @@ impl SessionLogger {
             .collect::<Vec<_>>()
             .join(",");
 
-        let event_json = format!(
-            "{{\"schema_version\":{DIAGNOSTICS_SCHEMA_VERSION},\"session_id\":{},\"sequence\":{},\"timestamp_unix_ms\":{timestamp_unix_ms},\"elapsed_ms\":{elapsed_ms},\"severity\":{},\"category\":{},\"subsystem\":{},\"event\":{},\"message\":{},\"context\":{{{context_json}}}}}",
+        let mut event_json = format!(
+            "{{\"schema_version\":{},\"session_id\":{},\"sequence\":{},\"timestamp_unix_ms\":{timestamp_unix_ms},\"elapsed_ms\":{elapsed_ms},\"severity\":{},\"category\":{},\"subsystem\":{},\"event\":{},\"message\":{},\"context\":{{",
+            DIAGNOSTICS_SCHEMA_VERSION,
             json_string(&self.session_id),
             self.sequence,
             json_string(severity),
@@ -120,6 +121,8 @@ impl SessionLogger {
             json_string(event),
             json_string(message),
         );
+        event_json.push_str(&context_json);
+        event_json.push_str("}}");
         writeln!(self.events_log, "{event_json}")?;
 
         let single_line_message = message.replace('\r', " ").replace('\n', " ");
@@ -180,11 +183,11 @@ impl SessionLogger {
                 "  \"started_unix_ms\": {},\n",
                 "  \"finished_unix_ms\": {},\n",
                 "  \"outcome\": {},\n",
-                "  \"artifacts\": {\n",
+                "  \"artifacts\": {{\n",
                 "    \"text_log\": \"session.log\",\n",
                 "    \"event_stream\": \"events.jsonl\"\n",
-                "  }\n",
-                "}\n"
+                "  }}\n",
+                "}}\n"
             ),
             json_string(&self.session_id),
             json_string(&self.command),
