@@ -42,6 +42,28 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
 
 inline constexpr std::uint32_t kEeMainRamSize = 32U * 1024U * 1024U;
 
+// EE DMAC D_STAT (0x1000E010). The PS2Tek register map documents channel
+// status bits 0..9 as write-one-to-clear and interrupt-mask bits 16..25 plus
+// 29..30 as write-one-to-toggle. The current model deliberately does not
+// invent a reset value or generate DMA events: D_STAT remains unavailable until
+// a device/test supplies a known register value.
+inline constexpr std::uint32_t kEeDmacDStatAddress{0x1000'E010U};
+inline constexpr std::uint32_t kEeDmacDStatChannelStatusMask{0x0000'03FFU};
+inline constexpr std::uint32_t kEeDmacDStatInterruptMaskMask{0x63FF'0000U};
+inline constexpr std::uint32_t kEeDmacDStatReadableMask{0x63FF'E3FFU};
+
+struct EeDmacState {
+    std::uint32_t d_stat{};
+    bool d_stat_known{};
+
+    // This is an explicit device/test input, not a hardware reset default.
+    // Reserved bits are discarded; all documented read fields are retained.
+    void seed_d_stat(std::uint32_t value) noexcept {
+        d_stat = value & kEeDmacDStatReadableMask;
+        d_stat_known = true;
+    }
+};
+
 struct EeMemory {
     std::span<std::uint8_t> main_ram{};
     // EE Timer 3 mode (0x10001810). No timer counting or interrupts are
@@ -49,6 +71,7 @@ struct EeMemory {
     // guest that configures and reads it back sees its own value. Reset is 0,
     // as no clock source is enabled out of reset. See ADR 0073.
     std::uint32_t timer3_mode{};
+    EeDmacState dmac{};
 };
 
 // FCR31 (the condition, cause and sticky flags plus their hardwired fields) is
@@ -873,6 +896,11 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     std::uint32_t address,
     std::uint32_t& value
 ) noexcept {
+    if (address == kEeDmacDStatAddress) {
+        if (!memory.dmac.d_stat_known) return Status::unsupported_memory_access;
+        value = memory.dmac.d_stat & kEeDmacDStatReadableMask;
+        return Status::ok;
+    }
     if (address == kEeTimer3ModeAddress) {
         value = memory.timer3_mode;
         return Status::ok;
@@ -957,6 +985,16 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     std::uint32_t address,
     std::uint32_t value
 ) noexcept {
+    if (address == kEeDmacDStatAddress) {
+        if (!memory.dmac.d_stat_known) return Status::unsupported_memory_access;
+
+        // Only the documented channel status bits are acknowledged here.
+        // Writing one to a mask bit reverses that bit; writing zero preserves it.
+        memory.dmac.d_stat &= ~(value & kEeDmacDStatChannelStatusMask);
+        memory.dmac.d_stat ^= value & kEeDmacDStatInterruptMaskMask;
+        memory.dmac.d_stat &= kEeDmacDStatReadableMask;
+        return Status::ok;
+    }
     if (address == kEeTimer3ModeAddress) {
         memory.timer3_mode = value & kEeTimer3ModeWritableMask;
         return Status::ok;
