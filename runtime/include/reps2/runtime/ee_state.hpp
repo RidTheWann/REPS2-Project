@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <span>
 
+#include "reps2/runtime/ee_dmac.hpp"
 #include "reps2/runtime/ee_fpu.hpp"
 
 namespace reps2::runtime {
@@ -41,29 +42,6 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
 }
 
 inline constexpr std::uint32_t kEeMainRamSize = 32U * 1024U * 1024U;
-
-// EE DMAC D_STAT (0x1000E010). The PS2Tek register map documents channel
-// status bits 0..9 as write-one-to-clear and interrupt-mask bits 16..25 plus
-// 29..30 as write-one-to-toggle. The current model deliberately does not
-// invent a reset value or generate DMA events: D_STAT remains unavailable until
-// a device/test supplies a known register value.
-inline constexpr std::uint32_t kEeDmacDStatAddress{0x1000'E010U};
-inline constexpr std::uint32_t kEeDmacDStatChannelStatusMask{0x0000'03FFU};
-inline constexpr std::uint32_t kEeDmacDStatUnmodelledStatusWriteMask{0x0000'E000U};
-inline constexpr std::uint32_t kEeDmacDStatInterruptMaskMask{0x63FF'0000U};
-inline constexpr std::uint32_t kEeDmacDStatReadableMask{0x63FF'E3FFU};
-
-struct EeDmacState {
-    std::uint32_t d_stat{};
-    bool d_stat_known{};
-
-    // This is an explicit device/test input, not a hardware reset default.
-    // Reserved bits are discarded; all documented read fields are retained.
-    void seed_d_stat(std::uint32_t value) noexcept {
-        d_stat = value & kEeDmacDStatReadableMask;
-        d_stat_known = true;
-    }
-};
 
 struct EeMemory {
     std::span<std::uint8_t> main_ram{};
