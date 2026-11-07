@@ -2335,6 +2335,44 @@ mod tests {
     }
 
     #[test]
+    fn parses_global_developer_options_before_the_command() {
+        let arguments = [
+            "reps2".to_owned(),
+            "--dev".to_owned(),
+            "--log-dir".to_owned(),
+            "diagnostics".to_owned(),
+            "version".to_owned(),
+        ];
+        let (options, filtered) =
+            parse_global_options(&arguments).expect("valid global options");
+        assert_eq!(
+            options,
+            GlobalOptions {
+                developer_mode: true,
+                log_dir: Some(PathBuf::from("diagnostics")),
+            }
+        );
+        assert_eq!(filtered, ["reps2", "version"]);
+    }
+
+    #[test]
+    fn rejects_missing_or_repeated_diagnostics_directory_options() {
+        assert!(
+            parse_global_options(&["reps2".to_owned(), "--log-dir".to_owned()]).is_err()
+        );
+        assert!(
+            parse_global_options(&[
+                "reps2".to_owned(),
+                "--log-dir".to_owned(),
+                "one".to_owned(),
+                "--log-dir".to_owned(),
+                "two".to_owned(),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn names_part_files_beside_the_primary_output() {
         assert_eq!(
             part_output_path(Path::new("out/game.cpp"), 7),
