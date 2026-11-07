@@ -793,11 +793,8 @@ fn compile_elf(
     // RAM image at its source virtual address and hand it to analysis as an
     // executable root at the destination. The RAM image itself is unchanged:
     // the guest's own copy stays an observable side effect.
-    let relocated_regions = run_pipeline_stage(
-        session,
-        "analysis.relocated_code",
-        "analysis",
-        || {
+    let relocated_regions =
+        run_pipeline_stage(session, "analysis.relocated_code", "analysis", || {
             let mut relocated_regions = Vec::new();
             for spec in &options.relocated_code {
                 let physical = elf::ee_main_ram_physical_address(spec.source).ok_or_else(|| {
@@ -820,8 +817,7 @@ fn compile_elf(
                 });
             }
             Ok(relocated_regions)
-        },
-    )?;
+        })?;
 
     let (graph, discovery) = run_pipeline_stage(session, "cfg.discover", "analysis", || {
         if options.discover {
@@ -938,15 +934,20 @@ fn compile_elf(
         let mut sources = Vec::with_capacity(part_outputs.len() + 1);
         sources.push(primary_output.clone());
         sources.extend(part_outputs.iter().cloned());
-        Some(run_pipeline_stage(session, "native.project", "native-build", || {
-            write_native_project(
-                output,
-                &sources,
-                Some(&ram_output_name),
-                options.probe_budget,
-                options.hle_syscalls,
-            )
-        })?)
+        Some(run_pipeline_stage(
+            session,
+            "native.project",
+            "native-build",
+            || {
+                write_native_project(
+                    output,
+                    &sources,
+                    Some(&ram_output_name),
+                    options.probe_budget,
+                    options.hle_syscalls,
+                )
+            },
+        )?)
     } else {
         None
     };
@@ -2184,10 +2185,17 @@ fn run_command_with_session(
             let options = parse_analyze_options(&arguments[3..])?;
             analyze_elf(Path::new(&arguments[2]), options, session)
         }
-        Some("profile-elf") if arguments.len() == 3 => profile_elf(Path::new(&arguments[2]), session),
+        Some("profile-elf") if arguments.len() == 3 => {
+            profile_elf(Path::new(&arguments[2]), session)
+        }
         Some("recompile-elf") if arguments.len() >= 4 => {
             let options = parse_recompile_options(&arguments[4..])?;
-            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), options, session)
+            compile_elf(
+                Path::new(&arguments[2]),
+                Path::new(&arguments[3]),
+                options,
+                session,
+            )
         }
         Some("compile-cfg-fixture") if arguments.len() >= 3 => {
             let options = parse_fixture_options(&arguments[3..])?;
