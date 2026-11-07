@@ -945,6 +945,7 @@ fn compile_elf(
                     Some(&ram_output_name),
                     options.probe_budget,
                     options.hle_syscalls,
+                    Some(&manifest.input_sha256),
                 )
             },
         )?)
@@ -1419,6 +1420,7 @@ fn write_native_project(
     ram_image: Option<&str>,
     probe_budget: u64,
     hle_syscalls: bool,
+    input_elf_sha256: Option<&str>,
 ) -> Result<PathBuf, String> {
     let (stem, _) = generated_output_parts(output);
     let directory = output.with_file_name(format!("{stem}.native"));
@@ -1429,7 +1431,14 @@ fn write_native_project(
         )
     })?;
 
-    let project = native_build::render(&stem, sources, ram_image, probe_budget, hle_syscalls);
+    let project = native_build::render_with_identity(
+        &stem,
+        sources,
+        ram_image,
+        probe_budget,
+        hle_syscalls,
+        input_elf_sha256,
+    );
     fs::write(directory.join("CMakeLists.txt"), project.cmake_lists).map_err(|error| {
         format!(
             "cannot write native build CMakeLists.txt in {}: {error}",
@@ -1967,6 +1976,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
             None,
             options.probe_budget,
             options.hle_syscalls,
+            None,
         )?;
         println!("  Native build project: {}", directory.display());
     }
