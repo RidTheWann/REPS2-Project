@@ -13,8 +13,8 @@ use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::coverage;
-use reps2_frontend::digest;
 use reps2_frontend::diagnostics;
+use reps2_frontend::digest;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
 use reps2_frontend::iso9660::{self, Iso9660};
@@ -1959,7 +1959,9 @@ fn usage() {
     println!();
     println!("Global developer options must appear before the command:");
     println!("  --dev                 enable a session-scoped developer diagnostics capture");
-    println!("  --log-dir <directory> write diagnostics under an explicit directory (also enables capture)");
+    println!(
+        "  --log-dir <directory> write diagnostics under an explicit directory (also enables capture)"
+    );
     println!("A session contains session.log, events.jsonl, and session.json.");
     println!();
     println!(
@@ -2109,9 +2111,8 @@ fn run() -> Result<(), String> {
     let command = arguments.get(1).map(String::as_str).unwrap_or("help");
     let log_root = match options.log_dir {
         Some(path) => path,
-        None => diagnostics::default_log_root().map_err(|error| {
-            format!("cannot resolve the REPS2 diagnostics directory: {error}")
-        })?,
+        None => diagnostics::default_log_root()
+            .map_err(|error| format!("cannot resolve the REPS2 diagnostics directory: {error}"))?,
     };
     let mut session = diagnostics::SessionLogger::start(
         &log_root,
@@ -2343,8 +2344,7 @@ mod tests {
             "diagnostics".to_owned(),
             "version".to_owned(),
         ];
-        let (options, filtered) =
-            parse_global_options(&arguments).expect("valid global options");
+        let (options, filtered) = parse_global_options(&arguments).expect("valid global options");
         assert_eq!(
             options,
             GlobalOptions {
@@ -2357,9 +2357,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_or_repeated_diagnostics_directory_options() {
-        assert!(
-            parse_global_options(&["reps2".to_owned(), "--log-dir".to_owned()]).is_err()
-        );
+        assert!(parse_global_options(&["reps2".to_owned(), "--log-dir".to_owned()]).is_err());
         assert!(
             parse_global_options(&[
                 "reps2".to_owned(),
