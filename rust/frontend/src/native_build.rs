@@ -13,9 +13,9 @@
 //! generated project references its sibling translation files through `..`, so
 //! the translation directory and `<stem>.native/` move together.
 
+use crate::VERSION;
 use crate::build_manifest::MANIFEST_VERSION;
 use crate::control_ir::CONTROL_IR_SCHEMA_VERSION;
-use crate::VERSION;
 
 /// Rendered native build project.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -386,9 +386,15 @@ set_tests_properties(reps2_generated_probe PROPERTIES
                 "synthetic_fixture"
             },
         )
-        .replace("@RAM_IMAGE@", &ram_image.map(cmake_quote).unwrap_or_default())
+        .replace(
+            "@RAM_IMAGE@",
+            &ram_image.map(cmake_quote).unwrap_or_default(),
+        )
         .replace("@MANIFEST_SCHEMA_VERSION@", &MANIFEST_VERSION.to_string())
-        .replace("@CONTROL_IR_SCHEMA_VERSION@", &CONTROL_IR_SCHEMA_VERSION.to_string())
+        .replace(
+            "@CONTROL_IR_SCHEMA_VERSION@",
+            &CONTROL_IR_SCHEMA_VERSION.to_string(),
+        )
         .replace("@TEST@", &test)
 }
 
@@ -798,21 +804,31 @@ mod tests {
             Some(&digest),
         );
 
-        assert!(project
-            .cmake_lists
-            .contains(&format!("set(REPS2_INPUT_ELF_SHA256 \"{digest}\")")));
+        assert!(
+            project
+                .cmake_lists
+                .contains(&format!("set(REPS2_INPUT_ELF_SHA256 \"{digest}\")"))
+        );
         assert!(project.cmake_lists.contains("input_kind \"boot_elf\""));
         assert!(project.cmake_lists.contains("manifest_schema_version 3"));
         assert!(project.cmake_lists.contains("control_ir_schema_version 1"));
         assert!(project.cmake_lists.contains("REPS2_RUNTIME_ABI_VERSION"));
         assert!(project.cmake_lists.contains("REPS2_RUNTIME_HEADERS_SHA256"));
-        assert!(project.cmake_lists.contains("REPS2_TRANSLATION_SOURCES_SHA256"));
-        assert!(project
-            .cmake_lists
-            .contains("reps2-native-build-identity-$<CONFIG>.json"));
-        assert!(project
-            .cmake_lists
-            .contains("compiler_launcher_config_sha256"));
+        assert!(
+            project
+                .cmake_lists
+                .contains("REPS2_TRANSLATION_SOURCES_SHA256")
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains("reps2-native-build-identity-$<CONFIG>.json")
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains("compiler_launcher_config_sha256")
+        );
         assert!(!project.cmake_lists.contains("compiler_arg1 \""));
         assert!(!project.cmake_lists.contains("compiler_launcher \""));
     }
