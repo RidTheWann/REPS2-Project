@@ -57,17 +57,13 @@ pub fn run_command(arguments: &[String], log_root: &Path) -> Result<(), String> 
         }
         Some("inspect") if arguments.len() == 2 => {
             let requested = &arguments[1];
-            match resolve_session_id(log_root, requested)
-                .and_then(|id| load_session(log_root, &id))
+            match resolve_session_id(log_root, requested).and_then(|id| load_session(log_root, &id))
             {
                 Ok(session) => {
                     println!("{}", session_inspection_json(&session));
                     Ok(())
                 }
-                Err(error) => report_error(
-                    "REPS2_DEV_SESSION_INSPECTION_FAILED",
-                    &error,
-                ),
+                Err(error) => report_error("REPS2_DEV_SESSION_INSPECTION_FAILED", &error),
             }
         }
         Some("help") | None => {
@@ -92,9 +88,7 @@ fn parse_session_limit(arguments: &[String]) -> Result<usize, String> {
         .parse::<usize>()
         .map_err(|_| "--limit must be a positive integer".to_owned())?;
     if limit == 0 || limit > MAX_SESSION_LIMIT {
-        return Err(format!(
-            "--limit must be between 1 and {MAX_SESSION_LIMIT}"
-        ));
+        return Err(format!("--limit must be between 1 and {MAX_SESSION_LIMIT}"));
     }
     Ok(limit)
 }
@@ -106,7 +100,9 @@ fn print_usage() {
     println!("  reps2 [--log-dir <directory>] dev inspect <latest|session-id>");
     println!();
     println!("sessions lists recent diagnostic sessions.");
-    println!("inspect returns the manifest, complete event stream, diagnostics, and integrity warnings.");
+    println!(
+        "inspect returns the manifest, complete event stream, diagnostics, and integrity warnings."
+    );
     println!("The default diagnostics root follows the platform-specific REPS2 log directory.");
 }
 
@@ -133,7 +129,12 @@ fn resolve_session_id(root: &Path, requested: &str) -> Result<String, String> {
             .and_then(|path| path.file_name())
             .and_then(|name| name.to_str())
             .map(str::to_owned)
-            .ok_or_else(|| format!("no REPS2 diagnostic sessions exist under {}", root.display()));
+            .ok_or_else(|| {
+                format!(
+                    "no REPS2 diagnostic sessions exist under {}",
+                    root.display()
+                )
+            });
     }
 
     if !valid_session_id(requested) {
@@ -163,11 +164,7 @@ fn session_directories(root: &Path) -> io::Result<Vec<PathBuf>> {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let name = entry.file_name();
-        if file_type.is_dir()
-            && name
-                .to_str()
-                .is_some_and(|name| valid_session_id(name))
-        {
+        if file_type.is_dir() && name.to_str().is_some_and(|name| valid_session_id(name)) {
             directories.push(entry.path());
         }
     }
@@ -177,7 +174,9 @@ fn session_directories(root: &Path) -> io::Result<Vec<PathBuf>> {
 
 fn load_session(root: &Path, id: &str) -> Result<SessionData, String> {
     if !valid_session_id(id) {
-        return Err(format!("invalid REPS2 diagnostic session identifier: {id:?}"));
+        return Err(format!(
+            "invalid REPS2 diagnostic session identifier: {id:?}"
+        ));
     }
     let directory = root.join(id);
     let metadata = fs::symlink_metadata(&directory).map_err(|error| {
@@ -202,13 +201,16 @@ fn load_session(root: &Path, id: &str) -> Result<SessionData, String> {
     let manifest_json = match fs::read_to_string(&manifest_path) {
         Ok(contents) if contents.trim().starts_with('{') && is_json_value(contents.trim()) => {
             Some(contents.trim().to_owned())
-        },
+        }
         Ok(_) => {
             integrity_errors.push("session.json is not valid JSON".to_owned());
             None
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            integrity_errors.push("session.json is missing; the process may have terminated before finalization".to_owned());
+            integrity_errors.push(
+                "session.json is missing; the process may have terminated before finalization"
+                    .to_owned(),
+            );
             None
         }
         Err(error) => {
@@ -271,10 +273,7 @@ fn session_list_json(root: &Path, limit: usize) -> io::Result<String> {
             continue;
         };
         let session = load_session(root, id).map_err(io::Error::other)?;
-        let manifest = session
-            .manifest_json
-            .as_deref()
-            .unwrap_or("null");
+        let manifest = session.manifest_json.as_deref().unwrap_or("null");
         let integrity_errors = render_string_array(&session.integrity_errors);
         entries.push(format!(
             concat!(
@@ -599,16 +598,16 @@ mod tests {
             ),
         )
         .expect("write session manifest");
-        fs::write(
-            directory.join("events.jsonl"),
-            events.join("\n") + "\n",
-        )
-        .expect("write event stream");
+        fs::write(directory.join("events.jsonl"), events.join("\n") + "\n")
+            .expect("write event stream");
     }
 
     #[test]
     fn validates_session_list_limits() {
-        assert_eq!(parse_session_limit(&[]).expect("default limit"), DEFAULT_SESSION_LIMIT);
+        assert_eq!(
+            parse_session_limit(&[]).expect("default limit"),
+            DEFAULT_SESSION_LIMIT
+        );
         assert_eq!(
             parse_session_limit(&["--limit".to_owned(), "5".to_owned()]).expect("explicit limit"),
             5
