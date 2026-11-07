@@ -133,6 +133,73 @@ impl SessionLogger {
         self.text_log.flush()
     }
 
+    /// Runs one frontend pipeline stage and records its lifecycle when diagnostics are enabled.
+    ///
+    /// Stage events are deliberately coarse-grained: callers choose stable stage IDs
+    /// around parsing, analysis, lowering and artifact creation. This avoids
+    /// per-instruction logging and keeps the event stream useful for agent triage.
+    pub fn run_stage<T>(
+        &mut self,
+        stage_id: &str,
+        subsystem: &str,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.record(
+            "info",
+            "pipeline",
+            subsystem,
+            "pipeline.stage.started",
+            "Frontend pipeline stage started",
+            &[("stage_id", stage_id)],
+        )
+        .map_err(|error| format!("cannot record pipeline stage {stage_id} start: {error}"))?;
+
+        let stage_started = Instant::now();
+        let result = operation();
+        let stage_elapsed_ms = stage_started.elapsed().as_millis().to_string();
+
+        match result {
+            Ok(value) => {
+                self.record(
+                    "info",
+                    "pipeline",
+                    subsystem,
+                    "pipeline.stage.succeeded",
+                    "Frontend pipeline stage completed",
+                    &[
+                        ("stage_id", stage_id),
+                        ("stage_elapsed_ms", &stage_elapsed_ms),
+                    ],
+                )
+                .map_err(|error| {
+                    format!("pipeline stage {stage_id} completed, but its result could not be recorded: {error}")
+                })?;
+                Ok(value)
+            }
+            Err(stage_error) => {
+                if let Err(log_error) = self.record(
+                    "error",
+                    "pipeline",
+                    subsystem,
+                    "pipeline.stage.failed",
+                    &stage_error,
+                    &[
+                        ("stage_id", stage_id),
+                        ("stage_elapsed_ms", &stage_elapsed_ms),
+                        ("error_code", "REPS2_PIPELINE_STAGE_FAILED"),
+                        ("failure_scope", "pipeline_stage"),
+                        ("error", &stage_error),
+                    ],
+                ) {
+                    return Err(format!(
+                        "{stage_error}; additionally, pipeline stage {stage_id} failure could not be recorded: {log_error}"
+                    ));
+                }
+                Err(stage_error)
+            }
+        }
+    }
+
     /// Completes the session and refreshes its small manifest.
     pub fn finish(&mut self, outcome: &str, error: Option<&str>) -> io::Result<()> {
         let severity = if outcome == "succeeded" {
@@ -371,6 +438,56 @@ mod tests {
         assert!(manifest.contains("\"outcome\": \"failed\""));
         assert!(manifest.contains("\"finished_unix_ms\":"));
         assert!(!manifest.contains("\"finished_unix_ms\": null"));
+    }
+
+    #[test]
+    fn records_successful_pipeline_stage_boundaries_and_duration() {
+        let temp = TestDirectory::new();
+        let mut logger = SessionLogger::start(&temp.0, "recompile-elf", "0.7.0", "test-platform")
+            .expect("start diagnostics session");
+        let directory = logger.directory().to_path_buf();
+
+        let value = logger
+            .run_stage("ir.lift", "ir", || Ok::<_, String>(42))
+            .expect("pipeline stage succeeds");
+        assert_eq!(value, 42);
+        logger.finish("succeeded", None).expect("finish session");
+
+        let events = fs::read_to_string(directory.join("events.jsonl"))
+            .expect("read structured event stream");
+        assert!(events.contains("\"event\":\"pipeline.stage.started\""));
+        assert!(events.contains("\"event\":\"pipeline.stage.succeeded\""));
+        assert!(events.contains("\"stage_id\":\"ir.lift\""));
+        assert!(events.contains("\"subsystem\":\"ir\""));
+        assert!(events.contains("\"stage_elapsed_ms\":"));
+        assert!(!events.contains("\"pipeline.stage.failed\""));
+    }
+
+    #[test]
+    fn records_failed_pipeline_stage_with_stable_agent_error_context() {
+        let temp = TestDirectory::new();
+        let mut logger = SessionLogger::start(&temp.0, "recompile-elf", "0.7.0", "test-platform")
+            .expect("start diagnostics session");
+        let directory = logger.directory().to_path_buf();
+
+        let error = logger
+            .run_stage::<()>("cfg.discover", "analysis", || {
+                Err("CFG instruction limit exceeded at 0x0010A008".to_owned())
+            })
+            .expect_err("pipeline stage fails");
+        assert_eq!(error, "CFG instruction limit exceeded at 0x0010A008");
+        logger
+            .finish("failed", Some(&error))
+            .expect("finish failed session");
+
+        let events = fs::read_to_string(directory.join("events.jsonl"))
+            .expect("read structured event stream");
+        assert!(events.contains("\"event\":\"pipeline.stage.failed\""));
+        assert!(events.contains("\"stage_id\":\"cfg.discover\""));
+        assert!(events.contains("\"subsystem\":\"analysis\""));
+        assert!(events.contains("\"error_code\":\"REPS2_PIPELINE_STAGE_FAILED\""));
+        assert!(events.contains("\"failure_scope\":\"pipeline_stage\""));
+        assert!(events.contains("\"error\":\"CFG instruction limit exceeded at 0x0010A008\""));
     }
 
     #[test]

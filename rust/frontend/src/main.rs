@@ -384,32 +384,56 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-fn analyze_elf(path: &Path, options: AnalyzeOptions) -> Result<(), String> {
-    let bytes = read_input(path)?;
-    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
-    if !image.is_mips() {
-        return Err("ELF machine is not EM_MIPS; refusing PS2 EE analysis".to_owned());
+fn run_pipeline_stage<T>(
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+    stage_id: &'static str,
+    subsystem: &'static str,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    match session.as_deref_mut() {
+        Some(logger) => logger.run_stage(stage_id, subsystem, operation),
+        None => operation(),
     }
+}
+
+fn analyze_elf(
+    path: &Path,
+    options: AnalyzeOptions,
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
+    let bytes = run_pipeline_stage(session, "input.read", "io", || read_input(path))?;
+    let image = run_pipeline_stage(session, "elf.parse", "elf", || {
+        elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())
+    })?;
+    run_pipeline_stage(session, "elf.target_validation", "elf", || {
+        if !image.is_mips() {
+            Err("ELF machine is not EM_MIPS; refusing PS2 EE analysis".to_owned())
+        } else {
+            Ok(())
+        }
+    })?;
 
     let limits = options.limits.to_limits();
-    let (graph, discovery) = if options.discover {
-        let analysis::DiscoveryAnalysis {
-            graph,
-            discovery,
-            accepted_roots,
-            skipped_roots,
-            skipped_blocks,
-        } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
-            .map_err(analysis_error_message)?;
-        (
-            graph,
-            Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
-        )
-    } else {
-        let graph =
-            analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
-        (graph, None)
-    };
+    let (graph, discovery) = run_pipeline_stage(session, "cfg.discover", "analysis", || {
+        if options.discover {
+            let analysis::DiscoveryAnalysis {
+                graph,
+                discovery,
+                accepted_roots,
+                skipped_roots,
+                skipped_blocks,
+            } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
+                .map_err(analysis_error_message)?;
+            Ok((
+                graph,
+                Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
+            ))
+        } else {
+            let graph =
+                analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
+            Ok((graph, None))
+        }
+    })?;
     let edges = graph.edges();
 
     println!("REPS2 reachable executable analysis");
@@ -488,13 +512,24 @@ fn analyze_elf(path: &Path, options: AnalyzeOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn profile_elf(path: &Path) -> Result<(), String> {
-    let bytes = read_input(path)?;
-    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
-    if !image.is_mips() {
-        return Err("ELF machine is not EM_MIPS; refusing PS2 EE profiling".to_owned());
-    }
-    let profile = coverage::profile(&image, &bytes).map_err(|error| error.to_string())?;
+fn profile_elf(
+    path: &Path,
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
+    let bytes = run_pipeline_stage(session, "input.read", "io", || read_input(path))?;
+    let image = run_pipeline_stage(session, "elf.parse", "elf", || {
+        elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())
+    })?;
+    run_pipeline_stage(session, "elf.target_validation", "elf", || {
+        if !image.is_mips() {
+            Err("ELF machine is not EM_MIPS; refusing PS2 EE profiling".to_owned())
+        } else {
+            Ok(())
+        }
+    })?;
+    let profile = run_pipeline_stage(session, "coverage.profile", "coverage", || {
+        coverage::profile(&image, &bytes).map_err(|error| error.to_string())
+    })?;
 
     let percentage = |count: u64| {
         if profile.scanned_words == 0 {
@@ -729,79 +764,106 @@ fn extract_boot_elf(input: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result<(), String> {
-    let bytes = read_input(input)?;
+fn compile_elf(
+    input: &Path,
+    output: &Path,
+    options: RecompileOptions,
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
+    let bytes = run_pipeline_stage(session, "input.read", "io", || read_input(input))?;
     let input_digest = digest::sha256_bytes(&bytes);
-    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
-    if !image.is_mips() {
-        return Err("ELF machine is not EM_MIPS; refusing PS2 EE compilation".to_owned());
-    }
+    let image = run_pipeline_stage(session, "elf.parse", "elf", || {
+        elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())
+    })?;
+    run_pipeline_stage(session, "elf.target_validation", "elf", || {
+        if !image.is_mips() {
+            Err("ELF machine is not EM_MIPS; refusing PS2 EE compilation".to_owned())
+        } else {
+            Ok(())
+        }
+    })?;
 
     let limits = options.limits.to_limits();
-    let ram_image = elf::build_main_ram_image(&bytes, &image)
-        .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
+    let ram_image = run_pipeline_stage(session, "ee.ram_image", "ee-memory", || {
+        elf::build_main_ram_image(&bytes, &image)
+            .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))
+    })?;
 
     // Runtime-copied code is data in the input image. Read it from the initial
     // RAM image at its source virtual address and hand it to analysis as an
     // executable root at the destination. The RAM image itself is unchanged:
     // the guest's own copy stays an observable side effect.
-    let mut relocated_regions = Vec::new();
-    for spec in &options.relocated_code {
-        let physical = elf::ee_main_ram_physical_address(spec.source).ok_or_else(|| {
-            format!(
-                "relocated-code source 0x{:08X} is not mapped in EE main RAM",
-                spec.source
-            )
+    let relocated_regions =
+        run_pipeline_stage(session, "analysis.relocated_code", "analysis", || {
+            let mut relocated_regions = Vec::new();
+            for spec in &options.relocated_code {
+                let physical = elf::ee_main_ram_physical_address(spec.source).ok_or_else(|| {
+                    format!(
+                        "relocated-code source 0x{:08X} is not mapped in EE main RAM",
+                        spec.source
+                    )
+                })?;
+                let start = physical as usize;
+                let size = spec.size as usize;
+                if start + size > ram_image.bytes.len() {
+                    return Err(format!(
+                        "relocated-code source 0x{:08X}+0x{:X} exceeds the EE main-RAM image",
+                        spec.source, spec.size
+                    ));
+                }
+                relocated_regions.push(analysis::RelocatedCodeRegion {
+                    destination: spec.destination,
+                    bytes: ram_image.bytes[start..start + size].to_vec(),
+                });
+            }
+            Ok(relocated_regions)
         })?;
-        let start = physical as usize;
-        let size = spec.size as usize;
-        if start + size > ram_image.bytes.len() {
-            return Err(format!(
-                "relocated-code source 0x{:08X}+0x{:X} exceeds the EE main-RAM image",
-                spec.source, spec.size
-            ));
-        }
-        relocated_regions.push(analysis::RelocatedCodeRegion {
-            destination: spec.destination,
-            bytes: ram_image.bytes[start..start + size].to_vec(),
-        });
-    }
 
-    let (graph, discovery) = if options.discover {
-        let analysis::DiscoveryAnalysis {
-            graph,
-            discovery,
-            accepted_roots,
-            skipped_roots,
-            skipped_blocks,
-        } = analysis::discover_elf_with_discovery_and_relocated(
-            &image,
-            &bytes,
-            limits,
-            &relocated_regions,
+    let (graph, discovery) = run_pipeline_stage(session, "cfg.discover", "analysis", || {
+        if options.discover {
+            let analysis::DiscoveryAnalysis {
+                graph,
+                discovery,
+                accepted_roots,
+                skipped_roots,
+                skipped_blocks,
+            } = analysis::discover_elf_with_discovery_and_relocated(
+                &image,
+                &bytes,
+                limits,
+                &relocated_regions,
+            )
+            .map_err(analysis_error_message)?;
+            Ok((
+                graph,
+                Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
+            ))
+        } else {
+            let graph =
+                analysis::discover_elf_with_relocated(&image, &bytes, limits, &relocated_regions)
+                    .map_err(analysis_error_message)?;
+            Ok((graph, None))
+        }
+    })?;
+    let program = run_pipeline_stage(session, "ir.lift", "ir", || {
+        control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())
+    })?;
+    let units = run_pipeline_stage(session, "codegen.emit_cpp", "codegen", || {
+        control_codegen::emit_cpp_units_with_entry(
+            &program,
+            image.entry_point,
+            options.translation_units,
         )
-        .map_err(analysis_error_message)?;
-        (
-            graph,
-            Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
-        )
-    } else {
-        let graph =
-            analysis::discover_elf_with_relocated(&image, &bytes, limits, &relocated_regions)
-                .map_err(analysis_error_message)?;
-        (graph, None)
-    };
-    let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
-    let units = control_codegen::emit_cpp_units_with_entry(
-        &program,
-        image.entry_point,
-        options.translation_units,
-    )
-    .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())
+    })?;
     let ram_output = output.with_extension("ram.bin");
-    fs::write(&ram_output, &ram_image.bytes)
-        .map_err(|error| format!("cannot write initial EE RAM image: {error}"))?;
-    let parts = write_translation_units(output, &units)?;
+    run_pipeline_stage(session, "artifact.write_ram", "artifacts", || {
+        fs::write(&ram_output, &ram_image.bytes)
+            .map_err(|error| format!("cannot write initial EE RAM image: {error}"))
+    })?;
+    let parts = run_pipeline_stage(session, "artifact.write_cpp", "artifacts", || {
+        write_translation_units(output, &units)
+    })?;
 
     let discovery_stats =
         discovery
@@ -859,23 +921,32 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
             .collect(),
     };
     let manifest_output = output.with_extension("manifest.json");
-    fs::write(&manifest_output, manifest.to_json()).map_err(|error| {
-        format!(
-            "cannot write build manifest to {}: {error}",
-            manifest_output.display()
-        )
+    run_pipeline_stage(session, "artifact.write_manifest", "artifacts", || {
+        fs::write(&manifest_output, manifest.to_json()).map_err(|error| {
+            format!(
+                "cannot write build manifest to {}: {error}",
+                manifest_output.display()
+            )
+        })
     })?;
 
     let native_directory = if options.native_build {
         let mut sources = Vec::with_capacity(part_outputs.len() + 1);
         sources.push(primary_output.clone());
         sources.extend(part_outputs.iter().cloned());
-        Some(write_native_project(
-            output,
-            &sources,
-            Some(&ram_output_name),
-            options.probe_budget,
-            options.hle_syscalls,
+        Some(run_pipeline_stage(
+            session,
+            "native.project",
+            "native-build",
+            || {
+                write_native_project(
+                    output,
+                    &sources,
+                    Some(&ram_output_name),
+                    options.probe_budget,
+                    options.hle_syscalls,
+                )
+            },
         )?)
     } else {
         None
@@ -2046,7 +2117,10 @@ fn run_tracked_command(
         )
         .map_err(|error| format!("cannot write command-start diagnostic event: {error}"))?;
 
-    let result = run_command(arguments);
+    let result = {
+        let mut capture = Some(&mut *session);
+        run_command_with_session(arguments, &mut capture)
+    };
     match &result {
         Ok(()) => session
             .record(
@@ -2082,6 +2156,14 @@ fn run_tracked_command(
 }
 
 fn run_command(arguments: &[String]) -> Result<(), String> {
+    let mut session: Option<&mut diagnostics::SessionLogger> = None;
+    run_command_with_session(arguments, &mut session)
+}
+
+fn run_command_with_session(
+    arguments: &[String],
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
     match arguments.get(1).map(String::as_str) {
         Some("version") if arguments.len() == 2 => {
             println!(
@@ -2101,12 +2183,19 @@ fn run_command(arguments: &[String]) -> Result<(), String> {
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
         Some("analyze-elf") if arguments.len() >= 3 => {
             let options = parse_analyze_options(&arguments[3..])?;
-            analyze_elf(Path::new(&arguments[2]), options)
+            analyze_elf(Path::new(&arguments[2]), options, session)
         }
-        Some("profile-elf") if arguments.len() == 3 => profile_elf(Path::new(&arguments[2])),
+        Some("profile-elf") if arguments.len() == 3 => {
+            profile_elf(Path::new(&arguments[2]), session)
+        }
         Some("recompile-elf") if arguments.len() >= 4 => {
             let options = parse_recompile_options(&arguments[4..])?;
-            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), options)
+            compile_elf(
+                Path::new(&arguments[2]),
+                Path::new(&arguments[3]),
+                options,
+                session,
+            )
         }
         Some("compile-cfg-fixture") if arguments.len() >= 3 => {
             let options = parse_fixture_options(&arguments[3..])?;
