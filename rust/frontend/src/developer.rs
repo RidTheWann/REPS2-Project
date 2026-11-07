@@ -762,10 +762,10 @@ mod tests {
         write_session(&temp.0, "session-3000-1-0", "failed", &[]);
 
         let report = session_list_json(&temp.0, 2).expect("bounded session list");
-        assert!(report.contains(r#"\"count\":2"#));
-        assert!(report.contains(r#"\"available_count\":3"#));
-        assert!(report.contains(r#"\"truncated\":true"#));
-        assert!(report.contains(r#"\"session_id\":\"session-3000-1-0\""#));
+        assert!(report.contains(r#""count":2"#));
+        assert!(report.contains(r#""available_count":3"#));
+        assert!(report.contains(r#""truncated":true"#));
+        assert!(report.contains(r#""session_id":"session-3000-1-0""#));
         assert!(!report.contains("session-1000-1-0"));
         assert!(is_json_value(&report));
     }
