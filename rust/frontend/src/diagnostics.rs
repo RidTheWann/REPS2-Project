@@ -124,7 +124,7 @@ impl SessionLogger {
         event_json.push_str("}}");
         writeln!(self.events_log, "{event_json}")?;
 
-        let single_line_message = message.replace('\r', " ").replace('\n', " ");
+        let single_line_message = message.replace(['\r', '\n'], " ");
         writeln!(
             self.text_log,
             "[{timestamp_unix_ms}] {severity:<5} {category}/{subsystem} {event}: {single_line_message}"
