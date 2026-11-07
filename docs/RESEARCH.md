@@ -22,6 +22,13 @@ These projects have different goals and different completion levels. Their demos
 
 - **ORI immediate extension:** the public MIPS32 instruction reference defines ORI's 16-bit immediate as zero-extended. The currently consulted PCSX2 R5900 implementation also combines the source GPR with the zero-extended 16-bit immediate. One publicly accessible mirror of the Sony EE Core Instruction Set Manual contains prose describing ORI's immediate as sign-extended. REPS2 follows the MIPS instruction definition and observed PCSX2 behavior for this subset, records the discrepancy, and requires a future differential conformance case before expanding claims.
 
+## CFG analysis resource-limit behavior
+
+- **Observed (synthetic regression):** an ELF executable-memory segment containing raw words `0x0000000C, 0x00000000, 0x00000000` (`syscall; nop; nop`) with the entry at `0x00100000` and `max_instructions = 1` previously returned `Ok(ControlFlowGraph)` with `decoded_instruction_count = 2`. The authoritative trap consumed the budget; the queued speculative continuation decoded beyond it, and blanket lenient error handling hid `InstructionLimitExceeded`. Before the change, the counter helper also incremented before returning an exhaustion error.
+- **Derived:** a partial graph cannot be reported as a successful bounded analysis when any root or continuation reaches the configured resource ceiling. A refused instruction must not consume count capacity. Block splitting likewise must verify capacity before graph mutation.
+- **Decision:** ADR 0085 restricts leniency to an exhaustive set of speculative structural decode failures. Resource, input/segment, PC-overflow and ownership-invariant errors propagate. Valid syscall continuation code remains discoverable; unsupported speculative delay-slot structure remains skippable and visible through existing reporting.
+- **Validation:** synthetic raw word tests cover instruction limits 1, 2 and 3, authoritative/heuristic roots, delay-slot accounting, counter no-mutation at zero/one/`usize::MAX`, block split boundary, and preserved lenient unsupported continuation behavior. A synthetic ELF CLI test checks `analyze-elf` with and without `--discover`, configured-limit hint, nonzero result, and `cfg.discover`/analysis-stage diagnostics. No retail binary or game artifact is involved.
+
 ## Control-flow and delay-slot references
 
 - MIPS32 Volume II defines the standard delayed-control-transfer instruction forms and branch offset calculation. Use it as a baseline only; validate EE-specific behavior and the supported R5900 encoding subset with PS2 documentation and differential tests.
