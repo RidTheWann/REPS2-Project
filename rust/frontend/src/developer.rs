@@ -265,6 +265,7 @@ fn load_session(root: &Path, id: &str) -> Result<SessionData, String> {
 fn session_list_json(root: &Path, limit: usize) -> io::Result<String> {
     let mut sessions = session_directories(root)?;
     sessions.reverse();
+    let available_count = sessions.len();
     sessions.truncate(limit);
 
     let mut entries = Vec::with_capacity(sessions.len());
@@ -296,11 +297,14 @@ fn session_list_json(root: &Path, limit: usize) -> io::Result<String> {
             "{{\"schema_version\":{},",
             "\"kind\":\"reps2.developer.session_list\",",
             "\"status\":\"ok\",\"log_root\":{},",
-            "\"count\":{},\"sessions\":[{}]}}"
+            "\"count\":{},\"available_count\":{},\"truncated\":{},",
+            "\"sessions\":[{}]}}"
         ),
         REPORT_SCHEMA_VERSION,
         json_string(&root.to_string_lossy()),
         entries.len(),
+        available_count,
+        available_count > entries.len(),
         entries.join(","),
     ))
 }
@@ -748,6 +752,22 @@ mod tests {
         assert!(!valid_session_id("session-../secret"));
         assert!(!valid_session_id("session-"));
         assert!(valid_session_id("session-1234-42-0"));
+    }
+
+    #[test]
+    fn session_list_reports_when_the_requested_limit_truncates_history() {
+        let temp = TestDirectory::new();
+        write_session(&temp.0, "session-1000-1-0", "succeeded", &[]);
+        write_session(&temp.0, "session-2000-1-0", "succeeded", &[]);
+        write_session(&temp.0, "session-3000-1-0", "failed", &[]);
+
+        let report = session_list_json(&temp.0, 2).expect("bounded session list");
+        assert!(report.contains(r#"\"count\":2"#));
+        assert!(report.contains(r#"\"available_count\":3"#));
+        assert!(report.contains(r#"\"truncated\":true"#));
+        assert!(report.contains(r#"\"session_id\":\"session-3000-1-0\""#));
+        assert!(!report.contains("session-1000-1-0"));
+        assert!(is_json_value(&report));
     }
 
     #[test]
