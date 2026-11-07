@@ -620,7 +620,10 @@ mod tests {
     fn renders_ordered_sources_and_named_probe_test() {
         let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert!(project.cmake_lists.contains(
-            "add_executable(reps2_probe\n    \"../game.cpp\"\n    \"../game.part0001.cpp\"\n    \"probe_main.cpp\""
+            "set(REPS2_TRANSLATION_SOURCES\n    \"../game.cpp\"\n    \"../game.part0001.cpp\"\n)"
+        ));
+        assert!(project.cmake_lists.contains(
+            "add_executable(reps2_probe\n    ${REPS2_TRANSLATION_SOURCES}\n    \"probe_main.cpp\""
         ));
         assert!(project.cmake_lists.contains(
             "add_test(NAME reps2_generated_probe\n    COMMAND reps2_probe \"${CMAKE_CURRENT_SOURCE_DIR}/../game.ram.bin\")"
@@ -822,7 +825,12 @@ mod tests {
         assert!(
             project
                 .cmake_lists
-                .contains("reps2-native-build-identity-$<CONFIG>.json")
+                .contains("reps2-native-build-identity-@CONFIG@.json")
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains("reps2-write-native-identity-$<CONFIG>.cmake")
         );
         assert!(
             project
