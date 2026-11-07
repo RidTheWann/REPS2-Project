@@ -15,10 +15,10 @@ The product goal remains broader than one title and broader than an ELF-launch u
 
 ## Verified repository state
 
-- Default branch: `main` at `4d1420588fafdc9e85793036280108caf08a36f9` (PR #22 squash-merged).
-- PR #22: https://github.com/RidTheWann/REPS2-Project/pull/22 — merged on 2026-11-07.
-- The merge adds the guarded EE DMAC D_STAT contract, generated-code CTest coverage, ADR 0079, updated research/roadmap, the REA workflow, and root agent instructions.
-- No open PRs or issues were returned by the repository search at this snapshot.
+- Default branch: `main` at `3da470f4c8a783de837a7c1e0c2ff05715b95d0a` (PR #23 squash-merged).
+- PR #22: https://github.com/RidTheWann/REPS2-Project/pull/22 — merged on 2026-11-07; adds the guarded EE DMAC D_STAT contract, generated-code CTest coverage, ADR 0079, updated research/roadmap, the REA workflow, and root agent instructions.
+- PR #23: https://github.com/RidTheWann/REPS2-Project/pull/23 — merged on 2026-11-07; reconciles this project-state snapshot and clarifies the Rust/CMake validation working directories in `AGENTS.md`.
+- No open PRs or issues were returned by the repository search immediately after PR #23 merged.
 - PR #22 CI completed successfully on the merged head: Rust frontend Ubuntu, Windows, MSRV 1.88, and progress dashboard. Ubuntu and Windows both passed CMake configure/build and CTest; Windows also passed the `reps2.exe version` CLI smoke test. The PR's generated D_STAT test is included in that CTest run.
 - The optional Codex PR review could not execute because the repository reached the review usage limit. It did not produce a code review result; CI validation is separate from that optional review.
 
