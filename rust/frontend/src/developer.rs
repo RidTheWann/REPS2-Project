@@ -597,6 +597,25 @@ mod tests {
     }
 
     #[test]
+    fn validates_session_list_limits() {
+        assert_eq!(parse_session_limit(&[]).expect("default limit"), DEFAULT_SESSION_LIMIT);
+        assert_eq!(
+            parse_session_limit(&["--limit".to_owned(), "5".to_owned()]).expect("explicit limit"),
+            5
+        );
+        for arguments in [
+            vec!["--limit".to_owned()],
+            vec!["--limit".to_owned(), "0".to_owned()],
+            vec!["--limit".to_owned(), "101".to_owned()],
+            vec!["--other".to_owned(), "5".to_owned()],
+            vec!["--limit".to_owned(), "many".to_owned()],
+            vec!["--limit".to_owned(), "5".to_owned(), "extra".to_owned()],
+        ] {
+            assert!(parse_session_limit(&arguments).is_err(), "{arguments:?}");
+        }
+    }
+
+    #[test]
     fn validates_json_values_and_rejects_malformed_records() {
         for valid in [
             r#"{"x":[1,true,null,{"text":"escaped \" quote and 🧪"}]}"#,
