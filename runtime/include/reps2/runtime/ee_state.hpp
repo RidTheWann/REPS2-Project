@@ -876,9 +876,8 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     std::uint32_t& value
 ) noexcept {
     if (address == kEeDmacDStatAddress) {
-        if (!memory.dmac.d_stat_known) return Status::unsupported_memory_access;
-        value = memory.dmac.d_stat & kEeDmacDStatReadableMask;
-        return Status::ok;
+        return memory.dmac.read_d_stat(value)
+            ? Status::ok : Status::unsupported_memory_access;
     }
     if (address == kEeTimer3ModeAddress) {
         value = memory.timer3_mode;
@@ -965,19 +964,8 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     std::uint32_t value
 ) noexcept {
     if (address == kEeDmacDStatAddress) {
-        if (!memory.dmac.d_stat_known
-            || (value & kEeDmacDStatUnmodelledStatusWriteMask) != 0U) {
-            return Status::unsupported_memory_access;
-        }
-
-        // Only the documented channel status bits are acknowledged here.
-        // Writing one to a mask bit reverses that bit; writing zero preserves it.
-        // Status writes for bits 13..15 remain unsupported until their precise
-        // acknowledgement semantics are established for this runtime model.
-        memory.dmac.d_stat &= ~(value & kEeDmacDStatChannelStatusMask);
-        memory.dmac.d_stat ^= value & kEeDmacDStatInterruptMaskMask;
-        memory.dmac.d_stat &= kEeDmacDStatReadableMask;
-        return Status::ok;
+        return memory.dmac.write_d_stat(value)
+            ? Status::ok : Status::unsupported_memory_access;
     }
     if (address == kEeTimer3ModeAddress) {
         memory.timer3_mode = value & kEeTimer3ModeWritableMask;
