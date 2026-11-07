@@ -14,6 +14,7 @@ use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::coverage;
 use reps2_frontend::digest;
+use reps2_frontend::diagnostics;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
 use reps2_frontend::iso9660::{self, Iso9660};
