@@ -38,7 +38,12 @@ impl SessionData {
 pub fn run_command(arguments: &[String], log_root: &Path) -> Result<(), String> {
     match arguments.first().map(String::as_str) {
         Some("sessions") => {
-            let limit = parse_session_limit(&arguments[1..])?;
+            let limit = match parse_session_limit(&arguments[1..]) {
+                Ok(limit) => limit,
+                Err(error) => {
+                    return report_error("REPS2_DEV_INVALID_ARGUMENTS", &error);
+                }
+            };
             match session_list_json(log_root, limit) {
                 Ok(report) => {
                     println!("{report}");
