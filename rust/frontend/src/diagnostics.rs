@@ -253,7 +253,7 @@ pub fn default_log_root() -> Result<PathBuf, String> {
             "LOCALAPPDATA is unavailable; pass --log-dir to choose a diagnostics folder"
                 .to_owned()
         })?;
-        return Ok(Path::new(&root).join("REPS2").join("Logs"));
+        Ok(Path::new(&root).join("REPS2").join("Logs"))
     }
 
     #[cfg(target_os = "macos")]
@@ -261,10 +261,10 @@ pub fn default_log_root() -> Result<PathBuf, String> {
         let home = env::var_os("HOME").ok_or_else(|| {
             "HOME is unavailable; pass --log-dir to choose a diagnostics folder".to_owned()
         })?;
-        return Ok(Path::new(&home)
+        Ok(Path::new(&home)
             .join("Library")
             .join("Logs")
-            .join("REPS2"));
+            .join("REPS2"))
     }
 
     #[cfg(all(not(windows), not(target_os = "macos")))]
