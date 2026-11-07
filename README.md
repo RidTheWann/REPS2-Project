@@ -51,6 +51,9 @@ For Rust-only work:
 ## CLI
 
     reps2 version
+    reps2 --dev add-game <disc-image.iso>
+    reps2 dev sessions
+    reps2 dev inspect latest
     reps2 disc-info <disc-image.iso>
     reps2 add-game <disc-image.iso> [--library <directory>]
     reps2 extract-boot-elf <disc-image.iso> <output.elf>

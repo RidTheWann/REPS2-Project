@@ -41,6 +41,29 @@ Each command creates a unique session directory containing:
 
 The first slice records the frontend command/session lifecycle and final command errors. It does not yet trace every guest instruction or claim that C++ device/runtime events are captured. Runtime tracing will be added as a separate bounded facility so diagnostics cannot turn into per-instruction disk I/O. Error messages can contain local file paths; review diagnostic files before sharing them publicly.
 
+## Agent and IDE developer CLI
+
+The `dev` command namespace is intended for IDE integrations, coding agents, and automated triage. Its inspection commands write exactly one JSON report to stdout; they do not start a new diagnostics session, so inspecting the latest session cannot accidentally select itself.
+
+    reps2 --dev --log-dir .\diagnostics version
+    reps2 --log-dir .\diagnostics dev sessions
+    reps2 --log-dir .\diagnostics dev sessions --limit 5
+    reps2 --log-dir .\diagnostics dev inspect latest
+    reps2 --log-dir .\diagnostics dev inspect session-1790000000000-1234-0
+
+`dev sessions` returns recent session identifiers, manifest summaries, event counts, diagnostic counts, and integrity warnings. Its `count` is the number returned, `available_count` is the number discovered before applying `--limit`, and `truncated` tells an agent whether older sessions remain outside the response. `dev inspect` returns the raw session manifest as a JSON object, the event stream as a JSON array, warning/error events (excluding the duplicate terminal session summary) in a separate `diagnostics` array, and an `integrity_errors` array for missing or malformed artifacts. The default log root is the same platform-specific directory used by `--dev`; `--log-dir` can select the root and must appear before `dev`.
+
+The report envelope is versioned with `schema_version: 1` and a `kind` discriminator:
+- `reps2.developer.session_list`
+- `reps2.developer.session_inspection`
+- `reps2.developer.error`
+
+The output contract is documented in [docs/schemas/developer-report-v1.schema.json](schemas/developer-report-v1.schema.json). Errors from the `dev` inspection commands use a JSON error envelope on stdout and a non-zero process exit code. Successful inspection commands exit with code 0. Human help is available through `reps2 dev help`.
+
+With `--dev` enabled, regular commands now emit `command.started`, `command.succeeded`, or `command.failed` events under the pipeline category. Each event identifies the top-level command subsystem (for example `iso9660`, `library`, `analysis`, `recompiler`, or `codegen`). Failures include the stable `REPS2_COMMAND_FAILED` code, command name, failure scope, and original error text. This is command-level attribution; it does not yet claim to identify an individual internal function, IR pass, guest instruction, or C++ runtime event. A session interrupted before finalization is returned as incomplete with explicit integrity warnings rather than being marked successful.
+
+Do not scrape human CLI output when an agent needs a session report. Run the relevant command with `--dev`, then call `dev inspect latest` using the same diagnostics root. Review reports before sharing them because error text can include local paths.
+
 ## add-game
 
 add-game accepts one raw 2048-byte-sector ISO 9660 image and stores a content-addressed record below the default per-user REPS2 library (`%LOCALAPPDATA%\\REPS2\\Library` on Windows). Set `REPS2_LIBRARY_DIR` or pass `--library <directory>` only to override the default. The generated `game.json` is the launcher-facing metadata contract; `boot.elf`, `recompiled.cpp`, and `ee-main-ram.bin` are stored only when the relevant stage succeeds. The original ISO is referenced by canonical path rather than copied, and duplicate imports are detected by content hash. The command is a managed import pipeline, not a claim that the imported title is playable.

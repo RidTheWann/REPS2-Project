@@ -13,6 +13,7 @@ use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::coverage;
+use reps2_frontend::developer;
 use reps2_frontend::diagnostics;
 use reps2_frontend::digest;
 use reps2_frontend::elf::{self, ParseLimits};
@@ -1940,6 +1941,8 @@ fn usage() {
     println!("Usage:");
     println!("  reps2 [--dev] [--log-dir <directory>] <command> [command options]");
     println!("  reps2 version");
+    println!("  reps2 dev sessions [--limit N]");
+    println!("  reps2 dev inspect <latest|session-id>");
     println!("  reps2 disc-info <disc-image.iso>");
     println!("  reps2 add-game <disc-image.iso> [--library <directory>]");
     println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
@@ -1963,6 +1966,9 @@ fn usage() {
         "  --log-dir <directory> write diagnostics under an explicit directory (also enables capture)"
     );
     println!("A session contains session.log, events.jsonl, and session.json.");
+    println!(
+        "The dev subcommands emit machine-readable JSON to stdout for IDEs and coding agents."
+    );
     println!();
     println!(
         "add-game imports one ISO into the default per-user REPS2 library; --library overrides the location."
@@ -2006,6 +2012,73 @@ fn usage() {
     println!(
         "Allocated relocations, non-main-RAM PT_LOAD segments, and PS2 hardware services remain unsupported."
     );
+}
+
+fn command_diagnostic_subsystem(command: &str) -> &'static str {
+    match command {
+        "disc-info" | "extract-boot-elf" => "iso9660",
+        "add-game" => "library",
+        "elf-info" => "elf",
+        "analyze-elf" => "analysis",
+        "profile-elf" => "coverage",
+        "recompile-elf" => "recompiler",
+        "decode" => "r5900",
+        "compile-cfg-fixture" => "test-fixtures",
+        "compile-words" => "codegen",
+        _ => "cli",
+    }
+}
+
+fn run_tracked_command(
+    arguments: &[String],
+    session: &mut diagnostics::SessionLogger,
+) -> Result<(), String> {
+    let command = arguments.get(1).map(String::as_str).unwrap_or("help");
+    let subsystem = command_diagnostic_subsystem(command);
+    session
+        .record(
+            "info",
+            "pipeline",
+            subsystem,
+            "command.started",
+            "REPS2 command execution started",
+            &[("command", command)],
+        )
+        .map_err(|error| format!("cannot write command-start diagnostic event: {error}"))?;
+
+    let result = run_command(arguments);
+    match &result {
+        Ok(()) => session
+            .record(
+                "info",
+                "pipeline",
+                subsystem,
+                "command.succeeded",
+                "REPS2 command execution completed",
+                &[("command", command)],
+            )
+            .map_err(|error| format!("cannot write command-success diagnostic event: {error}"))?,
+        Err(error) => session
+            .record(
+                "error",
+                "pipeline",
+                subsystem,
+                "command.failed",
+                error,
+                &[
+                    ("command", command),
+                    ("error_code", "REPS2_COMMAND_FAILED"),
+                    ("failure_scope", "command"),
+                    ("error", error),
+                ],
+            )
+            .map_err(|log_error| {
+                format!(
+                    "command failed ({error}); cannot write failure diagnostic event: {log_error}"
+                )
+            })?,
+    }
+    result
 }
 
 fn run_command(arguments: &[String]) -> Result<(), String> {
@@ -2104,6 +2177,19 @@ fn parse_global_options(arguments: &[String]) -> Result<(GlobalOptions, Vec<Stri
 fn run() -> Result<(), String> {
     let raw_arguments: Vec<String> = env::args().collect();
     let (options, arguments) = parse_global_options(&raw_arguments)?;
+
+    // The dev inspection commands must keep stdout as a single JSON document.
+    // Do not create a new diagnostics session while listing/inspecting sessions.
+    if arguments.get(1).is_some_and(|command| command == "dev") {
+        let log_root = match options.log_dir {
+            Some(path) => path,
+            None => diagnostics::default_log_root().map_err(|error| {
+                format!("cannot resolve the REPS2 diagnostics directory: {error}")
+            })?,
+        };
+        return developer::run_command(&arguments[2..], &log_root);
+    }
+
     if !options.developer_mode && options.log_dir.is_none() {
         return run_command(&arguments);
     }
@@ -2127,7 +2213,7 @@ fn run() -> Result<(), String> {
         println!("Developer diagnostics: enabled");
     }
 
-    let result = run_command(&arguments);
+    let result = run_tracked_command(&arguments, &mut session);
     let (outcome, error_text) = match &result {
         Ok(()) => ("succeeded", None),
         Err(error) => ("failed", Some(error.as_str())),
@@ -2353,6 +2439,18 @@ mod tests {
             }
         );
         assert_eq!(filtered, ["reps2", "version"]);
+    }
+
+    #[test]
+    fn maps_commands_to_their_diagnostic_subsystems() {
+        assert_eq!(command_diagnostic_subsystem("disc-info"), "iso9660");
+        assert_eq!(command_diagnostic_subsystem("extract-boot-elf"), "iso9660");
+        assert_eq!(command_diagnostic_subsystem("add-game"), "library");
+        assert_eq!(command_diagnostic_subsystem("analyze-elf"), "analysis");
+        assert_eq!(command_diagnostic_subsystem("profile-elf"), "coverage");
+        assert_eq!(command_diagnostic_subsystem("recompile-elf"), "recompiler");
+        assert_eq!(command_diagnostic_subsystem("compile-words"), "codegen");
+        assert_eq!(command_diagnostic_subsystem("invalid-command"), "cli");
     }
 
     #[test]

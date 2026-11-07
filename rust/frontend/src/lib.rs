@@ -11,6 +11,7 @@ pub mod codegen;
 pub mod control_codegen;
 pub mod control_ir;
 pub mod coverage;
+pub mod developer;
 pub mod diagnostics;
 pub mod digest;
 pub mod elf;
