@@ -232,17 +232,25 @@ foreach(header IN LISTS REPS2_RUNTIME_HEADERS)
     string(APPEND REPS2_RUNTIME_HEADER_MATERIAL "${header_relative}:${header_sha256}\n")
 endforeach()
 string(SHA256 REPS2_RUNTIME_HEADERS_SHA256 "${REPS2_RUNTIME_HEADER_MATERIAL}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CXX_COMPILER}" ${REPS2_RUNTIME_HEADERS})
+if(CMAKE_LINKER AND EXISTS "${CMAKE_LINKER}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_LINKER}")
+endif()
 
 # Hash the ordered generated dispatcher/part sources and optional initial RAM.
 set(REPS2_TRANSLATION_SOURCE_MATERIAL "")
+set(REPS2_TRANSLATION_SOURCE_PATHS "")
 foreach(source IN LISTS REPS2_TRANSLATION_SOURCES)
     set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
     if(NOT EXISTS "${source_path}")
         message(FATAL_ERROR "Missing generated translation source: ${source}")
     endif()
     file(SHA256 "${source_path}" source_sha256)
+    list(APPEND REPS2_TRANSLATION_SOURCE_PATHS "${source_path}")
     string(APPEND REPS2_TRANSLATION_SOURCE_MATERIAL "${source}:${source_sha256}\n")
 endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${REPS2_TRANSLATION_SOURCE_PATHS})
 string(SHA256 REPS2_TRANSLATION_SOURCES_SHA256 "${REPS2_TRANSLATION_SOURCE_MATERIAL}")
 set(REPS2_INPUT_ELF_SHA256 "@INPUT_ELF_SHA256@")
 if(NOT REPS2_INPUT_ELF_SHA256 STREQUAL "")
@@ -258,6 +266,7 @@ if(NOT "@RAM_IMAGE@" STREQUAL "")
         message(FATAL_ERROR "Missing initial RAM image: @RAM_IMAGE@")
     endif()
     file(SHA256 "${REPS2_RAM_IMAGE_PATH}" REPS2_RAM_IMAGE_SHA256)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${REPS2_RAM_IMAGE_PATH}")
 endif()
 
 set(REPS2_COMPILER_JSON "{}")
@@ -793,8 +802,8 @@ mod tests {
             .cmake_lists
             .contains(&format!("set(REPS2_INPUT_ELF_SHA256 \"{digest}\")")));
         assert!(project.cmake_lists.contains("input_kind \"boot_elf\""));
-        assert!(project.cmake_lists.contains("MANIFEST_SCHEMA_VERSION"));
-        assert!(project.cmake_lists.contains("CONTROL_IR_SCHEMA_VERSION"));
+        assert!(project.cmake_lists.contains("manifest_schema_version 3"));
+        assert!(project.cmake_lists.contains("control_ir_schema_version 1"));
         assert!(project.cmake_lists.contains("REPS2_RUNTIME_ABI_VERSION"));
         assert!(project.cmake_lists.contains("REPS2_RUNTIME_HEADERS_SHA256"));
         assert!(project.cmake_lists.contains("REPS2_TRANSLATION_SOURCES_SHA256"));
