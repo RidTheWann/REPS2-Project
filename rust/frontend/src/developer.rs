@@ -180,9 +180,19 @@ fn load_session(root: &Path, id: &str) -> Result<SessionData, String> {
         return Err(format!("invalid REPS2 diagnostic session identifier: {id:?}"));
     }
     let directory = root.join(id);
-    if !directory.is_dir() {
+    let metadata = fs::symlink_metadata(&directory).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            format!(
+                "diagnostic session {id:?} was not found under {}",
+                root.display()
+            )
+        } else {
+            format!("cannot inspect diagnostic session {id:?}: {error}")
+        }
+    })?;
+    if !metadata.file_type().is_dir() {
         return Err(format!(
-            "diagnostic session {id:?} was not found under {}",
+            "diagnostic session {id:?} is not a real directory under {}",
             root.display()
         ));
     }
@@ -712,6 +722,23 @@ mod tests {
         write_session(&temp.0, "session-2000-1-0", "succeeded", &[]);
         let latest = resolve_session_id(&temp.0, "latest").expect("resolve latest");
         assert_eq!(latest, "session-2000-1-0");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspection_rejects_session_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TestDirectory::new();
+        let outside = temp.0.join("outside");
+        fs::create_dir_all(&outside).expect("create outside directory");
+        fs::write(outside.join("session.json"), "{}").expect("write outside manifest");
+        fs::write(outside.join("events.jsonl"), "").expect("write outside event stream");
+        symlink(&outside, temp.0.join("session-4000-42-0")).expect("create session symlink");
+
+        let error = load_session(&temp.0, "session-4000-42-0")
+            .expect_err("session symlink must not be followed");
+        assert!(error.contains("not a real directory"));
     }
 
     #[test]
