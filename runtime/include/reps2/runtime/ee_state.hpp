@@ -49,6 +49,7 @@ inline constexpr std::uint32_t kEeMainRamSize = 32U * 1024U * 1024U;
 // a device/test supplies a known register value.
 inline constexpr std::uint32_t kEeDmacDStatAddress{0x1000'E010U};
 inline constexpr std::uint32_t kEeDmacDStatChannelStatusMask{0x0000'03FFU};
+inline constexpr std::uint32_t kEeDmacDStatUnmodelledStatusWriteMask{0x0000'E000U};
 inline constexpr std::uint32_t kEeDmacDStatInterruptMaskMask{0x63FF'0000U};
 inline constexpr std::uint32_t kEeDmacDStatReadableMask{0x63FF'E3FFU};
 
@@ -986,10 +987,15 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     std::uint32_t value
 ) noexcept {
     if (address == kEeDmacDStatAddress) {
-        if (!memory.dmac.d_stat_known) return Status::unsupported_memory_access;
+        if (!memory.dmac.d_stat_known
+            || (value & kEeDmacDStatUnmodelledStatusWriteMask) != 0U) {
+            return Status::unsupported_memory_access;
+        }
 
         // Only the documented channel status bits are acknowledged here.
         // Writing one to a mask bit reverses that bit; writing zero preserves it.
+        // Status writes for bits 13..15 remain unsupported until their precise
+        // acknowledgement semantics are established for this runtime model.
         memory.dmac.d_stat &= ~(value & kEeDmacDStatChannelStatusMask);
         memory.dmac.d_stat ^= value & kEeDmacDStatInterruptMaskMask;
         memory.dmac.d_stat &= kEeDmacDStatReadableMask;
