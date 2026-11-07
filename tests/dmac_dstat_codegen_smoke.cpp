@@ -2,6 +2,7 @@
 #include "reps2/runtime/ee_state.hpp"
 
 #include <cstdint>
+#include <cstdio>
 
 namespace reps2::generated {
 [[nodiscard]] reps2::runtime::Status execute(reps2::runtime::EeState& state) noexcept;
@@ -93,8 +94,17 @@ int test_channel_ack_and_mask_toggle_are_distinct() {
 } // namespace
 
 int main() {
-    if (const auto result = test_unknown_state_fails_closed(); result != 0) return result;
-    if (const auto result = test_seeded_read_and_guest_w1c_path(); result != 0) return result;
-    if (const auto result = test_channel_ack_and_mask_toggle_are_distinct(); result != 0) return result;
+    if (const auto result = test_unknown_state_fails_closed(); result != 0) {
+        std::fprintf(stderr, "unknown-state D_STAT test failed at check %d\\n", result);
+        return 10 + result;
+    }
+    if (const auto result = test_seeded_read_and_guest_w1c_path(); result != 0) {
+        std::fprintf(stderr, "seeded D_STAT guest path test failed at check %d\\n", result);
+        return 20 + result;
+    }
+    if (const auto result = test_channel_ack_and_mask_toggle_are_distinct(); result != 0) {
+        std::fprintf(stderr, "D_STAT write semantics test failed at check %d\\n", result);
+        return 30 + result;
+    }
     return 0;
 }
