@@ -41,7 +41,14 @@ pub fn render(
     probe_budget: u64,
     hle_syscalls: bool,
 ) -> NativeProject {
-    render_with_identity(project_stem, sources, ram_image, probe_budget, hle_syscalls, None)
+    render_with_identity(
+        project_stem,
+        sources,
+        ram_image,
+        probe_budget,
+        hle_syscalls,
+        None,
+    )
 }
 
 /// Renders a native project with the exact source boot-ELF digest.
@@ -109,7 +116,12 @@ fn cpp_string_literal(value: &str) -> String {
     output
 }
 
-fn render_cmake_lists(project_stem: &str, sources: &[String], ram_image: Option<&str>, input_elf_sha256: Option<&str>) -> String {
+fn render_cmake_lists(
+    project_stem: &str,
+    sources: &[String],
+    ram_image: Option<&str>,
+    input_elf_sha256: Option<&str>,
+) -> String {
     let source_lines = sources
         .iter()
         .map(|name| format!("    \"../{}\"", cmake_quote(name)))
@@ -255,8 +267,10 @@ reps2_json_set_string(REPS2_COMPILER_JSON target "${CMAKE_CXX_COMPILER_TARGET}")
 reps2_json_set_string(REPS2_COMPILER_JSON frontend_variant "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}")
 reps2_json_set_string(REPS2_COMPILER_JSON architecture_id "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
 reps2_json_set_string(REPS2_COMPILER_JSON executable_sha256 "${REPS2_COMPILER_EXECUTABLE_SHA256}")
-reps2_json_set_string(REPS2_COMPILER_JSON compiler_arg1 "${CMAKE_CXX_COMPILER_ARG1}")
-reps2_json_set_string(REPS2_COMPILER_JSON compiler_launcher "${CMAKE_CXX_COMPILER_LAUNCHER}")
+string(SHA256 REPS2_COMPILER_ARG1_SHA256 "${CMAKE_CXX_COMPILER_ARG1}")
+string(SHA256 REPS2_COMPILER_LAUNCHER_CONFIG_SHA256 "${CMAKE_CXX_COMPILER_LAUNCHER}")
+reps2_json_set_string(REPS2_COMPILER_JSON compiler_arg1_sha256 "${REPS2_COMPILER_ARG1_SHA256}")
+reps2_json_set_string(REPS2_COMPILER_JSON compiler_launcher_config_sha256 "${REPS2_COMPILER_LAUNCHER_CONFIG_SHA256}")
 reps2_json_set_string(REPS2_COMPILER_JSON linker_executable_sha256 "${REPS2_LINKER_EXECUTABLE_SHA256}")
 
 set(REPS2_CMAKE_JSON "{}")
@@ -355,7 +369,14 @@ set_tests_properties(reps2_generated_probe PROPERTIES
         .replace("@PROJECT@", &project_name(project_stem))
         .replace("@SOURCES@", &source_lines)
         .replace("@INPUT_ELF_SHA256@", input_elf_sha256.unwrap_or(""))
-        .replace("@INPUT_KIND@", if input_elf_sha256.is_some() { "boot_elf" } else { "synthetic_fixture" })
+        .replace(
+            "@INPUT_KIND@",
+            if input_elf_sha256.is_some() {
+                "boot_elf"
+            } else {
+                "synthetic_fixture"
+            },
+        )
         .replace("@RAM_IMAGE@", &ram_image.map(cmake_quote).unwrap_or_default())
         .replace("@MANIFEST_SCHEMA_VERSION@", &MANIFEST_VERSION.to_string())
         .replace("@CONTROL_IR_SCHEMA_VERSION@", &CONTROL_IR_SCHEMA_VERSION.to_string())
@@ -754,6 +775,36 @@ mod tests {
                 .cmake_lists
                 .contains("reps2-native-toolchain-$<CONFIG>.json")
         );
+    }
+
+    #[test]
+    fn renders_build_identity_inputs_without_embedding_machine_paths() {
+        let digest = "ab".repeat(32);
+        let project = render_with_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&digest),
+        );
+
+        assert!(project
+            .cmake_lists
+            .contains(&format!("set(REPS2_INPUT_ELF_SHA256 \"{digest}\")")));
+        assert!(project.cmake_lists.contains("input_kind \"boot_elf\""));
+        assert!(project.cmake_lists.contains("MANIFEST_SCHEMA_VERSION"));
+        assert!(project.cmake_lists.contains("CONTROL_IR_SCHEMA_VERSION"));
+        assert!(project.cmake_lists.contains("REPS2_RUNTIME_ABI_VERSION"));
+        assert!(project.cmake_lists.contains("REPS2_RUNTIME_HEADERS_SHA256"));
+        assert!(project.cmake_lists.contains("REPS2_TRANSLATION_SOURCES_SHA256"));
+        assert!(project
+            .cmake_lists
+            .contains("reps2-native-build-identity-$<CONFIG>.json"));
+        assert!(project
+            .cmake_lists
+            .contains("compiler_launcher_config_sha256"));
+        assert!(!project.cmake_lists.contains("CMAKE_CXX_COMPILER_ARG1}"));
     }
 
     #[test]

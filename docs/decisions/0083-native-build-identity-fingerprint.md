@@ -16,7 +16,7 @@ Add an explicit versioned runtime ABI declaration in `runtime/include/reps2/runt
 
 The generated CMake project extends its schema-version-1 toolchain report with:
 
-- compiler identity, version, target/frontend/architecture, executable SHA-256, compiler argument and launcher metadata, and linker executable SHA-256 when CMake exposes one;
+- compiler identity, version, target/frontend/architecture, executable SHA-256, hashes of compiler argument and launcher configuration, and linker executable SHA-256 when CMake exposes one;
 - CMake version, generator, host/target platform and active configuration;
 - C++ standard, target compile options, global/per-configuration compile and linker flags;
 - runtime ABI version and a deterministic digest of sorted relative public runtime-header paths plus their contents;
@@ -27,7 +27,7 @@ The generated CMake project extends its schema-version-1 toolchain report with:
 
 The complete configuration-specific toolchain report is hashed with SHA-256 when the generated native target is built. The companion `reps2-native-build-identity-<config>.json` contains the identity schema, kind, digest and corresponding report filename. Generator expressions keep Debug/Release and other multi-config builds separate.
 
-Absolute compiler/linker/runtime include paths, source paths, timestamps, usernames and machine names are not recorded. Compiler executable content is represented only by its digest.
+Compiler/linker/runtime include paths and generated source paths are not added to the new identity fields; executable contents and tool-launcher argument strings are represented by digests. The existing compile/link flag provenance fields are retained as configured by CMake, so callers who place local paths inside custom flags should review the report before sharing it. Timestamps, usernames and machine names are not recorded.
 
 ## Consequences and limitations
 
