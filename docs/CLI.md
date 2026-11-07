@@ -78,7 +78,7 @@ analyze-elf is a read-only, reachability-guided analysis command. It starts from
 
 ## profile-elf
 
-profile-elf is a read-only decoder census over every complete, naturally aligned 32-bit word in file-backed executable PT_LOAD segments. It reports supported, trap, and unsupported word counts, supported-opcode totals, and unsupported counts by encoding family and exact word. Because embedded data and unreachable bytes are included, the totals are an address-space census rather than a reachability claim. A separate bounded linear scan from the ELF entry point stops at the first unsupported instruction or trap and reports that address and word.
+profile-elf is a read-only decoder census over every complete, naturally aligned 32-bit word wholly contained in the file-backed bytes of executable PT_LOAD segments. Partial words, unrelated bytes after a segment, and zero-filled BSS tails are not instructions. It reports supported, trap, and unsupported word counts, supported-opcode totals, and unsupported counts by encoding family and exact word. Because embedded data and unreachable bytes are included, the totals are an address-space census rather than a reachability claim. A separate bounded linear scan from the ELF entry point stops at the first unsupported instruction or trap and reports that address and word.
 
 ## recompile-elf
 
