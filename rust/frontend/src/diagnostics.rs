@@ -40,8 +40,7 @@ impl SessionLogger {
         fs::create_dir_all(root)?;
         let started_unix_ms = unix_time_ms();
         let process_id = std::process::id();
-        let (session_id, directory) =
-            create_session_directory(root, started_unix_ms, process_id)?;
+        let (session_id, directory) = create_session_directory(root, started_unix_ms, process_id)?;
 
         let text_file = OpenOptions::new()
             .write(true)
@@ -136,7 +135,11 @@ impl SessionLogger {
 
     /// Completes the session and refreshes its small manifest.
     pub fn finish(&mut self, outcome: &str, error: Option<&str>) -> io::Result<()> {
-        let severity = if outcome == "succeeded" { "info" } else { "error" };
+        let severity = if outcome == "succeeded" {
+            "info"
+        } else {
+            "error"
+        };
         let message = match error {
             Some(error) => format!("Command {outcome}: {error}"),
             None => format!("Command {outcome}"),
@@ -250,8 +253,7 @@ pub fn default_log_root() -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
         let root = env::var_os("LOCALAPPDATA").ok_or_else(|| {
-            "LOCALAPPDATA is unavailable; pass --log-dir to choose a diagnostics folder"
-                .to_owned()
+            "LOCALAPPDATA is unavailable; pass --log-dir to choose a diagnostics folder".to_owned()
         })?;
         Ok(Path::new(&root).join("REPS2").join("Logs"))
     }
@@ -261,10 +263,7 @@ pub fn default_log_root() -> Result<PathBuf, String> {
         let home = env::var_os("HOME").ok_or_else(|| {
             "HOME is unavailable; pass --log-dir to choose a diagnostics folder".to_owned()
         })?;
-        Ok(Path::new(&home)
-            .join("Library")
-            .join("Logs")
-            .join("REPS2"))
+        Ok(Path::new(&home).join("Library").join("Logs").join("REPS2"))
     }
 
     #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -339,14 +338,14 @@ mod tests {
         assert!(event_lines[1].contains("\\\"unknown\\\"\\nno state changed"));
         assert!(event_lines[2].contains("\"event\":\"session.finished\""));
 
-        let human = fs::read_to_string(directory.join("session.log"))
-            .expect("read human-readable log");
+        let human =
+            fs::read_to_string(directory.join("session.log")).expect("read human-readable log");
         assert!(human.contains("session.started"));
         assert!(human.contains("runtime/ee memory.unsupported"));
         assert!(human.contains("unknown\" no state changed"));
 
-        let manifest = fs::read_to_string(directory.join("session.json"))
-            .expect("read session manifest");
+        let manifest =
+            fs::read_to_string(directory.join("session.json")).expect("read session manifest");
         assert!(manifest.contains("\"outcome\": \"succeeded\""));
         assert!(manifest.contains("\"event_stream\": \"events.jsonl\""));
         assert!(manifest.contains("\"text_log\": \"session.log\""));
