@@ -82,3 +82,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0075](0075-ee-createthread-dormant-records.md) | EE CreateThread dormant-thread records | Accepted |
 | [0076](0076-ee-start-thread-ready-queue.md) | EE StartThread ready-queue model with GetThreadId and ChangeThreadPriority | Accepted |
 | [0077](0077-ee-osd-config-host-store.md) | EE OSD configuration services as a documented host-session store | Accepted |
+| [0082](0082-pipeline-stage-diagnostics.md) | Frontend pipeline-stage diagnostics for agent triage | Accepted |
