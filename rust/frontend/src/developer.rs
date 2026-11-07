@@ -164,7 +164,7 @@ fn session_directories(root: &Path) -> io::Result<Vec<PathBuf>> {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let name = entry.file_name();
-        if file_type.is_dir() && name.to_str().is_some_and(|name| valid_session_id(name)) {
+        if file_type.is_dir() && name.to_str().is_some_and(valid_session_id) {
             directories.push(entry.path());
         }
     }
