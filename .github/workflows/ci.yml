@@ -95,12 +95,12 @@ jobs:
             throw 'Failed session did not preserve the command error'
           }
 
-          $sessionList = & .\build\\cargo-target\\release\\reps2.exe --log-dir $failureRoot dev sessions --limit 5 | ConvertFrom-Json
+          $sessionList = & .\build\cargo-target\release\reps2.exe --log-dir $failureRoot dev sessions --limit 5 | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw "dev sessions failed with exit code $LASTEXITCODE" }
           if ($sessionList.kind -ne 'reps2.developer.session_list' -or $sessionList.count -ne 1) {
             throw 'dev sessions did not return the expected JSON session list'
           }
-          $inspection = & .\build\\cargo-target\\release\\reps2.exe --log-dir $failureRoot dev inspect latest | ConvertFrom-Json
+          $inspection = & .\build\cargo-target\release\reps2.exe --log-dir $failureRoot dev inspect latest | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw "dev inspect failed with exit code $LASTEXITCODE" }
           if ($inspection.kind -ne 'reps2.developer.session_inspection' -or -not $inspection.complete) {
             throw 'dev inspect did not return a complete session inspection'
