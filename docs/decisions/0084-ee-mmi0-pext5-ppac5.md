@@ -36,7 +36,7 @@ Primary reference: Sony EE Core Instruction Set Manual, Version 6.0, PEXT5 entry
 - Decoder unit tests cover exact opcodes (including round-trip word `0x70033FC8`), mnemonics, MMI0 family, complete effects, all 31 illegal nonzero rs values, an unsupported neighboring selector, and legal MMI2 siblings.
 - IR and codegen unit tests prove distinct typed operations, single-source operand use, GPR[0] suppression, and helper selection.
 - A generated-C++ CTest fixture checks hand-derived values for all four lanes, rd==rt aliasing for both operations, poisoned entry GPR0 normalization, zero sources/destinations, untouched registers and HI/LO/HI1/LO1/SA, and a PEXT5-to-PPAC5 round trip. An independent concatenation-based oracle checks every input bit of both helpers, including discarded bits.
-- Single- and split-unit CFG native fixtures execute PEXT5 in a block body and PPAC5 in taken/annulled branch-likely and JR delay slots. These tests exercise the shared lowering path and C++ helper lookup in both output layouts.
+- Single- and split-unit CFG native fixtures execute PEXT5 in a block body and PPAC5 in taken/annulled branch-likely and JR delay slots. These tests exercise the shared lowering path and C++ helper lookup in both output layouts. Validation is established locally on Windows/MSVC (Release CTest 33/33) and in Ubuntu/Linux CI (CMake configure, GCC build, and CTest), with Rust frontend checks additionally passing on MSRV 1.88.
 
 ## Consequences
 
