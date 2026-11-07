@@ -59,6 +59,12 @@ These projects have different goals and different completion levels. Their demos
 - VU0 VF0 is the architectural constant `(0.0f, 0.0f, 0.0f, 1.0f)`, writes are ignored, and vector words are represented in increasing X/Y/Z/W order. The runtime represents the 128-bit transfer as two little-endian 64-bit lanes, placing W's IEEE single-precision bit pattern `0x3F800000` in bits 96..127. This layout has a synthetic native test for store and reload. It has not yet been checked against hardware or an independent title trace.
 - REPS2 uses existing checked aligned quadword RAM helpers for address resolution and transfers. Unsupported COP2 arithmetic remains an explicit stop; LQC2/SQC2 support does not imply VU program execution.
 
+## Downhill Domination DMAC/SIF boundary
+
+- A rebuilt post-COP2 probe using the local SCUS_971.77 ELF and relocated regions `0x80076000 <- 0x002829F8 (0x740)` and `0x80075000 <- 0x002831A0 (0x330)` reaches `0x0025C274` after 3,168,708 executed guest instructions, then stops with `unsupported_memory_access`. The local ELF SHA-256 is `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`; the trace budget is 5,000,000. This is not a boot stage.
+- The translated path builds `0x1000E010` (`lui $v0,0x1000; ori $v0,$v0,0xE010`) and executes `lw $v1,0($v0)`. PS2SDK `common/include/ee_regs.h` defines `A_EE_D_STAT` at `0x1000e010`; its DMA register documentation names it the DMAC status register. Following code masks `$v1` with `0x20`, the SIF0 status bit, and conditionally writes the value back to D_STAT (clear behavior). PS2SDK's `ee/kernel/src/sifcmd.c` independently names `0x1000e010` `DMAC_COMM_STAT` and uses bit `0x20` as `STAT_SIF0`.
+- Verified facts establish the address, register identity, and guest's test/clear pattern. They do not establish reset value, full D_STAT read/write semantics, whether the SIF0 operation can be safely modeled without a functioning SIF/DMA path, or the correct next service behavior. Keep the access explicitly unsupported until those semantics are researched and tested; do not return fabricated zero or pretend the clear completed.
+
 ## EE left/right partial load/store cross-checks
 
 - MIPS64 Architecture for Programmers, Volume I-A, Revision 5.04 and Volume II instruction definitions classify LWL/LWR/SWL/SWR and LDL/LDR/SDL/SDR as complementary left/right partial transfers. The left/right pair is used to assemble or store unaligned words and doublewords without requiring an unaligned host-language access.

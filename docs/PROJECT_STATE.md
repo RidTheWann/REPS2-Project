@@ -22,8 +22,14 @@ COP2 data-movement slice now decodes, lifts and lowers LQC2/SQC2 with an
 independent 32-register VU0 VF file and hardwired VF0. Synthetic native tests
 cover VF0 constant stores, VF5 round-trip, and ignored loads into VF0 (ADR 0078).
 The full local Windows CMake/CTest suite passes after raising the stack for the
-large CFG smoke snapshots. No new real-title run has verified progression past
-`0x00169EC4`; the title remains unbooted and non-playable.
+large CFG smoke snapshots. A fresh post-COP2 probe rebuilt from the local ELF (SHA-256
+`adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`) and both
+relocated regions reached `pc=0x0025C274` after 3,168,708 guest instructions, then stopped with
+`unsupported_memory_access`. The preceding instructions form `0x1000E010`,
+PS2SDK's `A_EE_D_STAT` (DMAC status) register. The next guest instructions
+mask bit `0x20` (SIF0) and conditionally write the same register, so this is a
+DMA/SIF state boundary, not ordinary RAM. No DMAC status value or write
+behavior is fabricated; no guest-visible boot stage is established.
 
 With these changes Downhill Domination completes the ps2sdk `InitAlarm` kernel
 patch, executes the copied alarm blob at `0x80076000`, obtains a thread id from
