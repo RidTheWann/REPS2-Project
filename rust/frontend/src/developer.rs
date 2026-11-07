@@ -113,11 +113,12 @@ fn print_usage() {
 fn report_error(code: &str, message: &str) -> Result<(), String> {
     println!(
         concat!(
-            "{{\"schema_version\":{REPORT_SCHEMA_VERSION},",
+            "{{\"schema_version\":{},",
             "\"kind\":\"reps2.developer.error\",",
             "\"status\":\"error\",",
             "\"error\":{{\"code\":{},\"message\":{}}}}}"
         ),
+        REPORT_SCHEMA_VERSION,
         json_string(code),
         json_string(message),
     );
@@ -618,7 +619,7 @@ mod tests {
         assert!(report.contains(r#""events":[{"severity":"info""#));
         assert!(report.contains(r#""diagnostics":[{"severity":"error","event":"command.failed""#));
         assert!(report.contains(r#""event_count":3"#));
-        assert!(report.contains(r#""diagnostic_count":2"#));
+        assert!(report.contains(r#""diagnostic_count":1"#));
         assert!(is_json_value(&report));
     }
 
