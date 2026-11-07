@@ -44,6 +44,13 @@ These projects have different goals and different completion levels. Their demos
 - Only the PVD namespace is consumed. Joliet supplementary name tables, Rock Ridge, UDF, path-table shortcuts, multi-volume spanning, multi-extent concatenation, interleaved data, raw 2352-byte BIN/CUE sector decoding, CHD containers, and CDVD device behavior are explicit non-goals for this increment.
 - The boot extraction command validates the selected file as ELF32 little-endian EM_MIPS ET_EXEC before creating an output path with exclusive create semantics. Extraction is not evidence that PT_LOAD placement, relocations, instruction coverage, or a retail title is supported by the current AOT backend.
 
+## EE MMI0 PEXT5/PPAC5 color conversion
+
+- Normative encoding/bit concatenation: EE Core Instruction Set Manual v6.0, printed pages 202 (PEXT5) and 254 (PPAC5); see [ADR 0084](decisions/0084-ee-mmi0-pext5-ppac5.md). The manual was consulted outside Git, not redistributed.
+- Non-normative cross-check: [PCSX2 MMI.cpp at d983b2b](https://github.com/PCSX2/pcsx2/blob/d983b2b0665c40acb0455433eb656eebcb9efaf2/pcsx2/MMI.cpp), four independent words and destination-zero suppression. No third-party implementation was copied.
+- Synthetic fixture words include `0x70021F88` (PEXT5 r3,r2), `0x70033FC8` (PPAC5 r7,r3), and `0x700127C8` (PPAC5 r4,r1), at guest PC `0xD000`. Source bits are routed independently using the manual's concatenation positions, covering all 128 bits and discarded bits. The CFG fixture at `0xD200` covers taken/annulled likely and return delays in both output layouts.
+- Continued remote implementation `b5c3140` on base `eca41b5`; review corrected a PEXEW sibling expectation, a fixture destination encoding, and an entry-GPR0 postcondition. Verified by synthetic generated-code native fixtures locally on Windows/MSVC (Release CTest 33/33) and in Ubuntu/Linux CI (CMake build and CTest); Rust frontend checks additionally verified on Rust MSRV 1.88 in CI. This is synthetic semantic evidence, not hardware differential validation or retail boot evidence.
+
 ## EE memory and load/store cross-checks
 
 - The public PS2 memory map identifies 32 MiB main RAM at virtual 0x00000000, an uncached alias at 0x20000000, and an accelerated alias at 0x30100000 for the upper 31 MiB. It separately identifies EE I/O registers, VU memories, privileged GS registers, IOP RAM, BIOS and scratchpad.

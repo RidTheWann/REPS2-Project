@@ -42,6 +42,8 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_copy_upper_doubleword;\n\
              using reps2::runtime::parallel_exchange_even_word;\n\
              using reps2::runtime::parallel_rotate_3_words;\n\
+             using reps2::runtime::parallel_extend_5;\n\
+             using reps2::runtime::parallel_pack_5;\n\
 \n\
              using reps2::runtime::funnel_shift_right_vec;\n\
              using reps2::runtime::store_fpu_control;\n\
@@ -445,6 +447,12 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelRotate3Words { dst, src } => {
             emit_parallel_single_word(output, dst, src, "parallel_rotate_3_words");
+        }
+        Operation::ParallelExtend5 { dst, src } => {
+            emit_parallel_single_word(output, dst, src, "parallel_extend_5");
+        }
+        Operation::ParallelPack5 { dst, src } => {
+            emit_parallel_single_word(output, dst, src, "parallel_pack_5");
         }
         Operation::AddDoublewordSigned { dst, lhs, rhs } => {
             emit_doubleword_signed_add(output, index, dst, lhs, rhs, in_branch_delay);
@@ -2098,6 +2106,34 @@ mod tests {
         // PCPYUD crosses neither half, while PCPYLD does: the lowering must not
         // reuse the MMI2 helper.
         assert!(!cpp.contains("parallel_copy_low_doubleword("));
+    }
+
+    #[test]
+    fn emits_r5900_mmi0_pext5_and_ppac5_single_source_helpers() {
+        let words = [
+            0x7002_1F88, // pext5 r3, r2
+            0x7005_2F88, // pext5 r5, r5
+            0x7001_27C8, // ppac5 r4, r1
+            0x7006_37C8, // ppac5 r6, r6
+            0x7002_0788, // pext5 r0, r2
+            0x7001_07C8, // ppac5 r0, r1
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xD400 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("PEXT5/PPAC5 IR");
+        let cpp = emit_cpp(&program).expect("PEXT5/PPAC5 C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_extend_5;"));
+        assert!(cpp.contains("using reps2::runtime::parallel_pack_5;"));
+        assert!(cpp.contains("if (3 != 0) state.gpr[3] = parallel_extend_5(state.gpr[2]);"));
+        assert!(cpp.contains("if (5 != 0) state.gpr[5] = parallel_extend_5(state.gpr[5]);"));
+        assert!(cpp.contains("if (4 != 0) state.gpr[4] = parallel_pack_5(state.gpr[1]);"));
+        assert!(cpp.contains("if (6 != 0) state.gpr[6] = parallel_pack_5(state.gpr[6]);"));
+        assert!(cpp.contains("if (0 != 0) state.gpr[0] = parallel_extend_5(state.gpr[2]);"));
+        assert!(cpp.contains("if (0 != 0) state.gpr[0] = parallel_pack_5(state.gpr[1]);"));
     }
 
     #[test]
