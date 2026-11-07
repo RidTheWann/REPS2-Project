@@ -51,7 +51,7 @@ The `dev` command namespace is intended for IDE integrations, coding agents, and
     reps2 --log-dir .\diagnostics dev inspect latest
     reps2 --log-dir .\diagnostics dev inspect session-1790000000000-1234-0
 
-`dev sessions` returns recent session identifiers, manifest summaries, event counts, diagnostic counts, and integrity warnings. `dev inspect` returns the raw session manifest as a JSON object, the event stream as a JSON array, warning/error events (excluding the duplicate terminal session summary) in a separate `diagnostics` array, and an `integrity_errors` array for missing or malformed artifacts. The default log root is the same platform-specific directory used by `--dev`; `--log-dir` can select the root and must appear before `dev`.
+`dev sessions` returns recent session identifiers, manifest summaries, event counts, diagnostic counts, and integrity warnings. Its `count` is the number returned, `available_count` is the number discovered before applying `--limit`, and `truncated` tells an agent whether older sessions remain outside the response. `dev inspect` returns the raw session manifest as a JSON object, the event stream as a JSON array, warning/error events (excluding the duplicate terminal session summary) in a separate `diagnostics` array, and an `integrity_errors` array for missing or malformed artifacts. The default log root is the same platform-specific directory used by `--dev`; `--log-dir` can select the root and must appear before `dev`.
 
 The report envelope is versioned with `schema_version: 1` and a `kind` discriminator:
 - `reps2.developer.session_list`
