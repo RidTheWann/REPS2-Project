@@ -967,6 +967,40 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_cop2_codegen_smoke COMMAND reps2_cop2_codegen_smoke)
 
+    set(REPS2_DMAC_DSTAT_GENERATED_CPP "${REPS2_GENERATED_DIR}/dmac_dstat_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_DMAC_DSTAT_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_DMAC_DSTAT_GENERATED_CPP}"
+            0x0000F000
+            0x3C021000  # lui  $v0, 0x1000
+            0x3442E010  # ori  $v0, $v0, 0xE010
+            0x8C430000  # lw   $v1, 0($v0)      D_STAT
+            0x30630020  # andi $v1, $v1, 0x20   SIF0 channel 5 status
+            0xAC430000  # sw   $v1, 0($v0)      acknowledge SIF0 if pending
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the bounded EE DMAC D_STAT access path"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_DMAC_DSTAT_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_dmac_dstat_codegen_fixture DEPENDS "${REPS2_DMAC_DSTAT_GENERATED_CPP}")
+    add_executable(reps2_dmac_dstat_codegen_smoke
+        "${REPS2_DMAC_DSTAT_GENERATED_CPP}"
+        tests/dmac_dstat_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_dmac_dstat_codegen_smoke reps2_dmac_dstat_codegen_fixture)
+    target_link_libraries(reps2_dmac_dstat_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_dmac_dstat_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_dmac_dstat_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_dmac_dstat_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_dmac_dstat_codegen_smoke COMMAND reps2_dmac_dstat_codegen_smoke)
+
     set(REPS2_COP1_ARITH_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/cop1_arith_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_ARITH_GENERATED_CPP}"
