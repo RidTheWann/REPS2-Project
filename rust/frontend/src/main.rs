@@ -13,8 +13,8 @@ use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::coverage;
-use reps2_frontend::diagnostics;
 use reps2_frontend::developer;
+use reps2_frontend::diagnostics;
 use reps2_frontend::digest;
 use reps2_frontend::elf::{self, ParseLimits};
 use reps2_frontend::ir;
@@ -1966,7 +1966,9 @@ fn usage() {
         "  --log-dir <directory> write diagnostics under an explicit directory (also enables capture)"
     );
     println!("A session contains session.log, events.jsonl, and session.json.");
-    println!("The dev subcommands emit machine-readable JSON to stdout for IDEs and coding agents.");
+    println!(
+        "The dev subcommands emit machine-readable JSON to stdout for IDEs and coding agents."
+    );
     println!();
     println!(
         "add-game imports one ISO into the default per-user REPS2 library; --library overrides the location."
@@ -2071,7 +2073,9 @@ fn run_tracked_command(
                 ],
             )
             .map_err(|log_error| {
-                format!("command failed ({error}); cannot write failure diagnostic event: {log_error}")
+                format!(
+                    "command failed ({error}); cannot write failure diagnostic event: {log_error}"
+                )
             })?,
     }
     result
