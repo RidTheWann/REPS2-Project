@@ -366,8 +366,8 @@ mod tests {
             .expect("read structured event stream");
         assert!(events.contains("\"severity\":\"error\""));
         assert!(events.contains("\"error\":\"cannot inspect input file\""));
-        let manifest = fs::read_to_string(directory.join("session.json"))
-            .expect("read session manifest");
+        let manifest =
+            fs::read_to_string(directory.join("session.json")).expect("read session manifest");
         assert!(manifest.contains("\"outcome\": \"failed\""));
         assert!(manifest.contains("\"finished_unix_ms\":"));
         assert!(!manifest.contains("\"finished_unix_ms\": null"));
