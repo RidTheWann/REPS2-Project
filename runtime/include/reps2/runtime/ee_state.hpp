@@ -17,6 +17,29 @@ struct Gpr128 {
     std::uint64_t high{};
 };
 
+// VU0 vector registers hold the same 128-bit quadword layout as a memory
+// quadword: X in bits 0..31, Y in 32..63, Z in 64..95 and W in 96..127.
+// The Gpr128 low/high lanes therefore contain X/Y and Z/W, respectively.
+// VF0 is not storage: it always reads as the constant `(0.0, 0.0, 0.0, 1.0)`
+// and ignores writes, so the read/write helpers below are the only supported
+// access path. VI0 is likewise the constant zero, but no instruction in this
+// slice uses the integer register file yet, so it is not modelled.
+struct Vu0State {
+    std::array<Gpr128, 32> vf{};
+};
+
+inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000ULL};
+
+[[nodiscard]] inline Gpr128 vu0_read_vf(const Vu0State& vu0, std::uint8_t index) noexcept {
+    return index == 0U ? kVu0Vf0 : vu0.vf[index];
+}
+
+inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value) noexcept {
+    if (index != 0U) {
+        vu0.vf[index] = value;
+    }
+}
+
 inline constexpr std::uint32_t kEeMainRamSize = 32U * 1024U * 1024U;
 
 struct EeMemory {
@@ -261,6 +284,7 @@ struct EeSyscallHandlerFrame {
     std::uint32_t saved_acc{};
     std::uint32_t saved_fcsr{};
     std::uint64_t saved_sa{};
+    Vu0State saved_vu0{};
     std::array<std::uint32_t, 32> saved_cop0{};
     std::uint32_t handler_address{};
     std::uint32_t resume_pc{};
@@ -515,6 +539,8 @@ struct EeState {
     std::array<std::uint32_t, 32> fpr{};
     std::uint32_t acc{};
     std::uint32_t fcsr{kFpuControlResetValue};
+    // VU0 macro-mode vector state. Only the VF file is modelled so far.
+    Vu0State vu0{};
     std::array<std::uint32_t, 32> cop0{};
     // Host-side execution accounting, not guest-architectural state: the
     // generated dispatcher charges an admitted basic block's instruction count
@@ -728,6 +754,7 @@ enum class Status : std::uint8_t {
     state.fpr = {};
     state.acc = 0;
     state.fcsr = kFpuControlResetValue;
+    state.vu0 = {};
     state.cop0 = {};
     state.cop0[kCop0PrId] = kEeProcessorId;
     state.cop0[kCop0Status] = 0x1040'0004U;

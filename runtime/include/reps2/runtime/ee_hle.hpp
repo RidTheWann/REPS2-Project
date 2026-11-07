@@ -780,6 +780,7 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     frame.saved_acc = state.acc;
     frame.saved_fcsr = state.fcsr;
     frame.saved_sa = state.sa;
+    frame.saved_vu0 = state.vu0;
     frame.saved_cop0 = state.cop0;
     frame.handler_address = handler_address;
     frame.resume_pc = resume_pc;
@@ -819,6 +820,7 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     state.acc = frame.saved_acc;
     state.fcsr = frame.saved_fcsr;
     state.sa = frame.saved_sa;
+    state.vu0 = frame.saved_vu0;
     state.cop0 = frame.saved_cop0;
 
     --state.hle.syscall_handler_depth;

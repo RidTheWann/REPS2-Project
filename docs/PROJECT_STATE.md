@@ -1,6 +1,6 @@
 # REPS2 autonomous engineering state
 
-Updated: 2026-11-06
+Updated: 2026-11-07
 
 ## Current objective
 
@@ -14,6 +14,16 @@ documented Timer 3 mode word (`0x10001810`) is modelled without counting or
 interrupts, and the frontend can analyse runtime-copied code declared with
 `--relocated-code`. Unsupported calls remain explicit stops; no success is
 fabricated.
+
+The probe with both declared relocated regions then reached `pc=0x00169EC4`
+(`SQC2 $vf0, 0x10($a0)`, raw `0xF8800010`) after 3,126,787 guest instructions;
+this was an unsupported-instruction boundary, not a boot stage. The bounded
+COP2 data-movement slice now decodes, lifts and lowers LQC2/SQC2 with an
+independent 32-register VU0 VF file and hardwired VF0. Synthetic native tests
+cover VF0 constant stores, VF5 round-trip, and ignored loads into VF0 (ADR 0078).
+The full local Windows CMake/CTest suite passes after raising the stack for the
+large CFG smoke snapshots. No new real-title run has verified progression past
+`0x00169EC4`; the title remains unbooted and non-playable.
 
 With these changes Downhill Domination completes the ps2sdk `InitAlarm` kernel
 patch, executes the copied alarm blob at `0x80076000`, obtains a thread id from
@@ -42,8 +52,8 @@ word-scan loop, not unresolved control flow.
   executes the Downhill Domination `InitAlarm` patch path (ADRs 0072–0074).
   PR #16 added the bounded EE syscall-boundary sequence trace (ADR 0071).
   PRs #15 and earlier are historical.
-- The `CreateThread` change described in this document is on a feature branch,
-  not yet merged.
+- This branch contains the unmerged `GetOsdConfigParam` and `SetOsdConfigParam`
+  work, plus the COP2 data-movement slice recorded in ADR 0078.
 - `main` remains protected and requires strict, up-to-date checks:
   `Rust frontend (ubuntu-latest)`, `Rust frontend (windows-latest)`, and
   `Rust frontend (MSRV 1.88)`.

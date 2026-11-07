@@ -116,6 +116,8 @@ pub enum Opcode {
     Sd,
     Lq,
     Sq,
+    Lqc2,
+    Sqc2,
     ParallelAddWord,
     ParallelSubWord,
     ParallelAddHalfword,
@@ -415,6 +417,8 @@ impl Opcode {
             Self::Sd => "sd",
             Self::Lq => "lq",
             Self::Sq => "sq",
+            Self::Lqc2 => "lqc2",
+            Self::Sqc2 => "sqc2",
             Self::ParallelAddWord => "paddw",
             Self::ParallelSubWord => "psubw",
             Self::ParallelAddHalfword => "paddh",
@@ -521,6 +525,11 @@ pub struct InstructionEffects {
     /// these masks include bit 0.
     pub fpr_read_mask: u32,
     pub fpr_write_mask: u32,
+    /// VU0 vector floating-point register dependencies. VF0 reads as the
+    /// hardwired constant {0,0,0,1.0}, so bit 0 is a real read dependency.
+    /// Writes to VF0 are ignored, so bit 0 is not a write dependency.
+    pub vf_read_mask: u32,
+    pub vf_write_mask: u32,
     pub reads_hi: bool,
     pub reads_lo: bool,
     pub writes_hi: bool,
@@ -555,6 +564,8 @@ impl InstructionEffects {
             gpr_write_mask: 0,
             fpr_read_mask: 0,
             fpr_write_mask: 0,
+            vf_read_mask: 0,
+            vf_write_mask: 0,
             reads_hi: false,
             reads_lo: false,
             writes_hi: false,
@@ -588,6 +599,19 @@ fn gpr_bit(index: u8) -> u32 {
 /// FPR[0] holds a value, so bit 0 of the mask is meaningful here.
 fn fpr_bit(index: u8) -> u32 {
     if index < 32 { 1_u32 << index } else { 0 }
+}
+
+/// VF0 reads as the hardwired constant {0,0,0,1.0} and ignores writes.
+/// Read mask therefore includes bit 0; write mask excludes it.
+fn vf_read_bit(index: u8) -> u32 {
+    if index < 32 { 1_u32 << index } else { 0 }
+}
+fn vf_write_bit(index: u8) -> u32 {
+    if index == 0 || index >= 32 {
+        0
+    } else {
+        1_u32 << index
+    }
 }
 
 /// One decoded guest instruction. This is decode metadata, not executed
@@ -1071,6 +1095,18 @@ impl Instruction {
                 effects.memory = MemoryEffect::Write;
                 effects.may_raise_exception = true;
             }
+            Opcode::Lqc2 => {
+                effects.gpr_read_mask = rs;
+                effects.vf_write_mask = vf_write_bit(self.rt);
+                effects.memory = MemoryEffect::Read;
+                effects.may_raise_exception = true;
+            }
+            Opcode::Sqc2 => {
+                effects.gpr_read_mask = rs;
+                effects.vf_read_mask = vf_read_bit(self.rt);
+                effects.memory = MemoryEffect::Write;
+                effects.may_raise_exception = true;
+            }
 
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1495,6 +1531,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x26 => Opcode::Lwr,
             0x37 => Opcode::Ld,
             0x3F => Opcode::Sd,
+            0x36 => Opcode::Lqc2,
+            0x3E => Opcode::Sqc2,
             0x1E => Opcode::Lq,
             0x1F => Opcode::Sq,
             _ => Opcode::Unknown,
@@ -1636,6 +1674,8 @@ mod tests {
             ((0x3F << 26) | (4 << 21) | (5 << 16) | 0xFFF8, Opcode::Sd),
             ((0x1E << 26) | (4 << 21) | (5 << 16) | 8, Opcode::Lq),
             ((0x1F << 26) | (4 << 21) | (5 << 16) | 12, Opcode::Sq),
+            ((0x36 << 26) | (4 << 21) | (5 << 16) | 8, Opcode::Lqc2),
+            ((0x3E << 26) | (4 << 21) | (5 << 16) | 12, Opcode::Sqc2),
         ];
         for (word, expected) in cases {
             let decoded = decode(word, 0x1000);
@@ -2140,7 +2180,7 @@ mod tests {
             ((word & !0x3F) | 0x09, "MMI2 group"),
             ((word & !(0x1F << 6)) | (0x19 << 6), "MMI0 selector 0x19"),
             ((word & !(0x1F << 6)) | (0x1B << 6), "MMI0 selector 0x1B"),
-            ((word & !(0x3F << 26)) | (0x3E << 26), "primary opcode"),
+            ((word & !(0x3F << 26)) | (0x34 << 26), "primary opcode"),
         ] {
             assert_eq!(decode(candidate, 0).opcode, Opcode::Unknown, "{label}");
         }
@@ -3154,6 +3194,38 @@ mod tests {
         assert_eq!(store.fpr_write_mask, 0);
         assert_eq!(store.memory, MemoryEffect::Write);
         assert!(store.may_raise_exception);
+    }
+
+    #[test]
+    fn effects_track_cop2_vf_dependencies() {
+        // VF0 reads the hardwired constant, so bit 0 is a read dependency.
+        // Writes to VF0 are ignored, so write mask excludes bit 0.
+        // rs=$a0=4, rt=5 (vf5), imm=0x10
+        let lqc2_vf5 = decode(0xD885_0010, 0).effects();
+        assert_eq!(lqc2_vf5.gpr_read_mask, 1 << 4); // rs=$a0=4
+        assert_eq!(lqc2_vf5.vf_write_mask, 1 << 5);
+        assert_eq!(lqc2_vf5.vf_read_mask, 0);
+        assert_eq!(lqc2_vf5.memory, MemoryEffect::Read);
+        assert!(lqc2_vf5.may_raise_exception);
+
+        // LQC2 $vf0, 0x10($a0): write to VF0 is ignored -> write mask 0.
+        let lqc2_vf0_const = decode(0xD880_0010, 0).effects();
+        assert_eq!(lqc2_vf0_const.vf_write_mask, 0);
+        assert!(lqc2_vf0_const.may_raise_exception);
+
+        // SQC2 $vf5, 0x10($a0): reads VF5.
+        let sqc2_vf5 = decode(0xF885_0010, 0).effects();
+        assert_eq!(sqc2_vf5.gpr_read_mask, 1 << 4);
+        assert_eq!(sqc2_vf5.vf_read_mask, 1 << 5);
+        assert_eq!(sqc2_vf5.vf_write_mask, 0);
+        assert_eq!(sqc2_vf5.memory, MemoryEffect::Write);
+        assert!(sqc2_vf5.may_raise_exception);
+
+        // SQC2 $vf0, 0x10($a0): reads VF0 (hardwired constant).
+        let sqc2_vf0_const = decode(0xF880_0010, 0).effects();
+        assert_eq!(sqc2_vf0_const.gpr_read_mask, 1 << 4);
+        assert_eq!(sqc2_vf0_const.vf_read_mask, 1 << 0);
+        assert!(sqc2_vf0_const.may_raise_exception);
     }
 
     #[test]

@@ -211,6 +211,25 @@ pub(crate) fn emit_instruction(
             ));
             emit_memory_status_check(output, &tag, true, in_branch_delay);
         }
+        Operation::LoadVu0Quadword { dst, base, offset } => {
+            let tag = format!("{index:04}");
+            emit_effective_address(output, &tag, base, offset);
+            output.push_str(&format!(
+                "    reps2::runtime::Gpr128 vu0_load_value_{tag}{{}};\n    const auto memory_status_{tag} = load_u128(state.memory, effective_address_{tag}, vu0_load_value_{tag});\n    if (memory_status_{tag} != reps2::runtime::Status::ok) return memory_status_{tag};\n"
+            ));
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {}, vu0_load_value_{tag});\n",
+                dst.index()
+            ));
+        }
+        Operation::StoreVu0Quadword { src, base, offset } => {
+            let tag = format!("{index:04}");
+            emit_effective_address(output, &tag, base, offset);
+            output.push_str(&format!(
+                "    const auto vu0_store_value_{tag} = reps2::runtime::vu0_read_vf(state.vu0, {});\n    const auto memory_status_{tag} = store_u128(state.memory, effective_address_{tag}, vu0_store_value_{tag});\n    if (memory_status_{tag} != reps2::runtime::Status::ok) return memory_status_{tag};\n",
+                src.index()
+            ));
+        }
         Operation::MoveFromCop0 { dst, cop0_reg } => {
             let d = dst.index();
             output.push_str(&format!(
