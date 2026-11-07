@@ -1854,7 +1854,18 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x0000_0000, // return delay slot
     ];
 
+    // Color conversion in a normal block, an annulled/taken likely delay,
+    // and a return delay slot. Shared by single- and split-unit native tests.
+    let mmi_color = [
+        0x7002_1F88, // pext5 r3, r2
+        0x5140_0002, // beql r10, zero, 0xD210
+        0x7003_27C8, // ppac5 r4, r3 (likely delay)
+        0x0000_0000, // fallthrough nop
+        0x03E0_0008, // jr ra
+        0x7001_2FC8, // ppac5 r5, r1 (return delay)
+    ];
     let mut segments = vec![
+        segment(0xD200, &mmi_color),
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
         segment(0x3000, &branch_and_link),
@@ -1899,6 +1910,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(base, std::slice::from_ref(word))
     }));
     let mut entries = vec![
+        entry(0xD200, "mmi-color-fixture"),
         entry(0x1000, "branch-fixture"),
         entry(0x2000, "call-fixture"),
         entry(0x3000, "branch-link-fixture"),
@@ -1951,6 +1963,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);
+    roots.push(0xD200);
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;

@@ -725,12 +725,14 @@ if(BUILD_TESTING)
             "${REPS2_MMI0_PEXT5_PPAC5_GENERATED_CPP}"
             0x0000D000
             0x70021F88  # pext5 r3, r2
-            0x700337C8  # ppac5 r7, r3 (round-trip)
+            0x70033FC8  # ppac5 r7, r3 (round-trip)
             0x70052F88  # pext5 r5, r5 (destination aliases source)
             0x700127C8  # ppac5 r4, r1
             0x700637C8  # ppac5 r6, r6 (destination aliases source)
             0x70020788  # pext5 r0, r2 (zero-register destination)
             0x700107C8  # ppac5 r0, r1 (zero-register destination)
+            0x70004788  # pext5 r8, r0 (constant-zero source)
+            0x70004FC8  # ppac5 r9, r0 (constant-zero source)
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling R5900 MMI0 PEXT5/PPAC5 conversion"
         VERBATIM

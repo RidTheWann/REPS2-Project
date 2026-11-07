@@ -22,20 +22,21 @@ PPAC5 extracts the corresponding fields:
 
 `((v >> 3) & 0x0000001f) | ((v >> 6) & 0x000003e0) | ((v >> 9) & 0x00007c00) | ((v >> 16) & 0x00008000)`
 
-Primary reference: Sony EE Core Instruction Set Manual, Version 6.0, PEXT5 entry page -201- and PPAC5 entry page -253-. Cross-check: PCSX2 `pcsx2/MMI.cpp` implements the same four per-word masks/shifts and suppresses the destination-zero write.
+Primary reference: Sony EE Core Instruction Set Manual, Version 6.0, PEXT5 entry printed page -202- and PPAC5 entry printed page -254- (public archive: https://github.com/4kbyter/ps2docs/blob/main/EE_Core_Instruction_Set_Manual.pdf). The manual remains outside the repository; only independently written semantics and synthetic test vectors are committed. Cross-check: PCSX2 `pcsx2/MMI.cpp` implements the same four per-word masks/shifts and suppresses the destination-zero write.
 
 ## Decision
 
-1. Decode only primary 0x1C, MMI0 selector 0x08, and the exact PEXT5/PPAC5 field selectors. Reject encodings with nonzero rs. The same selector under another MMI group remains unsupported.
+1. Decode only primary 0x1C, MMI0 selector 0x08, and the exact PEXT5/PPAC5 field selectors. Reject encodings with nonzero rs. Preserve legal sibling decoding: selectors 0x1E/0x1F under MMI2 (function 0x09) are PEXEW/PROT3W, not illegal PEXT5/PPAC5 words.
 2. Add typed single-source IR operations. Effects read rt and write rd only; no memory, SA, exception, or control-flow dependency is introduced.
 3. Compute a complete Gpr128 result before assigning it to rd. Each 32-bit word is transformed independently. A destination aliasing rt reads the original 128-bit source, and writes to GPR[0] remain suppressed.
 4. PPAC5 is truncating field extraction, not rounding or saturation. PEXT5 preserves the source bit positions rather than normalizing five-bit channels to the full eight-bit range.
 
 ## Validation
 
-- Decoder unit tests cover exact opcodes, mnemonics, MMI0 family, source/destination effects, reserved rs, neighboring selectors, and a wrong MMI group.
+- Decoder unit tests cover exact opcodes (including round-trip word `0x70033FC8`), mnemonics, MMI0 family, complete effects, all 31 illegal nonzero rs values, an unsupported neighboring selector, and legal MMI2 siblings.
 - IR and codegen unit tests prove distinct typed operations, single-source operand use, GPR[0] suppression, and helper selection.
-- A generated-C++ CTest fixture checks hand-derived values for all four lanes, rd==rt aliasing for both operations, zero-register write suppression, untouched registers, and a PEXT5-to-PPAC5 round trip. Compile-time assertions test runtime helpers independently.
+- A generated-C++ CTest fixture checks hand-derived values for all four lanes, rd==rt aliasing for both operations, poisoned entry GPR0 normalization, zero sources/destinations, untouched registers and HI/LO/HI1/LO1/SA, and a PEXT5-to-PPAC5 round trip. An independent concatenation-based oracle checks every input bit of both helpers, including discarded bits.
+- Single- and split-unit CFG native fixtures execute PEXT5 in a block body and PPAC5 in taken/annulled branch-likely and JR delay slots. These tests exercise the shared lowering path and C++ helper lookup in both output layouts.
 
 ## Consequences
 

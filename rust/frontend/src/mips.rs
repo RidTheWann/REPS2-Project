@@ -3374,9 +3374,38 @@ mod tests {
         assert_eq!(ppac5.effects().gpr_read_mask, 1 << 1);
         assert_eq!(ppac5.effects().gpr_write_mask, 1 << 4);
 
-        assert_eq!(decode(pext5_word | (1 << 21), 0).opcode, Opcode::Unknown);
-        assert_eq!(decode(ppac5_word | (1 << 21), 0).opcode, Opcode::Unknown);
-        assert_eq!(decode((pext5_word & !0x3F) | 0x09, 0).opcode, Opcode::Unknown);
+        for instruction in [pext5, ppac5] {
+            assert_eq!(
+                instruction.effects(),
+                InstructionEffects {
+                    gpr_read_mask: 1 << instruction.rt,
+                    gpr_write_mask: 1 << instruction.rd,
+                    ..InstructionEffects::none()
+                }
+            );
+            assert!(!instruction.has_delay_slot);
+        }
+        // Pin the generated round-trip fixture: rd is r7, not r6.
+        let round_trip = decode(0x7003_3FC8, 0xD004);
+        assert_eq!(round_trip.opcode, Opcode::ParallelPack5);
+        assert_eq!((round_trip.rs, round_trip.rt, round_trip.rd), (0, 3, 7));
+        // The same selector in MMI2 is legal PEXEW, not an unknown word.
+        assert_eq!(
+            decode((pext5_word & !0x3F) | 0x09, 0).opcode,
+            Opcode::ParallelExchangeEvenWord
+        );
+        assert_eq!(
+            decode((ppac5_word & !0x3F) | 0x09, 0).opcode,
+            Opcode::ParallelRotate3Words
+        );
+        for rs in 1..32 {
+            assert_eq!(decode(pext5_word | (rs << 21), 0).opcode, Opcode::Unknown);
+            assert_eq!(decode(ppac5_word | (rs << 21), 0).opcode, Opcode::Unknown);
+        }
+        for word in [pext5_word, ppac5_word] {
+            assert_eq!(decode(word & !(31 << 16), 0).effects().gpr_read_mask, 0);
+            assert_eq!(decode(word & !(31 << 11), 0).effects().gpr_write_mask, 0);
+        }
         assert_eq!(
             decode((pext5_word & !(0x1F << 6)) | (0x1D << 6), 0).opcode,
             Opcode::Unknown
