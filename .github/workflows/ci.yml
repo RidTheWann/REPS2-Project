@@ -94,6 +94,7 @@ jobs:
           if ($failedEvents[-1].context.error -ne 'invalid command-line arguments') {
             throw 'Failed session did not preserve the command error'
           }
+          exit 0
 
       - name: Developer diagnostics smoke test (Linux)
         if: runner.os == 'Linux'
