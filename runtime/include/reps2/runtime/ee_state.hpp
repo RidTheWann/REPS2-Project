@@ -1433,6 +1433,43 @@ inline constexpr std::uint32_t kEeTimer3ModeWritableMask{0x0000'03DFU};
     };
 }
 
+// PEXT5 expands the low 1-5-5-5 halfword of each 32-bit word into
+// 8-8-8-8 positions. The three five-bit channels move into bits 3..7,
+// 11..15 and 19..23; the alpha bit moves to bit 31. The four words are
+// transformed independently across the complete 128-bit GPR.
+[[nodiscard]] constexpr Gpr128 parallel_extend_5(const Gpr128& src) noexcept {
+    const auto extend = [](std::uint32_t value) noexcept -> std::uint32_t {
+        return ((value & 0x0000001FU) << 3U)
+            | ((value & 0x000003E0U) << 6U)
+            | ((value & 0x00007C00U) << 9U)
+            | ((value & 0x00008000U) << 16U);
+    };
+    return Gpr128{
+        static_cast<std::uint64_t>(extend(static_cast<std::uint32_t>(src.low)))
+            | (static_cast<std::uint64_t>(extend(static_cast<std::uint32_t>(src.low >> 32U))) << 32U),
+        static_cast<std::uint64_t>(extend(static_cast<std::uint32_t>(src.high)))
+            | (static_cast<std::uint64_t>(extend(static_cast<std::uint32_t>(src.high >> 32U))) << 32U),
+    };
+}
+
+// PPAC5 extracts the corresponding 1-5-5-5 fields from each 8-8-8-8
+// word. It truncates low-order fields as specified; it does not round or
+// saturate channel values.
+[[nodiscard]] constexpr Gpr128 parallel_pack_5(const Gpr128& src) noexcept {
+    const auto pack = [](std::uint32_t value) noexcept -> std::uint32_t {
+        return ((value >> 3U) & 0x0000001FU)
+            | ((value >> 6U) & 0x000003E0U)
+            | ((value >> 9U) & 0x00007C00U)
+            | ((value >> 16U) & 0x00008000U);
+    };
+    return Gpr128{
+        static_cast<std::uint64_t>(pack(static_cast<std::uint32_t>(src.low)))
+            | (static_cast<std::uint64_t>(pack(static_cast<std::uint32_t>(src.low >> 32U))) << 32U),
+        static_cast<std::uint64_t>(pack(static_cast<std::uint32_t>(src.high)))
+            | (static_cast<std::uint64_t>(pack(static_cast<std::uint32_t>(src.high >> 32U))) << 32U),
+    };
+}
+
 // QFSRV shifts the 256-bit funnel formed by GPR[rs]:GPR[rt] right by the SA
 // bit count and keeps the low 128 bits, so result bit i is funnel bit i + sa.
 // Counts above 127 therefore still draw bits from the rs operand.

@@ -472,6 +472,16 @@ pub enum Operation {
         dst: Gpr,
         src: Gpr,
     },
+    /// PEXT5 converts each word's low 1-5-5-5 halfword into 8-8-8-8 lanes.
+    ParallelExtend5 {
+        dst: Gpr,
+        src: Gpr,
+    },
+    /// PPAC5 truncates each word's 8-8-8-8 lanes into a 1-5-5-5 halfword.
+    ParallelPack5 {
+        dst: Gpr,
+        src: Gpr,
+    },
     /// PCPYUD: dst.low = lhs.high and dst.high = rhs.high. Unlike PCPYLD the
     /// two halves are not crossed, so the first operand supplies the low half.
     ParallelCopyUpperDoubleword {
@@ -1050,6 +1060,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: gpr(instruction.rt),
             },
             Opcode::ParallelRotate3Words => Operation::ParallelRotate3Words {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            Opcode::ParallelExtend5 => Operation::ParallelExtend5 {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            Opcode::ParallelPack5 => Operation::ParallelPack5 {
                 dst: gpr(instruction.rd),
                 src: gpr(instruction.rt),
             },
@@ -2219,6 +2237,56 @@ mod tests {
             Operation::ParallelCopyUpperDoubleword { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PCPYUD verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi0_pext5_and_ppac5() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1E << 6) | 0x08,
+            (0x1C << 26) | (5 << 16) | (5 << 11) | (0x1E << 6) | 0x08,
+            (0x1C << 26) | (1 << 16) | (4 << 11) | (0x1F << 6) | 0x08,
+            (0x1C << 26) | (6 << 16) | (6 << 11) | (0x1F << 6) | 0x08,
+            (0x1C << 26) | (2 << 16) | (0x1E << 6) | 0x08,
+            (0x1C << 26) | (1 << 16) | (0x1F << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xCA00 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PEXT5/PPAC5 lift into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelExtend5 { dst, src }
+                if dst.index() == 3 && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelExtend5 { dst, src }
+                if dst.index() == 5 && src.index() == 5
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::ParallelPack5 { dst, src }
+                if dst.index() == 4 && src.index() == 1
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::ParallelPack5 { dst, src }
+                if dst.index() == 6 && src.index() == 6
+        ));
+        assert!(matches!(
+            program.instructions()[4].operation,
+            Operation::ParallelExtend5 { dst, src }
+                if dst.is_zero() && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[5].operation,
+            Operation::ParallelPack5 { dst, src }
+                if dst.is_zero() && src.index() == 1
+        ));
+        program.verify().expect("PEXT5/PPAC5 verify");
     }
 
     #[test]

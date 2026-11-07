@@ -154,6 +154,10 @@ pub enum Opcode {
     ParallelPackWord,
     ParallelExchangeEvenWord,
     ParallelRotate3Words,
+    /// PEXT5 converts four 1-5-5-5 halfwords into 8-8-8-8 byte lanes.
+    ParallelExtend5,
+    /// PPAC5 truncates four 8-8-8-8 words into 1-5-5-5 halfwords.
+    ParallelPack5,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
     MoveToFpuRegister,
@@ -436,6 +440,8 @@ impl Opcode {
             Self::ParallelPackWord => "ppacw",
             Self::ParallelExchangeEvenWord => "pexew",
             Self::ParallelRotate3Words => "prot3w",
+            Self::ParallelExtend5 => "pext5",
+            Self::ParallelPack5 => "ppac5",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
             Self::MoveToFpuRegister => "mtc1",
@@ -936,11 +942,12 @@ impl Instruction {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
-            Opcode::ParallelExchangeEvenWord | Opcode::ParallelRotate3Words => {
-                // Single-source MMI2 word permutations read only rt and write
-                // only rd. rs is reserved and must be zero for a legal
-                // encoding; the decoder rejects a nonzero rs before this arm
-                // is reached.
+            Opcode::ParallelExchangeEvenWord
+            | Opcode::ParallelRotate3Words
+            | Opcode::ParallelExtend5
+            | Opcode::ParallelPack5 => {
+                // Single-source MMI operations read only rt and write only rd.
+                // rs is reserved-zero in these encodings.
                 effects.gpr_read_mask = rt;
                 effects.gpr_write_mask = rd;
             }
@@ -1482,6 +1489,9 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelExtendLowWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x1A => Opcode::ParallelExtendLowByte,
                 0x08 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelPackWord,
+                // PEXT5 and PPAC5 use a single rt source; rs is reserved-zero.
+                0x08 if ((word >> 6) & 0x1F) == 0x1E && rs == 0 => Opcode::ParallelExtend5,
+                0x08 if ((word >> 6) & 0x1F) == 0x1F && rs == 0 => Opcode::ParallelPack5,
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
                 0x09 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelAnd,
                 0x09 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelXor,
@@ -3335,6 +3345,42 @@ mod tests {
         assert!(!eret.has_delay_slot);
         let eret_eff = eret.effects();
         assert_eq!(eret_eff.control_flow, ControlFlowEffect::Trap);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi0_pext5_and_ppac5_with_reserved_rs() {
+        let pext5_word = (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1E << 6) | 0x08;
+        assert_eq!(pext5_word, 0x7002_1F88);
+        let pext5 = decode(pext5_word, 0xA000);
+        assert_eq!(pext5.opcode, Opcode::ParallelExtend5);
+        assert_eq!(pext5.opcode.mnemonic(), "pext5");
+        assert_eq!(encoding_family(pext5_word), EncodingFamily::Mmi0);
+        assert_eq!((pext5.rs, pext5.rt, pext5.rd), (0, 2, 3));
+        let effects = pext5.effects();
+        assert_eq!(effects.gpr_read_mask, 1 << 2);
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        assert!(!effects.reads_sa);
+        assert!(!effects.may_raise_exception);
+        assert!(!effects.unknown);
+
+        let ppac5_word = (0x1C << 26) | (1 << 16) | (4 << 11) | (0x1F << 6) | 0x08;
+        assert_eq!(ppac5_word, 0x7001_27C8);
+        let ppac5 = decode(ppac5_word, 0xA004);
+        assert_eq!(ppac5.opcode, Opcode::ParallelPack5);
+        assert_eq!(ppac5.opcode.mnemonic(), "ppac5");
+        assert_eq!(encoding_family(ppac5_word), EncodingFamily::Mmi0);
+        assert_eq!((ppac5.rs, ppac5.rt, ppac5.rd), (0, 1, 4));
+        assert_eq!(ppac5.effects().gpr_read_mask, 1 << 1);
+        assert_eq!(ppac5.effects().gpr_write_mask, 1 << 4);
+
+        assert_eq!(decode(pext5_word | (1 << 21), 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(ppac5_word | (1 << 21), 0).opcode, Opcode::Unknown);
+        assert_eq!(decode((pext5_word & !0x3F) | 0x09, 0).opcode, Opcode::Unknown);
+        assert_eq!(
+            decode((pext5_word & !(0x1F << 6)) | (0x1D << 6), 0).opcode,
+            Opcode::Unknown
+        );
     }
 
     #[test]
