@@ -10,6 +10,15 @@ on:
       - "scripts/generate_progress_dashboard.py"
       - "scripts/test_progress_dashboard.py"
       - ".github/workflows/dashboard.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/ROADMAP.md"
+      - "docs/PROJECT_STATE.md"
+      - "docs/RELEASE_GATES.md"
+      - "scripts/generate_progress_dashboard.py"
+      - "scripts/test_progress_dashboard.py"
+      - ".github/workflows/dashboard.yml"
   workflow_dispatch:
 
 permissions:
@@ -48,6 +57,7 @@ jobs:
 
   deploy:
     name: Deploy dashboard
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:
