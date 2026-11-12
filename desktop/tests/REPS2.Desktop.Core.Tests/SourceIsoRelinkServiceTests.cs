@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
-using System.Text.Json.Nodes;
 using REPS2.Desktop.Core.Models;
 using REPS2.Desktop.Core.Services;
 using Xunit;
