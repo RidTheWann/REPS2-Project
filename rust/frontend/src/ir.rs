@@ -307,6 +307,16 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// MADD: `{HI,LO} += sext32(lhs) * sext32(rhs)` with wrapping 64-bit add.
+    MultiplyAccumulateSigned {
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// MADDU: `{HI,LO} += zext32(lhs) * zext32(rhs)` with wrapping 64-bit add.
+    MultiplyAccumulateUnsigned {
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     /// DIV: signed 32-bit division. LO = quotient, HI = remainder.
     DivideWordSigned {
         lhs: Gpr,
@@ -917,6 +927,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
             },
             Opcode::Multu => Operation::MultiplyWordUnsigned {
                 dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::MultiplyAccumulateSigned => Operation::MultiplyAccumulateSigned {
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::MultiplyAccumulateUnsigned => Operation::MultiplyAccumulateUnsigned {
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
             },
@@ -2087,6 +2105,30 @@ mod tests {
             Operation::ParallelOr { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("POR verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_madd_and_maddu() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16),
+            (0x1C << 26) | (4 << 21) | (5 << 16) | 0x01,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xD100 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("MADD/MADDU lift into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::MultiplyAccumulateSigned { lhs, rhs } if lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::MultiplyAccumulateUnsigned { lhs, rhs } if lhs.index() == 4 && rhs.index() == 5
+        ));
+        program.verify().expect("MADD/MADDU verify");
     }
 
     #[test]

@@ -103,6 +103,42 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
     Ok(output)
 }
 
+pub(crate) fn emit_multiply_accumulate(
+    output: &mut String,
+    index: usize,
+    lhs: Gpr,
+    rhs: Gpr,
+    signed: bool,
+) {
+    let tag = format!("{index:04}");
+    let a = lhs.index();
+    let b = rhs.index();
+
+    // HI:LO is stored as two sign-extended words; the 64-bit pair is the
+    // concatenation of their low 32 bits.
+    let accumulate = if signed {
+        format!(
+            "    const std::int64_t maddacc_lhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{a}].low));\n\
+             \x20   const std::int64_t maddacc_rhs_{tag} = sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[{b}].low));\n\
+             \x20   const std::uint64_t maddacc_product_{tag} = static_cast<std::uint64_t>(maddacc_lhs_{tag} * maddacc_rhs_{tag});\n"
+        )
+    } else {
+        format!(
+            "    const std::uint64_t maddacc_lhs_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low);\n\
+             \x20   const std::uint64_t maddacc_rhs_{tag} = static_cast<std::uint32_t>(state.gpr[{b}].low);\n\
+             \x20   const std::uint64_t maddacc_product_{tag} = maddacc_lhs_{tag} * maddacc_rhs_{tag};\n"
+        )
+    };
+
+    output.push_str(&format!(
+        "{accumulate}\
+         \x20   const std::uint64_t maddacc_pair_{tag} = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(state.hi)) << 32U) | static_cast<std::uint32_t>(state.lo);\n\
+         \x20   const std::uint64_t maddacc_sum_{tag} = maddacc_pair_{tag} + maddacc_product_{tag};\n\
+         \x20   state.lo = sign_extend_word(static_cast<std::uint32_t>(maddacc_sum_{tag}));\n\
+         \x20   state.hi = sign_extend_word(static_cast<std::uint32_t>(maddacc_sum_{tag} >> 32U));\n"
+    ));
+}
+
 pub(crate) fn emit_instruction(
     output: &mut String,
     index: usize,
@@ -339,6 +375,12 @@ pub(crate) fn emit_instruction(
         }
         Operation::MultiplyWordUnsigned { dst, lhs, rhs } => {
             emit_multiply_word(output, index, dst, lhs, rhs, false)
+        }
+        Operation::MultiplyAccumulateSigned { lhs, rhs } => {
+            emit_multiply_accumulate(output, index, lhs, rhs, true)
+        }
+        Operation::MultiplyAccumulateUnsigned { lhs, rhs } => {
+            emit_multiply_accumulate(output, index, lhs, rhs, false)
         }
         Operation::DivideWordSigned { lhs, rhs } => emit_divide_word(output, index, lhs, rhs, true),
         Operation::DivideWordUnsigned { lhs, rhs } => {
@@ -1894,6 +1936,50 @@ mod tests {
         assert!(
             cpp.contains("if (6 != 0) state.gpr[6] = parallel_or(state.gpr[6], state.gpr[6]);")
         );
+    }
+
+    #[test]
+    fn emits_madd_and_maddu_as_wrapping_64_bit_hilo_accumulation() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16),
+            (0x1C << 26) | (4 << 21) | (5 << 16) | 0x01,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xD400 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("MADD/MADDU IR");
+        let cpp = emit_cpp(&program).expect("MADD/MADDU C++");
+
+        // Signed: sign-extended operands, unsigned wrap-around sum.
+        assert!(
+            cpp.contains("sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[1].low))")
+        );
+        assert!(
+            cpp.contains("sign_extend_word_signed(static_cast<std::uint32_t>(state.gpr[2].low))")
+        );
+        // Unsigned: plain zero-extended operands.
+        assert!(cpp.contains(
+            "const std::uint64_t maddacc_lhs_0001 = static_cast<std::uint32_t>(state.gpr[4].low);"
+        ));
+        // Both accumulate into the HI:LO pair and store back sign-extended words.
+        assert_eq!(cpp.matches("const std::uint64_t maddacc_pair_").count(), 2);
+        assert_eq!(cpp.matches("const std::uint64_t maddacc_sum_").count(), 2);
+        assert!(cpp.contains(
+            "state.lo = sign_extend_word(static_cast<std::uint32_t>(maddacc_sum_0000));"
+        ));
+        assert!(cpp.contains(
+            "state.hi = sign_extend_word(static_cast<std::uint32_t>(maddacc_sum_0000 >> 32U));"
+        ));
+        assert!(cpp.contains(
+            "state.lo = sign_extend_word(static_cast<std::uint32_t>(maddacc_sum_0001));"
+        ));
+        assert!(cpp.contains(
+            "state.hi = sign_extend_word(static_cast<std::uint32_t>(maddacc_sum_0001 >> 32U));"
+        ));
+        // No GPR destination is written.
+        assert!(!cpp.contains("state.gpr[3] = maddacc"));
     }
 
     #[test]
