@@ -1,0 +1,2 @@
+# No third-party packages are required.
+# scripts/generate_progress_dashboard.py uses the Python standard library only.

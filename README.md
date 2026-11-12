@@ -1,103 +1,174 @@
+<div align="center">
+
 # REPS2
 
-**REPS2** is an independent PlayStation 2 static recompilation toolchain targeting native Windows x64 execution.
+**An independent PlayStation 2 static AOT recompilation toolchain for native Windows x64**
 
-The frontend is written in Rust: executable inspection, instruction decoding, analysis, typed IR, verification, and AOT C++ source generation. Generated C++ is compiled by the host compiler and linked against the independently implemented C++20 runtime.
+<p>
+  <a href="https://github.com/RidTheWann/REPS2-Project/actions/workflows/ci.yml">
+    <img alt="CI status on GitHub" src="https://img.shields.io/github/actions/workflow/status/RidTheWann/REPS2-Project/ci.yml?branch=main&amp;label=CI&amp;logo=github&amp;logoColor=white&amp;style=flat">
+  </a>
+  <a href="https://www.rust-lang.org/">
+    <img alt="Rust 1.88+" src="https://img.shields.io/badge/Rust-1.88%2B-D34516?logo=rust&amp;logoColor=DEA584&amp;style=flat">
+  </a>
+  <a href="https://isocpp.org/">
+    <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&amp;logoColor=659AD2&amp;style=flat">
+  </a>
+  <a href="https://learn.microsoft.com/windows/apps/winui/winui3/">
+    <img alt="WinUI 3" src="https://img.shields.io/badge/WinUI-3-0078D4?logo=data:image%2Fsvg%2Bxml%3Bbase64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzNjUiIGhlaWdodD0iMzMyIiB2aWV3Qm94PSIwIDAgMzY1IDMzMiI%2BCjxkZWZzPgo8bGluZWFyR3JhZGllbnQgaWQ9ImEiIHgxPSI5OS41IiB5MT0iOC40IiB4Mj0iMjguNCIgeTI9IjEyMS4yIj48c3RvcCBzdG9wLWNvbG9yPSIjM0JENUZGIi8%2BPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMEZBRkZGIi8%2BPC9saW5lYXJHcmFkaWVudD4KPGxpbmVhckdyYWRpZW50IGlkPSJiIiB4MT0iOTkuNSIgeTE9IjE2NiIgeDI9Ijg2LjgiIHkyPSIzMzMuNiI%2BPHN0b3Agc3RvcC1jb2xvcj0iIzBGQUZGRiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzAwNzhENCIvPjwvbGluZWFyR3JhZGllbnQ%2BCjxsaW5lYXJHcmFkaWVudCBpZD0iYyIgeDE9IjE4Mi41IiB5MT0iNi44IiB4Mj0iNDU3LjMiIHkyPSIxNjQuMiI%2BPHN0b3Agc3RvcC1jb2xvcj0iIzBGQUZGRiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzAwNzhENCIvPjwvbGluZWFyR3JhZGllbnQ%2BCjxsaW5lYXJHcmFkaWVudCBpZD0iZCIgeDE9IjExNi45IiB5MT0iNDkuOSIgeDI9IjE0MS45IiB5Mj0iMTYwLjYiPjxzdG9wIHN0b3AtY29sb3I9IiNFNkY5RkUiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5REVBRkYiLz48L2xpbmVhckdyYWRpZW50Pgo8bGluZWFyR3JhZGllbnQgaWQ9ImUiIHgxPSI1MS4yIiB5MT0iMTgwLjUiIHgyPSIxNDkuNyIgeTI9IjMwNy43Ij48c3RvcCBzdG9wLWNvbG9yPSIjRTZGOUZFIi8%2BPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOURFQUZGIi8%2BPC9saW5lYXJHcmFkaWVudD4KPGxpbmVhckdyYWRpZW50IGlkPSJmIiB4MT0iMjE1LjIiIHkxPSI0OS45IiB4Mj0iMzgyLjQiIHkyPSIxMjAuOSI%2BPHN0b3Agc3RvcC1jb2xvcj0iIzlERUFGRiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzNCRDVGRiIvPjwvbGluZWFyR3JhZGllbnQ%2BCjwvZGVmcz4KPHBhdGggZD0iTTI0OC43NDEgLjEwM0gxMTYuMjZjLTE3Ljc4MiAwLTM0LjIxMyA5LjQ4Ny00My4xMDUgMjQuODg2TDcuMTU3IDEzOS4zMDJDMi40NjggMTQ3LjQyNCAwIDE1Ni42MzUgMCAxNjYuMDEyaDE4Mi41YzAtMS4wNTIuMjc3LTEuODg1LjgwMy0yLjc5NkwyNzMuNjI3IDYuNzcxQzI2Ni4xODQgMi40NzUgMjU3LjYzMi4xMDMgMjQ4Ljc0MS4xMDNaIiBmaWxsPSJ1cmwoI2EpIi8%2BCjxwYXRoIGQ9Ik0yNDguNzQxIDMzMS45MjFIMTE2LjI2Yy0xNy43ODIgMC0zNC4yMTQtOS40ODctNDMuMTA1LTI0Ljg4N0w3LjE1NyAxOTIuNzIxQzIuNTAyIDE4NC42NTguMDM1IDE3NS4zMTkgMCAxNjYuMDEyaDE4Mi41YzAgLjc5LjIwNyAxLjc2NS42MDIgMi40NDlsOTAuNTI0IDE1Ni43OTJjLTcuNDQxIDQuMjk3LTE1Ljk5NCA2LjY2OC0yNC44ODUgNi42NjhaIiBmaWxsPSJ1cmwoI2IpIi8%2BCjxwYXRoIGQ9Im0zNTcuODQzIDE5Mi43MTktNjUuOTk5IDExNC4zMTRjLTQuNDQ1IDcuNjk5LTEwLjc3NiAxMy45MjEtMTguMjE4IDE4LjIxOEwxODMuMTAyIDE2OC40NTljLS4zOTUtLjY4NC0uNjAyLTEuNDU5LS42MDItMi4yNDggMC0xLjA1Mi4yNzctMi4wODYuODAzLTIuOTk3TDI3My42MjcgNi43N2M3LjQ0MSA0LjI5NyAxMy43NzIgMTAuNTE4IDE4LjIxNyAxOC4yMThsNjUuOTk5IDExNC4zMTNjNC42ODggOC4xMjEgNy4xNTcgMTcuMzMzIDcuMTU3IDI2LjcxIDAgOS4zNzctMi40NjkgMTguNTktNy4xNTcgMjYuNzA5WiIgZmlsbD0idXJsKCNjKSIvPgo8cGF0aCBkPSJtMTgyLjYxOCA0OS44NzYtMzMuNTI1IDU4LjA2OC0zMi40NTMgNTYuMjQ1Yy0uMzIxLjU1NC0uNDg5IDEuMTk2LS40ODkgMS44MzZsLjAwNi4xODhINTEuMjM1bC0uMDAyLS4yMDFjMC0yLjEyNC41NDYtNC4yNDcgMS42NC02LjE2IDUuNjkzLTkuOTYgMTcuNjE4LTMwLjY0MSAyOS44OTctNTEuOTA4aC0uMDRsMjguNzM2LTQ5Ljc3M2MyLjk2NC01LjEzMyA4LjQ0MS04LjI5NSAxNC4zNjgtOC4yOTVoNTYuNzg0WiIgZmlsbD0idXJsKCNkKSIvPgo8cGF0aCBkPSJtMTQ5LjAzIDIyNC4xOTYuMDI0LjAtMzIuNDE0LTU2LjM1OGEzLjY0IDMuNjQgMCAwIDEtLjQ4My0xLjYyM2wtLjAwNi0uMTg3SDUxLjIzM2MuMDAyIDIuMTE5LjU0OSA0LjIzNyAxLjY0IDYuMTQ1IDUuNzAzIDkuOTc4IDE3LjY2IDMwLjcxNSAyOS45NjEgNTIuMDE5aC0uMDRsMjguNjcyIDQ5LjY2YzIuOTYzIDUuMTMzIDguNDQgOC4yOTYgMTQuMzY4IDguMjk2aDU2Ljc5OWwtMzMuNjAzLTU3Ljk1MloiIGZpbGw9InVybCgjZSkiLz4KPHBhdGggZD0ibTIxNS4yMjcgMTA3Ljk0NCAzMy41ODggNTguMTg2LTMzLjUyMyA1OC4wNjMgMS43OTUgMy4xMjIgMzEuNjQ1IDU0LjgzMyA2MC44NzYtMTA1LjM5MyAyLjYyNC00LjU5NmMxLjA4OS0xLjkwOCAxLjYzMy00LjAyNyAxLjYzMy02LjE0NSAwLTIuMTE5LS41NDQtNC4yMzctMS42MzMtNi4xNDdsLTIuNjQ5LTQuNjM4LTI3LjI0MS00Ny4xNjhoLS4wMmwtMzMuNTktNTguMTg2LTMzLjUwNSA1OC4wNjlaIiBmaWxsPSJ1cmwoI2YpIi8%2BCjwvc3ZnPg==&amp;style=flat">
+  </a>
+  <a href="https://dotnet.microsoft.com/">
+    <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&amp;logoColor=512BD4&amp;style=flat">
+  </a>
+  <a href="https://cmake.org/">
+    <img alt="CMake 3.25+" src="https://img.shields.io/badge/CMake-3.25%2B-064F8C?logo=data:image%2Fsvg%2Bxml%3Bbase64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4Ij48cGF0aCBmaWxsPSIjMDY0RjhDIiBkPSJNNjIuOC40TC4zIDEyMy44bDY4LjEtNTcuOXoiLz48cGF0aCBmaWxsPSIjMjQ5ODQ3IiBkPSJNMTIzLjggMTI3LjdsLTg0LTMzLjlMMCAxMjcuN3oiLz48cGF0aCBmaWxsPSIjQkUyMTI4IiBkPSJNMTI4IDEyNi42TDY1LjYgMi41bDkuMiAxMDIuNnoiLz48cGF0aCBmaWxsPSIjQ0RDRENFIiBkPSJNNzEuOSAxMDRsLTMuMS0zNC45TDQyIDkyeiIvPjwvc3ZnPg%3D%3D&amp;style=flat">
+  </a>
+  <a href="LICENSE">
+    <img alt="GPL-3.0-or-later license" src="https://img.shields.io/badge/License-GPL--3.0--or--later-A42E2B?logo=data:image%2Fsvg%2Bxml%3Bbase64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cGF0aCBmaWxsPSIjRkZGRkZGIiBkPSJNOC43NS43NVYyaC45ODVjLjMwNCAwIC42MDMuMDguODY3LjIzMWwxLjI5LjczNmMuMDM4LjAyMi4wOC4wMzMuMTI0LjAzM2gyLjIzNGEuNzUuNzUgMCAwIDEgMCAxLjVoLS40MjdsMi4xMTEgNC42OTJhLjc1Ljc1IDAgMCAxLS4xNTQuODM4bC0uNTMtLjUzLjUyOS41MzEtLjAwMS4wMDItLjAwMi4wMDItLjAwNi4wMDYtLjAwNi4wMDUtLjAxLjAxLS4wNDUuMDRjLS4yMS4xNzYtLjQ0MS4zMjctLjY4Ni40NUMxNC41NTYgMTAuNzggMTMuODggMTEgMTMgMTFhNC40OTggNC40OTggMCAwIDEtMi4wMjMtLjQ1NCAzLjU0NCAzLjU0NCAwIDAgMS0uNjg2LS40NWwtLjA0NS0uMDQtLjAxNi0uMDE1LS4wMDYtLjAwNi0uMDA0LS4wMDR2LS4wMDFhLjc1Ljc1IDAgMCAxLS4xNTQtLjgzOEwxMi4xNzggNC41aC0uMTYyYy0uMzA1IDAtLjYwNC0uMDc5LS44NjgtLjIzMWwtMS4yOS0uNzM2YS4yNDUuMjQ1IDAgMCAwLS4xMjQtLjAzM0g4Ljc1VjEzaDIuNWEuNzUuNzUgMCAwIDEgMCAxLjVoLTYuNWEuNzUuNzUgMCAwIDEgMC0xLjVoMi41VjMuNWgtLjk4NGEuMjQ1LjI0NSAwIDAgMC0uMTI0LjAzM2wtMS4yODkuNzM3Yy0uMjY1LjE1LS41NjQuMjMtLjg2OS4yM2gtLjE2MmwyLjExMiA0LjY5MmEuNzUuNzUgMCAwIDEtLjE1NC44MzhsLS41My0uNTMuNTI5LjUzMS0uMDAxLjAwMi0uMDAyLjAwMi0uMDA2LjAwNi0uMDE2LjAxNS0uMDQ1LjA0Yy0uMjEuMTc2LS40NDEuMzI3LS42ODYuNDVDNC41NTYgMTAuNzggMy44OCAxMSAzIDExYTQuNDk4IDQuNDk4IDAgMCAxLTIuMDIzLS40NTQgMy41NDQgMy41NDQgMCAwIDEtLjY4Ni0uNDVsLS4wNDUtLjA0LS4wMTYtLjAxNS0uMDA2LS4wMDYtLjAwNC0uMDA0di0uMDAxYS43NS43NSAwIDAgMS0uMTU0LS44MzhMMi4xNzggNC41SDEuNzVhLjc1Ljc1IDAgMCAxIDAtMS41aDIuMjM0YS4yNDkuMjQ5IDAgMCAwIC4xMjUtLjAzM2wxLjI4OC0uNzM3Yy4yNjUtLjE1LjU2NC0uMjMuODY5LS4yM2guOTg0Vi43NWEuNzUuNzUgMCAwIDEgMS41IDBabTIuOTQ1IDguNDc3Yy4yODUuMTM1LjcxOC4yNzMgMS4zMDUuMjczczEuMDItLjEzOCAxLjMwNS0uMjczTDEzIDYuMzI3Wm0tMTAgMGMuMjg1LjEzNS43MTguMjczIDEuMzA1LjI3M3MxLjAyLS4xMzggMS4zMDUtLjI3M0wzIDYuMzI3WiIvPjwvc3ZnPg==&amp;style=flat">
+  </a>
+</p>
 
-> **Status: experimental AOT foundation (v0.7.0).** REPS2 can import an owned ISO, extract and validate its boot ELF, analyze it, and generate deterministic C++20 for a documented R5900 subset: scalar and 64-bit integer operations, HI/LO and multiply, main-RAM loads and stores, control flow with delay slots, part of the EE FPU, and Level-1 SYSCALL/BREAK/overflow/address-error exceptions. Execution is verified on synthetic programs in CI on Windows and Linux. No title is boot-tested yet and every imported game is recorded as non-playable. Full R5900 coverage, relocations, TLB mapping, interrupts, MMIO devices, system services, and game compatibility are not complete. See [docs/CAPABILITIES.md](docs/CAPABILITIES.md) for the detailed list and [docs/ROADMAP.md](docs/ROADMAP.md) for the milestones.
+[Roadmap dashboard](https://ridthewann.github.io/REPS2-Project/) ·
+[Documentation](#documentation) ·
+[Desktop Alpha](desktop/README.md)
 
-## Current capabilities
+</div>
 
-The full list (ISO and ELF handling, decoder and IR coverage, code generation, memory model, exceptions, build manifest and native build driver) is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md).
+---
 
-## Requirements
+## Status Project
 
-- Rust 1.88 or newer (stable toolchain, edition 2024; the code uses let-chains).
-- CMake 3.25 or newer.
-- A C++20 compiler (Visual Studio 2022 17.4+, GCC 12+, or Clang 15+).
-- Git.
+<p align="center">
+  <a href="https://ridthewann.github.io/REPS2-Project/">
+    <img src="https://ridthewann.github.io/REPS2-Project/progress-grid.svg" alt="REPS2 project progress grid">
+  </a>
+</p>
 
-## Build and test
+The grid is grouped by milestone. Hover over a tile in the live dashboard for its full description. Progress is calculated only from checked items in [docs/ROADMAP.md](docs/ROADMAP.md); it is not a game-compatibility, boot-success, or release-readiness score. The dashboard is regenerated by GitHub Actions from the roadmap and [verified project state](docs/PROJECT_STATE.md).
 
-From the repository root:
+> **Experimental AOT foundation (v0.7.0) · Windows Desktop Alpha**  
+> REPS2 can import an owner-supplied PS2 ISO, inspect its boot ELF, analyze a documented R5900 subset, generate deterministic C++20, and build native modules for the project-owned RG REPS2 ENGINE. Windows x64 is the active desktop target; Linux remains a CI portability target.
 
-    cmake -S . -B build -DBUILD_TESTING=ON
-    cmake --build build --config Release --parallel
-    ctest --test-dir build -C Release --output-on-failure
+**Compatibility boundary:** no PS2 title is currently verified as Boot-tested or Playable. Successful import, analysis, translation, native compilation, synthetic execution, or a bounded diagnostic run must not be interpreted as proof that a retail game boots.
 
-The frontend executable is produced at:
+## What REPS2 does
 
-- Windows: build/cargo-target/release/reps2.exe
-- Linux: build/cargo-target/release/reps2
+REPS2 is designed around a multi-game PS2 ISO-to-native pipeline:
 
-The CMake build generates one C++ translation unit per supported feature slice under `build/generated/` — scalar/control (`synthetic_program.cpp`, `compare_nor_program.cpp`, `signed_doubleword_program.cpp`, `word_overflow_program.cpp`, `hilo_program.cpp`, `div_mov_program.cpp`, `control_flow.cpp`), MMI (`mmi0_word_program.cpp`, `mmi2_pcpyld_program.cpp`, `mmi3_por_program.cpp`, `mmi2_pand_program.cpp`, `mmi2_pxor_program.cpp`, `mmi3_pnor_program.cpp`, `mmi0_pextlw_program.cpp`, `mmi0_ppacw_program.cpp`, `mmi3_pcpyud_program.cpp`, `mmi2_pexew_program.cpp`, `mmi2_prot3w_program.cpp`, `mmi1_paddub_program.cpp`, `mmi0_pextlb_program.cpp`), SA/COP0/COP1 (`sa_program.cpp`, `cop0_program.cpp`, `cop1_program.cpp`, `cop1_arith_program.cpp`) — compiles each with the host C++20 compiler into a native smoke executable, and runs them together with the Rust test target through CTest. A separate split-CFG fixture emits the same control-flow graph as a dispatcher (`control_flow_split.cpp`) plus four block parts (`control_flow_split.part0001.cpp` through `control_flow_split.part0004.cpp`) and links them into `reps2_cfg_split_codegen_smoke`, pinning the multi-translation-unit path.
+1. **Import and inspect** an owned raw PS2 ISO and identify its boot ELF.
+2. **Analyze** the ELF and discover code regions, control flow, and unsupported boundaries.
+3. **Translate** supported R5900 instructions into a typed, verified intermediate representation.
+4. **Generate** deterministic C++20 source and versioned build metadata.
+5. **Build and execute** a native title module through the RG REPS2 ENGINE runtime boundary.
 
-For Rust-only work:
-
-    cargo fmt --manifest-path rust/Cargo.toml --all -- --check
-    cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
-    cargo test --manifest-path rust/Cargo.toml --workspace --locked
-
-## CLI
-
-    reps2 version
-    reps2 disc-info <disc-image.iso>
-    reps2 add-game <disc-image.iso> [--library <directory>]
-    reps2 extract-boot-elf <disc-image.iso> <output.elf>
-    reps2 elf-info <elf-file>
-    reps2 analyze-elf <elf-file> [--discover] [--max-blocks N] [--max-instructions N] [--max-roots N]
-    reps2 profile-elf <elf-file>
-    reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--max-blocks N] [--max-instructions N] [--max-roots N]
-    reps2 decode <instruction-word-hex> [pc-hex]
-    reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...
-
-Example:
-
-    reps2 elf-info "D:\List Games\some-owned-game\SLUS_123.45"
-    reps2 recompile-elf "D:\List Games\some-owned-game\SLUS_123.45" build\game.cpp
-    reps2 decode 0x2485FFFC 0x00100000
-    reps2 compile-words output.cpp 0x00100000 0x24080005 0x24090007 0x01095021
-
-Per-command behavior, analysis limits, produced artifacts and the generated-code contract are documented in [docs/CLI.md](docs/CLI.md).
+The original ISO remains an external user asset. Game images, BIOS dumps, proprietary SDKs, and copyrighted game content are not stored in this repository.
 
 ## Architecture
 
-1. Disc/filesystem inspection and executable extraction.
-2. ELF loading, symbols, relocations, and guest memory mapping.
-3. R5900 decoding, function discovery, and delay-slot-aware CFG construction.
-4. Typed, host-independent IR and verifier.
-5. Deterministic C++20 AOT source generation plus a machine-readable build manifest.
-6. Host compilation/linking of generated code and the C++20 runtime.
-7. Modular runtime services for EE, VU, GS, IOP, DMA, audio, input, and storage.
-8. Differential testing and game-stage regression.
+| Component | Responsibility | Technology |
+|---|---|---|
+| Frontend | ISO/ELF inspection, R5900 decoding, discovery, CFG, typed IR, verification, C++ generation, manifests, and CLI | Rust |
+| Generated title module | Deterministic native code emitted from the supported guest-code subset | C++20 |
+| Runtime | Versioned native-module ABI, EE session state, 32 MiB EE RAM, bounded execution, and structured run reports | C++20 |
+| Windows desktop | ISO library, evidence-derived lifecycle, native-build orchestration, job history, developer diagnostics, and update flow | WinUI 3 / .NET 10 |
+| Build and validation | Native builds, Rust checks, desktop tests, packaging, and roadmap dashboard deployment | CMake / MSVC / GitHub Actions |
 
-See docs/ARCHITECTURE.md, docs/ROADMAP.md, and docs/decisions/.
+The desktop application invokes the existing Rust frontend and RG REPS2 ENGINE through child processes and versioned artifacts. The UI does not contain a second compiler implementation or link the engine through FFI.
 
-## Semantic boundaries
+## Implemented foundation
 
-- Word operations validate the R5900 sign-extended word-value precondition, use 32-bit modulo/overflow behavior as specified by the operation, then sign-extend the word result into GPR[63:0].
-- Logical 64-bit operations affect GPR[63:0] only; the upper 64-bit GPR lane is preserved.
-- GPR[0] is hard-wired to zero.
-- Signed `ADD`, `ADDI`, `SUB`, `DADD`, `DADDI` and `DSUB` overflow is delivered as EE Level-1 `ExceptionCode::Overflow` (Cause.ExcCode 12), with no destination write on fault. The common exception vector is `0x80000180` (or `0xBFC00380` when BEV is set); `0x80000200` is reserved for the distinct interrupt vector. Arithmetic overflow in a branch delay slot records EPC/BD correctly; not-taken branch-likely slots remain annulled.
-- Status::undefined_word_operand is an explicit REPS2 diagnostic guard for an operand outside the documented word-value restriction; it is not presented as a distinct hardware exception.
-- ORI follows the MIPS zero-extended-immediate definition and the observed R5900 reference behavior; the discrepancy in one publicly mirrored Sony manual text is recorded in docs/decisions/0002-scalar-ir-and-cpp-aot.md.
-- Conditional branch predicates read the low 64-bit EE GPR value; signed branches use a bit-preserving signed interpretation rather than host-dependent casts.
-- Branch-and-link variants, including BLTZALL/BGEZALL, write the PC+8 return address regardless of whether the branch predicate is true. The link is written before the delay-slot instruction executes.
-- JALR captures its dynamic destination before writing the link register, preserving correct behavior when source and destination registers alias.
-- The CFG AOT dispatcher evaluates the branch predicate and writes any link address before the delay slot. For branch-likely instructions, the delay slot executes only on the taken path and is annulled on fallthrough; the selected next PC is committed after the delay-slot side effects.
-- EE load/store effective addresses use the low 32-bit base register plus a sign-extended 16-bit offset, wrapping as a 32-bit address. LB/LH/LW sign-extend into GPR[63:0]; LBU/LHU/LWU zero-extend into GPR[63:0]; stores write the low 8/16/32 bits and preserve the upper GPR lane.
-- Main-RAM reads/writes are little-endian and support the documented 32 MiB aliases. Halfword and word accesses require natural alignment; a faulting load does not modify its destination register.
-- MMIO, VU memory, IOP RAM, BIOS, scratchpad, reserved ranges, TLB remapping, cache effects and bus/exception delivery are not emulated by this memory slice. Recognized device/reserved regions return `unsupported_memory_access`; out-of-range or absent backing RAM returns `unmapped_memory`.
-- SYSCALL and BREAK are delivered as Level-1 EE exceptions with Cause.ExcCode 8/9, EPC/BD state, EXL and the normal or BEV bootstrap common vector. Nested Level-1 exceptions preserve the first EPC/BD frame. ERET resumes through EPC or ErrorEPC; an ambiguous EXL+ERL context is rejected rather than guessed. Delay-slot traps remain excluded from CFG lowering, and no BIOS/HLE syscall service is delivered.
+The current codebase includes:
+
+- Raw 2048-byte-sector ISO inspection, boot-ELF extraction, and ISO/ELF provenance checks.
+- Defensive ELF metadata parsing and R5900 CPU identification.
+- Decoder, analysis, typed IR, verifier, and deterministic C++20 AOT generation for the documented instruction subset.
+- CFG-aware control flow, delay-slot handling, main-RAM operations, selected EE FPU/MMI coverage, and explicit exception behavior.
+- A versioned native-module ABI and the RG REPS2 ENGINE session/runner boundary.
+- Bounded execution with structured developer reports; a clean host exit is not treated as a guest boot result.
+- A Windows Desktop Alpha for library management, ISO import, evidence-derived status, build orchestration, diagnostics, settings, and release-based one-click updates.
+
+The authoritative feature inventory and known gaps live in [docs/CAPABILITIES.md](docs/CAPABILITIES.md), [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md), and [docs/COMPATIBILITY_MATRIX.md](docs/COMPATIBILITY_MATRIX.md).
+
+## Build and test
+
+### Requirements
+
+- Rust 1.88 or newer (stable; Rust edition 2024).
+- CMake 3.25 or newer.
+- A C++20 toolchain: Visual Studio 2022 17.4+, GCC 12+, or Clang 15+.
+- Git.
+
+### Build the repository
+
+Run from the repository root:
+
+~~~sh
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+~~~
+
+The Rust frontend is produced at build/cargo-target/release/reps2.exe on Windows and build/cargo-target/release/reps2 on Linux.
+
+For Rust-only validation:
+
+~~~sh
+cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path rust/Cargo.toml --workspace --locked
+~~~
+
+### CLI entry points
+
+~~~text
+reps2 version
+reps2 disc-info <owned-disc.iso>
+reps2 add-game <owned-disc.iso> [--library <directory>]
+reps2 extract-boot-elf <owned-disc.iso> <output.elf>
+reps2 elf-info <boot.elf>
+reps2 analyze-elf <boot.elf>
+reps2 recompile-iso <owned-disc.iso> <output-directory>
+reps2 dev capabilities
+reps2 dev sessions
+reps2 dev inspect latest
+~~~
+
+See the [CLI guide](docs/CLI.md) for complete arguments, output layouts, limits, and report semantics.
+
+## Windows Desktop Alpha
+
+The native WinUI 3 application is the Windows-facing development shell for REPS2. It provides a game library, single-ISO import, title details, build queue, Developer Center, local settings, and a compatibility lifecycle derived from verified artifacts.
+
+- [Download Windows Desktop Alpha installer](https://github.com/RidTheWann/REPS2-Project/releases) · [Portable ZIP and checksums](https://github.com/RidTheWann/REPS2-Project/releases)
+- [Desktop Alpha guide](desktop/README.md)
+- [Implementation scope and boundaries](docs/desktop-alpha-implementation.md)
+
+The application currently has no Play button and does not claim that a title is playable. Native title builds require CMake and the MSVC C++ workload; those compiler tools are not bundled into the desktop package. The in-app updater checks published desktop-v* releases and verifies the package checksum before applying an update.
+
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| [Product vision](docs/PRODUCT_VISION.md) | Product goals, constraints, and target workflow |
+| [Architecture](docs/ARCHITECTURE.md) | Frontend, generated module, runtime, and subsystem boundaries |
+| [Capabilities](docs/CAPABILITIES.md) | Implemented instruction, analysis, runtime, and CLI coverage |
+| [Roadmap](docs/ROADMAP.md) | Milestones and implementation checklist |
+| [Project state](docs/PROJECT_STATE.md) | Current evidence, real-title observations, and active boundaries |
+| [Compatibility matrix](docs/COMPATIBILITY_MATRIX.md) | Per-title evidence and compatibility status |
+| [CLI reference](docs/CLI.md) | Commands, arguments, artifacts, and developer workflows |
+| [Release gates](docs/RELEASE_GATES.md) | Alpha, public beta, and REPS2 1.0 acceptance criteria |
+| [Decision records](docs/decisions/) | Architecture decisions and research-backed behavior contracts |
 
 ## Engineering and legal boundaries
 
-- REPS2 is an independent implementation. External projects may be studied for architecture and observable behavior, but their source code is not copied or incorporated.
-- Synthetic fixtures only. Do not commit game ISOs, BIOS dumps, proprietary SDKs, copyrighted game assets, or user-specific binaries.
-- Game data used for local validation must be lawfully obtained and remain outside this repository and CI.
-- Unsupported instructions and hardware behaviors must fail explicitly; silent approximations are not correctness claims.
-- Every behavior-changing implementation requires tests and, where possible, a differential test case.
+- REPS2 is an independent implementation. External projects may inform research into architecture and observable behavior; their source code is not copied or incorporated.
+- Do not commit PS2 ISOs, BIOS dumps, proprietary SDKs, copyrighted game assets, or user-specific binaries.
+- Local game validation must use lawfully obtained user-owned material and keep that material outside Git and CI.
+- Unsupported instructions and hardware behavior must fail explicitly; silent approximations are not correctness claims.
+- Behavior changes require tests and, where possible, differential evidence.
 
 ## License
 
-REPS2 is licensed under GNU General Public License v3.0 or later. See LICENSE.
+REPS2 is licensed under **GNU General Public License v3.0 or later**. See [LICENSE](LICENSE).
+
+Logo credits: [WinUI mark by Niels9001 (CC BY-SA 4.0)](https://commons.wikimedia.org/wiki/File:WinUI.svg), [Microsoft .NET brand assets](https://github.com/dotnet/brand/tree/main/logo), [CMake and .NET Core marks from Devicon (MIT)](https://github.com/devicons/devicon), and the [law scale icon from GitHub Primer Octicons (MIT)](https://primer.style/octicons/icon/law-16/).

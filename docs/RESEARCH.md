@@ -22,6 +22,13 @@ These projects have different goals and different completion levels. Their demos
 
 - **ORI immediate extension:** the public MIPS32 instruction reference defines ORI's 16-bit immediate as zero-extended. The currently consulted PCSX2 R5900 implementation also combines the source GPR with the zero-extended 16-bit immediate. One publicly accessible mirror of the Sony EE Core Instruction Set Manual contains prose describing ORI's immediate as sign-extended. REPS2 follows the MIPS instruction definition and observed PCSX2 behavior for this subset, records the discrepancy, and requires a future differential conformance case before expanding claims.
 
+## CFG analysis resource-limit behavior
+
+- **Observed (synthetic regression):** an ELF executable-memory segment containing raw words `0x0000000C, 0x00000000, 0x00000000` (`syscall; nop; nop`) with the entry at `0x00100000` and `max_instructions = 1` previously returned `Ok(ControlFlowGraph)` with `decoded_instruction_count = 2`. The authoritative trap consumed the budget; the queued speculative continuation decoded beyond it, and blanket lenient error handling hid `InstructionLimitExceeded`. Before the change, the counter helper also incremented before returning an exhaustion error.
+- **Derived:** a partial graph cannot be reported as a successful bounded analysis when any root or continuation reaches the configured resource ceiling. A refused instruction must not consume count capacity. Block splitting likewise must verify capacity before graph mutation.
+- **Decision:** ADR 0085 restricts leniency to an exhaustive set of speculative structural decode failures. Resource, input/segment, PC-overflow and ownership-invariant errors propagate. Valid syscall continuation code remains discoverable; unsupported speculative delay-slot structure remains skippable and visible through existing reporting.
+- **Validation:** synthetic raw word tests cover instruction limits 1, 2 and 3, authoritative/heuristic roots, delay-slot accounting, counter no-mutation at zero/one/`usize::MAX`, block split boundary, and preserved lenient unsupported continuation behavior. A synthetic ELF CLI test checks `analyze-elf` with and without `--discover`, configured-limit hint, nonzero result, and `cfg.discover`/analysis-stage diagnostics. No retail binary or game artifact is involved.
+
 ## Control-flow and delay-slot references
 
 - MIPS32 Volume II defines the standard delayed-control-transfer instruction forms and branch offset calculation. Use it as a baseline only; validate EE-specific behavior and the supported R5900 encoding subset with PS2 documentation and differential tests.
@@ -44,6 +51,18 @@ These projects have different goals and different completion levels. Their demos
 - Only the PVD namespace is consumed. Joliet supplementary name tables, Rock Ridge, UDF, path-table shortcuts, multi-volume spanning, multi-extent concatenation, interleaved data, raw 2352-byte BIN/CUE sector decoding, CHD containers, and CDVD device behavior are explicit non-goals for this increment.
 - The boot extraction command validates the selected file as ELF32 little-endian EM_MIPS ET_EXEC before creating an output path with exclusive create semantics. Extraction is not evidence that PT_LOAD placement, relocations, instruction coverage, or a retail title is supported by the current AOT backend.
 
+## EE MMI0 PEXT5/PPAC5 color conversion
+
+- Normative encoding/bit concatenation: EE Core Instruction Set Manual v6.0, printed pages 202 (PEXT5) and 254 (PPAC5); see [ADR 0084](decisions/0084-ee-mmi0-pext5-ppac5.md). The manual was consulted outside Git, not redistributed.
+- Non-normative cross-check: [PCSX2 MMI.cpp at d983b2b](https://github.com/PCSX2/pcsx2/blob/d983b2b0665c40acb0455433eb656eebcb9efaf2/pcsx2/MMI.cpp), four independent words and destination-zero suppression. No third-party implementation was copied.
+- Synthetic fixture words include `0x70021F88` (PEXT5 r3,r2), `0x70033FC8` (PPAC5 r7,r3), and `0x700127C8` (PPAC5 r4,r1), at guest PC `0xD000`. Source bits are routed independently using the manual's concatenation positions, covering all 128 bits and discarded bits. The CFG fixture at `0xD200` covers taken/annulled likely and return delays in both output layouts.
+- Continued remote implementation `b5c3140` on base `eca41b5`; review corrected a PEXEW sibling expectation, a fixture destination encoding, and an entry-GPR0 postcondition. Verified by synthetic generated-code native fixtures locally on Windows/MSVC (Release CTest 33/33) and in Ubuntu/Linux CI (CMake build and CTest); Rust frontend checks additionally verified on Rust MSRV 1.88 in CI. This is synthetic semantic evidence, not hardware differential validation or retail boot evidence.
+
+## ELF PT_LOAD BSS coalescing and overlap validation
+
+- Source-derived defect at base `eca41b50332a536194ace65ca3f1d4785b335d26`: `elf::load_segments` enlarged an existing same-base pure-BSS PT_LOAD and updated range accounting without checking collisions with other PT_LOAD ranges. Header order `[BSS A, initialized B, expanded A]` accepted overlapping virtual ranges, while another order rejected them. The synthetic regression uses A=`[0x00100010,0x00100014)`, B=`[0x00100020,0x00100024)`, then extends A to `0x00100040`; the defect was reproduced before correction.
+- Fix validates the proposed maximal BSS range against all other admitted ranges before allocating or mutating state. Tests cover all six program-header permutations, initialized/BSS B, legal exact adjacency, zero fill, merged permissions, and load-size boundaries. This establishes loader consistency only; existing RAM-image mapping has separate validation.
+
 ## EE memory and load/store cross-checks
 
 - The public PS2 memory map identifies 32 MiB main RAM at virtual 0x00000000, an uncached alias at 0x20000000, and an accelerated alias at 0x30100000 for the upper 31 MiB. It separately identifies EE I/O registers, VU memories, privileged GS registers, IOP RAM, BIOS and scratchpad.
@@ -51,6 +70,53 @@ These projects have different goals and different completion levels. Their demos
 - PCSX2's virtual-memory documentation notes that EE mappings depend on COP0/TLB state and that the memory map is more complex than the direct aliases shown in simplified tables. REPS2's initial memory slice deliberately does not claim to implement TLB remapping or the complete physical bus map.
 - The generated backend performs effective-address arithmetic in 32-bit unsigned arithmetic after sign-extending the 16-bit offset. The CPU memory helper validates alignment and backing bounds before access. Device/reserved regions are surfaced as unsupported, never mapped to ordinary RAM.
 - The public MIPS64 Architecture for Programmers, Volume I-A, Revision 6.01 (2014), §§5.1.2–5.1.3 identifies LD/SD as CPU doubleword load/store operations and documents natural-alignment requirements for these instructions before Release 6 (§5.1.3). It is used as the general ISA baseline; EE-specific address translation, 128-bit GPR lane effects, and exceptions remain bounded by REPS2's explicit runtime model and require target-specific conformance tests.
+
+## EE VU0 quadword data movement
+
+- Downhill Domination SCUS_971.77 probe-r2, using both explicit relocated-code regions, stopped at guest PC `0x00169EC4` on raw word `0xF8800010` (`SQC2 $vf0, 0x10($a0)`) after 3,126,787 guest instructions. The containing routine stores a constant vector into a caller-owned structure. A static RAM census found 3,124 LQC2 and 1,778 SQC2 words. This is title-specific execution evidence, not proof of boot.
+- The public PS2 EE Core instruction references identify LQC2/SQC2 as quadword transfers between EE memory and VU0 vector registers; PS2SDK headers provide the VU vector register naming/context. The encoding uses primary opcodes `0x36`/`0x3E`. PCSX2's R5900/VU0 implementation is useful as a separate behavioral cross-check but is not treated as a hardware specification or copied. These sources establish only the two transfer forms addressed by ADR 0078; VU arithmetic, VI registers, micro mode, and timing remain out of scope.
+- VU0 VF0 is the architectural constant `(0.0f, 0.0f, 0.0f, 1.0f)`, writes are ignored, and vector words are represented in increasing X/Y/Z/W order. The runtime represents the 128-bit transfer as two little-endian 64-bit lanes, placing W's IEEE single-precision bit pattern `0x3F800000` in bits 96..127. This layout has a synthetic native test for store and reload. It has not yet been checked against hardware or an independent title trace.
+- REPS2 uses existing checked aligned quadword RAM helpers for address resolution and transfers. Unsupported COP2 arithmetic remains an explicit stop; LQC2/SQC2 support does not imply VU program execution.
+
+## Downhill Domination DMAC/SIF boundary
+
+- A rebuilt post-COP2 probe using the local SCUS_971.77 ELF and relocated regions `0x80076000 <- 0x002829F8 (0x740)` and `0x80075000 <- 0x002831A0 (0x330)` reaches `0x0025C274` after 3,168,708 executed guest instructions, then stops with `unsupported_memory_access`. The local ELF SHA-256 is `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`; the trace budget is 5,000,000. This is not a boot stage.
+- The translated path builds `0x1000E010` (`lui $v0,0x1000; ori $v0,$v0,0xE010`) and executes `lw $v1,0($v0)`. PS2SDK `common/include/ee_regs.h` defines `A_EE_D_STAT` at `0x1000e010`; its DMA register documentation names it the DMAC status register. Following code masks `$v1` with `0x20`, the SIF0 status bit, and conditionally writes the value back to D_STAT.
+- PS2SDK's `ee/kernel/src/sifcmd.c` independently names `0x1000e010` `DMAC_COMM_STAT` and `0x20` `STAT_SIF0`. In `sceSifInitCmd`, it reads D_STAT, writes `STAT_SIF0` back when present, then checks SIF0 channel control register `0x1000c000` for `CHCR_STR` `0x100`; when the channel is not running, it starts the SIF0 DMA chain. This is evidence for the SDK initialization pattern, not proof that the retail target has the same initial event or is executing this exact source sequence.
+- PS2Tek's public EE register map describes D_STAT channel status bits 0..9 as write-one-to-clear, channel interrupt masks in bits 16..25 as write-one-to-toggle, and the stall/MFIFO mask fields in bits 29..30. It separately identifies status fields in bits 13..15; the present runtime does not claim write semantics for those fields. The channel-5 SIF0 status flag is bit 5 (`0x20`), and its interrupt-mask field is bit 21.
+- PCSX2's legacy `Dmac.h` independently corroborates the named D_STAT status/mask fields, including SIS/MEIS/BEIS and SIM/MEIM. This is a non-normative implementation cross-check, not a hardware specification and not copied implementation code.
+- ADR 0079 introduces an isolated `EeDmacState` owner in `runtime/include/reps2/runtime/ee_dmac.hpp`. A default state is explicitly unknown, not a declared hardware reset value. For an explicitly seeded known value, the model reads documented fields, returns reserved bits as zero, applies W1C to bits 0..9, and toggles mask fields 16..25/29..30 on writes of one. Writes setting bits 13..15 and every access while the state is unknown remain `unsupported_memory_access` without partial mutation.
+- A generated native smoke test covers the exact guest `LW/ANDI 0x20/SW` pattern with an explicitly seeded synthetic state and verifies that SIF0 bit 5 is cleared without changing unrelated fields. This establishes the bounded register transform only.
+- ADR 0091 extends the DMAC owner to DPCR (`0x1000E000`), D_STAT (`0x1000E010`), D_PCR (`0x1000E020`) and the SIF0 channel-5 registers CHCR/MADR/QWC/TADR (`0x1000C000`/`0x010`/`0x020`/`0x030`, addresses confirmed from PS2SDK `common/include/ee_regs.h` `A_EE_D5_*`), and adds a small MMIO dispatch table to `EeMemory` that `load_u32`/`store_u32` consult before main RAM. Each register keeps the ADR 0079 known/unknown discipline. Runtime `initialize_hle_boot_environment` seeds the kernel-initialized idle DMAC state (all modelled registers known and zero) for a host that opts into the HLE layer; without it every DMAC access still fails closed.
+- The idle state is modelled from PS2SDK's own `dma_reset` (R5900 code at `.text` offset `0x0` of `ee/lib/libdma.erl`), which loops the ten channels clearing channel control/status words, so the SDK-visible idle DMAC is "all channels stopped, no pending status". PCSX2's `dmacReset()` (stat=0, chcr=0) is a non-normative cross-check. This is a modelling decision about the kernel-initialized state, not a hardware reset claim.
+- SIF0 start is modelled as an immediately completed transfer: a `CHCR5` write raising `STR` (0→1) publishes the SIF0 completion event to `D_STAT` bit 5 and self-clears `STR`. It does nothing when `D_STAT` is unknown and never fabricates an event for an already-running channel. There is no IOP backpressure or timing; this is a documented simplification.
+- With the D_STAT/SIF0 path no longer refusing, the regenerated probe (extracted ELF SHA-256 `adfda7b7…f0cf0c`, `--discover --hle-syscalls`, 5,000,000 budget) executes 3,168,717 guest instructions and stops at PC `0x0025AAC4` as `unhandled_syscall` for `$v1 = 0x78`. The guest wrapper at `0x0025AAC0` is `li $v1,0x78; syscall; jr $ra`. PS2SDK `libkernel.erl` names `0x78` `sceSifSetDChain` (sibling `0x77` `sceSifSetDma`, both taking no argument beyond `$a0`/`$a1` set by the wrapper's caller). This is the next boundary; the services are not implemented.
+- ADR 0092 implements the guest-visible part of `sceSifSetDChain` (0x78): the HLE handler starts the SIF0 channel through the DMAC owner, publishes the SIF0 completion event, and leaves `$v0` untouched because PS2SDK declares the entry `void`. `sceSifSetDma` (0x77) remains unimplemented. Local ELF disassembly places the call inside the SDK SIF command initialisation: read `D_STAT`, test/acknowledge SIF0 `0x20`, read SIF0 `CHCR` `0x1000C000`, test `CHCR_STR` `0x100`, and call the `0x78` stub only when the channel is idle. With the service present the probe executes 3,168,726 instructions (9 more than ADR 0091) and stops at `0x0025A3F4` as `unhandled_syscall` `$v1 = 0x12`. The following call site (`0x0025C2B8` `jal 0x0025A3F0`) reaches the `0x12` stub with `$a0 = 5` and `$a1 = 0x0025C5F8`, so PS2SDK `__NR_AddDmacHandler 0x12` on channel 5 is the next requirement.
+- Unknown for `sceSifSetDChain`: the ROM kernel's own SIF0 command buffer, the exact `CHCR`/tag words it programs, and any IOP-side effect of the start are not observable in the target or in public sources. Only the guest-visible start-and-complete effect is modelled; DMAC interrupt delivery is not modelled, so a handler registered for channel 5 is never invoked by the completion event.
+- ADR 0095 implements `AddDmacHandler` (0x12), the next boundary the probe reached. Local ELF disassembly shows the call site `0x0025C2B0`..`0x0025C2CC`: `li $a0,5`, `$a1 = 0x0025C5F8`, `$a2 = 0` (delay slot `move $a2,zero`), the `0x12` stub at `0x0025A3F0`, the returned id stored to a global, and then a wrapper at `0x0025B068` that reads CP0 `Status` and calls stub `0x0025A440` (`0x16` `_EnableDmac`) with `$a0 = 5`. The registered handler at `0x0025C5F8` parses the SIF command packet (byte count from the kernel command-buffer pointer at `0x761B58`, then quadword copies), so the path expects SIF0 completion processing driven by the DMAC interrupt. The layer stores one handler record per channel with an HLE-local id (the kernel's id values and chain order are not observable) and delivers no interrupt. With the service present the probe executes 3,168,763 instructions (37 more than ADR 0092) and stops at `0x0025A444` as `unhandled_syscall` `$v1 = 0x16` with `$a0 = 5`.
+- Unknown for `AddDmacHandler`: the kernel's handler-id values, its per-channel chain order, whether it enables the channel interrupt inside the call, and how SIF0 completion is expected to reach a registered handler. DMAC interrupt delivery is not modelled, so the SIF completion handler the title registers is never invoked; this is the structural gap behind the SIF command path and needs explicit evidence before it is modelled.
+- ADR 0096 implements `EnableDmac` (0x16), the next boundary. The observed call site `0x0025C2C8` calls the SDK wrapper at `0x0025B068` with `$a0 = 5`; the wrapper tests CP0 `Status`, runs a critical-section helper, calls stub `0x0025A440` (`li $v1,0x16`) and propagates `$v0` — which the caller then discards. PS2Tek's EE map gives the guest-visible effect: `D_STAT` bits 16..25 are the per-channel interrupt mask, "1 = enabled, write 1 to reverse" (write-one-to-toggle), asserted when `(status & mask) != 0`; `D_CTRL` (`0x1000E000`) and `D_PCR` (`0x1000E020`) have no interrupt-mask field. The layer therefore sets the channel's mask bit only when it is clear, refuses an out-of-range channel with `-1`, stops with `unsupported_memory_access` when the register state is unknown, and leaves `$v0` untouched because the kernel's return value is not observable. With the service present the probe executes 3,168,788 instructions (25 more than ADR 0095) and stops at `0x0025AAF4` as `unhandled_syscall` `$v1 = 0x7a` with `$a0 = 0x80000000` (`SIF_REG_ID_SYSTEM | SIF_SYSREG_SUBADDR`).
+- Unknown for `EnableDmac`: whether the kernel performs additional critical-section or `D_CTRL` work, what it returns, and how SIF0 completion is expected to reach the registered handler. No interrupt is delivered, so the mask bit this service sets currently causes nothing.
+- ADR 0097 implements `sceSifGetReg` (0x7a), the next boundary, as an HLE-owned SIF register file: the four documented hardware registers (`SIF_REG_MAINADDR` 1, `SUBADDR` 2, `MSFLAG` 3, `SMFLAG` 4; EE `0x1000F200`/`0x210`/`0x220`/`0x230` per PS2SDK `common/include/ee_regs.h`) and the three kernel software registers (`SIF_REG_ID_SYSTEM` | 0..2 = `0x80000000`..`0x80000002`, per `ee/include/sifdma.h`). The observed read at `0x0025C2D4` is `SIF_SYSREG_SUBADDR`; on a non-zero result the SDK treats the IOP-side SIF command system as initialised, and on zero it takes the second path PS2SDK's `sceSifInitCmd` also contains: poll `SIF_REG_SMFLAG` until `$v0 & 2`, then adopt the hardware `SUBADDR`. Every register therefore reads as zero — REPS2 has no IOP, so the honest model is "not initialised"; a non-zero sub-address would be an invented IOP-side address that the title stores at `0x761B60` and later loads into a SIF transfer structure argument at `0x0025C4E4`. With the service present the probe executes the full 5,000,000-instruction budget (`203,526` syscalls, `hle_name=SifGetReg`, `$a0 = 4`) and stops as `budget_exhausted` at `0x0025AAF8`, parked in the title's own `SMFLAG` wait loop (`0x0025C328`..`0x0025C334`).
+- **M4 frontier (recorded, not solved):** the title's next requirement is the IOP-side SIF command handshake — the IOP `SIFCMD` and the `SMFLAG` flags it publishes — not another standalone EE syscall. Correction (ADR 0098): the title polls `SMFLAG & 0x00020000` (`lui $s0, 0x2`), which is PS2SDK `SIF_STAT_CMDINIT`; an earlier note misread this as bit `0x2`, so the title's convention does match PS2SDK. Seeding that flag or a non-zero `SIF_SYSREG_SUBADDR` would fake an IOP and is explicitly not done. Follow-on units in evidence order: `sceSifSetReg` (0x79) sharing the register file, `sceSifSetDma` (0x77) transfer programming behind the DMAC owner, and an IOP-side SIFCMD model with a documented protocol.
+- Remaining unknowns: the true initial DMAC state on real hardware (the HLE boot state is a documented model, not measured), whether any IOP/SIF side effect is required before the title proceeds, and the semantics of the SIF DMA calls (`0x77`/`0x78`) the path now needs. Do not return fabricated zero, invent a pending bit, or claim the clear completed as a real device action.
+
+References:
+- PS2Tek EE register map: https://israpps.github.io/ps2tek/
+- PS2SDK SIF initialization: https://github.com/ps2dev/ps2sdk/blob/master/ee/kernel/src/sifcmd.c
+- PCSX2 legacy DMAC field-layout cross-check: https://sources.debian.org/src/pcsx2/1.6.0%2Bdfsg-2/pcsx2/Dmac.h
+
+## Resident IOP SIFCMD startup and SIF register ownership
+
+- **Observed (pinned PS2SDK `d41ea62946e53d9a0c8788bb9eb8c8faf488b559`, `iop/system/sifcmd/src/sifcmd.c`):** the IOP `sifcmd` module's `_start` calls `sceSifInit()` then `sceSifInitCmd()`. `sceSifInitCmd` runs `sceSifSetSMFlag(SIF_STAT_CMDINIT)` and then blocks on event flag `0x100`. `_start` ends with `sceSifSetSubAddr((u32)g_sif_cmd_data_table.m_pckt_buffer)`, and registers handlers for `SIF_CMD_CHANGE_SADDR`, `SIF_CMD_SET_SREG` and `SIF_CMD_INIT_CMD`. The `INIT_CMD` handler `sif_sys_cmd_handler_init_from_ee` returns immediately when `pkt->m_header.opt != 0`; otherwise it runs `sceSifSetMSFlag(SIF_STAT_CMDINIT)` and stores `pkt->m_newaddr` in `m_sif_send_eebuf`.
+- **Observed (same pin, `ee/kernel/src/sifcmd.c`):** the EE `sceSifInitCmd` reads `SIF_SYSREG_SUBADDR`; a non-zero value sends `SIF_CMD_CHANGE_SADDR` with the EE `pktbuf`, while a zero value polls `SIF_REG_SMFLAG & SIF_STAT_CMDINIT`, reads `SIF_REG_SUBADDR`, writes `SIF_SYSREG_SUBADDR` and `SIF_SYSREG_MAINADDR = (u32)&_sif_cmd_data`, and sends `SIF_CMD_INIT_CMD` with `opt = 0`.
+- **Derived (register ownership):** `SMFLAG` is written by the IOP, `MSFLAG` by the EE, `SADDR` by the IOP (`sceSifSetSubAddr`), and the `SIF_SYSREG_*` software registers by the EE kernel. Modelling the whole register file as EE-writable state is therefore wrong in ownership, even where the values coincide.
+- **Observed (target disassembly):** `0x0025C2D4` calls `sceSifGetReg(0x80000000)`; `0x0025C2DC` branches on zero to `0x0025C324`; `0x0025C328`..`0x0025C334` poll `sceSifGetReg(4) & 0x00020000`; `0x0025C33C` reads hardware register 2. The block is the title's statically linked copy of the EE `sceSifInitCmd` above.
+- **Observed (probe, after this change):** with the modeled resident IOP `SIFCMD` (ADR 0099) the probe runs `4,999,998` guest instructions and stops `budget_exhausted` at `0x0025C108`, `syscalls=65`, `hle_name=SifSetDma`, `sif_iop=resident`, `sif_smflag=0x00020000`, `sif_msflag=0x00020000`, `sif_cmd_pkts=2`, `sif_cmd_cid=0x80000002`, `sif_cmd_init=1`. Before the change the same probe parked at `0x0025AAF8` with `203,526` `sceSifGetReg` calls.
+- **New first boundary:** `0x0025C928` calls `0x0025C108` (which indexes a global table at `0x00761C80`) and loops while the entry is zero — the SDK's SIF RPC wait. Completing it requires the IOP RPC responder plus SIF1 interrupt dispatch and EE-side SIF DMA completion delivery.
+- **Inferred:** on hardware a resident IOP therefore makes the retail `SIF_SYSREG_SUBADDR` non-zero so the `SMFLAG` poll is not taken; REPS2 reaches the poll only because its kernel HLE had not modelled the resident module.
+- **Unknown:** the IOP command-packet buffer address and IOP RAM layout; whether the retail `IOPRP270.IMG` build matches the pinned PS2SDK; the IOP event-flag mechanism; SIF1 dispatch and DMAC completion interrupts. `SADDR` is deliberately left unmodelled (reads zero) because REPS2 cannot back an IOP buffer address; that value is inert only because the SIF DMA model never dereferences `dest`.
+- **Do not:** seed `SMFLAG` outside this device transaction, invent an IOP address, or fabricate a DMA/RPC completion.
 
 ## EE left/right partial load/store cross-checks
 
@@ -259,6 +325,16 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 - The runtime helper's branch-delay EPC/BD rule, nested Level-1 behavior, BEV vector selection, EXL/ERL return selection, generated ERET continuation and invalid-return cases are covered by native C++ tests on Windows/MSVC and Linux/GCC. CFG lowering admits SYSCALL/BREAK in delay slots as typed guest exceptions; ERET and other control transfers remain unsupported there. Generated data-memory operations can independently deliver AdEL/AdES from an admitted branch delay slot.
 - Build manifest schema v2 records `guest_exception_count` separately from `unsupported_stop_count`; the latter now counts only genuinely unsupported terminators. All generated manifests continue to record `playable: false`.
 
+## EE kernel syscall interface and SetupThread
+
+- The EE kernel syscall entry is a `syscall` instruction whose service number is carried in a register, not in the instruction's 20-bit code field. ps2sdk's wrappers expand to `li $3, __NR_<call>` followed by a bare `syscall` (https://github.com/ps2dev/ps2sdk/blob/master/ee/kernel/src/kernel.S), and its crt0 issues `addiu $3, $0, 60; syscall` before any other kernel call (https://github.com/ps2dev/ps2sdk/blob/master/ee/startup/src/crt0.c). The instruction still traps architecturally with Cause.ExcCode 8 into V_COMMON (https://psi-rockin.github.io/ps2tek/).
+- Arguments use `$a0..$a3` (GPR[4..7]) and the result returns in `$v0` (GPR[2]). ps2sdk callers treat a negative result as failure. A specific negative error-code taxonomy is not reproducible from public sources, so REPS2 treats only "negative" as failure and never synthesizes an error code.
+- The ps2sdk "i" variants (for example `__NR_iChangeThreadPriority`) pass the negated number (https://github.com/ps2dev/ps2sdk/blob/master/ee/kernel/include/syscallnr.h); dispatch therefore uses the magnitude.
+- Service numbers on the observed boot path: 1 ResetEE, 2 SetGsCrt, 4 Exit, 6 LoadExecPS2, 0x10 AddIntcHandler, 0x20 CreateThread, 0x22 StartThread, 0x29 ChangeThreadPriority, 0x3C SetupThread, 0x3D SetupHeap, 0x40 CreateSema, 0x64 FlushCache, 0x74 SetSyscall, 0x7E MachineType, 0x7F GetMemorySize (ps2sdk `ee/kernel/include/kernel.h`, `syscallnr.h`; PCSX2's BIOS service-name table agrees on 0x3C, 0x3D and 0x40).
+- SetupThread (0x3C) is declared `void *SetupThread(void *gp, void *stack, s32 stack_size, void *args, void *root_func)` (ps2sdk `kernel.h`). crt0 moves the result into `$sp` immediately afterwards, so the returned value is the initial stack pointer. Emulator implementations (Play!'s `PS2OS`) compute `stackAddr = (a1 == 0xFFFFFFFF) ? ramSize - 0x1000 : a1 + a2`, return `stackAddr - 0x2A0`, clear `$v1`, and give the first call thread id 1.
+- Unverified and treated as emulator observations rather than documented kernel behavior: the placement of the fifth argument (`root_func` is not passed in a register by the o32 convention), the `0x2A0` reserve, the `$v1 = 0` return, the argv-block rewrite and the thread-id assignment. No public source implements the whole EE kernel: PCSX2 does not emulate it and instead vectors into the BIOS (`R5900OpcodeImpl` SYSCALL path), so the observable contract comes from ps2sdk prototypes plus emulators that reimplement individual services.
+- REPS2 therefore implements only the guest-visible part it can defend (documented prototype, stack computation with the sentinel, `$v0`/`$v1` results) and records the rest as unobserved. A service number without a handler stops as `Status::unhandled_syscall` instead of returning fabricated success; see ADR 0062.
+
 ## EE data address errors (AdEL / AdES)
 
 - Sony's EE Core User's Manual v6.0, section 4.2.9, defines AdEL as Cause.ExcCode 4 for a misaligned instruction fetch or load and AdES as code 5 for a misaligned store. V_COMMON is `0x80000180` when BEV=0 and `0xBFC00380` when BEV=1; BadVAddr receives the virtual address that directly caused the exception (https://docs.alexrp.com/mips/ee.pdf).
@@ -268,7 +344,7 @@ Extracted ELF entry images from eight titles, profiled with `profile-elf` over e
 
 ## Decoder coverage profiling
 
-- `profile-elf` treats every complete, naturally aligned 32-bit word in file-backed executable PT_LOAD ranges as a census unit. It does not claim those words are reachable code; embedded data, padding, and never-executed functions are included.
+- `profile-elf` treats every complete, naturally aligned 32-bit word wholly contained in each file-backed executable PT_LOAD range as a census unit. It does not claim those words are reachable code; embedded data, padding inside a segment, and never-executed functions are included. Incomplete trailing bytes and zero-filled memory tails are not words. A regression fixture for a valid 85-byte ELF with one executable file-backed byte at EOF (offset 84, virtual address `0x00100000`, memory size 4, flags `PF_R|PF_X`) reports one executable byte and zero scanned, supported, trap, or unsupported words without failure; unrelated bytes following a segment are likewise excluded. Boundary tests cover file sizes 0 through 15, all four guest-address residues, four file-offset alignments, and both EOF-exact and padded input buffers (256 combinations per mode).
 - Supported, `SYSCALL`/`BREAK` trap, and unsupported words are counted separately. Unsupported words are grouped by the broad encoding family derived from primary opcode/MMI selector fields and by exact 32-bit encoding. This makes the next instruction-family investment measurable without overstating semantic coverage.
 - The entry scan is a separate bounded linear diagnostic. It stops at the first unsupported word or trap and reports the guest PC and raw word. It does not follow branches, and a clean scan does not establish CFG reachability or playability.
 
@@ -340,7 +416,1009 @@ References:
 - REL/RELA entries targeting SHF_ALLOC sections are rejected until their specific R_MIPS relocation semantics are implemented and differential-tested. Debug/non-allocated relocations do not change the executable image.
 - ET_DYN, relocatable objects, expansion RAM, custom TOOL mappings, COP0/TLB mappings, and segments outside default main RAM are not silently accepted.
 
+## EE syscall continuation discovery (M4 evidence)
+
+- ADR 0062 added opt-in HLE dispatch for the EE `SYSCALL` boundary. The first real-title run answered Downhill Domination's `SetupThread` service (0x3C), but stopped at the following PC because the CFG treated a trap as having no successor.
+- ADR 0063 adds a distinct `syscall_continuation` edge to `pc + 4`. This is not an architectural successor: an unserviced trap vectors through COP0. It is a translation candidate because a serviced HLE call resumes there.
+- Continuations are queued leniently. Retail images can place data after a trap; an undecodable continuation is reported as a skipped heuristic block rather than a hard analysis failure.
+- Reproduced on Downhill Domination USA (`SCUS_971.77`, local ISO only): before the change, `SetupThread` was handled and execution stopped at `pc=0x0010A17C`; after the change, execution resumed and reached the next service, `SetupHeap` (0x3D), at `pc=0x0010A194`. The observed bounded run was `executed=2756980`, `syscalls=2`, `hle_handled=1`, `hle_number=0x0000003D`, `status=unhandled_syscall`.
+- This proves continuation translation and service-boundary progress only. It does not prove heap behavior, BIOS completion, a visible boot stage, or playability.
+
+## EE SetupHeap research (next M4 runtime boundary)
+
+Public sources fetched for the next service:
+
+- ps2sdk `kernel.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/kernel.h
+- ps2sdk `kernel.S`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/src/kernel.S
+- ps2sdk `syscallnr.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/syscallnr.h
+- ps2sdk startup `crt0.c`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/startup/src/crt0.c
+- ps2sdk startup `linkfile`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/startup/src/linkfile
+- ps2tek: https://psi-rockin.github.io/ps2tek/
+
+Documented facts:
+
+- ps2sdk declares `SetupHeap(void *heap_start, s32 heap_size)` and assigns service 0x3D. The wrapper places 0x3D in `$v1`, preserves `$a0/$a1`, and leaves the kernel result in `$v0`; the C declaration is `void`.
+- ps2tek describes 0x3D as initializing the current thread's heap. For a non-sentinel address it documents the end as `heap + heap_size`; for its documented sentinel form it says the heap ends at the current thread's stack pointer and returns that end. The heap is per-thread; child threads inherit their parent's heap.
+- ps2sdk startup calls `SetupThread` first, then calls `SetupHeap(&_end, -1)`; its own linker file sets `_heap_size = -1`, and `crt0.c` discards the result. No EE `CreateHeap` follows; `CreateHeap` references found in ps2sdk are IOP-side.
+- ps2sdk's `_sbrk` uses `EndOfHeap()` as the upper bound for newlib allocations. ps2tek's 0x3E wording calls the result the heap base, contradicting its 0x3D wording and the `_sbrk` usage; the end interpretation is better supported.
+
+Unresolved discrepancy:
+
+- Downhill Domination calls `SetupHeap(0x008A0400, 0xFFFFFFFF)`, and ps2sdk's startup passes `-1` in the **size** parameter. ps2tek places its documented sentinel on the **heap address** parameter. The sources therefore do not prove that both slots are accepted equivalently. Treating `heap_size == -1` as "heap end equals the current thread's stack pointer" is an empirically required compatibility extension for this M4 path, not a settled hardware fact.
+
+Safe implementation boundary:
+
+- Explicit non-negative `(heap_start, heap_size)` can record a per-thread range and return its end in `$v0`.
+- The observed `heap_size == -1` form can be implemented as a named, traceable profile extension using the stack pointer produced by `SetupThread`.
+- Downhill Domination then reached syscall `0x40` (`CreateSema`) at `pc=0x0025A6E4` after the `SetupHeap` continuation. The captured boundary was `a0=0x0093C7E0`, `a1=0xFFFFFFFF`, `a2=0`, `a3=0`, `sp=0x0093C7E0`, and `v0_before=1`; the 24 bytes at `a0` in the initial RAM image are all zero, which says nothing about the call because a stack-allocated parameter block is only filled at run time. That boundary is now resolved by ADR 0066; no semaphore id or success result was fabricated to get past it.
+- Do not invent error codes, an EE kernel allocator, overlap policy, alignment/slack rules, repeated-call semantics, or `CreateHeap`. Unknown or unsupported behavior must remain an explicit diagnostic.
+
+## EE CreateSema research (M4 runtime boundary)
+
+Public sources fetched:
+
+- ps2sdk `kernel.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/kernel.h
+- ps2sdk `syscallnr.h`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/include/syscallnr.h
+- ps2sdk `kernel.S`: https://raw.githubusercontent.com/ps2dev/ps2sdk/master/ee/kernel/src/kernel.S
+- ps2tek: https://psi-rockin.github.io/ps2tek/
+
+Documented facts:
+
+- `ee_sema_t` is `int count, max_count, init_count, wait_threads; u32 attr, option;` — six 32-bit fields, 24 bytes. ps2sdk declares `s32 CreateSema(ee_sema_t *sema)` and assigns service 0x40; the wrapper is the ordinary `li $3, __NR_CreateSema; syscall` shape.
+- ps2sdk documents `MAX_SEMAPHORES 256`. ps2tek describes the internal object as `{ free, count, max_count, attr, option, wait_threads, wait_next, wait_prev }`, i.e. the kernel keeps the count, the maximum, both guest attribute words and a waiter list.
+- The public description says the call "returns the semaphore's id if successful and -1 if not", and that only `init_count` and `max_count` need to be specified; `attr` and `option` may be given but the same source marks them as not interpreted by the kernel. `count` and `wait_threads` are the fields `ReferSemaStatus` (0x47) reports back.
+- `WaitSema` blocks when `count` is zero, `SignalSema` increments `count` or releases a waiter, and both force a reschedule; `PollSema` decrements and fails when the count is zero.
+
+Unresolved:
+
+- No public source states the kernel's id allocation order, whether it rewrites the guest parameter block, or which count pairs it rejects. The implementation therefore treats "lowest free slot" as a host choice and refuses only combinations that cannot be represented.
+- EE kernel semaphores and IOP THSEMAP services share an API shape but their equivalence is not demonstrated, so no IOP behavior was reused.
+
+Observed on the real title:
+
+- Downhill Domination calls `CreateSema` twice (`sema_param=0x0093C800` on the second call, `init=1`, `max=1`, `attr=0`, `option=0`). The service returned ids 0 and 1 and the guest continued, which confirms the 24-byte layout and the returned-id contract: the read succeeded through the normal EE address-resolution path, and a wrong layout would have produced `init_exceeds_max`/`negative_counts` refusals instead of clean ids.
+- The next boundary is syscall `0x74` (`SetSyscall`) at `pc=0x0025F094` with `a0=0x83`, `a1=0x0025EF38`, `a2=0`, `a3=0x0029E580`. ps2sdk declares `SetSyscall(s32 syscall_num, void *handler)` and its privileged dispatch indexes a 256-entry vector with the registered handler address. ADR 0067 implements registration only: the slot and handler are validated and stored, but arbitrary guest handler invocation is not guessed.
+- After registration, Downhill Domination reaches syscall `0x83` (`FindAddress`) at `pc=0x0025EF7C`, with `a0=0x80000000`, `a1=0x80080000`, `a2=0x0025EF38`, `a3=0x0029E580`. The bounded run reports `executed=2757047`, `syscalls=7`, `hle_handled=6`. This proves registration-boundary progress only; handler execution, BIOS completion, visible boot and playability remain unproven.
+- `FindAddress` is not safe to stub. ps2sdk names service `0x83` but exposes no public declaration or argument contract; `GetEntryAddress` (0x5B) is a separate service. The observed kernel-segment arguments do not distinguish address-range search, vector lookup or another kernel registry. ADR 0068 defers it pending return-register, memory-side-effect and caller-control-flow evidence.
+
+### Downhill Domination `FindAddress` wrapper and call sites
+
+`0x0025EF78` is a five-instruction wrapper for service `0x83` that passes
+`$a0..$a3` through unchanged:
+
+```
+0025ef78: 24030083   addiu $v1, $zero, 0x83
+0025ef7c: 0000000c   syscall
+0025ef80: 03e00008   jr    $ra
+0025ef84: 00000000   nop
+```
+
+Four call sites exist in the same routine. `$a1` is always
+`lui 0x8008` → `0x80080000` and `$a3` is `0x0029E580`:
+
+| site | `$a0` | `$a2` |
+|---|---|---|
+| `0x0025EFE4` | `lui $a0,0x8000` → `0x80000000` | `$s5 - 0x10C8` → `0x0025EF38` |
+| `0x0025EFF8` | `0x80000000` | `$s4 - 0x1100` → `0x0025EF00` |
+| `0x0025F024` | `$s3 + 4` | `0x0025EF38` |
+| `0x0025F040` | `$s2 + 4` | `0x0025EF00` |
+
+The bounded probe's syscall-sequence ring (ADR 0071) settles where `4` comes from.
+Observed boundaries, oldest first, with `path` = host service (`H`) or registered
+guest handler (`G`):
+
+```
+0x0010A178  0x3C H  SetupThread
+0x0010A194  0x3D H  SetupHeap
+0x0025A6E4  0x64 H  FlushCache
+0x0025A6E4  0x64 H  FlushCache
+0x0025F094  0x74 H  a0=0x00000083 a1=0x0025EF38   SetSyscall
+0x0025F094  0x74 H  a0=0x0000005A a1=0x0025EF00   SetSyscall
+0x0025EF7C  0x83 G  a0=0x80000000 a1=0x80080000 a2=0x0025EF38
+0x0025EF7C  0x83 G  a0=0x80000000 a1=0x80080000 a2=0x0025EF00
+0x0025EF7C  0x83 G  a0=0x00000004 a1=0x80080000 a2=0x0025EF38
+```
+
+Two conclusions follow directly from the bytes and the trace:
+
+- `$a0` survives guest-handler entry and return unchanged: the first two
+  dispatches carry `0x80000000`, matching call sites `0x0025EFE4` and
+  `0x0025EFF8`. There is no register-restoration defect in the REPS2 path.
+- The third dispatch matches call site `0x0025F024`, whose `addiu $a0,$s3,4`
+  runs with `$s3 == 0`, so `4` is produced by guest code.
+
+`$a1 - $a0` is 512 KiB for the first two calls but almost the whole KUSEG window
+for the third, which is why only the third run exhausts the budget. On real
+hardware the third scan would reach unmapped KUSEG long before the KSEG0 end
+bound and fault, which suggests the path is not intended to be taken.
+
+### The selector at `0x0025F00C` and the kernel-table dependency
+
+The routine at `0x0025EF90` (prologue `addiu $sp,$sp,-0x80`) runs this sequence:
+
+1. reads the descriptor table at `0x00282218` and calls the `SetSyscall` wrapper
+   `0x0025F090` for `(0x83, 0x0025EF38)` and `(0x5A, 0x0025EF00)`, which are the
+   two `0x74` boundaries in the trace;
+2. calls the `0x83` wrapper `0x0025EF78` with `(0x80000000, 0x80080000,
+   0x0025EF38)` and keeps the result in `$s3`, then repeats with `0x0025EF00`
+   and keeps the result in `$s2`;
+3. computes `$s1 = $s3 - 0x20C` and `$s0 = $s2 - 0x168`, then loops: while
+   `$s1 != $s0`, the smaller one is advanced by another search starting at
+   `$sN + 4` for the same handler value, recomputing `$sN - 0x20C` or
+   `$sN - 0x168`;
+4. stores the final `$s1` to `0x00282210`.
+
+So both searches are meant to locate the *stored copy* of the registered handler
+addresses, and the fixed offsets recover object headers from those slots.
+
+Measured against the generated 32 MiB RAM image:
+
+- `0x0025EF38` occurs exactly once, at `0x0028221C`; `0x0025EF00` occurs exactly
+  once, at `0x00282224`. Both are the `.data` descriptor table.
+- Neither value occurs anywhere in the 512 KiB window `[0, 0x80000)` that the
+  search covers, and low RAM is zero-filled in the image.
+
+The searches therefore return `0`, `$s1`/`$s0` become `0xFFFFFDF4`/`0xFFFFFE98`,
+and the loop's first iteration starts at address `4` — the run that exhausts the
+budget.
+
+That is the root cause: the guest expects its registered handler addresses to be
+present in **low EE RAM**, i.e. it expects `SetSyscall` to copy them into a
+kernel-side table. ADR 0067 records the registration in host state and writes
+nothing to guest memory, so no such table exists. The table address and layout
+must come from evidence rather than a guess, because `$s3 - 0x20C` assumes the
+slot's position inside a specific kernel object.
+
+Unresolved:
+
+- The kernel table's address, capacity and entry layout. This needs evidence
+  from a public behavioural reference or from guest writes observed at the
+  `0x74` boundary; it must not be invented.
+- Whether the two initial lookups are expected to succeed at all. Every measured
+  path says they cannot with the current RAM image, so the not-found fallback is
+  what actually runs.
+
+The routine the guest handler at `0x0025EF38` enters is this word scan:
+
+```
+0025ef38: 8c820000   lw    $v0, 0($a0)
+0025ef3c: 1046000b   beq   $v0, $a2, found
+0025ef40: 0085102b   sltu  $v0, $a0, $a1
+0025ef44: 5040000a   beql  $v0, $zero, leave
+0025ef48: 0002200a   movz  $a0, $zero, $v0
+0025ef4c: 24840004   addiu $a0, $a0, 4
+0025ef50: 8c820000   lw    $v0, 0($a0)      <- budget-exhausted PC window
+0025ef54: 10460005   beq   $v0, $a2, found
+0025ef58: 0085102b   sltu  $v0, $a0, $a1
+0025ef5c: 5440fffc   bnel  $v0, $zero, 0x0025EF50
+0025ef60: 24840004   addiu $a0, $a0, 4
+```
+
+It returns the address of the first word equal to `$a2`, or `0` when the range
+ends. Because `$a0` starts at `4` in KUSEG while `$a1` is `0x80080000` in KSEG0,
+the loop walks the whole KUSEG window instead of the 8 MiB of physical RAM the
+`0x80000000` form addresses. REPS2 currently services those reads without a
+fault, so the probe exhausts its budget rather than stopping.
+
+Unresolved:
+
+- Whether the two `$sN + 4` sites are legitimate (a module list whose base is
+  zero) or reflect a guest register that should be non-zero. Distinguishing the
+  two needs a syscall-sequence trace that records every boundary, not only the
+  last one.
+- Whether the real kernel faults on the unmapped KUSEG reads this range implies.
+
+### EE kernel syscall table (resolved, ADR 0072)
+
+The unresolved questions above are answered by the guest routine itself and by
+public evidence:
+
+- The guest offsets are exactly service-number scaled: `-0x20C = -0x83*4` and
+  `-0x168 = -0x5A*4`. Subtracting the slot index from a found handler address
+  yields the base of a flat array of 32-bit handler pointers.
+- ps2sdk `ee/kernel/src/libosd_full.c` documents the same layout: "The address
+  is relative to the start of the syscall table, and is in units of 32-bit
+  pointers (4 bytes)", and its table comment names `0x80011F80` as "the start of
+  the syscall table" (`0x80011F80 + (-15358*4) = 0x80002F88`).
+- A ps2dev forum probe installs marker handlers for services `0xFE`/`0xFF`, scans
+  `0x80000000..0x80080000` in 4-byte steps, and computes the base as
+  `address - syscall_number * 4`. The same thread reports that the base varies
+  between BIOS versions, which is consistent with the guest recovering it at
+  runtime instead of hardcoding it.
+
+Consequence for HLE: `SetSyscall` must write the registered handler pointer into
+guest memory, not only into host state. REPS2 fixes the documented base
+`0x80011F80` (1 KiB for 256 entries), writes `handler` at `base + slot*4` after
+the existing validation, and refuses with `table_unwritable` if the slot cannot
+be written. Entries REPS2 does not service stay zero; no kernel handler address
+is fabricated.
+
+Open issues:
+
+- The HLE base is the documented ps2sdk value; a real BIOS may use another
+  address. Because the title recovers the base from its own handlers, the
+  recovery path is unaffected, but code that hardcodes a different BIOS base is
+  not modelled.
+- Direct guest writes to the table are visible in main RAM but are not yet
+  consulted by HLE dispatch; a title that patches an unregistered slot directly
+  needs a separate observed contract before REPS2 honors it.
+
+### Downhill Domination `InitAlarm` boundary (ADR 0073)
+
+Once the guest-visible syscall table exists, the `0x0025EF90` init completes:
+both FindAddress searches find the registered handlers at
+`0x80011F80 + 0x83*4` and `+ 0x5A*4`, compute the same base, and store it at
+`0x00282210`. The next stop moved from the former scan loop to
+`pc=0x0025F34C`, which is `lw $v1, 0($v0)` with `$v0 = 0x10001810` — the Timer 3
+mode register.
+
+The routine at `0x0025F330` is ps2sdk's `InitAlarm` (`ee/kernel/src/alarm.c`):
+
+- it applies the patch only when `(*T3_MODE) & 0x100 == 0` (compare interrupt
+  disabled);
+- it registers `kCopy` as service 0x5A, copies a 0x740-byte blob to
+  `0x80076000` and the 0x28-byte `eenull` to `0x00082000`, flushes the cache, and
+  registers 0x5B;
+- it then calls `setup(slot, GetEntryAddress(slot))` for 0xFC, 0xFE, 0xFD, 0xFF,
+  0x12C (`Intc12Handler`) and 0x08.
+
+The descriptor table at `0x00283160` matches that source exactly:
+`(0x5A, 0x0025F2E8)`, `(0x5B, 0x80076000)`, then the six slots above. Slot
+0x12C is beyond the 256 entries assumed in ADR 0067, which is why the host
+bound was raised to 512.
+
+`GetEntryAddress`'s arithmetic is pinned by ps2sdk `libosd.c`: its special slot
+`0xFFFFC402` documents `0x80011F80 + (-15358*4) = 0x80002F88`, so the call
+returns the slot address `base + number*4`, not the handler stored there.
+
+Modelling only the documented Timer 3 mode word (reset 0, writable mode bits
+retained, no counting or interrupts) and the 0x5B slot-address service lets the
+patch path proceed. The blob itself is copied at run time and is data in the
+ELF, so it was admitted with the frontend's explicit `--relocated-code`
+`0x80076000:0x002829F8:0x740` input (ADR 0074).
+
+With the blob translated, the probe executes the full patch:
+
+- the translated `0x5B` handler searches the six-entry `(number, handler)`
+  table embedded at `0x80076710` and returns 0xFC→`0x80076440`,
+  0xFE→`0x80076440`, 0xFD→`0x800762A0`, 0xFF→`0x800762A0`,
+  0x12C→`0x80076488`, 0x08→`0x800766C0`;
+- each result is written back through `SetSyscall` at the matching slot;
+- after another `FlushCache` and a third `CreateSema`, execution reaches
+  `CreateThread` (0x20) at `pc=0x0025A4E4` with `$a0=0x0093C7B0`,
+  `$a1=0x002A40F0`, `$a2=0x00000400`.
+
+`CreateThread` was the next stop; it is now serviced and the probe stops one
+service later. The earlier scan-loop and Timer 3 stops are gone. This is real
+guest-path progress, not a visible boot stage.
+
+### EE `CreateThread` boundary and dormant records (ADR 0075)
+
+Facts:
+
+- ps2sdk `kernel.h` declares `s32 CreateThread(ee_thread_t *thread)`, and
+  `ee_thread_t` is nine 32-bit words: `status`, `func`, `stack`, `stack_size`,
+  `gp_reg`, `initial_priority`, `current_priority`, `attr`, `option`. The same
+  header documents `MAX_THREADS 256` and names thread 0 as the idle thread.
+- The retail caller at `0x0025B1A8` (the game's `InitThread`) builds the block
+  on its own stack, leaves `status` uninitialized, calls `CreateThread`, stores
+  the returned id at `0x00282150`, and then calls `StartThread` with an argv
+  block at `0x00761208`.
+- The observed call is `pc=0x0025A4E4`, service `0x20`, with
+  `$a0=0x0093C7B0` (the block, equal to `$sp`), `$a1=0x002A40F0`,
+  `$a2=0x00000400`, `$a3=0x0029E580`. The block holds `func=0x0025B0D0`,
+  `stack=0x00760E00`, `stack_size=0x400`, `gp=0x002A40F0`,
+  `initial_priority=0`. All of those resolve inside EE main RAM.
+- ps2sdk `kernel.S` wraps the service as an ordinary `syscall`, and callers test
+  the `s32` result for `< 0`; no specific negative code is documented.
+
+Decision and limits:
+
+- REPS2 validates the block and returns an id from a bounded host record table
+  (ids start at 1). Any refusal returns `-1`, allocates nothing, and records an
+  explicit reason.
+- No guest memory is written. The parameter block is input only; the guest's
+  uninitialized `status` word is never read or rewritten.
+- No thread status, stack image, argv block, ready-queue entry or scheduler
+  state is created. `StartThread`, `ExitThread`, `ReferThreadStatus`, priority
+  changes and deletion remain unimplemented; their guest-visible contracts are
+  not inferred.
+
+Observed result after servicing the call:
+
+- The probe reports `syscalls=29`, `hle_handled=18`, `status=14`
+  (`unhandled_syscall`) at `pc=0x0025A504`, `executed=2,946,363`.
+- Sequence records:
+  `0x0025A4E4:32:H:0x0093C7B0:0x002A40F0:0x00000400:0x0029E580:0x0025B0D0`
+  (handled `CreateThread`), then
+  `0x0025A504:34:U:0x00000002:0x00761208:0x00000400:0x0029E580:0x00760000`
+  (unhandled `StartThread`, `$a0=2` = the returned id, `$a1` = argv).
+
+Public behavioural references (retrieved 2026-11-06):
+
+- ps2sdk `ee/kernel/include/kernel.h` fixes the struct offsets (`status` 0x00,
+  `func` 0x04, `stack` 0x08, `stack_size` 0x0C, `gp_reg` 0x10,
+  `initial_priority` 0x14, `current_priority` 0x18, `attr` 0x1C,
+  `option` 0x20, documented "Do not use - officially documented to not work"),
+  `MAX_THREADS 256` with "Thread 0 is always the idle thread", and the status
+  encoding `THS_RUN 0x01`, `THS_READY 0x02`, `THS_WAIT 0x04`,
+  `THS_SUSPEND 0x08`, `THS_WAITSUSPEND 0x0C`, `THS_DORMANT 0x10`.
+- ps2sdk `ee/kernel/src/thread.c` leaves `ee_thread_t.status` unset, checks
+  `(topId = CreateThread(&thread)) < 0`, calls
+  `StartThread(topId, &topArg)` without testing the result, then
+  `ChangeThreadPriority(GetThreadId(), 1)`; its guard uses `priority < 128`.
+  The second call proves the running thread and the newly created thread must
+  have distinct ids.
+- ps2tek's kernel documentation states that boot "creates a thread with
+  priority 0 (main thread)" before guest code runs.
+- Open PS2 Loader patch notes record titles that hardcode the main thread id for
+  `WakeupThread`, so exact id values can matter to titles outside this probe;
+  REPS2 therefore keeps ids explicit and never derives them from an opaque
+  pointer.
+
+Open questions for the next increment:
+
+- `StartThread` semantics: ps2sdk declares `s32 StartThread(s32 thid, void
+  *args)` and documents a DORMANT→READY transition with ready-queue insertion;
+  whether the call may switch immediately to a higher-priority thread is a
+  scheduler property, not a return-value property.
+- How argv is exposed to the new thread (`$a0`/`$sp` layout) and when
+  `root_func` from `SetupThread` is consumed.
+- `attr`/`option` bits, stack guard behaviour, and the exact negative failure
+  codes beyond the documented "negative means failure".
+
+### EE `StartThread`, `GetThreadId` and `ChangeThreadPriority` (ADR 0076)
+
+Facts from the same caller (`0x0025B1A8`) and the syscall wrappers:
+
+- `0x0025A4E0` is `li $v1,0x20; syscall` (CreateThread). `0x0025A500` is
+  `li $v1,0x22; syscall` (StartThread). `0x0025A5D0` is `li $v1,0x2F; syscall`
+  (GetThreadId). `0x0025A570` is `li $v1,0x29; syscall`
+  (ChangeThreadPriority). Each wrapper returns immediately with `jr $ra`.
+- After `CreateThread($sp)` the code tests the result with `bgez`; on success it
+  stores the id at `0x00282150`, zeroes the two-word argv block at
+  `0x00761208`, and calls `StartThread(id, 0x00761208)`.
+- It then calls `GetThreadId()`, moves `$v0` into `$a0`, and calls
+  `ChangeThreadPriority(that_id, 1)`.
+- At creation time the guest passes `initial_priority=0`; ps2tek records that
+  boot creates the main thread with priority 0, so the started thread and the
+  running thread begin at equal priority. Equal priorities are queued FIFO, so
+  no immediate switch is implied by the observed sequence.
+
+Public references: see the ps2sdk and ps2tek entries in the CreateThread section.
+ps2sdk defines `THS_DORMANT 0x10` and `THS_READY 0x02`, and its example calls
+`ChangeThreadPriority(GetThreadId(), 1)` right after starting a thread, which
+requires the running thread and the created thread to have different ids.
+
+Decision and limits:
+
+- `StartThread` accepts only an existing DORMANT record, stores `args` opaquely,
+  sets READY and inserts by ascending current priority. Refusals return `-1`.
+- `GetThreadId` returns the boot thread id (1) because REPS2 has one context.
+- `ChangeThreadPriority` accepts 0..127 and re-orders a READY thread.
+- No service switches context. The boot thread continues; a later blocking
+  service is where a dispatcher becomes observable, and it stays unimplemented
+  until that service's contract is established.
+
+Observed result after servicing the chain (2026-11-06):
+
+- `status=14`, `pc=0x0025A794`, `executed=2,946,399`, `syscalls=32`,
+  `hle_handled=21`.
+- Records: `StartThread`
+  `0x0025A504:34:H:0x00000002:0x00761208:0x00000400:0x0029E580:0x00760000`,
+  `GetThreadId`
+  `0x0025A5D4:47:H:0x00000002:0x00761208:0x00000400:0x0029E580:0x00000000`,
+  `ChangeThreadPriority`
+  `0x0025A574:41:H:0x00000001:0x00000001:0x00000400:0x0029E580:0x00000001`,
+  then unhandled `0x0025A794:75:U:0x0093C7C0:0x00000001:0x00000400:0x0029E580:0x00000002`.
+- The `ChangeThreadPriority` arguments confirm `GetThreadId` returned 1 (the
+  boot thread) and the guest lowered that thread to priority 1. The created
+  thread record (id 2) stays at priority 0, so it would outrank the boot thread
+  if a dispatcher existed. The guest then performs the OSD configuration probe.
+- Next boundary: `GetOsdConfigParam` (0x4B) at `pc=0x0025A794` with
+  `$a0=0x0093C7C0`. The caller at `0x0025F148` reads four bytes, clears bits
+  13..15, sets bit 13, writes, reads back, restores, and reports whether bits
+  13..14 are zero. `SetOsdConfigParam` (0x4A) is part of the same probe.
+
+### EE OSD configuration services (ADR 0077)
+
+Facts:
+
+- ps2sdk declares `void GetOsdConfigParam(void *addr)` and
+  `void SetOsdConfigParam(void *addr)`; both return void. The game's wrappers at
+  `0x0025A790` and `0x0025A780` carry service numbers 0x4B and 0x4A.
+- The observed call passes a 4-byte stack buffer at `$a0=0x0093C7C0`. The
+  caller at `0x0025F148` reads it, clears bits 13..15 (`& 0xFFFF1FFF`), sets bit
+  13 (`| 0x2000`), writes it with 0x4A, reads it back with 0x4B, restores the
+  original with 0x4A again, and returns `(((value >> 13) & 7) < 1)`.
+- The kernel's backing store is NVRAM/EEPROM, which REPS2 does not have and
+  must not claim.
+
+Decision and limits:
+
+- One 32-bit host-session word, initialized to 0, is served by 0x4B and stored
+  verbatim by 0x4A through the validated EE address path.
+- Refusals (unmapped, unsupported physical window, misalignment) record a
+  reason and change nothing. `$v0 = -1` is diagnostic only because the documented
+  return type is void.
+- Persistence, board-specific defaults and bit policy are not implemented or
+  invented. Services depending on language/aspect bits see the zeroed default.
+
+Observed result (2026-11-06):
+
+- `status=4` (`unresolved_control_flow`), `pc=0x80075000`,
+  `executed=2,948,141`, `syscalls=42`, `hle_handled=30`.
+- Both directions of the OSD probe are handled twice, then boot installs its
+  second copy path: `SetSyscall(0x5A, 0x0025F570)`, a translated guest copy of
+  0x330 bytes from `0x002831A0` to `0x80075000`, two `FlushCache` calls,
+  `SetSyscall(0x5B, 0x80075000)` and `SetSyscall(0x54, 0x0025F940)`.
+- Service 0x5B then dispatches into the copied blob. The region is not declared
+  for translation, so the probe reports unresolved control flow at
+  `0x80075000`. The next dependency is `--relocated-code` coverage, not another
+  service.
+
+## IOP-side SIFCMD command model (ADR 0098)
+
+The SIF register model (ADR 0097) left the title parked in its own `sceSifInitCmd`
+wait loop for the IOP `SMFLAG` command-init flag. ADR 0098 adds the bounded,
+evidence-led part of the IOP-side frontier and the EE-side services that sequence
+calls.
+
+- **Observed (PS2SDK `d41ea62946e53d9a0c8788bb9eb8c8faf488b559`):** the 16-byte
+  `SifCmdHeader_t` (`psize`, `dsize`, `dest`, `cid`, `opt`); system ids
+  `CHANGE_SADDR` (`0x80000000|0`), `SET_SREG` (`|1`), `INIT_CMD` (`|2`). EE
+  `_SifSendCmd` copies the packet from the EE source into the IOP receive buffer.
+  IOP `_change_addr` sets the IOP send-to-EE destination; `_set_sreg` writes
+  `m_sregs_ptr[index]`; the `INIT_CMD` handler sets `MSFLAG` `SIF_STAT_CMDINIT`
+  when `opt == 0` (event `0x100`) and returns after event `0x800` when `opt != 0`.
+  IOP `sceSifInitCmd` sets `SMFLAG` `SIF_STAT_CMDINIT` before waiting for event
+  `0x100`.
+- **Observed (target disassembly):** `0x0025C324` `lui $s0, 0x2`; `and $v0, $v0,
+  $s0` polls `SMFLAG & 0x00020000`. This corrects the ADR 0097/earlier-note claim
+  that the title polls bit `0x2`.
+- **Derived:** because the target takes the zero-`SIF_SYSREG_SUBADDR` branch, it
+  waits for `SMFLAG` CMDINIT (set by the IOP) before sending `INIT_CMD`.
+- **Implemented:** `sceSifSetReg` (`0x79`) and `sceSifSetDma` (`0x77`) plus a
+  bounded command model (`CHANGE_SADDR` → `ee_pktbuf`, `SET_SREG` → a 32-entry
+  software-register bank with a bounded index, `INIT_CMD` `opt == 0` →
+  `ee_pktbuf`, `initialized`, `MSFLAG` CMDINIT). The command packet is parsed from
+  the EE source address of the `SIF_DMA_ERT` transfer entry.
+- **Unknown / not fabricated:** the IOP-ready `SMFLAG` bit is not seeded (no IOP
+  exists), so the title still parks and no boot stage is established. The IOP
+  event flags, IOP memory, the SIF1 interrupt dispatch, and any DMAC interrupt
+  remain unmodelled.
+
+## R5900 branch differential and mutation evidence
+
+- **Observed (synthetic regression):** the branch differential test compares the Rust decoder and CFG against an independently written Python oracle (`tools/branch_oracle.py`) over generated vectors covering BEQ/BNE, BLEZ/BGTZ, BLTZ/BGEZ, the branch-likely family, B*AL link branches, J/JAL, JR/JALR, BC1 branches and GPR[0] suppression. The suite compared 2377 vectors with 0 failures and recorded 788 vectors skipped because their branch PC (0xFFFF1000 region or a 32-bit-unrepresentable target) lies outside the 32 MiB main-RAM image the test can map.
+- **Derived:** the J/JAL region-carry rule (target region taken from PC+4, not PC) cannot be exercised by an executable vector: crossing a 256 MiB boundary needs a branch PC of 0x...FFFC whose delay slot at 0x...0000 lies outside mappable RAM. It is covered instead by the oracle self-check and the decoder unit test `jump_region_uses_the_high_four_bits_of_pc_plus_four`. This is a recorded path asymmetry, not a passing vector.
+- **Observed (mutation testing):** `tools/mutate_branch_analysis.py` applies 14 single-point mutations to the decoder and CFG analysis and reruns the frontend suite. All 14 are killed only by an executed test failure; a compile error, a non-unique anchor, a timeout or a missing baseline pass is not counted as a kill, and the unmutated frontend suite must be green first. The restored workspace suite is rebuilt and rerun green after the mutations are undone.
+- **Limitation:** agreement between the Python oracle, the Rust decoder and the CFG analysis shows those REPS2 models agree on the tested synthetic inputs. It is not R5900 hardware proof, not a Gate disposition and not retail-boot evidence. No retail bytes, BIOS or extracted asset is involved.
+
+## IOP-to-EE SIF0 RPCINIT handshake (ADR 0100)
+
+ADR 0099 left the title parked in the SDK SIF RPC wait loop at `0x0025C928`,
+which polls `word[0x00761C80]`. ADR 0100 identifies exactly who writes that word
+and models the minimum IOP->EE transaction that writes it.
+
+- **Observed (PS2SDK `d41ea62946e53d9a0c8788bb9eb8c8faf488b559`):** EE
+  `sceSifInitRpc` registers the four RPC command handlers, checks
+  `sceSifGetReg(SIF_SYSREG_RPCINIT)`, sends `SIF_CMD_INIT_CMD` with `opt = 1`,
+  then blocks in `while (!sceSifGetSreg(SIF_SREG_RPCINIT));` before calling
+  `sceSifSetReg(SIF_SYSREG_RPCINIT, 1)`. `sceSifGetSreg(sreg)` returns
+  `_sif_cmd_data.sregs[sreg]`; the `SIF_CMD_SET_SREG` system handler `set_sreg`
+  runs `cmd_data->sregs[pkt->sreg] = pkt->val` and is dispatched only from
+  `_SifCmdIntHandler`, the `DMAC_SIF0` (EE channel 5) handler. IOP
+  `sceSifInitRpc` builds `SifCmdSRegData_t{ index = SIF_SREG_RPCINIT; value = 1 }`
+  and `sceSifSendCmd(SIF_CMD_SET_SREG, ...)` to the EE receive buffer published
+  with `INIT_CMD`.
+- **Observed (target disassembly, `mips64r5900el-ps2-elf-objdump`):**
+  `0x0025C108` is the getter `word[0x00761C80 + index*4]`; the only `jal` to it is
+  the wait loop at `0x0025C928` (`jal 0x25C108; beqz v0, 0x25C928`). `0x0025C0D8`
+  is `set_sreg`: `lw v0,16(a0)` (index), `lw a2,28(a1)` (the `sregs` pointer at
+  `cmd_data` offset `0x1C`), `lw v1,20(a0)` (value), `sw v1,0(a2+index*4)`.
+  `0x0025C1C0` stores `a0 = 0x00761C80` into `cmd_data` at offset `0x1C`, with
+  `cmd_data = 0x00761B58` — the value the EE publishes as `SIF_SYSREG_MAINADDR`.
+  `0x0025C204` zeroes the 32-dword `sregs` array.
+- **Derived:** `word[0x00761C80]` is `_sif_cmd_data.sregs[0]` and can become 1
+  only via an inbound `SIF_CMD_SET_SREG(index 0, value 1)` processed through the
+  SIF0 receive dispatch. `cmd_data.sregs` is at offset `0x1C` in both pinned
+  PS2SDK and the retail image, so the array is locatable from the guest-published
+  `SIF_SYSREG_MAINADDR`.
+- **Observed (IOPRP270.IMG read-only, SHA-256 `05c0b8c0...110f63`):** contains
+  resident `SIFCMD` (SHA-256 `722e2d0d...`) and `SIFMAN` plus RPC server modules
+  (`FILEIO`, `CDVDMAN`, `CDVDFSV`, `MODLOAD`); the RPC servers are the modules
+  that call the IOP-side `sceSifInitRpc`.
+- **Implemented:** `process_ee_sif_command` (EE-side SIFCMD receive dispatch, the
+  `set_sreg` handler writing `sregs[index] = value` through the published
+  `cmd_data`), `iop_sifcmd_rpc_init_reply` (the modelled SIF0 reply writing the
+  documented packet into the guest receive buffer and publishing the `D_STAT`
+  SIF0 event), and `EeDmacState::publish_sif0_event`.
+- **Unknown / not fabricated:** the exact retail IOP instruction that runs the IOP
+  `sceSifInitRpc`; whether the retail SIFCMD/SIFMAN `.txt` matches the pinned
+  PS2SDK byte-for-byte; and the CPU-level interrupt chain (no EE interrupt
+  exception is delivered, so the EE-side handler is HLE rather than guest code).
+
+## EE semaphore signal/wait and the observed `WaitSema` block
+
+After the ADR 0100 RPCINIT handshake the probe stopped on `WaitSema` (`0x44`) at
+`0x0025A724` with `$a0 = 3`. That PC is the `syscall` word of the `WaitSema`
+stub (`0x0025A720: li v1,68; 0x0025A724: syscall`), inside a stub table that also
+holds `CreateSema` (`0x0025A6E0`, `v1=64`), `DeleteSema` (`0x0025A6F0`, `v1=65`),
+`SignalSema` (`0x0025A700`, `v1=66`) and `iSignalSema` (`0x0025A710`, `v1=-67`).
+
+- **Observed (pinned PS2SDK `ee/kernel/include/kernel.h`):** the semaphore API is
+  `CreateSema`/`DeleteSema`/`SignalSema`/`iSignalSema`/`WaitSema`/`PollSema`/
+  `iPollSema`/`ReferSemaStatus`/`iReferSemaStatus`/`iDeleteSema`, all returning
+  `s32`, with `ee_sema_t { count, max_count, init_count, wait_threads, attr,
+  option }`.
+- **Observed (target disassembly, `mips64r5900-el-ps2-objdump`):** the function at
+  `0x0025B0D0` is a lock wrapper — it calls `WaitSema` with a delay slot
+  `lw a0,4608(s6)` where `s6 = 0x00760000`, so the id comes from the global at
+  `0x00761200`; after the wait it scans a table indexed by a guest structure. That
+  global is assigned the `CreateSema` result at `0x0025B1E0`, and the semaphore is
+  created at `0x0025B1D0` from a parameter block built at `sp+48` with
+  `sw 255,52(sp)` (`max_count = 255`) and `sw zero,56(sp)` (`init_count = 0`).
+  The caller never tests `WaitSema`'s `$v0`. Whether this object is the one the
+  probe blocks on is not established.
+- **Observed (real-title probe on this revision):** the probe stops as
+  `status=16` (`semaphore_wait_blocked`) at `pc=0x0025A724` with `$a0 = 3` and
+  reports `sema_id=3`, `sema_init=0`, `sema_max=1`, `sema_wait=1`,
+  `sema_op_id=3`, `sema_wait_count=0`, `sema_wait_blocked=1`. The blocked object
+  is the most recently created semaphore (id 3), created with `init_count = 0`,
+  `max_count = 1`; the wait observes `count = 0`.
+- **Derived:** the waited semaphore has `init_count = 0`, so `WaitSema` genuinely
+  blocks; the signal that would release it is the EE's packet/queue bookkeeping
+  driven by the unmodelled IOP RPC bind reply.
+- **Implemented:** `DeleteSema`/`SignalSema`/`iSignalSema`/`WaitSema` over the
+  `CreateSema` table, the `Status::semaphore_wait_blocked` stop, and the new probe
+  fields `sema_delete`/`sema_signal`/`sema_wait`/`sema_op_id`/`sema_op_count`/
+  `sema_wait_count`/`sema_op_valid`/`sema_wait_blocked` (ADR 0101).
+- **Implemented producer (ADR 0104):** the resident IOP SIFRPC model answers
+  `SIF_CMD_RPC_BIND` with the documented no-server `SIF_CMD_RPC_END` reply, and
+  the EE-side `_request_end` dispatch raises the client semaphore. The probe now
+  reports `sif_rpc_bind=1 sif_rpc_bind_sid=0x80000592 sif_rpc_bind_sema=3
+  sif_rpc_bind_signalled=1`, the wait consumes the count, and the title runs on
+  to `budget_exhausted`. Because no IOP module is modelled the bind itself fails,
+  which is the truthful result and not a fabricated success.
+- **Not fabricated:** no count is incremented to fake a release, no thread is
+  scheduled, and `PollSema`/`ReferSemaStatus` stay unimplemented because their
+  non-blocking failure and status-write contracts are not established.
+- **Implemented (ADR 0119):** `PollSema` (`0x45`) and `iPollSema` (`0x46`,
+  resolved by magnitude) are the documented non-blocking acquire: a live object
+  with a positive count is decremented and returns its semaphore id; a zero count
+  or an id naming no live object returns the documented `-1`. The exact success
+  value is derived from the retail wrapper at `0x00246FA0`, which passes the id
+  and compares the returned `$v0` against that same id. The service completes
+  normally in every case, so `Status::semaphore_wait_blocked` stays exclusive
+  to `WaitSema`. ps2tek documents the decrement and failure result but not the
+  success result; PS2SDK `ee/kernel/include/kernel.h` declares
+  `s32 PollSema(s32 sema_id)` and `syscallnr.h` defines `0x45`/`-0x46`. The
+  `ReferSemaStatus` (`0x47`/`0x48`) service remains unimplemented: it has no
+  primary description and no caller in the observed image.
+- **Observed (real-title probe before the ADR 0119 success-value correction,
+  local evidence):** the build handled the service (`hle_name=PollSema`) and the
+  5,000,000-instruction run stopped at `pc=0x00246DAC`. Contrary to the initial
+  interpretation of the summary counters, the probe recorded a first observed
+  count of 1 and two successful count consumptions (`poll_sema_first_count=1`,
+  `poll_sema_acquired_total=2`). The wrapper then compares `$v0` against the
+  stored semaphore id; returning 0 for a successful poll on a nonzero id makes
+  that wrapper take its bail path. This is the evidence for the ID return, not
+  evidence that the semaphore producer is absent. The next post-correction probe
+  must establish the new execution frontier. The previous run is not a boot stage;
+  exact configuration and hashes are recorded in `docs/PROJECT_STATE.md`.
+- **Observed (real-title probe PostPR70 after the PollSema correction):** a
+  single `PollSema` call consumed the count (`poll_sema=1`,
+  `poll_sema_acquired=1`, `poll_sema_first_count=1`,
+  `poll_sema_acquired_total=1`) and the run left the poll loop, stopping as
+  `unhandled_syscall` service `0x30` at `0x0025A5E4` after 3,172,922
+  instructions with `$a0 = 1` and `$a1 = 0x007607D8`. The caller sequence is
+  `GetThreadId` then `ReferThreadStatus(self, &status)`.
+- **Implemented (ADR 0120):** `ReferThreadStatus` (`0x30`, plus the
+  `iReferThreadStatus` magnitude alias) writes the documented twelve-word
+  `ee_thread_status_t` and returns `0`, or `-1` with no write for an unknown id
+  or an invalid destination. `TH_SELF` (0) names the executing boot thread. The
+  boot-thread block reports `THS_RUN`, the SetupThread-recorded gp and stack
+  region, and the crt0 root function passed in `$8` at `0x0010A1D0` (the
+  `ExitThread` thunk); created records report their CreateThread fields with the
+  DORMANT/READY status the layer assigned. `attr`/`option` of the boot thread
+  and all wait fields stay zero because no source records them. Evidence:
+  PS2SDK `ee/kernel/include/kernel.h` (prototype, `TH_SELF`, `THS_*`, `TSW_*`,
+  `sizeof(ee_thread_status_t) == 0x30`), the retail thunk at `0x0025A5E0`
+  (`li $v1,0x30; syscall; jr $ra; nop`), its three call sites
+  (`0x00247010`, `0x0024734C`, `0x00247664`, each passing the id from
+  `0x007607D0` and the buffer `0x007607D8`, with no reader of that block in the
+  image), and the crt0 SetupThread argument setup at
+  `0x0010A148`..`0x0010A178`. `iReferThreadStatus` is the negated number and is
+  resolved by magnitude. Not modelled: EE kernel TCB layout, RUN state for
+  created threads, and any scheduler.
+- **Observed (real-title probe PostPR71 after ADR 0120):** `ReferThreadStatus`
+  was handled (`refer_thread_status=1 refer_thread_status_id=1
+  refer_thread_status_value=0x00000001`), and the run then executed the full
+  5,000,000-instruction budget (`executed=4,999,995`, `syscalls=118`,
+  `hle_handled=101`), exhausting it at `pc=0x002476B8` inside a retry loop
+  whose last syscall is `DeleteSema` (0x41). The loop repeats the SIF RPC bind
+  for server `0x80000593` (`sif_rpc_bind=3 sif_rpc_bind_sid=0x80000593
+  sif_rpc_bind_server=0x00000000 sif_rpc_bind_had=0`); the resident IOP model
+  answers with the documented no-server reply, so the title retries until the
+  budget ends. The last SIF command packet had `sif_cmd_cid=0x80000009` with
+  `sif_cmd_pkts=10 sif_set_dma=10 sif_ee_inbound=7`. **Next frontier:**
+  identify what `0x80000593` is in the title's libcdvd client and serve it from
+  the owner's ISO rather than letting the retry loop spin. This is a
+  missing-server boundary, not a boot or playable stage.
+- **Identified (ADR 0121):** `0x80000593` is the CDVDFSV **S-command RPC
+  server**. ps2tek's server list names it "CDVD S commands (CDVDFSV)";
+  PS2SDK `ee/rpc/cdvd/src/scmd.c` defines `CD_SERVER_SCMD 0x80000593` and issues
+  every S-command as `sceSifCallRpc(&clientSCmd, <scmd code>, ...)`, so the RPC
+  function number is the S-command number and the reply starts with `m_retres`.
+  The same `_CdCheckSCmd` does `PollSema(sCmdSemaId) != sCmdSemaId`, which
+  independently confirms ADR 0119's success value (the id). Implemented:
+  the boot environment registers `0x80000593` so the bind completes with the
+  sid token; its handler refuses every call (no RPC_END, caller stays blocked)
+  while the dispatch records the S-command number and first payload word, so
+  the next probe names the first S-command the title issues.
+- **Observed (real-title probe PostPR72 after ADR 0121):** the bind for
+  `0x80000593` completes (`sif_rpc_bind_had=1 sif_rpc_bind_server=0x80000593`),
+  and the title's first S-command is `sif_rpc_call_number=34` — decimal 34 is
+  `CD_SCMD_MMODE` (0x22) in PS2SDK `scmd.c` — with `rpc_call_req=0x00000002`
+  (`SCECdMmodeDvd`; `SCECdMmodeCd` is 1) and 4-byte send/recv sizes. The handler
+  refuses it, so no reply is sent and the caller blocks
+  (`stage=semaphore_wait_blocked`, `pc=0x0025A724`, 3,173,557 instructions).
+  **Next frontier:** implement the MMODE body (ps2sdk documents
+  `sceCdMmode` as "1 on success, 0 on failure") and continue with whatever the
+  title issues next. This is a modelled-boundary stop, not a boot or playable
+  stage.
+- **Observed (real-title probe PostPR73 after ADR 0122):** with `CD_SCMD_MMODE`
+  (0x22) modelled, the call completes: `scmd_calls=1 scmd_replies=1
+  scmd_number=34 scmd_media=0x00000002 scmd_retres=0x00000001 scmd_replied=1
+  cdvd_mmode=0x00000002` and `sif_rpc_call_replied=1`. The caller is no longer
+  blocked: `stage=budget_exhausted`, `executed=4,999,997`, `pc=0x00247AD0`
+  (previously `semaphore_wait_blocked` at `0x0025A724` with 3,173,557
+  instructions). The IOP-side reference (`cdvdman.c sceCdMmode` =
+  `g_cdvdman_mmode = media; return 1;`, `cdvdfsv.c cdvdfsv_rpc3_22_mmode` sets
+  `m_retres` from it for a 4-byte request) matches the HLE exactly: store the
+  media word, answer `m_retres = 1`. **Next frontier:** the loop now running at
+  `0x00247AD0` under the 5,000,000-instruction budget — identify it and either
+  raise the budget or model the next S-command/service it issues. Still a
+  modelled-boundary stop, not a boot or playable stage.
+- **Observed (exact-main rerun 2026-11-11, `origin/main` `2cb1fd2`, Windows
+  x64/MSVC 19.51.36260.0, Downhill ISO SHA-256
+  `0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86`, boot ELF
+  SHA-256 `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`):**
+  the `0x00247AD0` loop is a countdown spin (`lui $23,0x28`;
+  `addiu $3,$zero,-1`; `addiu $2,$2,-1`; `bne $2,$3` back to `0x00247AD0`)
+  executed before `jal 0x0025CDB8` with `$a1=0x8000059C` — i.e. the delay
+  ahead of `sceSifBindRpc` for the CDVDFSV **DiskReady** server (PS2SDK
+  `libcdvd.c`: `0x8000059C` queue 3, `0x8000059A` queue 1; title string
+  `Libcdvd bind err CdDiskReady`). Via the generated probe the 5,000,000
+  budget still ends inside this spin (`executed=4,999,997`). ADR 0123 records
+  a runner/probe parity fix (engine session now seeds the modelled HLE boot
+  environment): before it, `rg-reps2-engine --hle-syscalls` stopped earlier as
+  `unsupported_memory_access` at `0x0025C274` (`lw` from `0x1000E010`
+  `D_STAT`, `d_stat_known=false`) after 3,168,708 instructions; after it, the
+  same module reaches `budget_limit_reached` at `pc=0x00247AD0` after
+  79,999,922 instructions over 16 batches, trace confined to
+  `0x00247AD0..0x00247AE4`. **Next frontier:** the unserved DiskReady RPC
+  server (`0x8000059C`), then SearchFile/NCmd (`0x80000597`/`0x80000595`) —
+  not an instruction gap. Black (USA) exact-main rerun stops as
+  `guest_stopped` at `0x80076000` after 479,362 instructions (runtime-copied
+  code, undeclared for that title).
+- **Observed (2026-11-11, feature branch on `26db844`, DiskReady servers
+  `0x8000059A`/`0x8000059C` served from host media presence, ADR 0124):** the
+  Downhill probe's frontier moved from the `0x00247AD0` delay spin (bind for
+  `0x8000059C`) to `pc=0x002473A0` — a `lui $2,0x10` countdown spin at
+  `0x002473A0..0x002473B4` ahead of `jal 0x0025CDB8` with `$a1=0x80000595`,
+  i.e. the **NCMD server bind retry loop**; engine runner over 16×5,000,000
+  batches: `budget_limit_reached`, executed=79,999,924, syscalls 179 seen /
+  162 handled (previously 168/151). DiskReady's bind and call completed with a
+  truthful media-derived answer. **Next frontier:** the NCMD server
+  (`0x80000595`; its first call's function number names the command), then
+  SearchFile (`0x80000597`) — both need the ISO9660 path-table walker before
+  read answers can be truthful.
+- **Observed (2026-11-11, ADR 0125 branch on `7edee57` + NCmdDiskReady):** with
+  `0x80000595`/`0x80000597` registered fail-closed, the real-title runner report
+  showed `ncmd_calls=1 ncmd_number=14 rpc_call_replied=0` then
+  `semaphore_wait_blocked @ 0x0025A724` (executed=3,889,518) — the first NCMD
+  call is **fno 14 = CD_NCMD_DISKREADY** (PS2SDK `ncmd.c`: empty request, 4-byte
+  reply, 2/6). Serving fno 14 from media presence (`ncmd_replies=1
+  ncmd_retres=2`) advanced the run to a new stop `unresolved_control_flow @
+  0x0025C774` (executed=3,889,750): `0x0025C770 beq -> 0x0025C7C4` has delay
+  slot `0x0025C774`, and `0x0025C7BC bgtz -> 0x0025C774` branches **into a delay
+  slot**, which the analyzer currently rejects although hardware executes the
+  target as an ordinary instruction. **Next frontier:** admit delay-slot-entry
+  branch targets in CFG discovery; then SearchFile (`0x80000597`, 292-byte
+  packet, needs the ISO9660 path-table walker).
+- **Observed (2026-11-11, ADR 0126 branch on `8c24f19`, delay-slot-entry
+  targets admitted as ordinary block starts):** the Downhill CFG grew from
+  60,466 to 60,484 blocks (`block_0x0025C774` now exists) and the probe
+  advances past the cache-writeback loop to a new stop
+  `unresolved_control_flow @ 0x80076440` after 3,890,249 instructions
+  (syscalls 149 seen / 131 handled). `0x80076440` lies inside the declared
+  relocated-code region `0x80076000..0x80076740` but is not a translated
+  block — **next frontier:** find the edge that reaches it (likely an
+  indirect jump through the runtime-copied code or a mid-region entry).
+- **Observed (2026-11-11, ADR 0127 branch on `a642ef0`, discovery now scans
+  declared relocated regions):** Downhill manifest `scanned_words`
+  364,352 → 365,020, prologue candidates 3,763 → 3,769, accepted roots
+  7,155 → 7,169, blocks 60,484 → 60,585; `block_0x80076440` is now emitted.
+  The probe enters the copied code and stops deeper, at
+  `unsupported_memory_access @ 0x800761A4` after 3,890,274 instructions
+  (syscalls 149/131) — **next frontier:** classify the memory access at
+  `0x800761A4` inside the relocated region.
+
+## EE DMAC interrupt line and the SIF0 completion path (research note, ADR 0104)
+
+Recorded so a later increment does not wire SIF0 completion into the wrong
+interrupt path.
+
+- **Observed (PS2SDK `ee/dma/include/dma_registers.h`):** `DMA_REG_CTRL`
+  (`0x1000E000`, bit 0 `DMAE`), `DMA_REG_STAT` (`0x1000E010`, `CIS`/`SIS`/
+  `MEIS`/`BEIS` at bits 0..15 and `CIM`/`SIM`/`MEIM` at bits 16..30),
+  `DMA_REG_PCR` (`0x1000E020`, `CPCOND`/`CDE`/`PCE`), `DMA_REG_ENABLER`
+  (`0x1000F520`) and `DMA_REG_ENABLEW` (`0x1000F590`). There is **no `DICR`**:
+  `0x1000E020` is the priority-control register, not an interrupt-control one.
+  REPS2 modelled that address as "DICR" and `0x1000E000` as "DPCR"; the values
+  had plain read/write behaviour, but both names and the interrupt claim were
+  wrong. ADR 0105 renames them to `D_PCR` and `D_CTRL` and records this note.
+- **Observed (PS2SDK `ee/kernel/src/sifcmd.c`):** the SIF0 receive handler
+  registers through `AddDmacHandler(DMAC_SIF0)` and `EnableDmac(DMAC_SIF0)`, and
+  hard-codes `D_STAT` bit 5 (`0x20`) with `CHCR5.STR` (`0x100`).
+- **Observed (PS2SDK `ee/kernel/include/syscallnr.h`):** `__NR__EnableDmac` is
+  `0x16` and `__NR__DisableDmac` is `0x17`; the "i" variants are `-0x1c` and
+  `-0x1d`, which the layer's magnitude dispatch resolves to `0x1C`/`0x1D`.
+  `D_STAT` bits 16..25 are the per-channel interrupt mask, a write-one-to-toggle
+  register (already recorded for ADR 0096).
+- **Observed (real-title probe after ADR 0115, local evidence):** with the
+  registry and `_DisableDmac` in place the probe executes 3,170,312 instructions,
+  reports `disable_dmac=1`/channel 5/`disabled`, and then stops on `syscall`
+  `0x13` (`RemoveDmacHandler`) at `0x0025A414` with `$a0 = 5` and `$a1 = 5` (the
+  handler id the HLE `AddDmacHandler` returned). The call site is the SDK
+  `sceSifExitCmd` teardown: `DisableDmac(5); RemoveDmacHandler(5, sif0_id);
+  sif0_id = 0` (`ee/kernel/src/sifcmd.c:287-291`), also visible at
+  `0x25C3B0`..`0x25C3D8` in the boot ELF. **Implemented:** the symmetric
+  `D_STAT` mask clear (ADR 0115). **Not yet implemented:** the removal service;
+  **unknown:** the kernel's return value for both services, which is left
+  unwritten.
+- **Observed (PS2SDK `ee/kernel/include/kernel.h:482` and
+  `ee/kernel/src/iopcontrol.c:42`):** `sceSifStopDma(void)` is documented as
+  "Disables SIF0 (IOP -> EE)" and `SifIopReset` calls it before building and
+  sending a `SIF_CMD_RESET_CMD` packet. **Observed (boot ELF):** the retail
+  `SifIopReset` at `0x25EBE0` calls `sceSifStopDma` at `0x25EBE4`, reads
+  `SIF_SYSREG_SUBADDR`, fills a reset packet with its argument string and sends
+  it. **Derived:** the title's post-CdInit path is an IOP reset, and its own
+  strings name `IOPRP270.IMG` plus the IRX set it intends to load, so the reset
+  is the title's IOP-replacement strategy rather than a CDVD read. **Unknown:**
+  whether any CDVD access uses the ROM CDVDFSV before the reset. Modelling the
+  reset command, an IOP reboot and IOP module loading is a new subsystem and is
+  not claimed; the reset packet's `SIF_CMD_RESET_CMD` (cid `0x80000003`) is
+  currently outside the modelled SIFCMD commands.
+- **Observed (boot ELF, local evidence):** the retail `SifIopReset` at `0x25EBD0`
+  performs the documented sequence byte for byte: it calls `sceSifStopDma` at
+  `0x25EBE4`, reads `SIF_SYSREG_SUBADDR` (`0x80000000`), fills the static
+  `SifCmdResetData_t` at `0x00765140` (`psize` byte `0x68`, `dest` at `+4`,
+  `cid` `0x80000003` at `+8`, `arglen` at `+0x10`, `mode` at `+0x14`, argument
+  characters from `+0x18`, length checked against `RESET_ARG_MAX` in
+  `SifIopReboot` at `0x25ED48`), starts one `SifDmaTransfer_t{src = packet,
+  dest = SUBADDR, size = 0x68, attr = 0x44}` with `sceSifSetDma(.., 1)`, then
+  writes `SetReg(4, 0x40000)`, `SetReg(4, 0x10000)`, `SetReg(4, 0x20000)`,
+  `SetReg(0x80000002, 0)`, `SetReg(0x80000000, 0)`. `SifIopSync` at `0x25ED10`
+  is `(GetReg(SIF_REG_SMFLAG) & 0x40000) != 0`; its caller at `0x20DF60` retries
+  `SifIopReboot` while it returns `0` and then spins at `0x20DF80` as
+  `while (!SifIopSync())`.
+- **Observed (ps2tek SIF map; PCSX2 `pcsx2/HwWrite.cpp`):** the EE's SIF flag
+  windows are directional: `0x1000F220` is `MSFLAG` (EE→IOP) and PCSX2
+  implements an EE write there as `psHu32 |= value`, while `0x1000F230` is
+  `SMFLAG` (IOP→EE) and an EE write there is `psHu32 &= ~value`. The EE
+  therefore *clears* IOP→EE status bits; the IOP sets them. That is why
+  `SifIopReset` clearing `BOOTEND`/`SIFINIT`/`CMDINIT` before the reboot is
+  followed by a wait for the IOP to assert them again.
+- **Observed (PS2SDK `iop/system/sifman/src/sifman.c` and
+  `iop/system/sifcmd/src/sifcmd.c`):** the IOP-side modules own those
+  assertions. `sifman`'s `sceSifInit` waits for `MSFLAG & SIF_STAT_SIFINIT`,
+  then writes `SMFLAG = SIF_STAT_SIFINIT`; `sifcmd`'s `sceSifInitCmd` writes
+  `SMFLAG SIF_STAT_CMDINIT` and waits for the EE's `INIT_CMD` event flag, and
+  its `INIT_CMD` handler stores the EE's receive buffer and acknowledges on
+  `MSFLAG`. The EE-side `sceSifInitCmd` mirrors that: with
+  `SIF_SYSREG_SUBADDR` cleared by the reset it waits
+  `while (!(sceSifGetReg(SIF_REG_SMFLAG) & SIF_STAT_CMDINIT))`, re-publishes
+  `SIF_SYSREG_MAINADDR` and sends `SIF_CMD_INIT_CMD`.
+  (`common/include/sif_mmio_hwport.h` places these at IOP `0x1D000020`
+  `msflag` / `0x1D000030` `smflag`, mirroring the EE's `0x1000F2xx` window.)
+- **Implemented (ADR 0118):** the requested reset is modelled as a restart of
+  the resident HLE IOP's SIF services. `SIF_CMD_RESET_CMD` records `arglen` and
+  `mode`, re-arms the RPCINIT handshake and marks a boot pending; the EE's next
+  `SMFLAG` read publishes `SIFINIT | CMDINIT | BOOTEND` (`0x70000`), because the
+  two IOP modules the model stands in for have re-run their documented startup
+  publication and, with no IOP image executed, the modelled boot has no further
+  work. `SifIopSync` then observes `BOOTEND` and the guest resumes into its own
+  re-initialisation. **Not claimed:** the `IOPRP270.IMG` replacement image and
+  its IRX set are never executed; no IOP RAM, R3000 code, module loader or
+  IOP-side server definition exists, `SIF_SYSREG_SUBADDR` deliberately stays
+  zero (the IOP's packet-buffer address is not modelled, ADR 0099), and the
+  hardware's write-one-to-clear on the IOP→EE flag register is not modelled
+  because REPS2 owns both sides of the register file. A service only the
+  rebooted IOP would have provided still answers nothing.
+- **Observed (real-title probe after ADR 0117, local evidence):** before ADR
+  0118, the probe reported `sif_stop_dma=1 sif_stop_dma_cleared=0`, processed the
+  reset packet (`sif_cmd_cid=0x80000003`), and exhausted its 5,000,000-instruction
+  budget in the post-reset `SifIopSync` poll at `0x0025ED10`; the modelled IOP
+  never rebooted. **Observed (real-title probe after ADR 0118, local evidence):**
+  the same image now reports `iop_resets=1`, `iop_resets_completed=1`,
+  `sif_smflag=0x00070000`, repeats the RPCINIT reply (`sif_rpcinit_sent=1`), and
+  completes a second CdInit bind/call (`sif_rpc_bind=2`, `sif_rpc_call=2`,
+  `sif_rpc_call_replies=2`). Execution then stops as `unhandled_syscall` `0x45`
+  (`PollSema`, per PS2SDK `ee/kernel/include/syscallnr.h`) at `0x0025A734`, after
+  `3,172,908` instructions. The last HLE call was `$a0=4`, `$a1=0x00246EE8`,
+  `$a2=0`, `$a3=0x40`, `$v0` before call `5`; this is a distinct post-reset
+  boundary, not a boot or playable-stage observation. The probe used boot ELF
+  SHA-256 `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`,
+  parent ISO SHA-256 `0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86`,
+  Windows x64/MSVC 19.51.36260.0, `--discover --tu-count 8 --hle-syscalls`, two
+  relocated code regions, and a 5,000,000-instruction budget. The exact host
+  artifacts and trace are under `D:\\REPS2-DevTests\\DownhillDomination\\PostPR67`
+  and remain outside Git.
+- **Observed (PS2SDK `ee/kernel/src/sifrpc.c`, `_request_end`):** RPC completion
+  is signalled from the SIF command handler, not from the DMA interrupt:
+  `if (cd->hdr.sema_id >= 0) iSignalSema(cd->hdr.sema_id);`. The waiting
+  semaphore is created by `sceSifBindRpc`/`sceSifCallRpc` with `max_count = 1`,
+  `init_count = 0`, matching the id-3 object the probe observes.
+- **Observed (PCSX2 `pcsx2/Hw.cpp`, `pcsx2/Sif0.cpp`):** SIF0 completion calls
+  `hwDmacIrq(DMAC_SIF0)`, which sets `D_STAT` bit 5 and tests the DMAC interrupt;
+  `dmacInterrupt()` returns `0x800` (COP0 `Cause` bit 11, IP3) while
+  `intcInterrupt()` returns `0x400` (IP2). The DMAC condition is
+  `(D_STAT[16:31] & D_STAT[0:15]) != 0 || (D_STAT & 0x8000) != 0`, gated by
+  `D_CTRL.DMAE` and by `DMAC_ENABLER` not holding the controller. `INTC_SBUS` is
+  raised only on the IOP side (`IopHwWrite.cpp`, register `0x1D000450`).
+- **Inferred:** the EE DMAC interrupt is a separate COP0 line from the INTC, so
+  SIF0 completion must not be modelled as an INTC source. Delivering it requires
+  a COP0 IP3 exception path plus the `AddDmacHandler` chain, neither of which
+  exists yet.
+- **Implemented:** the RPC bind reply path with no modelled IOP server
+  (ADR 0104), and the SDK register names plus the documented interrupt condition
+  as a pure predicate (ADR 0105). No EE interrupt is delivered: the COP0 IP3
+  path, `D_CTRL`/hold device state, and the `AddDmacHandler` chain remain
+  unimplemented and are not claimed.
+- **Observed (target disassembly, `mips64r5900el-ps2-elf-objdump`, owner-supplied
+  boot ELF; local evidence only):** the post-bind stop at `0x002478F0` is a
+  delay-count instruction (`addiu v0,v0,-1` after `lui v0,0x10`, ~65,536
+  iterations) inside a retry loop. `0x00247828` loads `$a1 = 0x80000592`, calls
+  `0x25CDB8` (`sceSifBindRpc`-shaped: `cd, sid, mode=0`), and tests `cd->server`
+  at `+36`; when it is NULL the delay loop runs and control returns to
+  `0x00247828`. The other bind sites use `0x00123456`, `0x00123457`,
+  `0x80000100`, `0x80000101`, `0x80000400`, `0x80000592`, `0x80000597` and
+  `0x80000901`..`0x80000905`. **Derived:** the title polls for an IOP module that
+  registers sid `0x80000592` and will not proceed while that bind fails, so a
+  budget increase cannot advance it. **Inferred:** the sid family matches the
+  conventional PS2 server ids (memory card, SIO2, CDVD, sound); the module
+  identity is not established by the pinned sources and is not claimed.
+- **Not implemented:** any IOP module, RPC server payload, or `SIF_CMD_RPC_CALL`
+  reply. Serving the observed sid would require an evidence-backed server model
+  (and, for CDVD, a runtime media source), which is M5 work, not a runtime
+  assumption.
+
+### The title's IOP module set and the libcdvd servers it binds
+
+Recorded from the owner-supplied boot ELF and the pinned ps2sdk sources so the
+next unit starts from what the title actually asks the IOP for. No game material
+enters the repository.
+
+- **Observed (ASCII strings in the boot ELF):** the title references
+  `cdrom0:\IOPRP270.IMG;1` and a module list
+  `MOD\SIO2MAN.IRX`, `MOD\MTAPMAN.IRX`, `MOD\MCMAN.IRX`, `MOD\MCSERV.IRX`,
+  `MOD\PADMAN.IRX`, `MOD\LIBSD.IRX`, `MOD\CDVDSTM.IRX`, `MOD\989SND.IRX`,
+  `MOD\989ERR.IRX`.
+- **Observed (same strings):** libcdvd diagnostics
+  `Libcdvd bind err CdSearchFile`, `Libcdvd bind err CdDiskReady`,
+  `Libcdvd bind err N CMD`, `Libcdvd bind err S cmd`,
+  `Libcdvd bind err %d CD_Init %d`, plus `PsIIlibcdvd 2700`,
+  `sceCdSearchFile`, `sceCdSync`, `sceCdStRead`, `sceCdStStat`.
+- **Observed (disassembly, ADR 0104):** the bind sites use sids `0x00123456`,
+  `0x00123457`, `0x80000100`, `0x80000101`, `0x80000400`, `0x80000592`,
+  `0x80000597` and `0x80000901`..`0x80000905`; the retry loop waits on
+  `0x80000592`.
+- **Observed (ps2sdk `ee/rpc/cdvd/src/libcdvd.c`, `scmd.c`, `ncmd.c`;
+  `iop/cdvd/cdvdfsv/src/cdvdfsv.c`):** libcdvd server ids are fixed constants
+  registered with `sceSifRegisterRpc`, not per-bind assignments:
+  `0x80000592` = CdInit server, `0x80000597` = SearchFile/fscall,
+  `0x8000059A` = CdDiskReady (queue 1), `0x80000593` = SCMD,
+  `0x80000595` = NCMD, `0x80000596` = POFF (XCDVDFSV), `0x8000059C` =
+  CdDiskReady (queue 3).
+- **Derived:** the title drives libcdvd and its retry loop waits for the
+  **CdInit** server (`0x80000592`), so its next requirement is that RPC server,
+  followed by the SearchFile and NCMD servers for actual reads. Its own strings
+  map onto the same generation (`CD_Init`, `CdSearchFile`, `CdDiskReady`,
+  `S cmd`, `N CMD`).
+- **Observed protocol facts (same sources):** a call's small status returns
+  inside the 64-byte RPC reply packet; bulk bytes (sector data, the 32-byte
+  `sceCdlFILE`) are written by the server with `sceSifSetDma` to an **EE pointer
+  carried in the request**, i.e. EE DMA channel 5 (SIF0, IOP→EE). `sceCdSync`
+  is EE-local (`ncmd.c` polls `cbSema || sceSifCheckStatRpc`), not an RPC.
+  `sceCdDiskReady` returns `SCECdComplete` (2) or `SCECdNotReady` (6);
+  `sceCdRead` returns 0 unless the drive reports ready. `sceCdlFILE` is 32 bytes
+  (`lsn`, `size`, `name[16]` body only, `date[8]`); `sceCdSearchFile` builds its
+  answer from the ISO9660 PVD at LSN 16 and the path tables.
+- **Unknown / not claimed:** `CDVDSTM.IRX`'s own server id (a distinct module —
+  do not assume it shares the libcdvd ids), whether this title reads through the
+  IOP `fileio`/`cdfs` path instead of direct libcdvd calls, the CDVDFSV/CDVDMAN
+  version values a real drive would report, and every Mechacon/NVM-dependent
+  answer (disc ID, region, clock, model ID).
+- **Consequence for the design:** a CDVD server needs a media source at runtime.
+  The generated probe currently executes from a RAM image only, so serving CDVD
+  reads requires a documented host-media boundary (the user's own ISO) and an
+  ADR. LSN, size, date and payload can all come from the ISO's own ISO9660
+  metadata and sectors; disc-identity answers must stay explicit failures.
+
+### SIFRPC call path and the server token (ADR 0114)
+
+Recorded from the same pinned ps2sdk sources and the owner-supplied boot ELF so
+the next unit starts from the exact wire contract.
+
+- **Observed (ps2sdk `ee/kernel/src/sifrpc.c`, `sceSifBindRpc`):** bind clears
+  `cd->server`, sets `cd->hdr.pkt_addr`/`rpc_id`/`sema_id`, writes the sid at
+  packet `+0x20` and the client at `+0x1C`, and in blocking mode creates a
+  semaphore (`max_count = 1`, `init_count = 0`), sends, waits, deletes.
+- **Observed (`_request_end`):** only a bind reply writes `cd->server`,
+  `cd->buf` and `cd->cbuf` from the reply packet; every completion signals
+  `cd->hdr.sema_id` when it is non-negative, frees the request packet and clears
+  the client's packet pointer.
+- **Observed (`sceSifCallRpc`):** the call packet carries the function number at
+  `+0x20`, send size `+0x24`, reply buffer `+0x28`, reply size `+0x2C`,
+  `rmode = 1` at `+0x30`, and `sd = cd->server` at `+0x34`. The request payload
+  is **not** in the packet: `sceSifSendCmd` sends it as the DMA entry before the
+  command packet, and `sceSifSendCmd` puts the command packet last with
+  `SIF_DMA_ERT | SIF_DMA_INT_O` (`ee/kernel/src/sifcmd.c`).
+- **Observed (`sceSifCallRpc`, `SIF_RPC_M_NOWAIT` without an end function):**
+  `rmode` becomes 0 and the server sends no RPC_END reply at all.
+- **Observed (target disassembly, local evidence only):** the bind wrapper at
+  `0x25CDB8` clears `cd->server`, sends `0x80000009` with a 64-byte packet and
+  waits; the reply handler at `0x25CAD0` copies reply `+0x24`/`+0x28`/`+0x2C`
+  into client `+0x24`/`+0x14`/`+0x18` and signals. The call wrapper at
+  `0x25CF88` stores `cd->server` at packet `+0x34` and sends `0x8000000A`. All
+  eighteen bind sites only zero-test `cd->server`; none loads through it.
+  **Derived:** the EE treats the server value as an opaque routed token, so
+  REPS2 may return a non-address token.
+- **Observed (`ee/rpc/cdvd/src/libcdvd.c`):** CdInit binds `0x80000592`, calls
+  function 0 with `{mode}` (4 bytes) and a 16-byte `CdInitPkt`
+  `{m_init_result, m_cdvdfsv_version, m_cdvdman_version, m_cdvdfsv_isverbose}`,
+  and returns 1. DiskReady binds `0x8000059A`, calls function 0 with a 4-byte
+  mode and a 4-byte result (2 ready, 6 not ready). SearchFile binds
+  `0x80000597`, calls function 0 with `{padding[32], name[256], dest}`, receives
+  a 4-byte status, and the server writes the 32-byte `sceCdlFILE` to `dest`.
+- **Implemented:** the bounded server table, the opaque sid token, call
+  dispatch from the call packet plus its preceding payload entry, and the CdInit
+  server. An unregistered token, refused function number, missing payload or
+  zero `rmode` produces no reply; the caller stays blocked.
+- **Unknown / not claimed:** the values a real CDVDFSV/CDVDMAN reports, any
+  IOP-side buffer address, guest `end_function` invocation, SIF1 transfers and
+  DMA back-pressure.
+
+## Timer 3 Count frontier correction (ADR 0129)
+
+The latest GPR snapshot for the Downhill Domination USA probe identifies the effective address of the stop at `0x800761A4`: instruction `lw $20, 0($2)`, with `$2 = 0xFFFFFFFFB0001800`. Its low 32-bit guest address is `0xB0001800`, the KSEG1 alias of physical `0x10001800`.
+
+PS2SDK's EE register definitions identify the relevant addresses as:
+
+- `0x10001800`: `T3_COUNT`
+- `0x10001810`: `T3_MODE`
+- `0x10001820`: `T3_COMP`
+
+PS2TEK documents Timer 3 as reserved by BIOS alarm functions and describes the timer counter as a 16-bit register whose progression is controlled by `Tn_MODE`. REPS2's existing ADR 0073 implementation models only the Timer 3 mode word: reset zero and retention of documented writable bits. It does not model counting, compare matching, overflow, or interrupt delivery. Therefore, the new `T3_COUNT` stop is not a DMAC register access; the description in ADR 0128's original evidence wording is corrected by ADR 0129.
+
+Do not make `T3_COUNT` or `T3_COMP` return zero or a host wall-clock value merely to advance this title. Before implementation, capture the target's timer mode/compare setup, writes and reads, enable state at the access, access width, and the consumer's dependence on counter progression. Any future implementation needs a deterministic guest-time source and explicit compare/overflow/interrupt semantics. The PR #82 probe was run on head `d4496a7`; a new probe on merged main `431f71d` remains outstanding.
+
+Public references:
+- [PS2SDK EE register definitions](https://github.com/ps2dev/ps2sdk/blob/master/ee/kernel/include/ee_regs.h)
+- [PS2SDK Timer API](https://ps2dev.github.io/ps2sdk/timer_8h_source.html)
+- [PS2TEK EE Timers](https://israpps.github.io/ps2tek/)
+
+## KSEG aliases for MMIO device selection (ADR 0130)
+
+The direct-mapped KSEG0/KSEG1 aliases use the low 29 bits as the physical address. The EE runtime now applies that same address normalization before matching its existing 32-bit MMIO dispatch table in both `load_u32` and `store_u32`. This makes an existing modeled register such as `T3_MODE` at `0x10001810` reachable through its KSEG1 alias `0xB0001810`, without changing the device's register semantics.
+
+This is address selection only. It does not model cache effects, TLB mappings, or new devices. The Downhill access to `T3_COUNT` at `0xB0001800` remains unsupported; the adjacent `T3_COMP` remains unsupported as well. See ADR 0130 and the Timer 3 frontier correction in ADR 0129.
+
 ## Provenance rules
+
 
 1. REPS2 source is independently authored.
 2. Public specifications may be cited. Keep source notes adjacent to non-obvious semantics.

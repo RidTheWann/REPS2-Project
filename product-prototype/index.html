@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>REPS2 — Interactive Product Prototype</title>
+  <meta name="description" content="Design validation prototype for the REPS2 Windows desktop platform. Simulated data; not the production GUI." />
+  <!-- Design system tokens are the single source of truth. -->
+  <link rel="stylesheet" href="../design-system/reps2/tokens.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+</head>
+<body>
+  <div id="app"></div>
+  <div id="dialog-root"></div>
+  <div class="toasts" id="toasts"></div>
+  <noscript>This prototype requires JavaScript to render its interactive screens.</noscript>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

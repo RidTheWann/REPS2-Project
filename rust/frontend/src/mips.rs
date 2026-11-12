@@ -116,6 +116,8 @@ pub enum Opcode {
     Sd,
     Lq,
     Sq,
+    Lqc2,
+    Sqc2,
     ParallelAddWord,
     ParallelSubWord,
     ParallelAddHalfword,
@@ -152,6 +154,10 @@ pub enum Opcode {
     ParallelPackWord,
     ParallelExchangeEvenWord,
     ParallelRotate3Words,
+    /// PEXT5 converts four 1-5-5-5 halfwords into 8-8-8-8 byte lanes.
+    ParallelExtend5,
+    /// PPAC5 truncates four 8-8-8-8 words into 1-5-5-5 halfwords.
+    ParallelPack5,
     FunnelShiftRightVec,
     MoveFromFpuRegister,
     MoveToFpuRegister,
@@ -415,6 +421,8 @@ impl Opcode {
             Self::Sd => "sd",
             Self::Lq => "lq",
             Self::Sq => "sq",
+            Self::Lqc2 => "lqc2",
+            Self::Sqc2 => "sqc2",
             Self::ParallelAddWord => "paddw",
             Self::ParallelSubWord => "psubw",
             Self::ParallelAddHalfword => "paddh",
@@ -432,6 +440,8 @@ impl Opcode {
             Self::ParallelPackWord => "ppacw",
             Self::ParallelExchangeEvenWord => "pexew",
             Self::ParallelRotate3Words => "prot3w",
+            Self::ParallelExtend5 => "pext5",
+            Self::ParallelPack5 => "ppac5",
             Self::FunnelShiftRightVec => "qfsrv",
             Self::MoveFromFpuRegister => "mfc1",
             Self::MoveToFpuRegister => "mtc1",
@@ -521,6 +531,11 @@ pub struct InstructionEffects {
     /// these masks include bit 0.
     pub fpr_read_mask: u32,
     pub fpr_write_mask: u32,
+    /// VU0 vector floating-point register dependencies. VF0 reads as the
+    /// hardwired constant {0,0,0,1.0}, so bit 0 is a real read dependency.
+    /// Writes to VF0 are ignored, so bit 0 is not a write dependency.
+    pub vf_read_mask: u32,
+    pub vf_write_mask: u32,
     pub reads_hi: bool,
     pub reads_lo: bool,
     pub writes_hi: bool,
@@ -555,6 +570,8 @@ impl InstructionEffects {
             gpr_write_mask: 0,
             fpr_read_mask: 0,
             fpr_write_mask: 0,
+            vf_read_mask: 0,
+            vf_write_mask: 0,
             reads_hi: false,
             reads_lo: false,
             writes_hi: false,
@@ -588,6 +605,19 @@ fn gpr_bit(index: u8) -> u32 {
 /// FPR[0] holds a value, so bit 0 of the mask is meaningful here.
 fn fpr_bit(index: u8) -> u32 {
     if index < 32 { 1_u32 << index } else { 0 }
+}
+
+/// VF0 reads as the hardwired constant {0,0,0,1.0} and ignores writes.
+/// Read mask therefore includes bit 0; write mask excludes it.
+fn vf_read_bit(index: u8) -> u32 {
+    if index < 32 { 1_u32 << index } else { 0 }
+}
+fn vf_write_bit(index: u8) -> u32 {
+    if index == 0 || index >= 32 {
+        0
+    } else {
+        1_u32 << index
+    }
 }
 
 /// One decoded guest instruction. This is decode metadata, not executed
@@ -912,11 +942,12 @@ impl Instruction {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
-            Opcode::ParallelExchangeEvenWord | Opcode::ParallelRotate3Words => {
-                // Single-source MMI2 word permutations read only rt and write
-                // only rd. rs is reserved and must be zero for a legal
-                // encoding; the decoder rejects a nonzero rs before this arm
-                // is reached.
+            Opcode::ParallelExchangeEvenWord
+            | Opcode::ParallelRotate3Words
+            | Opcode::ParallelExtend5
+            | Opcode::ParallelPack5 => {
+                // Single-source MMI operations read only rt and write only rd.
+                // rs is reserved-zero in these encodings.
                 effects.gpr_read_mask = rt;
                 effects.gpr_write_mask = rd;
             }
@@ -1068,6 +1099,18 @@ impl Instruction {
             | Opcode::Sdl
             | Opcode::Sdr => {
                 effects.gpr_read_mask = rs | rt;
+                effects.memory = MemoryEffect::Write;
+                effects.may_raise_exception = true;
+            }
+            Opcode::Lqc2 => {
+                effects.gpr_read_mask = rs;
+                effects.vf_write_mask = vf_write_bit(self.rt);
+                effects.memory = MemoryEffect::Read;
+                effects.may_raise_exception = true;
+            }
+            Opcode::Sqc2 => {
+                effects.gpr_read_mask = rs;
+                effects.vf_read_mask = vf_read_bit(self.rt);
                 effects.memory = MemoryEffect::Write;
                 effects.may_raise_exception = true;
             }
@@ -1446,6 +1489,9 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelExtendLowWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x1A => Opcode::ParallelExtendLowByte,
                 0x08 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelPackWord,
+                // PEXT5 and PPAC5 use a single rt source; rs is reserved-zero.
+                0x08 if ((word >> 6) & 0x1F) == 0x1E && rs == 0 => Opcode::ParallelExtend5,
+                0x08 if ((word >> 6) & 0x1F) == 0x1F && rs == 0 => Opcode::ParallelPack5,
                 0x09 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyLowDoubleword,
                 0x09 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelAnd,
                 0x09 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelXor,
@@ -1495,6 +1541,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x26 => Opcode::Lwr,
             0x37 => Opcode::Ld,
             0x3F => Opcode::Sd,
+            0x36 => Opcode::Lqc2,
+            0x3E => Opcode::Sqc2,
             0x1E => Opcode::Lq,
             0x1F => Opcode::Sq,
             _ => Opcode::Unknown,
@@ -1636,6 +1684,8 @@ mod tests {
             ((0x3F << 26) | (4 << 21) | (5 << 16) | 0xFFF8, Opcode::Sd),
             ((0x1E << 26) | (4 << 21) | (5 << 16) | 8, Opcode::Lq),
             ((0x1F << 26) | (4 << 21) | (5 << 16) | 12, Opcode::Sq),
+            ((0x36 << 26) | (4 << 21) | (5 << 16) | 8, Opcode::Lqc2),
+            ((0x3E << 26) | (4 << 21) | (5 << 16) | 12, Opcode::Sqc2),
         ];
         for (word, expected) in cases {
             let decoded = decode(word, 0x1000);
@@ -2140,7 +2190,7 @@ mod tests {
             ((word & !0x3F) | 0x09, "MMI2 group"),
             ((word & !(0x1F << 6)) | (0x19 << 6), "MMI0 selector 0x19"),
             ((word & !(0x1F << 6)) | (0x1B << 6), "MMI0 selector 0x1B"),
-            ((word & !(0x3F << 26)) | (0x3E << 26), "primary opcode"),
+            ((word & !(0x3F << 26)) | (0x34 << 26), "primary opcode"),
         ] {
             assert_eq!(decode(candidate, 0).opcode, Opcode::Unknown, "{label}");
         }
@@ -3157,6 +3207,38 @@ mod tests {
     }
 
     #[test]
+    fn effects_track_cop2_vf_dependencies() {
+        // VF0 reads the hardwired constant, so bit 0 is a read dependency.
+        // Writes to VF0 are ignored, so write mask excludes bit 0.
+        // rs=$a0=4, rt=5 (vf5), imm=0x10
+        let lqc2_vf5 = decode(0xD885_0010, 0).effects();
+        assert_eq!(lqc2_vf5.gpr_read_mask, 1 << 4); // rs=$a0=4
+        assert_eq!(lqc2_vf5.vf_write_mask, 1 << 5);
+        assert_eq!(lqc2_vf5.vf_read_mask, 0);
+        assert_eq!(lqc2_vf5.memory, MemoryEffect::Read);
+        assert!(lqc2_vf5.may_raise_exception);
+
+        // LQC2 $vf0, 0x10($a0): write to VF0 is ignored -> write mask 0.
+        let lqc2_vf0_const = decode(0xD880_0010, 0).effects();
+        assert_eq!(lqc2_vf0_const.vf_write_mask, 0);
+        assert!(lqc2_vf0_const.may_raise_exception);
+
+        // SQC2 $vf5, 0x10($a0): reads VF5.
+        let sqc2_vf5 = decode(0xF885_0010, 0).effects();
+        assert_eq!(sqc2_vf5.gpr_read_mask, 1 << 4);
+        assert_eq!(sqc2_vf5.vf_read_mask, 1 << 5);
+        assert_eq!(sqc2_vf5.vf_write_mask, 0);
+        assert_eq!(sqc2_vf5.memory, MemoryEffect::Write);
+        assert!(sqc2_vf5.may_raise_exception);
+
+        // SQC2 $vf0, 0x10($a0): reads VF0 (hardwired constant).
+        let sqc2_vf0_const = decode(0xF880_0010, 0).effects();
+        assert_eq!(sqc2_vf0_const.gpr_read_mask, 1 << 4);
+        assert_eq!(sqc2_vf0_const.vf_read_mask, 1 << 0);
+        assert!(sqc2_vf0_const.may_raise_exception);
+    }
+
+    #[test]
     fn decodes_sync_movn_movz_cache_and_pref() {
         // SYNC with stype=0: 0x0000000F
         let sync = decode(0x0000_000F, 0x1000);
@@ -3263,6 +3345,71 @@ mod tests {
         assert!(!eret.has_delay_slot);
         let eret_eff = eret.effects();
         assert_eq!(eret_eff.control_flow, ControlFlowEffect::Trap);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi0_pext5_and_ppac5_with_reserved_rs() {
+        let pext5_word = (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1E << 6) | 0x08;
+        assert_eq!(pext5_word, 0x7002_1F88);
+        let pext5 = decode(pext5_word, 0xA000);
+        assert_eq!(pext5.opcode, Opcode::ParallelExtend5);
+        assert_eq!(pext5.opcode.mnemonic(), "pext5");
+        assert_eq!(encoding_family(pext5_word), EncodingFamily::Mmi0);
+        assert_eq!((pext5.rs, pext5.rt, pext5.rd), (0, 2, 3));
+        let effects = pext5.effects();
+        assert_eq!(effects.gpr_read_mask, 1 << 2);
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        assert!(!effects.reads_sa);
+        assert!(!effects.may_raise_exception);
+        assert!(!effects.unknown);
+
+        let ppac5_word = (0x1C << 26) | (1 << 16) | (4 << 11) | (0x1F << 6) | 0x08;
+        assert_eq!(ppac5_word, 0x7001_27C8);
+        let ppac5 = decode(ppac5_word, 0xA004);
+        assert_eq!(ppac5.opcode, Opcode::ParallelPack5);
+        assert_eq!(ppac5.opcode.mnemonic(), "ppac5");
+        assert_eq!(encoding_family(ppac5_word), EncodingFamily::Mmi0);
+        assert_eq!((ppac5.rs, ppac5.rt, ppac5.rd), (0, 1, 4));
+        assert_eq!(ppac5.effects().gpr_read_mask, 1 << 1);
+        assert_eq!(ppac5.effects().gpr_write_mask, 1 << 4);
+
+        for instruction in [pext5, ppac5] {
+            assert_eq!(
+                instruction.effects(),
+                InstructionEffects {
+                    gpr_read_mask: 1 << instruction.rt,
+                    gpr_write_mask: 1 << instruction.rd,
+                    ..InstructionEffects::none()
+                }
+            );
+            assert!(!instruction.has_delay_slot);
+        }
+        // Pin the generated round-trip fixture: rd is r7, not r6.
+        let round_trip = decode(0x7003_3FC8, 0xD004);
+        assert_eq!(round_trip.opcode, Opcode::ParallelPack5);
+        assert_eq!((round_trip.rs, round_trip.rt, round_trip.rd), (0, 3, 7));
+        // The same selector in MMI2 is legal PEXEW, not an unknown word.
+        assert_eq!(
+            decode((pext5_word & !0x3F) | 0x09, 0).opcode,
+            Opcode::ParallelExchangeEvenWord
+        );
+        assert_eq!(
+            decode((ppac5_word & !0x3F) | 0x09, 0).opcode,
+            Opcode::ParallelRotate3Words
+        );
+        for rs in 1..32 {
+            assert_eq!(decode(pext5_word | (rs << 21), 0).opcode, Opcode::Unknown);
+            assert_eq!(decode(ppac5_word | (rs << 21), 0).opcode, Opcode::Unknown);
+        }
+        for word in [pext5_word, ppac5_word] {
+            assert_eq!(decode(word & !(31 << 16), 0).effects().gpr_read_mask, 0);
+            assert_eq!(decode(word & !(31 << 11), 0).effects().gpr_write_mask, 0);
+        }
+        assert_eq!(
+            decode((pext5_word & !(0x1F << 6)) | (0x1D << 6), 0).opcode,
+            Opcode::Unknown
+        );
     }
 
     #[test]

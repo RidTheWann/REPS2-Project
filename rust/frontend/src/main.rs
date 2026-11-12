@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use reps2_frontend::analysis::{self, AnalysisLimits};
-use reps2_frontend::build_manifest::{BuildManifest, DiscoveryStats, ProgramStats};
+use reps2_frontend::build_manifest::{
+    BuildManifest, DiscoveryStats, ManifestRelocatedCode, ProgramStats,
+};
 use reps2_frontend::codegen;
 use reps2_frontend::control_codegen;
 use reps2_frontend::control_ir;
 use reps2_frontend::coverage;
+use reps2_frontend::developer;
+use reps2_frontend::diagnostics;
 use reps2_frontend::digest;
 use reps2_frontend::elf::{self, ParseLimits};
+use reps2_frontend::elf_compat;
 use reps2_frontend::ir;
 use reps2_frontend::iso9660::{self, Iso9660};
 use reps2_frontend::library;
@@ -39,6 +44,58 @@ fn read_input(path: &Path) -> Result<Vec<u8>, String> {
         return Err("input file exceeds the 512 MiB safety limit".to_owned());
     }
     fs::read(path).map_err(|error| format!("cannot read input file: {error}"))
+}
+
+fn print_compatibility_report(image: &elf::Image) {
+    let report = elf_compat::analyze_compatibility(image);
+    println!("Compatibility report (ELF metadata only; not a boot or playability result)");
+    println!("  ELF format valid: {}", report.format_valid);
+    println!(
+        "  Architecture identity recognized: {}",
+        report.architectural_identity_recognized
+    );
+    println!("  PS2-compatible metadata: {}", report.ps2_compatible);
+    println!("  Unresolved metadata: {}", report.has_unresolved);
+    for finding in &report.diagnostics {
+        println!("  Severity: {:?}", finding.severity);
+        println!("  Diagnostic code: {}", finding.code);
+        println!("  Message: {}", finding.message);
+        println!("  Explanation: {}", finding.explanation);
+        println!("  Blocked stage: {:?}", finding.blocks_stage);
+    }
+}
+
+fn validate_parent_iso(path: &Path, input_elf_sha256: &[u8; 32]) -> Result<String, String> {
+    let mut file = File::open(path)
+        .map_err(|error| format!("cannot open parent ISO {}: {error}", path.display()))?;
+    let iso_sha256 = digest::sha256_reader(&mut file)
+        .map_err(|error| format!("cannot hash parent ISO {}: {error}", path.display()))?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("cannot rewind parent ISO {}: {error}", path.display()))?;
+    let mut iso = Iso9660::open(file)
+        .map_err(|error| format!("invalid parent ISO {}: {error}", path.display()))?;
+    let boot_path = iso
+        .boot_executable_path()
+        .map_err(|error| format!("cannot resolve boot ELF in {}: {error}", path.display()))?
+        .ok_or_else(|| {
+            format!(
+                "parent ISO {} has no SYSTEM.CNF BOOT2 or BOOT target",
+                path.display()
+            )
+        })?;
+    let boot_elf = iso
+        .read_file(&boot_path, iso9660::MAX_BOOT_EXECUTABLE_BYTES)
+        .map_err(|error| format!("cannot extract boot ELF {boot_path} from parent ISO: {error}"))?;
+    let boot_elf_sha256 = digest::sha256_bytes(&boot_elf);
+    if &boot_elf_sha256 != input_elf_sha256 {
+        return Err(format!(
+            "input ELF SHA-256 {} does not match extracted boot ELF {boot_path} SHA-256 {} from parent ISO {}",
+            digest::hex_digest(input_elf_sha256),
+            digest::hex_digest(&boot_elf_sha256),
+            path.display()
+        ));
+    }
+    Ok(digest::hex_digest(&iso_sha256))
 }
 
 fn elf_info(path: &Path) -> Result<(), String> {
@@ -302,6 +359,8 @@ fn elf_info(path: &Path) -> Result<(), String> {
         );
     }
 
+    print_compatibility_report(&image);
+
     if !image.is_mips() {
         eprintln!("Warning: ELF machine is not EM_MIPS; this is not a supported PS2 EE target.");
     }
@@ -380,32 +439,57 @@ fn decode_word(word_text: &str, pc_text: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-fn analyze_elf(path: &Path, options: AnalyzeOptions) -> Result<(), String> {
-    let bytes = read_input(path)?;
-    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
-    if !image.is_mips() {
-        return Err("ELF machine is not EM_MIPS; refusing PS2 EE analysis".to_owned());
+fn run_pipeline_stage<T>(
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+    stage_id: &'static str,
+    subsystem: &'static str,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    match session.as_deref_mut() {
+        Some(logger) => logger.run_stage(stage_id, subsystem, operation),
+        None => operation(),
     }
+}
+
+fn analyze_elf(
+    path: &Path,
+    options: AnalyzeOptions,
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
+    let bytes = run_pipeline_stage(session, "input.read", "io", || read_input(path))?;
+    let image = run_pipeline_stage(session, "elf.parse", "elf", || {
+        elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())
+    })?;
+    print_compatibility_report(&image);
+    run_pipeline_stage(session, "elf.target_validation", "elf", || {
+        if !image.is_mips() {
+            Err("ELF machine is not EM_MIPS; refusing PS2 EE analysis".to_owned())
+        } else {
+            Ok(())
+        }
+    })?;
 
     let limits = options.limits.to_limits();
-    let (graph, discovery) = if options.discover {
-        let analysis::DiscoveryAnalysis {
-            graph,
-            discovery,
-            accepted_roots,
-            skipped_roots,
-            skipped_blocks,
-        } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
-            .map_err(analysis_error_message)?;
-        (
-            graph,
-            Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
-        )
-    } else {
-        let graph =
-            analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
-        (graph, None)
-    };
+    let (graph, discovery) = run_pipeline_stage(session, "cfg.discover", "analysis", || {
+        if options.discover {
+            let analysis::DiscoveryAnalysis {
+                graph,
+                discovery,
+                accepted_roots,
+                skipped_roots,
+                skipped_blocks,
+            } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
+                .map_err(analysis_error_message)?;
+            Ok((
+                graph,
+                Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
+            ))
+        } else {
+            let graph =
+                analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
+            Ok((graph, None))
+        }
+    })?;
     let edges = graph.edges();
 
     println!("REPS2 reachable executable analysis");
@@ -416,10 +500,18 @@ fn analyze_elf(path: &Path, options: AnalyzeOptions) -> Result<(), String> {
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
         println!("  Root discovery: enabled (static scan of executable bytes)");
         println!("    Scanned words: {}", found.scanned_words);
+        println!(
+            "    Scanned data-pointer words: {}",
+            found.scanned_data_words
+        );
         println!("    JAL call-target roots: {}", found.call_targets.len());
         println!(
             "    Stack-prologue roots: {}",
             found.prologue_candidates.len()
+        );
+        println!(
+            "    Data-pointer roots: {}",
+            found.data_pointer_candidates.len()
         );
         println!("    Distinct candidates: {}", found.candidate_count());
         println!("    Truncated by limit: {}", found.truncated);
@@ -476,13 +568,24 @@ fn analyze_elf(path: &Path, options: AnalyzeOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn profile_elf(path: &Path) -> Result<(), String> {
-    let bytes = read_input(path)?;
-    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
-    if !image.is_mips() {
-        return Err("ELF machine is not EM_MIPS; refusing PS2 EE profiling".to_owned());
-    }
-    let profile = coverage::profile(&image, &bytes).map_err(|error| error.to_string())?;
+fn profile_elf(
+    path: &Path,
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
+    let bytes = run_pipeline_stage(session, "input.read", "io", || read_input(path))?;
+    let image = run_pipeline_stage(session, "elf.parse", "elf", || {
+        elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())
+    })?;
+    run_pipeline_stage(session, "elf.target_validation", "elf", || {
+        if !image.is_mips() {
+            Err("ELF machine is not EM_MIPS; refusing PS2 EE profiling".to_owned())
+        } else {
+            Ok(())
+        }
+    })?;
+    let profile = run_pipeline_stage(session, "coverage.profile", "coverage", || {
+        coverage::profile(&image, &bytes).map_err(|error| error.to_string())
+    })?;
 
     let percentage = |count: u64| {
         if profile.scanned_words == 0 {
@@ -717,46 +820,204 @@ fn extract_boot_elf(input: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result<(), String> {
-    let bytes = read_input(input)?;
-    let input_digest = digest::sha256_bytes(&bytes);
-    let image = elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())?;
-    if !image.is_mips() {
-        return Err("ELF machine is not EM_MIPS; refusing PS2 EE compilation".to_owned());
+/// Extracts the ISO's verified SYSTEM.CNF boot ELF and prepares a complete
+/// native-module project in a new output directory. The ISO remains read-only;
+/// the output directory is never reused or overwritten.
+fn recompile_iso(
+    input: &Path,
+    output_dir: &Path,
+    mut options: RecompileOptions,
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
+    if output_dir.file_name().is_none() {
+        return Err("output directory must name a new child directory".to_owned());
+    }
+    if output_dir.exists() {
+        return Err(format!(
+            "output directory already exists; refusing to overwrite: {}",
+            output_dir.display()
+        ));
     }
 
-    let limits = options.limits.to_limits();
-    let ram_image = elf::build_main_ram_image(&bytes, &image)
-        .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))?;
-    let (graph, discovery) = if options.discover {
-        let analysis::DiscoveryAnalysis {
-            graph,
-            discovery,
-            accepted_roots,
-            skipped_roots,
-            skipped_blocks,
-        } = analysis::discover_elf_with_discovery(&image, &bytes, limits)
-            .map_err(analysis_error_message)?;
-        (
-            graph,
-            Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
+    let input = input
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve input ISO path: {error}"))?;
+    if !input.is_file() {
+        return Err(format!(
+            "input ISO is not a regular file: {}",
+            input.display()
+        ));
+    }
+    let parent = output_dir
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "cannot create output parent directory {}: {error}",
+            parent.display()
         )
-    } else {
-        let graph =
-            analysis::discover_elf(&image, &bytes, limits).map_err(analysis_error_message)?;
-        (graph, None)
-    };
-    let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
-    let units = control_codegen::emit_cpp_units_with_entry(
-        &program,
-        image.entry_point,
-        options.translation_units,
-    )
-    .map_err(|error| error.to_string())?;
+    })?;
+    fs::create_dir(output_dir).map_err(|error| {
+        format!(
+            "cannot create fresh build output directory {}: {error}",
+            output_dir.display()
+        )
+    })?;
+
+    // The ISO itself is the provenance root for this command; callers must not
+    // be able to bind an unrelated parent ISO or disable native-module output.
+    options.native_build = true;
+    options.parent_iso = Some(input.clone());
+    let boot_elf = output_dir.join("boot.elf");
+    let translation = output_dir.join("boot.cpp");
+
+    let result = (|| {
+        run_pipeline_stage(session, "iso.extract_boot_elf", "iso9660", || {
+            extract_boot_elf(&input, &boot_elf)
+        })?;
+        compile_elf(&boot_elf, &translation, options, session)
+    })();
+
+    if let Err(error) = result {
+        return match fs::remove_dir_all(output_dir) {
+            Ok(()) => Err(format!(
+                "{error}; removed incomplete output directory {}",
+                output_dir.display()
+            )),
+            Err(cleanup_error) => Err(format!(
+                "{error}; also failed to remove incomplete output directory {}: {cleanup_error}",
+                output_dir.display()
+            )),
+        };
+    }
+
+    println!("Prepared ISO-to-native REPS2 build");
+    println!("  Source ISO: {}", input.display());
+    println!("  Output directory: {}", output_dir.display());
+    println!("  Boot ELF: {}", boot_elf.display());
+    println!("  Generated C++: {}", translation.display());
+    println!(
+        "  Initial EE RAM: {}",
+        output_dir.join("boot.ram.bin").display()
+    );
+    println!(
+        "  Manifest: {}",
+        output_dir.join("boot.manifest.json").display()
+    );
+    println!(
+        "  Native module project: {}",
+        output_dir.join("boot.native").display()
+    );
+    println!("  Playable: no — native preparation is not a retail-title boot result");
+    Ok(())
+}
+
+fn compile_elf(
+    input: &Path,
+    output: &Path,
+    options: RecompileOptions,
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
+    let bytes = run_pipeline_stage(session, "input.read", "io", || read_input(input))?;
+    let input_digest = digest::sha256_bytes(&bytes);
+    let image = run_pipeline_stage(session, "elf.parse", "elf", || {
+        elf::parse(&bytes, ParseLimits::default()).map_err(|error| error.to_string())
+    })?;
+    run_pipeline_stage(session, "elf.target_validation", "elf", || {
+        if !image.is_mips() {
+            Err("ELF machine is not EM_MIPS; refusing PS2 EE compilation".to_owned())
+        } else {
+            Ok(())
+        }
+    })?;
+    let parent_iso_sha256 = options
+        .parent_iso
+        .as_deref()
+        .map(|path| validate_parent_iso(path, &input_digest))
+        .transpose()?;
+
+    let limits = options.limits.to_limits();
+    let ram_image = run_pipeline_stage(session, "ee.ram_image", "ee-memory", || {
+        elf::build_main_ram_image(&bytes, &image)
+            .map_err(|error| format!("cannot construct initial EE main-RAM image: {error}"))
+    })?;
+
+    // Runtime-copied code is data in the input image. Read it from the initial
+    // RAM image at its source virtual address and hand it to analysis as an
+    // executable root at the destination. The RAM image itself is unchanged:
+    // the guest's own copy stays an observable side effect.
+    let relocated_regions =
+        run_pipeline_stage(session, "analysis.relocated_code", "analysis", || {
+            let mut relocated_regions = Vec::new();
+            for spec in &options.relocated_code {
+                let physical = elf::ee_main_ram_physical_address(spec.source).ok_or_else(|| {
+                    format!(
+                        "relocated-code source 0x{:08X} is not mapped in EE main RAM",
+                        spec.source
+                    )
+                })?;
+                let start = physical as usize;
+                let size = spec.size as usize;
+                if start + size > ram_image.bytes.len() {
+                    return Err(format!(
+                        "relocated-code source 0x{:08X}+0x{:X} exceeds the EE main-RAM image",
+                        spec.source, spec.size
+                    ));
+                }
+                relocated_regions.push(analysis::RelocatedCodeRegion {
+                    destination: spec.destination,
+                    bytes: ram_image.bytes[start..start + size].to_vec(),
+                });
+            }
+            Ok(relocated_regions)
+        })?;
+
+    let (graph, discovery) = run_pipeline_stage(session, "cfg.discover", "analysis", || {
+        if options.discover {
+            let analysis::DiscoveryAnalysis {
+                graph,
+                discovery,
+                accepted_roots,
+                skipped_roots,
+                skipped_blocks,
+            } = analysis::discover_elf_with_discovery_and_relocated(
+                &image,
+                &bytes,
+                limits,
+                &relocated_regions,
+            )
+            .map_err(analysis_error_message)?;
+            Ok((
+                graph,
+                Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
+            ))
+        } else {
+            let graph =
+                analysis::discover_elf_with_relocated(&image, &bytes, limits, &relocated_regions)
+                    .map_err(analysis_error_message)?;
+            Ok((graph, None))
+        }
+    })?;
+    let program = run_pipeline_stage(session, "ir.lift", "ir", || {
+        control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())
+    })?;
+    let units = run_pipeline_stage(session, "codegen.emit_cpp", "codegen", || {
+        control_codegen::emit_cpp_units_with_entry(
+            &program,
+            image.entry_point,
+            options.translation_units,
+        )
+        .map_err(|error| error.to_string())
+    })?;
     let ram_output = output.with_extension("ram.bin");
-    fs::write(&ram_output, &ram_image.bytes)
-        .map_err(|error| format!("cannot write initial EE RAM image: {error}"))?;
-    let parts = write_translation_units(output, &units)?;
+    run_pipeline_stage(session, "artifact.write_ram", "artifacts", || {
+        fs::write(&ram_output, &ram_image.bytes)
+            .map_err(|error| format!("cannot write initial EE RAM image: {error}"))
+    })?;
+    let parts = run_pipeline_stage(session, "artifact.write_cpp", "artifacts", || {
+        write_translation_units(output, &units)
+    })?;
 
     let discovery_stats =
         discovery
@@ -766,7 +1027,9 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
                     candidate_count: found.candidate_count(),
                     call_target_count: found.call_targets.len(),
                     prologue_candidate_count: found.prologue_candidates.len(),
+                    data_pointer_candidate_count: found.data_pointer_candidates.len(),
                     scanned_words: found.scanned_words,
+                    scanned_data_words: found.scanned_data_words,
                     truncated: found.truncated,
                     accepted_root_count: *accepted_roots,
                     skipped_root_count: skipped_roots.len(),
@@ -801,24 +1064,45 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
         part_outputs: part_outputs.clone(),
         ram_output: ram_output_name.clone(),
         ram_image_bytes: ram_image.bytes.len(),
+        relocated_code: options
+            .relocated_code
+            .iter()
+            .map(|spec| ManifestRelocatedCode {
+                destination: spec.destination,
+                source: spec.source,
+                size: spec.size,
+            })
+            .collect(),
     };
     let manifest_output = output.with_extension("manifest.json");
-    fs::write(&manifest_output, manifest.to_json()).map_err(|error| {
-        format!(
-            "cannot write build manifest to {}: {error}",
-            manifest_output.display()
-        )
+    run_pipeline_stage(session, "artifact.write_manifest", "artifacts", || {
+        fs::write(&manifest_output, manifest.to_json()).map_err(|error| {
+            format!(
+                "cannot write build manifest to {}: {error}",
+                manifest_output.display()
+            )
+        })
     })?;
 
     let native_directory = if options.native_build {
         let mut sources = Vec::with_capacity(part_outputs.len() + 1);
         sources.push(primary_output.clone());
         sources.extend(part_outputs.iter().cloned());
-        Some(write_native_project(
-            output,
-            &sources,
-            Some(&ram_output_name),
-            options.probe_budget,
+        Some(run_pipeline_stage(
+            session,
+            "native.project",
+            "native-build",
+            || {
+                write_native_project(
+                    output,
+                    &sources,
+                    Some(&ram_output_name),
+                    options.probe_budget,
+                    options.hle_syscalls,
+                    Some(&manifest.input_sha256),
+                    parent_iso_sha256.as_deref(),
+                )
+            },
         )?)
     } else {
         None
@@ -838,8 +1122,22 @@ fn compile_elf(input: &Path, output: &Path, options: RecompileOptions) -> Result
     if let Some(directory) = &native_directory {
         println!("  Native build project: {}", directory.display());
     }
+    if let (Some(path), Some(hash)) = (options.parent_iso.as_deref(), parent_iso_sha256.as_deref())
+    {
+        println!("  Parent ISO: {}", path.display());
+        println!("  Parent ISO SHA-256: {hash}");
+    }
     println!("  ELF entry point: 0x{:08X}", image.entry_point);
     println!("  PT_LOAD segments placed: {}", ram_image.segments.len());
+    if !relocated_regions.is_empty() {
+        println!("  Relocated code regions: {}", relocated_regions.len());
+        for spec in &options.relocated_code {
+            println!(
+                "    0x{:08X} <- 0x{:08X} (0x{:X} bytes)",
+                spec.destination, spec.source, spec.size
+            );
+        }
+    }
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
         println!(
             "  Root discovery: enabled ({} candidate(s), {accepted_roots} accepted, {} candidate(s) skipped, {} heuristic block(s) skipped)",
@@ -988,13 +1286,26 @@ fn parse_analyze_options(arguments: &[String]) -> Result<AnalyzeOptions, String>
     Ok(options)
 }
 
-/// Parsed `recompile-elf` options.
+/// A runtime-copied code image declared on the command line. `source` is a
+/// virtual address inside an input PT_LOAD; `size` bytes are copied from the
+/// initial RAM image and analysed as code at `destination`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RelocatedCodeSpec {
+    destination: u32,
+    source: u32,
+    size: u32,
+}
+
+/// Parsed `recompile-elf` options.
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct RecompileOptions {
     discover: bool,
     translation_units: usize,
     native_build: bool,
     probe_budget: u64,
+    hle_syscalls: bool,
+    relocated_code: Vec<RelocatedCodeSpec>,
+    parent_iso: Option<PathBuf>,
     limits: LimitOptions,
 }
 
@@ -1005,9 +1316,44 @@ impl Default for RecompileOptions {
             translation_units: 1,
             native_build: false,
             probe_budget: 0,
+            hle_syscalls: false,
+            relocated_code: Vec::new(),
+            parent_iso: None,
             limits: LimitOptions::default(),
         }
     }
+}
+
+/// Parses `destination:source:size`, all hexadecimal. The destination must be
+/// word-aligned and the size a nonzero multiple of four.
+fn parse_relocated_code(value: &str) -> Result<RelocatedCodeSpec, String> {
+    let parts: Vec<&str> = value.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "invalid relocated-code spec {value:?}; expected destination:source:size in hexadecimal"
+        ));
+    }
+    let destination = parse_hex(parts[0])
+        .map_err(|error| format!("invalid relocated-code destination {value:?}: {error}"))?;
+    let source = parse_hex(parts[1])
+        .map_err(|error| format!("invalid relocated-code source {value:?}: {error}"))?;
+    let size = parse_hex(parts[2])
+        .map_err(|error| format!("invalid relocated-code size {value:?}: {error}"))?;
+    if destination & 3 != 0 {
+        return Err(format!(
+            "relocated-code destination {value:?} is not word-aligned"
+        ));
+    }
+    if size == 0 || size & 3 != 0 {
+        return Err(format!(
+            "relocated-code size {value:?} must be a nonzero multiple of four bytes"
+        ));
+    }
+    Ok(RelocatedCodeSpec {
+        destination,
+        source,
+        size,
+    })
 }
 
 fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, String> {
@@ -1032,6 +1378,10 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
                 options.native_build = true;
                 index += 1;
             }
+            "--hle-syscalls" => {
+                options.hle_syscalls = true;
+                index += 1;
+            }
             "--probe-budget" => {
                 let value = arguments
                     .get(index + 1)
@@ -1048,8 +1398,25 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
                 parse_limit_option(flag, value, &mut options.limits)?;
                 index += 2;
             }
+            "--relocated-code" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--relocated-code requires a value".to_owned())?;
+                options.relocated_code.push(parse_relocated_code(value)?);
+                index += 2;
+            }
+            "--parent-iso" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--parent-iso requires a value".to_owned())?;
+                options.parent_iso = Some(PathBuf::from(value));
+                index += 2;
+            }
             other => return Err(format!("unknown recompile-elf option {other:?}")),
         }
+    }
+    if options.parent_iso.is_some() && !options.native_build {
+        return Err("--parent-iso requires --native-build".to_owned());
     }
     Ok(options)
 }
@@ -1060,6 +1427,7 @@ struct FixtureOptions {
     translation_units: usize,
     native_build: bool,
     probe_budget: u64,
+    hle_syscalls: bool,
 }
 
 impl Default for FixtureOptions {
@@ -1068,6 +1436,7 @@ impl Default for FixtureOptions {
             translation_units: 1,
             native_build: false,
             probe_budget: 0,
+            hle_syscalls: false,
         }
     }
 }
@@ -1088,6 +1457,10 @@ fn parse_fixture_options(arguments: &[String]) -> Result<FixtureOptions, String>
             }
             "--native-build" => {
                 options.native_build = true;
+                index += 1;
+            }
+            "--hle-syscalls" => {
+                options.hle_syscalls = true;
                 index += 1;
             }
             "--probe-budget" => {
@@ -1218,6 +1591,9 @@ fn write_native_project(
     sources: &[String],
     ram_image: Option<&str>,
     probe_budget: u64,
+    hle_syscalls: bool,
+    input_elf_sha256: Option<&str>,
+    parent_iso_sha256: Option<&str>,
 ) -> Result<PathBuf, String> {
     let (stem, _) = generated_output_parts(output);
     let directory = output.with_file_name(format!("{stem}.native"));
@@ -1228,7 +1604,15 @@ fn write_native_project(
         )
     })?;
 
-    let project = native_build::render(&stem, sources, ram_image, probe_budget);
+    let project = native_build::render_with_game_identity(
+        &stem,
+        sources,
+        ram_image,
+        probe_budget,
+        hle_syscalls,
+        input_elf_sha256,
+        parent_iso_sha256,
+    );
     fs::write(directory.join("CMakeLists.txt"), project.cmake_lists).map_err(|error| {
         format!(
             "cannot write native build CMakeLists.txt in {}: {error}",
@@ -1238,6 +1622,12 @@ fn write_native_project(
     fs::write(directory.join("probe_main.cpp"), project.probe_source).map_err(|error| {
         format!(
             "cannot write native build probe in {}: {error}",
+            directory.display()
+        )
+    })?;
+    fs::write(directory.join("rg_reps2_module.cpp"), project.module_source).map_err(|error| {
+        format!(
+            "cannot write RG REPS2 ENGINE module wrapper in {}: {error}",
             directory.display()
         )
     })?;
@@ -1586,8 +1976,76 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x03E0_0008,                                  // jr ra
         0x0000_0000,                                  // return delay slot
     ];
+    // HLE syscall fixtures. The EE kernel service number lives in $v1 (GPR[3]),
+    // not in the instruction, so the tests set it before execution.
+    let hle_syscall = [
+        0x0000_000C, // syscall: service number from $v1
+        0x2402_0001, // addiu v0, zero, 1: proves execution resumed past the trap
+        0x03E0_0008, // jr ra
+        0x0000_0000, // return delay slot
+    ];
+    let hle_unhandled_syscall = [
+        0x0000_000C, // syscall: service number with no host handler
+        0x2402_0001, // addiu v0, zero, 1: unreachable when the service is missing
+    ];
+    let hle_delay_slot_syscall = [
+        (0x04 << 26) | (8 << 21) | 4, // beq t0, zero, 0xE214
+        0x0000_000C,                  // delay slot: syscall
+        0x2402_0007,                  // not-taken path: addiu v0, zero, 7
+        0x03E0_0008,                  // not-taken return
+        0x0000_0000,                  // return delay slot
+        0x2402_0009,                  // taken path: addiu v0, zero, 9 (resume point)
+        0x03E0_0008,                  // taken return
+        0x0000_0000,                  // return delay slot
+    ];
+    let hle_setup_heap = [
+        0x0000_000C, // syscall: SetupHeap service number from $v1
+        0x2402_0001, // addiu v0, zero, 1: proves execution resumed past the trap
+        0x03E0_0008, // jr ra
+        0x0000_0000, // return delay slot
+    ];
+    // The semaphore fixture returns straight to $ra so $v0 still holds whatever
+    // the service decided, which is the value these tests assert on.
+    let hle_create_sema = [
+        0x0000_000C, // syscall: CreateSema service number from $v1
+        0x03E0_0008, // jr ra: no register write hides the service result
+        0x0000_0000, // return delay slot
+    ];
+    let hle_set_syscall = [
+        0x0000_000C, // syscall: SetSyscall service number from $v1
+        0x03E0_0008, // jr ra: no register write hides the void result
+        0x0000_0000, // return delay slot
+    ];
+    // A guest routine installed through SetSyscall (0x74): it receives the
+    // caller's $a0..$a3 unchanged, computes its own result in $v0, and returns
+    // through $ra. REPS2 reaches it through the normal dispatcher; $ra holds
+    // the syscall-return sentinel so the boundary completes back in HLE.
+    let hle_syscall_handler = [
+        0x2402_002A, // addiu v0, zero, 42: the handler's service result
+        0x03E0_0008, // jr ra: back to the HLE return sentinel
+        0x0000_0000, // return delay slot
+    ];
+    // A caller that reaches a registered slot through an ordinary SYSCALL; the
+    // HLE layer diverts it to the guest handler above, then execution continues
+    // at the instruction after the trap with the caller's context restored.
+    let hle_call_registered_handler = [
+        0x0000_000C, // syscall: service number from $v1
+        0x03E0_0008, // jr ra: back to the caller with the restored context
+        0x0000_0000, // return delay slot
+    ];
 
+    // Color conversion in a normal block, an annulled/taken likely delay,
+    // and a return delay slot. Shared by single- and split-unit native tests.
+    let mmi_color = [
+        0x7002_1F88, // pext5 r3, r2
+        0x5140_0002, // beql r10, zero, 0xD210
+        0x7003_27C8, // ppac5 r4, r3 (likely delay)
+        0x0000_0000, // fallthrough nop
+        0x03E0_0008, // jr ra
+        0x7001_2FC8, // ppac5 r5, r1 (return delay)
+    ];
     let mut segments = vec![
+        segment(0xD200, &mmi_color),
         segment(0x1000, &branch_and_jump),
         segment(0x2000, &jal_and_return),
         segment(0x3000, &branch_and_link),
@@ -1615,6 +2073,14 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xB200, &break_in_jump_delay),
         segment(0xF000, &eret_return),
         segment(0xCC00, &conditional_trap_delay),
+        segment(0xE000, &hle_syscall),
+        segment(0xE100, &hle_unhandled_syscall),
+        segment(0xE200, &hle_delay_slot_syscall),
+        segment(0xE300, &hle_setup_heap),
+        segment(0xE400, &hle_create_sema),
+        segment(0xE500, &hle_set_syscall),
+        segment(0xE600, &hle_syscall_handler),
+        segment(0xE700, &hle_call_registered_handler),
     ];
     // Each conditional trap is an independent one-instruction segment, so a
     // false predicate retires to an untranslated boundary instead of flowing
@@ -1624,6 +2090,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(base, std::slice::from_ref(word))
     }));
     let mut entries = vec![
+        entry(0xD200, "mmi-color-fixture"),
         entry(0x1000, "branch-fixture"),
         entry(0x2000, "call-fixture"),
         entry(0x3000, "branch-link-fixture"),
@@ -1651,6 +2118,14 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xB200, "jump-trap-delay-slot-fixture"),
         entry(0xF000, "eret-fixture"),
         entry(0xF004, "eret-return-continuation-fixture"),
+        entry(0xE000, "hle-syscall-fixture"),
+        entry(0xE100, "hle-unhandled-syscall-fixture"),
+        entry(0xE200, "hle-delay-slot-syscall-fixture"),
+        entry(0xE300, "hle-setup-heap-fixture"),
+        entry(0xE400, "hle-create-sema-fixture"),
+        entry(0xE500, "hle-set-syscall-fixture"),
+        entry(0xE600, "hle-syscall-handler-fixture"),
+        entry(0xE700, "hle-call-registered-handler-fixture"),
     ];
     entries.extend(
         (0..conditional_traps.len())
@@ -1660,10 +2135,15 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     let mut roots = vec![
         0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200,
         0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
-        0xB000, 0xB100, 0xB200, 0xF000, 0xF004,
+        0xB000, 0xB100, 0xB200, 0xF000, 0xF004, 0xE000, 0xE100, 0xE200, 0xE300, 0xE400, 0xE500,
+        // Keep the continuation PCs as explicit fixture roots as a regression
+        // guard for multi-root analysis; production CFG discovery also reaches
+        // them through its lenient SyscallContinuation edges.
+        0xE004, 0xE104, 0xE304, 0xE404, 0xE504, 0xE600, 0xE604, 0xE700, 0xE704,
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);
+    roots.push(0xD200);
     let graph = analysis::discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
         .map_err(|error| error.to_string())?;
     let program = control_ir::ControlProgram::lift(&graph).map_err(|error| error.to_string())?;
@@ -1683,7 +2163,15 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         let mut sources = Vec::with_capacity(parts.len() + 1);
         sources.push(output_file_name(output));
         sources.extend(parts.iter().map(|part| output_file_name(part)));
-        let directory = write_native_project(output, &sources, None, options.probe_budget)?;
+        let directory = write_native_project(
+            output,
+            &sources,
+            None,
+            options.probe_budget,
+            options.hle_syscalls,
+            None,
+            None,
+        )?;
         println!("  Native build project: {}", directory.display());
     }
     Ok(())
@@ -1726,7 +2214,13 @@ fn usage() {
     println!("REPS2 - PlayStation 2 static recompilation frontend");
     println!();
     println!("Usage:");
+    println!("  reps2 [--dev] [--log-dir <directory>] <command> [command options]");
     println!("  reps2 version");
+    println!("  reps2 dev sessions [--limit N]");
+    println!("  reps2 dev inspect <latest|session-id>");
+    println!("  reps2 dev summary <latest|session-id>");
+    println!("  reps2 dev compare <base> <candidate>");
+    println!("  reps2 dev capabilities");
     println!("  reps2 disc-info <disc-image.iso>");
     println!("  reps2 add-game <disc-image.iso> [--library <directory>]");
     println!("  reps2 extract-boot-elf <disc-image.iso> <output.elf>");
@@ -1736,13 +2230,26 @@ fn usage() {
     );
     println!("  reps2 profile-elf <elf-file>");
     println!(
-        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--probe-budget N] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--parent-iso <disc.iso>] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+    );
+    println!(
+        "  reps2 recompile-iso <disc.iso> <new-output-directory> [--discover] [--tu-count N] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE] [--max-blocks N] [--max-instructions N] [--max-roots N]"
     );
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!(
-        "  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build] [--probe-budget N]"
+        "  reps2 compile-cfg-fixture <output.cpp> [--tu-count N] [--native-build] [--probe-budget N] [--hle-syscalls]"
     );
     println!("  reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...");
+    println!();
+    println!("Global developer options must appear before the command:");
+    println!("  --dev                 enable a session-scoped developer diagnostics capture");
+    println!(
+        "  --log-dir <directory> write diagnostics under an explicit directory (also enables capture)"
+    );
+    println!("A session contains session.log, events.jsonl, and session.json.");
+    println!(
+        "The dev subcommands emit machine-readable JSON to stdout for IDEs and coding agents."
+    );
     println!();
     println!(
         "add-game imports one ISO into the default per-user REPS2 library; --library overrides the location."
@@ -1757,6 +2264,12 @@ fn usage() {
         "extract-boot-elf resolves SYSTEM.CNF BOOT2 (preferred) or BOOT and accepts only MIPS ET_EXEC images."
     );
     println!(
+        "recompile-iso extracts that verified boot ELF, builds its initial EE RAM image, deterministic manifest, C++ translation and RG REPS2 ENGINE shared-module project in a new output directory."
+    );
+    println!(
+        "recompile-iso never overwrites an existing output directory; on failure it removes the incomplete directory. The source ISO is read-only."
+    );
+    println!(
         "recompile-elf emits C++ plus a companion 32 MiB .ram.bin for eligible static EE ET_EXEC images."
     );
     println!(
@@ -1769,10 +2282,16 @@ fn usage() {
         "--tu-count N splits generated C++ into a dispatcher plus N block part files (<stem>.partNNNN.cpp); the default is 1."
     );
     println!(
-        "--native-build writes a deterministic <stem>.native/ CMake project plus a host probe that compiles and runs the emitted units; pass -DREPS2_RUNTIME_INCLUDE=<repo>/runtime/include when configuring it."
+        "--native-build writes a deterministic <stem>.native/ CMake project, host probe and RG REPS2 ENGINE shared-module wrapper; configure with both REPS2_RUNTIME_INCLUDE and REPS2_ENGINE_INCLUDE, then build the probe and DLL/SO target."
     );
     println!(
         "--probe-budget N bakes N as the generated probe's default instruction budget so its CTest executes real guest code; 0 (the default) stops before any instruction runs. The probe prints one trace line: entry, status, final pc, budget, executed, and COP0 cause/epc/status/badvaddr."
+    );
+    println!(
+        "--hle-syscalls enables the runtime EE syscall HLE layer in the generated probe (without it a guest SYSCALL delivers the architectural Level-1 exception). The probe trace then also reports hle, syscalls, hle_handled, hle_number and hle_name; an unimplemented service number stops as status=unhandled_syscall instead of being faked."
+    );
+    println!(
+        "--relocated-code DEST:SOURCE:SIZE (hexadecimal, repeatable) analyses SIZE bytes read from the input image at virtual address SOURCE as executable guest code at DEST. Use it for code a title copies into RAM at run time; the guest's own copy stays observable and the initial RAM image is unchanged."
     );
     println!(
         "--max-blocks/--max-instructions/--max-roots override the default analysis bounds (250000 blocks, 2000000 instructions, 500000 discovered roots). Overrides must be positive and stay below the CLI ceilings."
@@ -1782,8 +2301,85 @@ fn usage() {
     );
 }
 
-fn run() -> Result<(), String> {
-    let arguments: Vec<String> = env::args().collect();
+fn command_diagnostic_subsystem(command: &str) -> &'static str {
+    match command {
+        "disc-info" | "extract-boot-elf" => "iso9660",
+        "add-game" => "library",
+        "elf-info" => "elf",
+        "analyze-elf" => "analysis",
+        "profile-elf" => "coverage",
+        "recompile-elf" | "recompile-iso" => "recompiler",
+        "decode" => "r5900",
+        "compile-cfg-fixture" => "test-fixtures",
+        "compile-words" => "codegen",
+        _ => "cli",
+    }
+}
+
+fn run_tracked_command(
+    arguments: &[String],
+    session: &mut diagnostics::SessionLogger,
+) -> Result<(), String> {
+    let command = arguments.get(1).map(String::as_str).unwrap_or("help");
+    let subsystem = command_diagnostic_subsystem(command);
+    session
+        .record(
+            "info",
+            "pipeline",
+            subsystem,
+            "command.started",
+            "REPS2 command execution started",
+            &[("command", command)],
+        )
+        .map_err(|error| format!("cannot write command-start diagnostic event: {error}"))?;
+
+    let result = {
+        let mut capture = Some(&mut *session);
+        run_command_with_session(arguments, &mut capture)
+    };
+    match &result {
+        Ok(()) => session
+            .record(
+                "info",
+                "pipeline",
+                subsystem,
+                "command.succeeded",
+                "REPS2 command execution completed",
+                &[("command", command)],
+            )
+            .map_err(|error| format!("cannot write command-success diagnostic event: {error}"))?,
+        Err(error) => session
+            .record(
+                "error",
+                "pipeline",
+                subsystem,
+                "command.failed",
+                error,
+                &[
+                    ("command", command),
+                    ("error_code", diagnostics::codes::COMMAND_FAILED),
+                    ("failure_scope", "command"),
+                    ("error", error),
+                ],
+            )
+            .map_err(|log_error| {
+                format!(
+                    "command failed ({error}); cannot write failure diagnostic event: {log_error}"
+                )
+            })?,
+    }
+    result
+}
+
+fn run_command(arguments: &[String]) -> Result<(), String> {
+    let mut session: Option<&mut diagnostics::SessionLogger> = None;
+    run_command_with_session(arguments, &mut session)
+}
+
+fn run_command_with_session(
+    arguments: &[String],
+    session: &mut Option<&mut diagnostics::SessionLogger>,
+) -> Result<(), String> {
     match arguments.get(1).map(String::as_str) {
         Some("version") if arguments.len() == 2 => {
             println!(
@@ -1803,12 +2399,37 @@ fn run() -> Result<(), String> {
         Some("elf-info") if arguments.len() == 3 => elf_info(Path::new(&arguments[2])),
         Some("analyze-elf") if arguments.len() >= 3 => {
             let options = parse_analyze_options(&arguments[3..])?;
-            analyze_elf(Path::new(&arguments[2]), options)
+            analyze_elf(Path::new(&arguments[2]), options, session)
         }
-        Some("profile-elf") if arguments.len() == 3 => profile_elf(Path::new(&arguments[2])),
+        Some("profile-elf") if arguments.len() == 3 => {
+            profile_elf(Path::new(&arguments[2]), session)
+        }
         Some("recompile-elf") if arguments.len() >= 4 => {
             let options = parse_recompile_options(&arguments[4..])?;
-            compile_elf(Path::new(&arguments[2]), Path::new(&arguments[3]), options)
+            compile_elf(
+                Path::new(&arguments[2]),
+                Path::new(&arguments[3]),
+                options,
+                session,
+            )
+        }
+        Some("recompile-iso") if arguments.len() >= 4 => {
+            if arguments[4..]
+                .iter()
+                .any(|argument| argument == "--parent-iso")
+            {
+                return Err(
+                    "--parent-iso is implicit for recompile-iso and must not be supplied"
+                        .to_owned(),
+                );
+            }
+            let options = parse_recompile_options(&arguments[4..])?;
+            recompile_iso(
+                Path::new(&arguments[2]),
+                Path::new(&arguments[3]),
+                options,
+                session,
+            )
         }
         Some("compile-cfg-fixture") if arguments.len() >= 3 => {
             let options = parse_fixture_options(&arguments[3..])?;
@@ -1824,10 +2445,113 @@ fn run() -> Result<(), String> {
             usage();
             Ok(())
         }
+        Some("help") if arguments.len() == 2 => {
+            usage();
+            Ok(())
+        }
         _ => {
             usage();
             Err("invalid command-line arguments".to_owned())
         }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct GlobalOptions {
+    developer_mode: bool,
+    log_dir: Option<PathBuf>,
+}
+
+fn parse_global_options(arguments: &[String]) -> Result<(GlobalOptions, Vec<String>), String> {
+    let mut options = GlobalOptions::default();
+    let mut filtered = Vec::with_capacity(arguments.len());
+    if let Some(program) = arguments.first() {
+        filtered.push(program.clone());
+    }
+
+    let mut index = 1;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--dev" => {
+                options.developer_mode = true;
+                index += 1;
+            }
+            "--log-dir" => {
+                if options.log_dir.is_some() {
+                    return Err("--log-dir may be supplied only once".to_owned());
+                }
+                let value = arguments
+                    .get(index + 1)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "--log-dir requires a directory path".to_owned())?;
+                options.log_dir = Some(PathBuf::from(value));
+                index += 2;
+            }
+            _ => {
+                filtered.extend_from_slice(&arguments[index..]);
+                break;
+            }
+        }
+    }
+
+    Ok((options, filtered))
+}
+
+fn run() -> Result<(), String> {
+    let raw_arguments: Vec<String> = env::args().collect();
+    let (options, arguments) = parse_global_options(&raw_arguments)?;
+
+    // The dev inspection commands must keep stdout as a single JSON document.
+    // Do not create a new diagnostics session while listing/inspecting sessions.
+    if arguments.get(1).is_some_and(|command| command == "dev") {
+        let log_root = match options.log_dir {
+            Some(path) => path,
+            None => diagnostics::default_log_root().map_err(|error| {
+                format!("cannot resolve the REPS2 diagnostics directory: {error}")
+            })?,
+        };
+        return developer::run_command(&arguments[2..], &log_root);
+    }
+
+    if !options.developer_mode && options.log_dir.is_none() {
+        return run_command(&arguments);
+    }
+
+    let log_root = match options.log_dir {
+        Some(path) => path,
+        None => diagnostics::default_log_root()
+            .map_err(|error| format!("cannot resolve the REPS2 diagnostics directory: {error}"))?,
+    };
+    let session_arguments = arguments.get(1..).unwrap_or_default();
+    let mut session = diagnostics::SessionLogger::start(
+        &log_root,
+        session_arguments,
+        reps2_frontend::VERSION,
+        env::consts::OS,
+    )
+    .map_err(|error| format!("cannot start developer diagnostics: {error}"))?;
+
+    println!("Diagnostics session: {}", session.directory().display());
+    if options.developer_mode {
+        println!("Developer diagnostics: enabled");
+    }
+
+    let result = run_tracked_command(&arguments, &mut session);
+    let (outcome, error_text) = match &result {
+        Ok(()) => ("succeeded", None),
+        Err(error) => ("failed", Some(error.as_str())),
+    };
+    let finish_result = session.finish(outcome, error_text);
+
+    match (result, finish_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(command_error), Ok(())) => Err(command_error),
+        (Ok(()), Err(log_error)) => Err(format!(
+            "command completed, but diagnostics could not be finalized: {log_error}"
+        )),
+        (Err(command_error), Err(log_error)) => Err(format!(
+            "{command_error}; additionally, diagnostics could not be finalized: {log_error}"
+        )),
     }
 }
 
@@ -1852,7 +2576,26 @@ mod tests {
         assert_eq!(options.translation_units, 1);
         assert!(!options.discover);
         assert!(!options.native_build);
+        assert_eq!(options.parent_iso, None);
         assert_eq!(options.limits, LimitOptions::default());
+    }
+
+    #[test]
+    fn parses_relocated_code_specs_and_rejects_bad_shapes() {
+        let spec = parse_relocated_code("80076000:2829F8:740").expect("valid spec");
+        assert_eq!(
+            spec,
+            RelocatedCodeSpec {
+                destination: 0x8007_6000,
+                source: 0x0028_29F8,
+                size: 0x740,
+            }
+        );
+        assert!(parse_relocated_code("80076000:2829F8").is_err());
+        assert!(parse_relocated_code("80076002:2829F8:740").is_err());
+        assert!(parse_relocated_code("80076000:2829F8:0").is_err());
+        assert!(parse_relocated_code("80076000:2829F8:742").is_err());
+        assert!(parse_relocated_code("zzz:2829F8:740").is_err());
     }
 
     #[test]
@@ -1862,6 +2605,8 @@ mod tests {
             "4".to_owned(),
             "--discover".to_owned(),
             "--native-build".to_owned(),
+            "--parent-iso".to_owned(),
+            "parent.iso".to_owned(),
             "--probe-budget".to_owned(),
             "4096".to_owned(),
             "--max-blocks".to_owned(),
@@ -1879,12 +2624,32 @@ mod tests {
                 translation_units: 4,
                 native_build: true,
                 probe_budget: 4096,
+                hle_syscalls: false,
+                relocated_code: Vec::new(),
+                parent_iso: Some(PathBuf::from("parent.iso")),
                 limits: LimitOptions {
                     max_blocks: 300_000,
                     max_instructions: 2_500_000,
                     max_function_roots: 600_000,
                 },
             }
+        );
+    }
+
+    #[test]
+    fn parent_iso_requires_native_build_and_a_path() {
+        assert!(parse_recompile_options(&["--parent-iso".to_owned()]).is_err());
+        assert!(
+            parse_recompile_options(&["--parent-iso".to_owned(), "parent.iso".to_owned(),])
+                .is_err()
+        );
+        assert!(
+            parse_recompile_options(&[
+                "--native-build".to_owned(),
+                "--parent-iso".to_owned(),
+                "parent.iso".to_owned(),
+            ])
+            .is_ok()
         );
     }
 
@@ -1961,6 +2726,7 @@ mod tests {
                 translation_units: 4,
                 native_build: true,
                 probe_budget: 2048,
+                hle_syscalls: false,
             }
         );
         assert!(parse_fixture_options(&["--unknown".to_owned()]).is_err());
@@ -1969,11 +2735,81 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_hle_syscall_layer_flags() {
+        let fixture =
+            parse_fixture_options(&["--hle-syscalls".to_owned()]).expect("fixture HLE option");
+        assert!(fixture.hle_syscalls);
+        assert!(!fixture.native_build);
+
+        let recompile =
+            parse_recompile_options(&["--hle-syscalls".to_owned()]).expect("recompile HLE option");
+        assert!(recompile.hle_syscalls);
+        // The layer is opt-in: neither parser enables it by default.
+        assert!(
+            !parse_fixture_options(&[])
+                .expect("fixture defaults")
+                .hle_syscalls
+        );
+        assert!(
+            !parse_recompile_options(&[])
+                .expect("recompile defaults")
+                .hle_syscalls
+        );
+    }
+
+    #[test]
     fn rejects_malformed_recompile_options() {
         assert!(parse_recompile_options(&["--tu-count".to_owned()]).is_err());
         assert!(parse_recompile_options(&["--tu-count".to_owned(), "many".to_owned()]).is_err());
         assert!(parse_recompile_options(&["--unknown".to_owned()]).is_err());
         assert!(parse_analyze_options(&["--unknown".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn parses_global_developer_options_before_the_command() {
+        let arguments = [
+            "reps2".to_owned(),
+            "--dev".to_owned(),
+            "--log-dir".to_owned(),
+            "diagnostics".to_owned(),
+            "version".to_owned(),
+        ];
+        let (options, filtered) = parse_global_options(&arguments).expect("valid global options");
+        assert_eq!(
+            options,
+            GlobalOptions {
+                developer_mode: true,
+                log_dir: Some(PathBuf::from("diagnostics")),
+            }
+        );
+        assert_eq!(filtered, ["reps2", "version"]);
+    }
+
+    #[test]
+    fn maps_commands_to_their_diagnostic_subsystems() {
+        assert_eq!(command_diagnostic_subsystem("disc-info"), "iso9660");
+        assert_eq!(command_diagnostic_subsystem("extract-boot-elf"), "iso9660");
+        assert_eq!(command_diagnostic_subsystem("add-game"), "library");
+        assert_eq!(command_diagnostic_subsystem("analyze-elf"), "analysis");
+        assert_eq!(command_diagnostic_subsystem("profile-elf"), "coverage");
+        assert_eq!(command_diagnostic_subsystem("recompile-elf"), "recompiler");
+        assert_eq!(command_diagnostic_subsystem("compile-words"), "codegen");
+        assert_eq!(command_diagnostic_subsystem("invalid-command"), "cli");
+    }
+
+    #[test]
+    fn rejects_missing_or_repeated_diagnostics_directory_options() {
+        assert!(parse_global_options(&["reps2".to_owned(), "--log-dir".to_owned()]).is_err());
+        assert!(
+            parse_global_options(&[
+                "reps2".to_owned(),
+                "--log-dir".to_owned(),
+                "one".to_owned(),
+                "--log-dir".to_owned(),
+                "two".to_owned(),
+            ])
+            .is_err()
+        );
     }
 
     #[test]

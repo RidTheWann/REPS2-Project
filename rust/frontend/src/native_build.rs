@@ -2,11 +2,10 @@
 //! Deterministic generation of a standalone native build project.
 //!
 //! `recompile-elf --native-build` and `compile-cfg-fixture --native-build`
-//! write `<stem>.native/CMakeLists.txt` and `<stem>.native/probe_main.cpp`
-//! beside the translation. The project compiles the dispatcher, every part and
-//! a host probe with an explicit runtime include directory, then registers a
-//! CTest that loads the RAM image (when present) and performs one bounded
-//! `execute_cfg` call.
+//! write a deterministic CMake project, a host probe, and an exported RG REPS2
+//! ENGINE module wrapper beside the translation. The CMake project builds both
+//! the probe executable and a native shared module with explicit runtime and
+//! engine include directories.
 //!
 //! The renderer is pure: identical arguments produce identical files, and no
 //! absolute paths, timestamps, or machine identifiers are embedded. The
@@ -14,12 +13,15 @@
 //! the translation directory and `<stem>.native/` move together.
 
 use crate::VERSION;
+use crate::build_manifest::MANIFEST_VERSION;
+use crate::control_ir::CONTROL_IR_SCHEMA_VERSION;
 
 /// Rendered native build project.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeProject {
     pub cmake_lists: String,
     pub probe_source: String,
+    pub module_source: String,
 }
 
 /// Renders a native CMake project for one translation layout.
@@ -30,16 +32,71 @@ pub struct NativeProject {
 /// fixtures that execute against zero-filled RAM. `probe_budget` is the default
 /// instruction budget baked into the generated probe and the generated CTest,
 /// so the project exercises real guest code instead of stopping immediately.
+/// `hle_syscalls` enables the runtime EE syscall HLE layer in the probe.
 #[must_use]
 pub fn render(
     project_stem: &str,
     sources: &[String],
     ram_image: Option<&str>,
     probe_budget: u64,
+    hle_syscalls: bool,
+) -> NativeProject {
+    render_with_identity(
+        project_stem,
+        sources,
+        ram_image,
+        probe_budget,
+        hle_syscalls,
+        None,
+    )
+}
+
+/// Renders a native project with the exact source boot-ELF digest.
+/// Synthetic fixtures pass None.
+#[must_use]
+pub fn render_with_identity(
+    project_stem: &str,
+    sources: &[String],
+    ram_image: Option<&str>,
+    probe_budget: u64,
+    hle_syscalls: bool,
+    input_elf_sha256: Option<&str>,
+) -> NativeProject {
+    render_with_game_identity(
+        project_stem,
+        sources,
+        ram_image,
+        probe_budget,
+        hle_syscalls,
+        input_elf_sha256,
+        None,
+    )
+}
+
+/// Renders a native project bound to both the boot-ELF digest and, when the
+/// project was produced through the library import flow, the parent ISO
+/// digest. Direct ELF projects pass `None` for `parent_iso_sha256`; the field
+/// is then recorded as `null` instead of being fabricated.
+#[must_use]
+pub fn render_with_game_identity(
+    project_stem: &str,
+    sources: &[String],
+    ram_image: Option<&str>,
+    probe_budget: u64,
+    hle_syscalls: bool,
+    input_elf_sha256: Option<&str>,
+    parent_iso_sha256: Option<&str>,
 ) -> NativeProject {
     NativeProject {
-        cmake_lists: render_cmake_lists(project_stem, sources, ram_image),
-        probe_source: render_probe_source(ram_image, probe_budget),
+        cmake_lists: render_cmake_lists(
+            project_stem,
+            sources,
+            ram_image,
+            input_elf_sha256,
+            parent_iso_sha256,
+        ),
+        probe_source: render_probe_source(ram_image, probe_budget, hle_syscalls),
+        module_source: render_module_source(project_stem),
     }
 }
 
@@ -91,7 +148,13 @@ fn cpp_string_literal(value: &str) -> String {
     output
 }
 
-fn render_cmake_lists(project_stem: &str, sources: &[String], ram_image: Option<&str>) -> String {
+fn render_cmake_lists(
+    project_stem: &str,
+    sources: &[String],
+    ram_image: Option<&str>,
+    input_elf_sha256: Option<&str>,
+    parent_iso_sha256: Option<&str>,
+) -> String {
     let source_lines = sources
         .iter()
         .map(|name| format!("    \"../{}\"", cmake_quote(name)))
@@ -114,21 +177,53 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(REPS2_RUNTIME_INCLUDE "" CACHE PATH "Directory containing reps2/runtime/*.hpp")
+set(REPS2_ENGINE_INCLUDE "" CACHE PATH "Directory containing rg_reps2_engine/*.hpp")
 if(NOT REPS2_RUNTIME_INCLUDE)
     message(FATAL_ERROR "Set -DREPS2_RUNTIME_INCLUDE=<path>/runtime/include")
 endif()
+if(NOT REPS2_ENGINE_INCLUDE)
+    message(FATAL_ERROR "Set -DREPS2_ENGINE_INCLUDE=<path>/engine/include")
+endif()
 
-add_executable(reps2_probe
+set(REPS2_TRANSLATION_SOURCES
 @SOURCES@
+)
+add_executable(reps2_probe
+    ${REPS2_TRANSLATION_SOURCES}
     "probe_main.cpp"
 )
 target_include_directories(reps2_probe PRIVATE "${REPS2_RUNTIME_INCLUDE}")
 target_compile_features(reps2_probe PRIVATE cxx_std_20)
 if(MSVC)
-    target_compile_options(reps2_probe PRIVATE /W4 /permissive-)
+    target_compile_options(reps2_probe PRIVATE /W4 /permissive- /bigobj)
 else()
     target_compile_options(reps2_probe PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
+
+# Build the generated dispatcher as a loadable RG REPS2 ENGINE module.
+add_library(reps2_native_module SHARED
+    ${REPS2_TRANSLATION_SOURCES}
+    "rg_reps2_module.cpp"
+)
+target_include_directories(reps2_native_module PRIVATE
+    "${REPS2_RUNTIME_INCLUDE}"
+    "${REPS2_ENGINE_INCLUDE}"
+)
+target_compile_features(reps2_native_module PRIVATE cxx_std_20)
+set_target_properties(reps2_native_module PROPERTIES
+    OUTPUT_NAME "reps2_native_module"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+if(MSVC)
+    target_compile_options(reps2_native_module PRIVATE /W4 /permissive- /bigobj)
+else()
+    target_compile_options(reps2_native_module PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reps2-native-module-$<CONFIG>.path"
+    CONTENT "$<TARGET_FILE:reps2_native_module>\n"
+)
 
 # Keep host-toolchain provenance separate from the deterministic frontend
 # manifest: this file is emitted by CMake at configure time, where the actual
@@ -165,12 +260,96 @@ foreach(option IN LISTS REPS2_TARGET_COMPILE_OPTIONS)
 endforeach()
 string(APPEND REPS2_TARGET_COMPILE_OPTIONS_JSON "]")
 
+# Hash the actual compiler/linker binaries, without recording local paths.
+if(NOT EXISTS "${CMAKE_CXX_COMPILER}")
+    message(FATAL_ERROR "Configured C++ compiler executable is missing")
+endif()
+file(SHA256 "${CMAKE_CXX_COMPILER}" REPS2_COMPILER_EXECUTABLE_SHA256)
+set(REPS2_LINKER_EXECUTABLE_SHA256 "")
+if(CMAKE_LINKER AND EXISTS "${CMAKE_LINKER}")
+    file(SHA256 "${CMAKE_LINKER}" REPS2_LINKER_EXECUTABLE_SHA256)
+endif()
+
+# The runtime ABI and contents of every public runtime header affect the binary.
+set(REPS2_RUNTIME_ABI_HEADER "${REPS2_RUNTIME_INCLUDE}/reps2/runtime/abi_version.hpp")
+if(NOT EXISTS "${REPS2_RUNTIME_ABI_HEADER}")
+    message(FATAL_ERROR "Missing REPS2 runtime ABI header")
+endif()
+file(STRINGS "${REPS2_RUNTIME_ABI_HEADER}" REPS2_RUNTIME_ABI_LINE
+    REGEX "^#define REPS2_RUNTIME_ABI_VERSION [0-9]+$")
+if(NOT REPS2_RUNTIME_ABI_LINE MATCHES "^#define REPS2_RUNTIME_ABI_VERSION ([0-9]+)$")
+    message(FATAL_ERROR "Cannot read REPS2_RUNTIME_ABI_VERSION")
+endif()
+set(REPS2_RUNTIME_ABI_VERSION "${CMAKE_MATCH_1}")
+file(GLOB_RECURSE REPS2_RUNTIME_HEADERS LIST_DIRECTORIES FALSE
+    "${REPS2_RUNTIME_INCLUDE}/reps2/runtime/*.hpp")
+list(SORT REPS2_RUNTIME_HEADERS)
+if(NOT REPS2_RUNTIME_HEADERS)
+    message(FATAL_ERROR "No REPS2 runtime headers found")
+endif()
+set(REPS2_RUNTIME_HEADER_MATERIAL "")
+foreach(header IN LISTS REPS2_RUNTIME_HEADERS)
+    file(SHA256 "${header}" header_sha256)
+    file(RELATIVE_PATH header_relative "${REPS2_RUNTIME_INCLUDE}" "${header}")
+    string(APPEND REPS2_RUNTIME_HEADER_MATERIAL "${header_relative}:${header_sha256}\n")
+endforeach()
+string(SHA256 REPS2_RUNTIME_HEADERS_SHA256 "${REPS2_RUNTIME_HEADER_MATERIAL}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CXX_COMPILER}" ${REPS2_RUNTIME_HEADERS})
+if(CMAKE_LINKER AND EXISTS "${CMAKE_LINKER}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_LINKER}")
+endif()
+
+# Hash the ordered generated dispatcher/part sources and optional initial RAM.
+set(REPS2_TRANSLATION_SOURCE_MATERIAL "")
+set(REPS2_TRANSLATION_SOURCE_PATHS "")
+foreach(source IN LISTS REPS2_TRANSLATION_SOURCES)
+    set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+    if(NOT EXISTS "${source_path}")
+        message(FATAL_ERROR "Missing generated translation source: ${source}")
+    endif()
+    file(SHA256 "${source_path}" source_sha256)
+    list(APPEND REPS2_TRANSLATION_SOURCE_PATHS "${source_path}")
+    string(APPEND REPS2_TRANSLATION_SOURCE_MATERIAL "${source}:${source_sha256}\n")
+endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${REPS2_TRANSLATION_SOURCE_PATHS})
+string(SHA256 REPS2_TRANSLATION_SOURCES_SHA256 "${REPS2_TRANSLATION_SOURCE_MATERIAL}")
+set(REPS2_INPUT_ELF_SHA256 "@INPUT_ELF_SHA256@")
+if(NOT REPS2_INPUT_ELF_SHA256 STREQUAL "")
+    string(LENGTH "${REPS2_INPUT_ELF_SHA256}" input_digest_length)
+    if(NOT input_digest_length EQUAL 64 OR NOT REPS2_INPUT_ELF_SHA256 MATCHES "^[0-9a-fA-F]+$")
+        message(FATAL_ERROR "Input ELF SHA-256 must contain 64 hexadecimal digits")
+    endif()
+endif()
+set(REPS2_PARENT_ISO_SHA256 "@PARENT_ISO_SHA256@")
+if(NOT REPS2_PARENT_ISO_SHA256 STREQUAL "")
+    string(LENGTH "${REPS2_PARENT_ISO_SHA256}" iso_digest_length)
+    if(NOT iso_digest_length EQUAL 64 OR NOT REPS2_PARENT_ISO_SHA256 MATCHES "^[0-9a-fA-F]+$")
+        message(FATAL_ERROR "Parent ISO SHA-256 must contain 64 hexadecimal digits")
+    endif()
+endif()
+set(REPS2_RAM_IMAGE_SHA256 "")
+if(NOT "@RAM_IMAGE@" STREQUAL "")
+    set(REPS2_RAM_IMAGE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../@RAM_IMAGE@")
+    if(NOT EXISTS "${REPS2_RAM_IMAGE_PATH}")
+        message(FATAL_ERROR "Missing initial RAM image: @RAM_IMAGE@")
+    endif()
+    file(SHA256 "${REPS2_RAM_IMAGE_PATH}" REPS2_RAM_IMAGE_SHA256)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${REPS2_RAM_IMAGE_PATH}")
+endif()
+
 set(REPS2_COMPILER_JSON "{}")
 reps2_json_set_string(REPS2_COMPILER_JSON id "${CMAKE_CXX_COMPILER_ID}")
 reps2_json_set_string(REPS2_COMPILER_JSON version "${CMAKE_CXX_COMPILER_VERSION}")
 reps2_json_set_string(REPS2_COMPILER_JSON target "${CMAKE_CXX_COMPILER_TARGET}")
 reps2_json_set_string(REPS2_COMPILER_JSON frontend_variant "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}")
 reps2_json_set_string(REPS2_COMPILER_JSON architecture_id "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+reps2_json_set_string(REPS2_COMPILER_JSON executable_sha256 "${REPS2_COMPILER_EXECUTABLE_SHA256}")
+string(SHA256 REPS2_COMPILER_ARG1_SHA256 "${CMAKE_CXX_COMPILER_ARG1}")
+string(SHA256 REPS2_COMPILER_LAUNCHER_CONFIG_SHA256 "${CMAKE_CXX_COMPILER_LAUNCHER}")
+reps2_json_set_string(REPS2_COMPILER_JSON compiler_arg1_sha256 "${REPS2_COMPILER_ARG1_SHA256}")
+reps2_json_set_string(REPS2_COMPILER_JSON compiler_launcher_config_sha256 "${REPS2_COMPILER_LAUNCHER_CONFIG_SHA256}")
+reps2_json_set_string(REPS2_COMPILER_JSON linker_executable_sha256 "${REPS2_LINKER_EXECUTABLE_SHA256}")
 
 set(REPS2_CMAKE_JSON "{}")
 reps2_json_set_string(REPS2_CMAKE_JSON version "${CMAKE_VERSION}")
@@ -198,6 +377,30 @@ reps2_json_set_string(REPS2_COMPILE_JSON release_executable_linker_flags "${CMAK
 reps2_json_set_string(REPS2_COMPILE_JSON relwithdebinfo_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}")
 reps2_json_set_string(REPS2_COMPILE_JSON minsizerel_executable_linker_flags "${CMAKE_EXE_LINKER_FLAGS_MINSIZEREL}")
 
+set(REPS2_RUNTIME_JSON "{}")
+string(JSON REPS2_RUNTIME_JSON SET "${REPS2_RUNTIME_JSON}" abi_version "${REPS2_RUNTIME_ABI_VERSION}")
+reps2_json_set_string(REPS2_RUNTIME_JSON headers_sha256 "${REPS2_RUNTIME_HEADERS_SHA256}")
+set(REPS2_FRONTEND_JSON "{}")
+string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" manifest_schema_version @MANIFEST_SCHEMA_VERSION@)
+string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" control_ir_schema_version @CONTROL_IR_SCHEMA_VERSION@)
+reps2_json_set_string(REPS2_FRONTEND_JSON input_kind "@INPUT_KIND@")
+if(REPS2_INPUT_ELF_SHA256 STREQUAL "")
+    string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" input_elf_sha256 null)
+else()
+    reps2_json_set_string(REPS2_FRONTEND_JSON input_elf_sha256 "${REPS2_INPUT_ELF_SHA256}")
+endif()
+if(REPS2_PARENT_ISO_SHA256 STREQUAL "")
+    string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" parent_iso_sha256 null)
+else()
+    reps2_json_set_string(REPS2_FRONTEND_JSON parent_iso_sha256 "${REPS2_PARENT_ISO_SHA256}")
+endif()
+reps2_json_set_string(REPS2_FRONTEND_JSON translation_sources_sha256 "${REPS2_TRANSLATION_SOURCES_SHA256}")
+if(REPS2_RAM_IMAGE_SHA256 STREQUAL "")
+    string(JSON REPS2_FRONTEND_JSON SET "${REPS2_FRONTEND_JSON}" ram_image_sha256 null)
+else()
+    reps2_json_set_string(REPS2_FRONTEND_JSON ram_image_sha256 "${REPS2_RAM_IMAGE_SHA256}")
+endif()
+
 set(REPS2_NATIVE_TOOLCHAIN_JSON "{}")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" schema_version 1)
 reps2_json_set_string(REPS2_NATIVE_TOOLCHAIN_JSON tool "reps2-native-build")
@@ -205,18 +408,42 @@ reps2_json_set_string(REPS2_NATIVE_TOOLCHAIN_JSON frontend_version "@VERSION@")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" compiler "${REPS2_COMPILER_JSON}")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" cmake "${REPS2_CMAKE_JSON}")
 string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" compile "${REPS2_COMPILE_JSON}")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" runtime "${REPS2_RUNTIME_JSON}")
+string(JSON REPS2_NATIVE_TOOLCHAIN_JSON SET "${REPS2_NATIVE_TOOLCHAIN_JSON}" frontend "${REPS2_FRONTEND_JSON}")
 file(GENERATE
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reps2-native-toolchain-$<CONFIG>.json"
     CONTENT "${REPS2_NATIVE_TOOLCHAIN_JSON}\n"
 )
 
+# Hash the report only after file(GENERATE) has materialized the active config.
+# Each configuration receives a distinct report and SHA-256 identity.
+set(REPS2_IDENTITY_SCRIPT [=[
+file(READ "@OUTPUT_DIR@/reps2-native-toolchain-@CONFIG@.json" toolchain_json)
+string(SHA256 cache_key_sha256 "${toolchain_json}")
+file(WRITE "@OUTPUT_DIR@/reps2-native-build-identity-@CONFIG@.json"
+    "{\n  \"schema_version\": 1,\n  \"kind\": \"reps2.native_build_identity\",\n  \"cache_key_sha256\": \"${cache_key_sha256}\",\n  \"toolchain_report\": \"reps2-native-toolchain-@CONFIG@.json\"\n}\n")
+]=])
+string(REPLACE "@OUTPUT_DIR@" "${CMAKE_CURRENT_BINARY_DIR}" REPS2_IDENTITY_SCRIPT "${REPS2_IDENTITY_SCRIPT}")
+string(REPLACE "@CONFIG@" "$<CONFIG>" REPS2_IDENTITY_SCRIPT "${REPS2_IDENTITY_SCRIPT}")
+file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reps2-write-native-identity-$<CONFIG>.cmake"
+    CONTENT "${REPS2_IDENTITY_SCRIPT}"
+)
+add_custom_target(reps2_native_build_identity
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_BINARY_DIR}/reps2-write-native-identity-$<CONFIG>.cmake"
+    COMMENT "Writing REPS2 native build identity"
+    VERBATIM
+)
+add_dependencies(reps2_probe reps2_native_build_identity)
+
 enable_testing()
 @TEST@
 # The probe prints one machine-readable trace line; require it so the test
 # fails if the trace fields disappear or the probe never reaches execution.
+# stage=... is an optional classification field inserted after status.
 set_tests_properties(reps2_generated_probe PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
-    PASS_REGULAR_EXPRESSION "entry=0x[0-9A-Fa-f]+ status=[0-9]+ pc=0x[0-9A-Fa-f]+ budget=[0-9]+ executed=[0-9]+"
+    PASS_REGULAR_EXPRESSION "entry=0x[0-9A-Fa-f]+ status=[0-9]+( stage=[a-z_]+)? pc=0x[0-9A-Fa-f]+ budget=[0-9]+ executed=[0-9]+"
 )
 "#;
 
@@ -224,10 +451,114 @@ set_tests_properties(reps2_generated_probe PROPERTIES
         .replace("@VERSION@", VERSION)
         .replace("@PROJECT@", &project_name(project_stem))
         .replace("@SOURCES@", &source_lines)
+        .replace("@INPUT_ELF_SHA256@", input_elf_sha256.unwrap_or(""))
+        .replace("@PARENT_ISO_SHA256@", parent_iso_sha256.unwrap_or(""))
+        .replace(
+            "@INPUT_KIND@",
+            if input_elf_sha256.is_some() {
+                "boot_elf"
+            } else {
+                "synthetic_fixture"
+            },
+        )
+        .replace(
+            "@RAM_IMAGE@",
+            &ram_image.map(cmake_quote).unwrap_or_default(),
+        )
+        .replace("@MANIFEST_SCHEMA_VERSION@", &MANIFEST_VERSION.to_string())
+        .replace(
+            "@CONTROL_IR_SCHEMA_VERSION@",
+            &CONTROL_IR_SCHEMA_VERSION.to_string(),
+        )
         .replace("@TEST@", &test)
 }
 
-fn render_probe_source(ram_image: Option<&str>, probe_budget: u64) -> String {
+fn module_name(project_stem: &str) -> String {
+    // The descriptor ABI caps names at 96 bytes. Keep a sanitized visible
+    // prefix and append a stable FNV-1a suffix so truncation cannot alias names.
+    let normalized = project_name(project_stem);
+    let prefix: String = normalized.chars().take(79).collect();
+    let mut hash = 0xCBF29CE484222325_u64;
+    for byte in project_stem.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001B3);
+    }
+    format!("{prefix}_{hash:016x}")
+}
+
+fn render_module_source(project_stem: &str) -> String {
+    let name = module_name(project_stem);
+    format!(
+        r#"// Generated by reps2-frontend {}. Do not edit.
+#include <cstddef>
+#include <cstdint>
+#include <span>
+
+#include "rg_reps2_engine/module.hpp"
+#include "reps2/runtime/ee_state.hpp"
+
+namespace reps2::generated {{
+[[nodiscard]] reps2::runtime::Status initialize_ee_state(
+    reps2::runtime::EeState& state,
+    std::span<const std::uint8_t> main_ram_image
+) noexcept;
+[[nodiscard]] reps2::runtime::Status execute_cfg(
+    reps2::runtime::EeState& state,
+    std::uint64_t instruction_budget
+) noexcept;
+}} // namespace reps2::generated
+
+extern "C" std::uint32_t rg_reps2_module_initialize(
+    void* guest_state,
+    const std::uint8_t* ram_image,
+    std::uint64_t ram_image_size
+) noexcept {{
+    if (guest_state == nullptr || ram_image == nullptr
+        || ram_image_size != reps2::runtime::kEeMainRamSize) {{
+        return static_cast<std::uint32_t>(
+            reps2::runtime::Status::invalid_memory_image);
+    }}
+    auto& state = *static_cast<reps2::runtime::EeState*>(guest_state);
+    const auto image = std::span<const std::uint8_t>(
+        ram_image, static_cast<std::size_t>(ram_image_size));
+    return static_cast<std::uint32_t>(
+        reps2::generated::initialize_ee_state(state, image));
+}}
+
+extern "C" std::uint32_t rg_reps2_module_execute(
+    void* guest_state,
+    std::uint64_t instruction_budget
+) noexcept {{
+    if (guest_state == nullptr || instruction_budget == 0U) {{
+        return static_cast<std::uint32_t>(
+            reps2::runtime::Status::unsupported_memory_access);
+    }}
+    auto& state = *static_cast<reps2::runtime::EeState*>(guest_state);
+    return static_cast<std::uint32_t>(
+        reps2::generated::execute_cfg(state, instruction_budget));
+}}
+
+namespace {{
+constexpr char kModuleName[] = "{}";
+const rg::reps2::engine::NativeModuleDescriptor kModuleDescriptor =
+    rg::reps2::engine::make_native_module_descriptor(
+        kModuleName,
+        static_cast<std::uint32_t>(sizeof(kModuleName) - 1U),
+        &rg_reps2_module_initialize,
+        &rg_reps2_module_execute
+    );
+}} // namespace
+
+RG_REPS2_MODULE_EXPORT const rg::reps2::engine::NativeModuleDescriptor*
+rg_reps2_get_native_module_descriptor_v1() noexcept {{
+    return &kModuleDescriptor;
+}}
+"#,
+        VERSION, name
+    )
+}
+
+fn render_probe_source(ram_image: Option<&str>, probe_budget: u64, hle_syscalls: bool) -> String {
     let default_image = ram_image
         .map(cpp_string_literal)
         .unwrap_or_else(|| "nullptr".to_owned());
@@ -235,6 +566,7 @@ fn render_probe_source(ram_image: Option<&str>, probe_budget: u64) -> String {
     const TEMPLATE: &str = r#"// Generated by reps2-frontend @VERSION@. Do not edit.
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -243,6 +575,7 @@ fn render_probe_source(ram_image: Option<&str>, probe_budget: u64) -> String {
 #include <vector>
 
 #include "reps2/runtime/ee_state.hpp"
+#include "reps2/runtime/ee_hle.hpp"
 
 namespace reps2::generated {
 [[nodiscard]] reps2::runtime::Status initialize_ee_state(
@@ -319,27 +652,233 @@ int main(int argc, char** argv) {
     }
 
     const std::uint32_t entry = state.pc;
+    state.instruction_trace_enabled = std::getenv("REPS2_INSTRUCTION_TRACE") != nullptr;
+    @ENABLE_HLE@
     const Status status = reps2::generated::execute_cfg(state, budget);
+    // Classify how bounded execution stopped. `stage` is a stable host contract
+    // (see reps2::runtime::status_name); it distinguishes a compile-time
+    // success, executed guest instructions, budget exhaustion, guest exception,
+    // unsupported instruction and unresolved control flow without claiming a
+    // title booted. When the stop is an architecturally delivered SYSCALL, also
+    // report Cause.ExcCode and the EE kernel service number the SDK passes in
+    // $3 (v1); the observed retail boot path uses register-numbered syscalls.
+    const std::uint32_t cause = state.cop0[reps2::runtime::kCop0Cause];
+    const std::uint32_t exccode = (cause >> 2U) & 0x1FU;
+    const bool is_syscall =
+        status == Status::exception_delivered && exccode == 8U;
+    const std::uint32_t syscall_code =
+        is_syscall ? static_cast<std::uint32_t>(state.gpr[3].low) : 0U;
+    // HLE accounting: `hle` reports whether the host service layer was enabled,
+    // `syscalls`/`hle_handled` how many guest SYSCALLs it saw and serviced, and
+    // `hle_number`/`hle_name` the last normalized service number. A name here
+    // means a handler exists, not that the guest kernel executed the service.
+    const bool hle = state.hle.syscall_enabled;
+    const char* hle_name =
+        hle ? reps2::runtime::ee_syscall_service_name(state.hle.last_syscall_number) : nullptr;
+    // CreateSema (0x40) boundary: the parameter address, the two counts that are
+    // actually inputs, and the id the service returned or the reason it refused.
+    // These are host observations of the last CreateSema call, so a trace shows
+    // what the guest asked for without claiming a scheduler exists.
+    const char* sema_rejection = reps2::runtime::ee_sema_rejection_name(
+        state.hle.last_sema_rejection);
+    const char* sif_iop =
+        reps2::runtime::ee_iop_sif_residency_name(state.hle.sif_cmd.residency);
     std::printf(
-        "entry=0x%08X status=%d pc=0x%08X budget=%llu executed=%llu"
-        " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X\n",
+        "entry=0x%08X status=%d stage=%s pc=0x%08X budget=%llu executed=%llu"
+        " cause=0x%08X epc=0x%08X cop0_status=0x%08X badvaddr=0x%08X"
+        " exccode=%u syscall=0x%08X"
+        " hle=%u dmac_boot=%u syscalls=%llu hle_handled=%llu hle_pc=0x%08X hle_number=0x%08X"
+        " hle_v0_before=0x%08X hle_a0=0x%08X hle_a1=0x%08X hle_a2=0x%08X hle_a3=0x%08X"
+        " hle_sp=0x%08X hle_name=%s"
+        " sema_calls=%llu sema_live=%u sema_param=0x%08X sema_init=%d sema_max=%d"
+        " sema_attr=0x%08X sema_option=0x%08X sema_id=%d sema_refused=%s"
+        " sema_delete=%llu sema_signal=%llu sema_wait=%llu sema_op_id=%d"
+        " sema_op_count=%d sema_wait_count=%d sema_op_valid=%u sema_wait_blocked=%u"
+        " poll_sema=%llu poll_sema_acquired=%u poll_sema_count_before=%d"
+        " poll_sema_first_count=%d poll_sema_acquired_total=%llu"
+        " refer_thread_status=%llu refer_thread_status_id=%u"
+        " refer_thread_status_value=0x%08X refer_thread_status_outcome=%s"
+        " disable_dmac=%llu disable_dmac_channel=%u disable_dmac_outcome=%s"
+        " remove_dmac=%llu remove_dmac_channel=%u remove_dmac_id=%u"
+        " remove_dmac_outcome=%s sif_stop_dma=%llu sif_stop_dma_cleared=%u"
+        " iop_resets=%u iop_resets_completed=%u last_reset_mode=%u"
+        " last_reset_arg_len=%u"
+        " sif_iop=%s sif_smflag=0x%08X sif_msflag=0x%08X"
+        " sif_hw_subaddr=0x%08X sif_get_regs=%llu sif_set_regs=%llu sif_set_dma=%llu"
+        " sif_cmd_pkts=%u sif_cmd_cid=0x%08X sif_cmd_pktsize=%u sif_cmd_init=%u"
+        " sif_ee_inbound=%u sif_ee_inbound_cid=0x%08X sif_ee_sreg0=%u"
+        " sif_rpcinit_sent=%u sif_ee_sif0_event=%u"
+        " sif_rpc_bind=%u sif_rpc_bind_sid=0x%08X sif_rpc_bind_sema=%d"
+        " sif_rpc_bind_signalled=%u sif_rpc_bind_server=0x%08X sif_rpc_bind_had=%u"
+        " sif_rpc_call=%u sif_rpc_call_replies=%u sif_rpc_call_number=%u"
+        " sif_rpc_call_server=0x%08X sif_rpc_call_send=%u sif_rpc_call_recv=%u"
+        " sif_rpc_call_replied=%u rpc_call_req=0x%08X"
+        " scmd_calls=%u scmd_replies=%u scmd_number=%u scmd_media=0x%08X"
+        " scmd_retres=0x%08X scmd_replied=%u cdvd_mmode=0x%08X"
+        " diskready_calls=%u diskready_replies=%u diskready_mode=0x%08X"
+        " diskready_retres=0x%08X diskready_replied=%u"
+        " ncmd_calls=%u ncmd_replies=%u ncmd_number=%u ncmd_retres=0x%08X"
+        " ncmd_replied=%u searchfile_calls=%u searchfile_number=%u"
+        " syscall_seq_count=%u syscall_seq=",
+
         static_cast<unsigned>(entry),
         static_cast<int>(status),
+        reps2::runtime::status_name(status),
         static_cast<unsigned>(state.pc),
         static_cast<unsigned long long>(budget),
         static_cast<unsigned long long>(state.instructions_executed),
-        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Cause]),
+        static_cast<unsigned>(cause),
         static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Epc]),
         static_cast<unsigned>(state.cop0[reps2::runtime::kCop0Status]),
-        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0BadVAddr]));
+        static_cast<unsigned>(state.cop0[reps2::runtime::kCop0BadVAddr]),
+        static_cast<unsigned>(exccode),
+        static_cast<unsigned>(syscall_code),
+        hle ? 1U : 0U,
+        state.memory.dmac.d_stat_known ? 1U : 0U,
+        static_cast<unsigned long long>(state.hle.syscall_count),
+        static_cast<unsigned long long>(state.hle.syscall_handled_count),
+        static_cast<unsigned>(state.hle.last_syscall_pc),
+        static_cast<unsigned>(state.hle.last_syscall_number),
+        static_cast<unsigned>(state.hle.last_syscall_v0_before),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[0]),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[1]),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[2]),
+        static_cast<unsigned>(state.hle.last_syscall_arguments[3]),
+        static_cast<unsigned>(state.hle.last_syscall_sp),
+        hle_name == nullptr ? "-" : hle_name,
+        static_cast<unsigned long long>(state.hle.create_sema_calls),
+        static_cast<unsigned>(state.hle.semaphore_count),
+        static_cast<unsigned>(state.hle.last_sema_parameter_address),
+        static_cast<int>(state.hle.last_sema_init_count),
+        static_cast<int>(state.hle.last_sema_max_count),
+        static_cast<unsigned>(state.hle.last_sema_attr),
+        static_cast<unsigned>(state.hle.last_sema_option),
+        static_cast<int>(state.hle.last_sema_id),
+        sema_rejection,
+        static_cast<unsigned long long>(state.hle.delete_sema_calls),
+        static_cast<unsigned long long>(state.hle.signal_sema_calls),
+        static_cast<unsigned long long>(state.hle.wait_sema_calls),
+        static_cast<int>(state.hle.last_sema_op_id),
+        static_cast<int>(state.hle.last_sema_op_count_after),
+        static_cast<int>(state.hle.last_sema_wait_count_before),
+        state.hle.last_sema_op_valid ? 1U : 0U,
+        state.hle.last_sema_wait_blocked ? 1U : 0U,
+        static_cast<unsigned long long>(state.hle.poll_sema_calls),
+        state.hle.last_sema_poll_acquired ? 1U : 0U,
+        static_cast<int>(state.hle.last_sema_poll_count_before),
+        static_cast<int>(state.hle.first_sema_poll_count_before),
+        static_cast<unsigned long long>(state.hle.poll_sema_acquired_total),
+        static_cast<unsigned long long>(state.hle.refer_thread_status_calls),
+        static_cast<unsigned>(state.hle.last_refer_thread_status_id),
+        static_cast<unsigned>(state.hle.last_refer_thread_status_value),
+        reps2::runtime::ee_thread_status_rejection_name(
+            state.hle.last_refer_thread_status_rejection),
+        static_cast<unsigned long long>(state.hle.disable_dmac_calls),
+        static_cast<unsigned>(state.hle.last_disable_dmac_channel),
+        reps2::runtime::ee_dmac_disable_outcome_name(
+            state.hle.last_disable_dmac_outcome),
+        static_cast<unsigned long long>(state.hle.remove_dmac_handler_calls),
+        static_cast<unsigned>(state.hle.last_remove_dmac_channel),
+        static_cast<unsigned>(state.hle.last_remove_dmac_id),
+        reps2::runtime::ee_dmac_remove_outcome_name(
+            state.hle.last_remove_dmac_outcome),
+        static_cast<unsigned long long>(state.hle.sif_stop_dma_calls),
+        state.hle.last_sif_stop_dma_str_cleared ? 1U : 0U,
+        static_cast<unsigned>(state.hle.sif_cmd.iop_reset_count),
+        static_cast<unsigned>(state.hle.sif_cmd.completed_resets),
+        static_cast<unsigned>(state.hle.sif_cmd.last_reset_mode),
+        static_cast<unsigned>(state.hle.sif_cmd.last_reset_arg_len),
+        sif_iop,
+        static_cast<unsigned>(state.hle.sif_cmd.smflag),
+        static_cast<unsigned>(state.hle.sif_cmd.msflag),
+        static_cast<unsigned>(state.hle.sif_hardware_registers[
+            reps2::runtime::kEeSifRegisterSubAddr]),
+        static_cast<unsigned long long>(state.hle.sif_get_reg_calls),
+        static_cast<unsigned long long>(state.hle.sif_set_reg_calls),
+        static_cast<unsigned long long>(state.hle.sif_set_dma_calls),
+        static_cast<unsigned>(state.hle.sif_cmd.packet_count),
+        static_cast<unsigned>(state.hle.sif_cmd.last_cid),
+        static_cast<unsigned>(state.hle.sif_cmd.last_packet_size),
+        state.hle.sif_cmd.initialized ? 1U : 0U,
+        static_cast<unsigned>(state.hle.sif_cmd.inbound_packet_count),
+        static_cast<unsigned>(state.hle.sif_cmd.last_inbound_cid),
+        static_cast<unsigned>(state.hle.sif_cmd.ee_sreg_rpcinit),
+        state.hle.sif_cmd.rpc_init_sent ? 1U : 0U,
+        state.hle.sif_cmd.ee_sif0_event_published ? 1U : 0U,
+        static_cast<unsigned>(state.hle.sif_cmd.rpc_bind_replies),
+        static_cast<unsigned>(state.hle.sif_cmd.last_rpc_bind_sid),
+        static_cast<int>(state.hle.sif_cmd.last_rpc_bind_sema_id),
+        state.hle.sif_cmd.last_rpc_bind_sema_signalled ? 1U : 0U,
+        static_cast<unsigned>(state.hle.sif_cmd.last_rpc_bind_server_sid),
+        state.hle.sif_cmd.last_rpc_bind_had_server ? 1U : 0U,
+        static_cast<unsigned>(state.hle.sif_cmd.rpc_call_count),
+        static_cast<unsigned>(state.hle.sif_cmd.rpc_call_replies),
+        static_cast<unsigned>(state.hle.sif_cmd.last_rpc_call_number),
+        static_cast<unsigned>(state.hle.sif_cmd.last_rpc_call_server_sid),
+        static_cast<unsigned>(state.hle.sif_cmd.last_rpc_call_send_size),
+        static_cast<unsigned>(state.hle.sif_cmd.last_rpc_call_recv_size),
+        state.hle.sif_cmd.last_rpc_call_replied ? 1U : 0U,
+        static_cast<unsigned>(state.hle.sif_cmd.last_rpc_call_request_word),
+        static_cast<unsigned>(state.hle.sif_cmd.scmd_call_count),
+        static_cast<unsigned>(state.hle.sif_cmd.scmd_replies),
+        static_cast<unsigned>(state.hle.sif_cmd.last_scmd_number),
+        state.hle.sif_cmd.last_scmd_media,
+        state.hle.sif_cmd.last_scmd_retres,
+        static_cast<unsigned>(state.hle.sif_cmd.last_scmd_replied),
+        state.hle.sif_cmd.cdvd_mmode,
+        static_cast<unsigned>(state.hle.sif_cmd.diskready_call_count),
+        static_cast<unsigned>(state.hle.sif_cmd.diskready_replies),
+        state.hle.sif_cmd.last_diskready_mode,
+        state.hle.sif_cmd.last_diskready_retres,
+        static_cast<unsigned>(state.hle.sif_cmd.last_diskready_replied),
+        static_cast<unsigned>(state.hle.sif_cmd.ncmd_call_count),
+        static_cast<unsigned>(state.hle.sif_cmd.ncmd_replies),
+        state.hle.sif_cmd.last_ncmd_number,
+        state.hle.sif_cmd.last_ncmd_retres,
+        static_cast<unsigned>(state.hle.sif_cmd.last_ncmd_replied),
+        static_cast<unsigned>(state.hle.sif_cmd.searchfile_call_count),
+        state.hle.sif_cmd.last_searchfile_number,
+        static_cast<unsigned>(state.hle.syscall_sequence_count));
+    for (std::size_t i = 0; i < state.hle.syscall_sequence_count; ++i) {
+        const reps2::runtime::EeSyscallObservation& observation =
+            state.hle.syscall_observation(i);
+        const char path = observation.path == reps2::runtime::EeSyscallPath::guest_handler
+            ? 'G'
+            : (observation.path == reps2::runtime::EeSyscallPath::host_service ? 'H' : 'U');
+        std::printf("%s0x%08X:%u:%c:0x%08X:0x%08X:0x%08X:0x%08X:0x%08X",
+                    i == 0U ? "" : ";",
+                    static_cast<unsigned>(observation.pc),
+                    static_cast<unsigned>(observation.number),
+                    path,
+                    static_cast<unsigned>(observation.arguments[0]),
+                    static_cast<unsigned>(observation.arguments[1]),
+                    static_cast<unsigned>(observation.arguments[2]),
+                    static_cast<unsigned>(observation.arguments[3]),
+                    static_cast<unsigned>(observation.v0_before));
+    }
+    std::printf(
+        " instruction_trace_enabled=%u instruction_trace_count=%u instruction_trace_pcs=",
+        state.instruction_trace_enabled ? 1U : 0U,
+        static_cast<unsigned>(state.instruction_trace_count));
+    for (std::uint32_t i = 0; i < state.instruction_trace_count; ++i) {
+        std::printf("0x%08X%s", static_cast<unsigned>(state.instruction_trace_pcs[i]),
+                    (i + 1U == state.instruction_trace_count) ? "" : ",");
+    }
+    std::printf("\\n");
     return 0;
 }
 "#;
 
+    let enable_hle = if hle_syscalls {
+        "    // HLE service layer requested by --hle-syscalls: enable dispatch and\n    // establish the device state the replaced EE kernel would present.\n    state.hle.syscall_enabled = true;\n    reps2::runtime::initialize_hle_boot_environment(state);"
+    } else {
+        "    // Architectural exception delivery: the HLE layer is disabled.\n    state.hle.syscall_enabled = false;"
+    };
     TEMPLATE
         .replace("@VERSION@", VERSION)
         .replace("@DEFAULT_IMAGE@", &default_image)
         .replace("@DEFAULT_BUDGET@", &probe_budget.to_string())
+        .replace("@ENABLE_HLE@", enable_hle)
 }
 
 #[cfg(test)]
@@ -352,9 +891,12 @@ mod tests {
 
     #[test]
     fn renders_ordered_sources_and_named_probe_test() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 0);
+        let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert!(project.cmake_lists.contains(
-            "add_executable(reps2_probe\n    \"../game.cpp\"\n    \"../game.part0001.cpp\"\n    \"probe_main.cpp\""
+            "set(REPS2_TRANSLATION_SOURCES\n    \"../game.cpp\"\n    \"../game.part0001.cpp\"\n)"
+        ));
+        assert!(project.cmake_lists.contains(
+            "add_executable(reps2_probe\n    ${REPS2_TRANSLATION_SOURCES}\n    \"probe_main.cpp\""
         ));
         assert!(project.cmake_lists.contains(
             "add_test(NAME reps2_generated_probe\n    COMMAND reps2_probe \"${CMAKE_CURRENT_SOURCE_DIR}/../game.ram.bin\")"
@@ -373,7 +915,7 @@ mod tests {
 
     #[test]
     fn omits_ram_image_for_synthetic_fixtures() {
-        let project = render("fixture", &sources(), None, 0);
+        let project = render("fixture", &sources(), None, 0, false);
         assert!(
             project
                 .cmake_lists
@@ -398,14 +940,14 @@ mod tests {
     #[test]
     fn escapes_cmake_and_cpp_strings() {
         let names = vec!["a\"b.cpp".to_owned()];
-        let project = render("weird", &names, Some("r\"m.bin"), 0);
+        let project = render("weird", &names, Some("r\"m.bin"), 0, false);
         assert!(project.cmake_lists.contains("\"../a\\\"b.cpp\""));
         assert!(project.probe_source.contains(": \"r\\\"m.bin\";"));
     }
 
     #[test]
     fn probe_exposes_the_runtime_boundary_and_bounded_execution() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 0);
+        let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert!(
             project
                 .probe_source
@@ -419,7 +961,7 @@ mod tests {
 
     #[test]
     fn probe_bakes_budget_and_emits_a_machine_readable_trace() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 4096);
+        let project = render("game", &sources(), Some("game.ram.bin"), 4096, false);
         assert!(
             project
                 .probe_source
@@ -435,6 +977,14 @@ mod tests {
             "epc=0x%08X",
             "cop0_status=0x%08X",
             "badvaddr=0x%08X",
+            "sif_iop=%s",
+            "sif_smflag=0x%08X",
+            "sif_msflag=0x%08X",
+            "sif_ee_inbound=%u",
+            "sif_ee_inbound_cid=0x%08X",
+            "sif_ee_sreg0=%u",
+            "sif_rpcinit_sent=%u",
+            "sif_ee_sif0_event=%u",
         ] {
             assert!(
                 project.probe_source.contains(field),
@@ -442,13 +992,137 @@ mod tests {
             );
         }
         assert!(project.probe_source.contains("state.instructions_executed"));
+        assert!(project.probe_source.contains("REPS2_INSTRUCTION_TRACE"));
+        assert!(project.probe_source.contains("instruction_trace_count"));
+        assert!(project.probe_source.contains("syscall_seq_count"));
         assert!(project.cmake_lists.contains("PASS_REGULAR_EXPRESSION"));
         assert!(project.cmake_lists.contains("executed=[0-9]+"));
     }
 
     #[test]
+    fn probe_reports_hle_accounting_and_enables_the_layer_on_request() {
+        let enabled = render("game", &sources(), Some("game.ram.bin"), 4096, true);
+        assert!(
+            enabled
+                .probe_source
+                .contains("state.hle.syscall_enabled = true;")
+        );
+        assert!(
+            enabled
+                .probe_source
+                .contains("reps2::runtime::initialize_hle_boot_environment(state);")
+        );
+        for field in [
+            "hle=%u",
+            "dmac_boot=%u",
+            "syscalls=%llu",
+            "hle_handled=%llu",
+            "hle_pc=0x%08X",
+            "hle_number=0x%08X",
+            "hle_v0_before=0x%08X",
+            "hle_a0=0x%08X",
+            "hle_a1=0x%08X",
+            "hle_a2=0x%08X",
+            "hle_a3=0x%08X",
+            "hle_sp=0x%08X",
+            "hle_name=%s",
+            "sema_calls=%llu",
+            "sema_live=%u",
+            "sema_param=0x%08X",
+            "sema_init=%d",
+            "sema_max=%d",
+            "sema_attr=0x%08X",
+            "sema_option=0x%08X",
+            "sema_id=%d",
+            "sema_refused=%s",
+            "sema_delete=%llu",
+            "sema_signal=%llu",
+            "sema_wait=%llu",
+            "sema_op_id=%d",
+            "sema_op_count=%d",
+            "sema_wait_count=%d",
+            "sema_op_valid=%u",
+            "sema_wait_blocked=%u",
+        ] {
+            assert!(
+                enabled.probe_source.contains(field),
+                "probe trace omits {field}"
+            );
+        }
+        assert!(enabled.probe_source.contains("ee_syscall_service_name"));
+        assert!(
+            enabled
+                .probe_source
+                .contains("state.hle.last_syscall_number")
+        );
+
+        // The default keeps the architectural exception path untouched.
+        let disabled = render("game", &sources(), Some("game.ram.bin"), 4096, false);
+        assert!(
+            disabled
+                .probe_source
+                .contains("state.hle.syscall_enabled = false;")
+        );
+        assert!(
+            !disabled
+                .probe_source
+                .contains("state.hle.syscall_enabled = true;")
+        );
+    }
+
+    #[test]
+    fn emits_versioned_native_module_descriptor_and_coarse_callbacks() {
+        let project = render("game", &sources(), Some("game.ram.bin"), 4096, false);
+        assert!(
+            project
+                .module_source
+                .contains("rg_reps2_get_native_module_descriptor_v1")
+        );
+        assert!(
+            project
+                .module_source
+                .contains("make_native_module_descriptor")
+        );
+        assert!(
+            project
+                .module_source
+                .contains("initialize_ee_state(state, image)")
+        );
+        assert!(
+            project
+                .module_source
+                .contains("execute_cfg(state, instruction_budget)")
+        );
+        assert!(project.module_source.contains("void* guest_state"));
+        assert!(
+            project
+                .cmake_lists
+                .contains("add_library(reps2_native_module SHARED")
+        );
+        assert!(project.cmake_lists.contains("REPS2_ENGINE_INCLUDE"));
+        assert!(
+            project
+                .cmake_lists
+                .contains("reps2-native-module-$<CONFIG>.path")
+        );
+    }
+
+    #[test]
+    fn generated_module_names_are_bounded_and_mutation_sensitive() {
+        let ordinary = module_name("game");
+        assert!(ordinary.len() <= 96);
+        assert!(ordinary.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-' || byte == b'.'
+        }));
+        let title = "very-long-game-title".repeat(20);
+        let long = module_name(&title);
+        assert_eq!(long.len(), 96);
+        assert_ne!(long, module_name(&format!("{title}x")));
+    }
+
+    #[test]
     fn renders_native_toolchain_provenance_contract() {
-        let project = render("game", &sources(), Some("game.ram.bin"), 0);
+        let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert!(
             project
                 .cmake_lists
@@ -467,9 +1141,206 @@ mod tests {
     }
 
     #[test]
+    fn records_frontend_version_in_toolchain_report() {
+        let project = render("game", &sources(), Some("game.ram.bin"), 0, false);
+        assert!(project.cmake_lists.contains(&format!(
+            "reps2_json_set_string(REPS2_NATIVE_TOOLCHAIN_JSON frontend_version \"{VERSION}\")"
+        )));
+    }
+
+    #[test]
+    fn renders_build_identity_inputs_without_embedding_machine_paths() {
+        let digest = "ab".repeat(32);
+        let project = render_with_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&digest),
+        );
+
+        assert!(
+            project
+                .cmake_lists
+                .contains(&format!("set(REPS2_INPUT_ELF_SHA256 \"{digest}\")"))
+        );
+        assert!(project.cmake_lists.contains("input_kind \"boot_elf\""));
+        assert!(project.cmake_lists.contains("manifest_schema_version 3"));
+        assert!(project.cmake_lists.contains("control_ir_schema_version 1"));
+        assert!(project.cmake_lists.contains("REPS2_RUNTIME_ABI_VERSION"));
+        assert!(project.cmake_lists.contains("REPS2_RUNTIME_HEADERS_SHA256"));
+        assert!(
+            project
+                .cmake_lists
+                .contains("REPS2_TRANSLATION_SOURCES_SHA256")
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains("reps2-native-build-identity-@CONFIG@.json")
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains("reps2-write-native-identity-$<CONFIG>.cmake")
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains("compiler_launcher_config_sha256")
+        );
+        assert!(!project.cmake_lists.contains("compiler_arg1 \""));
+        assert!(!project.cmake_lists.contains("compiler_launcher \""));
+    }
+
+    #[test]
+    fn renders_parent_iso_digest_when_provided() {
+        let elf_digest = "ab".repeat(32);
+        let iso_digest = "cd".repeat(32);
+        let project = render_with_game_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&elf_digest),
+            Some(&iso_digest),
+        );
+
+        assert!(
+            project
+                .cmake_lists
+                .contains(&format!("set(REPS2_INPUT_ELF_SHA256 \"{elf_digest}\")"))
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains(&format!("set(REPS2_PARENT_ISO_SHA256 \"{iso_digest}\")"))
+        );
+        assert!(project.cmake_lists.contains("input_kind \"boot_elf\""));
+        // The CMakeLists.txt template contains the parent_iso_sha256 placeholder
+        // and the configure-time logic to set it to null or the digest
+        assert!(project.cmake_lists.contains("REPS2_PARENT_ISO_SHA256"));
+    }
+
+    #[test]
+    fn renders_parent_iso_digest_as_null_when_not_provided() {
+        let elf_digest = "ab".repeat(32);
+        let project = render_with_game_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&elf_digest),
+            None,
+        );
+
+        assert!(
+            project
+                .cmake_lists
+                .contains(&format!("set(REPS2_INPUT_ELF_SHA256 \"{elf_digest}\")"))
+        );
+        assert!(
+            project
+                .cmake_lists
+                .contains("set(REPS2_PARENT_ISO_SHA256 \"\")")
+        );
+        assert!(project.cmake_lists.contains("REPS2_PARENT_ISO_SHA256"));
+    }
+
+    #[test]
+    fn identity_inputs_are_deterministic_and_mutation_sensitive() {
+        let elf = "ab".repeat(32);
+        let iso = "cd".repeat(32);
+        let base = render_with_game_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&elf),
+            Some(&iso),
+        );
+        let again = render_with_game_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&elf),
+            Some(&iso),
+        );
+        assert_eq!(
+            base, again,
+            "identical inputs must produce identical output"
+        );
+
+        let other_elf = "ef".repeat(32);
+        let changed_elf = render_with_game_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&other_elf),
+            Some(&iso),
+        );
+        assert!(
+            changed_elf != base,
+            "changing the ELF digest must change the project"
+        );
+
+        let other_iso = "01".repeat(32);
+        let changed_iso = render_with_game_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&elf),
+            Some(&other_iso),
+        );
+        assert!(
+            changed_iso != base,
+            "changing the parent ISO digest must change the project"
+        );
+
+        let no_iso = render_with_game_identity(
+            "game",
+            &sources(),
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&elf),
+            None,
+        );
+        assert!(
+            no_iso != base,
+            "dropping the parent ISO digest must change the project"
+        );
+
+        let other_sources = vec!["game.cpp".to_owned(), "game.part0002.cpp".to_owned()];
+        let changed_sources = render_with_game_identity(
+            "game",
+            &other_sources,
+            Some("game.ram.bin"),
+            128,
+            false,
+            Some(&elf),
+            Some(&iso),
+        );
+        assert!(
+            changed_sources != base,
+            "changing the translation source list must change the project"
+        );
+    }
+
+    #[test]
     fn rendering_is_deterministic() {
-        let first = render("game", &sources(), Some("game.ram.bin"), 0);
-        let second = render("game", &sources(), Some("game.ram.bin"), 0);
+        let first = render("game", &sources(), Some("game.ram.bin"), 0, false);
+        let second = render("game", &sources(), Some("game.ram.bin"), 0, false);
         assert_eq!(first, second);
         assert!(!first.cmake_lists.contains("timestamp"));
     }

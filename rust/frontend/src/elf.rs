@@ -11,13 +11,16 @@ pub const ET_CORE: u16 = 4;
 pub const PT_LOAD: u32 = 1;
 pub const PT_MIPS_REGINFO: u32 = 0x7000_0000;
 pub const PT_MIPS_ABIFLAGS: u32 = 0x7000_0003;
+pub const SHF_WRITE: u32 = 0x1;
 pub const SHF_ALLOC: u32 = 0x2;
+pub const SHF_EXECINSTR: u32 = 0x4;
 pub const PF_R: u32 = 0x4;
 pub const PF_W: u32 = 0x2;
 pub const PF_X: u32 = 0x1;
 pub const EE_MAIN_RAM_SIZE: usize = 32 * 1024 * 1024;
 pub const SHT_NULL: u32 = 0;
 pub const SHT_SYMTAB: u32 = 2;
+pub const SHT_PROGBITS: u32 = 1;
 pub const SHT_STRTAB: u32 = 3;
 pub const SHT_RELA: u32 = 4;
 pub const SHT_NOBITS: u32 = 8;
@@ -27,6 +30,60 @@ pub const SHT_SYMTAB_SHNDX: u32 = 18;
 pub const SHT_MIPS_REGINFO: u32 = 0x7000_0006;
 pub const SHT_MIPS_ABIFLAGS: u32 = 0x7000_002A;
 pub const SHT_MIPS_OPTIONS: u32 = 0x7000_000D;
+
+/// Human name of a documented MIPS processor-specific section type, or `None`
+/// for a value the MIPS psABI does not define. Values are taken verbatim from
+/// the project-local PS2 EE toolchain header
+/// (`ee/mips64r5900el-ps2-elf/include/elf.h`). REPS2 interprets only
+/// `SHT_MIPS_REGINFO`, `SHT_MIPS_ABIFLAGS` and `SHT_MIPS_OPTIONS`; every other
+/// named type is recognized metadata that is preserved but not interpreted, so
+/// it is not an "unknown" type.
+#[must_use]
+pub const fn mips_section_type_name(kind: u32) -> Option<&'static str> {
+    Some(match kind {
+        0x7000_0000 => "SHT_MIPS_LIBLIST",
+        0x7000_0001 => "SHT_MIPS_MSYM",
+        0x7000_0002 => "SHT_MIPS_CONFLICT",
+        0x7000_0003 => "SHT_MIPS_GPTAB",
+        0x7000_0004 => "SHT_MIPS_UCODE",
+        0x7000_0005 => "SHT_MIPS_DEBUG",
+        0x7000_0006 => "SHT_MIPS_REGINFO",
+        0x7000_0007 => "SHT_MIPS_PACKAGE",
+        0x7000_0008 => "SHT_MIPS_PACKSYM",
+        0x7000_0009 => "SHT_MIPS_RELD",
+        0x7000_000B => "SHT_MIPS_IFACE",
+        0x7000_000C => "SHT_MIPS_CONTENT",
+        0x7000_000D => "SHT_MIPS_OPTIONS",
+        0x7000_0010 => "SHT_MIPS_SHDR",
+        0x7000_0011 => "SHT_MIPS_FDESC",
+        0x7000_0012 => "SHT_MIPS_EXTSYM",
+        0x7000_0013 => "SHT_MIPS_DENSE",
+        0x7000_0014 => "SHT_MIPS_PDESC",
+        0x7000_0015 => "SHT_MIPS_LOCSYM",
+        0x7000_0016 => "SHT_MIPS_AUXSYM",
+        0x7000_0017 => "SHT_MIPS_OPTSYM",
+        0x7000_0018 => "SHT_MIPS_LOCSTR",
+        0x7000_0019 => "SHT_MIPS_LINE",
+        0x7000_001A => "SHT_MIPS_RFDESC",
+        0x7000_001B => "SHT_MIPS_DELTASYM",
+        0x7000_001C => "SHT_MIPS_DELTAINST",
+        0x7000_001D => "SHT_MIPS_DELTACLASS",
+        0x7000_001E => "SHT_MIPS_DWARF",
+        0x7000_001F => "SHT_MIPS_DELTADECL",
+        0x7000_0020 => "SHT_MIPS_SYMBOL_LIB",
+        0x7000_0021 => "SHT_MIPS_EVENTS",
+        0x7000_0022 => "SHT_MIPS_TRANSLATE",
+        0x7000_0023 => "SHT_MIPS_PIXIE",
+        0x7000_0024 => "SHT_MIPS_XLATE",
+        0x7000_0025 => "SHT_MIPS_XLATE_DEBUG",
+        0x7000_0026 => "SHT_MIPS_WHIRL",
+        0x7000_0027 => "SHT_MIPS_EH_REGION",
+        0x7000_0028 => "SHT_MIPS_XLATE_OLD",
+        0x7000_0029 => "SHT_MIPS_PDR_EXCEPTION",
+        0x7000_002A => "SHT_MIPS_ABIFLAGS",
+        _ => return None,
+    })
+}
 
 const ELF_HEADER_SIZE: usize = 52;
 const PROGRAM_HEADER_SIZE: usize = 32;
@@ -1105,7 +1162,11 @@ fn parse_symbols(
                 u32::from(raw_symbol_section)
             };
             let binding = info >> 4;
-            if (index < local_symbol_end) != (binding == STB_LOCAL) {
+            // ELF defines sh_info as one greater than the last local symbol
+            // index. GNU ld for the EE target emits a trailing local `_gp` at
+            // or beyond that boundary, so only a non-local symbol before the
+            // declared boundary is a genuine inconsistency.
+            if index < local_symbol_end && binding != STB_LOCAL {
                 return Err(Error::new(
                     "ELF symbol bindings disagree with the symbol table local-symbol boundary",
                 ));
@@ -1637,6 +1698,17 @@ pub fn parse(bytes: &[u8], limits: ParseLimits) -> Result<Image, Error> {
             )
             .ok_or_else(|| Error::new("Section-header offset overflow"))?;
         let section = read_section_header(bytes, base)?;
+        // gABI section headers: sh_addralign is 0/1 (no constraint) or a
+        // positive power of two, and sh_addr must be congruent to it. A
+        // violated alignment is malformed metadata, not a provider decision.
+        if section.alignment != 0 && !section.alignment.is_power_of_two() {
+            return Err(Error::new("ELF section alignment is not a power of two"));
+        }
+        if section.alignment > 1 && section.virtual_address % section.alignment != 0 {
+            return Err(Error::new(
+                "ELF section address violates its declared alignment",
+            ));
+        }
         if section.kind != SHT_NOBITS && section.kind != SHT_NULL {
             checked_range(
                 bytes,
@@ -1930,6 +2002,13 @@ pub fn load_segments(
                 .find(|s| s.virtual_address == header.virtual_address && s.file_size == 0)
             {
                 if memory_size > existing.bytes.len() {
+                    let start = u64::from(header.virtual_address);
+                    let new_end = start + u64::from(header.memory_size);
+                    if ranges.iter().any(|range| {
+                        range.start != start && start < range.end && range.start < new_end
+                    }) {
+                        return Err(Error::new("ELF PT_LOAD virtual memory ranges overlap"));
+                    }
                     let additional = memory_size - existing.bytes.len();
                     total = total
                         .checked_add(additional)
@@ -1940,8 +2019,6 @@ pub fn load_segments(
                         ));
                     }
                     existing.bytes.resize(memory_size, 0);
-                    let start = u64::from(header.virtual_address);
-                    let new_end = start + u64::from(header.memory_size);
                     for r in &mut ranges {
                         if r.start == start {
                             if new_end > r.end {
@@ -2058,6 +2135,496 @@ mod tests {
         put_u32(bytes, base + 28, section.info);
         put_u32(bytes, base + 32, section.alignment);
         put_u32(bytes, base + 36, section.entry_size);
+    }
+
+    /// Deterministic, constructed ELF32 fixture builder for parser tests.
+    ///
+    /// Everything it writes is synthetic metadata authored by this test
+    /// harness. It is not PS2 toolchain output, is not derived from a game
+    /// binary, and caller-selected `e_flags` values are examples rather than
+    /// compatibility claims.
+    struct FixtureSection {
+        name: String,
+        kind: u32,
+        flags: u32,
+        address: u32,
+        data: Vec<u8>,
+        memory_size: u32,
+        link: Option<String>,
+        info_name: Option<String>,
+        info: u32,
+        alignment: u32,
+        entry_size: u32,
+    }
+
+    struct FixtureSegment {
+        address: u32,
+        memory_size: u32,
+        flags: u32,
+        data: Vec<u8>,
+    }
+
+    struct ElfFixture {
+        file_type: u16,
+        machine: u16,
+        flags: u32,
+        entry_point: u32,
+        segments: Vec<FixtureSegment>,
+        sections: Vec<FixtureSection>,
+    }
+
+    impl ElfFixture {
+        fn new(file_type: u16, machine: u16, flags: u32) -> Self {
+            Self {
+                file_type,
+                machine,
+                flags,
+                entry_point: 0,
+                segments: Vec::new(),
+                sections: Vec::new(),
+            }
+        }
+
+        fn executable(flags: u32, entry_point: u32) -> Self {
+            let mut fixture = Self::new(ET_EXEC, EM_MIPS, flags);
+            fixture.entry_point = entry_point;
+            fixture
+        }
+
+        fn relocatable(flags: u32) -> Self {
+            Self::new(ET_REL, EM_MIPS, flags)
+        }
+
+        fn load_segment(
+            &mut self,
+            address: u32,
+            flags: u32,
+            memory_size: u32,
+            data: &[u8],
+        ) -> &mut Self {
+            self.segments.push(FixtureSegment {
+                address,
+                memory_size,
+                flags,
+                data: data.to_vec(),
+            });
+            self
+        }
+
+        // A flat placement API keeps the fixture call sites readable.
+        #[allow(clippy::too_many_arguments)]
+        fn section(
+            &mut self,
+            name: &str,
+            kind: u32,
+            flags: u32,
+            address: u32,
+            data: &[u8],
+            alignment: u32,
+            entry_size: u32,
+        ) -> usize {
+            self.sections.push(FixtureSection {
+                name: name.to_owned(),
+                kind,
+                flags,
+                address,
+                memory_size: u32::try_from(data.len()).expect("fixture section fits u32"),
+                data: data.to_vec(),
+                link: None,
+                info_name: None,
+                info: 0,
+                alignment,
+                entry_size,
+            });
+            self.sections.len() - 1
+        }
+
+        fn nobits_section(
+            &mut self,
+            name: &str,
+            flags: u32,
+            address: u32,
+            size: u32,
+            alignment: u32,
+        ) -> usize {
+            self.sections.push(FixtureSection {
+                name: name.to_owned(),
+                kind: SHT_NOBITS,
+                flags,
+                address,
+                data: Vec::new(),
+                memory_size: size,
+                link: None,
+                info_name: None,
+                info: 0,
+                alignment,
+                entry_size: 0,
+            });
+            self.sections.len() - 1
+        }
+
+        fn link_to(&mut self, section: usize, target: &str) -> &mut Self {
+            self.sections[section].link = Some(target.to_owned());
+            self
+        }
+
+        fn set_info(&mut self, section: usize, info: u32) -> &mut Self {
+            self.sections[section].info = info;
+            self
+        }
+
+        fn info_from_section(&mut self, section: usize, target: &str) -> &mut Self {
+            self.sections[section].info_name = Some(target.to_owned());
+            self
+        }
+
+        fn build(&self) -> Vec<u8> {
+            // Layout: ELF header -> program headers -> segment data ->
+            // section data -> .shstrtab -> section headers. Every gap is
+            // four-byte aligned, so identical inputs produce identical bytes.
+            let section_total = self.sections.len() + 2; // null + user + .shstrtab
+            assert!(section_total < usize::from(SHN_LORESERVE));
+            let shstrtab_index = self.sections.len() + 1;
+            let resolve = |name: &str| -> u32 {
+                self.sections
+                    .iter()
+                    .position(|section| section.name == name)
+                    .map_or_else(
+                        || panic!("fixture links to unknown section {name}"),
+                        |index| index as u32 + 1,
+                    )
+            };
+
+            let mut shstr = vec![0u8];
+            let mut name_offsets = Vec::with_capacity(self.sections.len());
+            for section in &self.sections {
+                name_offsets.push(shstr.len() as u32);
+                shstr.extend_from_slice(section.name.as_bytes());
+                shstr.push(0);
+            }
+            let shstr_name_offset = shstr.len() as u32;
+            shstr.extend_from_slice(b".shstrtab\0");
+
+            let align4 = |value: usize| (value + 3) & !3;
+            let mut offset = ELF_HEADER_SIZE + self.segments.len() * PROGRAM_HEADER_SIZE;
+            let mut segment_offsets = Vec::with_capacity(self.segments.len());
+            for segment in &self.segments {
+                offset = align4(offset);
+                segment_offsets.push(offset);
+                offset += segment.data.len();
+            }
+            let mut section_offsets = Vec::with_capacity(self.sections.len());
+            for section in &self.sections {
+                offset = align4(offset);
+                section_offsets.push(offset);
+                if section.kind != SHT_NOBITS {
+                    offset += section.data.len();
+                }
+            }
+            offset = align4(offset);
+            let shstr_offset = offset;
+            offset += shstr.len();
+            let section_header_offset = align4(offset);
+            let total = section_header_offset + section_total * SECTION_HEADER_SIZE;
+
+            let mut bytes = vec![0u8; total];
+            bytes[0..4].copy_from_slice(b"\x7FELF");
+            bytes[4] = 1; // ELFCLASS32
+            bytes[5] = 1; // ELFDATA2LSB
+            bytes[6] = 1; // EV_CURRENT
+            put_u16(&mut bytes, 16, self.file_type);
+            put_u16(&mut bytes, 18, self.machine);
+            put_u32(&mut bytes, 20, 1);
+            put_u32(&mut bytes, 24, self.entry_point);
+            put_u32(
+                &mut bytes,
+                28,
+                if self.segments.is_empty() {
+                    0
+                } else {
+                    ELF_HEADER_SIZE as u32
+                },
+            );
+            put_u32(&mut bytes, 32, section_header_offset as u32);
+            put_u32(&mut bytes, 36, self.flags);
+            put_u16(&mut bytes, 40, ELF_HEADER_SIZE as u16);
+            put_u16(
+                &mut bytes,
+                42,
+                if self.segments.is_empty() {
+                    0
+                } else {
+                    PROGRAM_HEADER_SIZE as u16
+                },
+            );
+            put_u16(&mut bytes, 44, self.segments.len() as u16);
+            put_u16(&mut bytes, 46, SECTION_HEADER_SIZE as u16);
+            put_u16(&mut bytes, 48, section_total as u16);
+            put_u16(&mut bytes, 50, shstrtab_index as u16);
+
+            for (index, segment) in self.segments.iter().enumerate() {
+                let base = ELF_HEADER_SIZE + index * PROGRAM_HEADER_SIZE;
+                put_u32(&mut bytes, base, PT_LOAD);
+                put_u32(&mut bytes, base + 4, segment_offsets[index] as u32);
+                put_u32(&mut bytes, base + 8, segment.address);
+                put_u32(&mut bytes, base + 12, segment.address);
+                put_u32(&mut bytes, base + 16, segment.data.len() as u32);
+                put_u32(&mut bytes, base + 20, segment.memory_size);
+                put_u32(&mut bytes, base + 24, segment.flags);
+                put_u32(&mut bytes, base + 28, 1);
+                let start = segment_offsets[index];
+                bytes[start..start + segment.data.len()].copy_from_slice(&segment.data);
+            }
+
+            for (index, section) in self.sections.iter().enumerate() {
+                let start = section_offsets[index];
+                if section.kind != SHT_NOBITS {
+                    bytes[start..start + section.data.len()].copy_from_slice(&section.data);
+                }
+                let header = section_header_offset + (index + 1) * SECTION_HEADER_SIZE;
+                put_u32(&mut bytes, header, name_offsets[index]);
+                put_u32(&mut bytes, header + 4, section.kind);
+                put_u32(&mut bytes, header + 8, section.flags);
+                put_u32(&mut bytes, header + 12, section.address);
+                put_u32(&mut bytes, header + 16, start as u32);
+                put_u32(&mut bytes, header + 20, section.memory_size);
+                put_u32(
+                    &mut bytes,
+                    header + 24,
+                    section.link.as_deref().map_or(0, resolve),
+                );
+                put_u32(
+                    &mut bytes,
+                    header + 28,
+                    section.info_name.as_deref().map_or(section.info, resolve),
+                );
+                put_u32(&mut bytes, header + 32, section.alignment);
+                put_u32(&mut bytes, header + 36, section.entry_size);
+            }
+
+            bytes[shstr_offset..shstr_offset + shstr.len()].copy_from_slice(&shstr);
+            let shstr_header = section_header_offset + shstrtab_index * SECTION_HEADER_SIZE;
+            put_u32(&mut bytes, shstr_header, shstr_name_offset);
+            put_u32(&mut bytes, shstr_header + 4, SHT_STRTAB);
+            put_u32(&mut bytes, shstr_header + 12, 0);
+            put_u32(&mut bytes, shstr_header + 16, shstr_offset as u32);
+            put_u32(&mut bytes, shstr_header + 20, shstr.len() as u32);
+            put_u32(&mut bytes, shstr_header + 32, 1);
+
+            bytes
+        }
+    }
+
+    fn elf32_symbol(name: u32, value: u32, size: u32, info: u8, section_index: u16) -> [u8; 16] {
+        let mut bytes = [0u8; 16];
+        bytes[0..4].copy_from_slice(&name.to_le_bytes());
+        bytes[4..8].copy_from_slice(&value.to_le_bytes());
+        bytes[8..12].copy_from_slice(&size.to_le_bytes());
+        bytes[12] = info;
+        bytes[14..16].copy_from_slice(&section_index.to_le_bytes());
+        bytes
+    }
+
+    fn elf32_rel(offset: u32, symbol_index: u32, kind: u8) -> [u8; 8] {
+        let mut bytes = [0u8; 8];
+        bytes[0..4].copy_from_slice(&offset.to_le_bytes());
+        bytes[4..8].copy_from_slice(&((symbol_index << 8) | u32::from(kind)).to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn constructed_r5900_executable_fixture_preserves_declared_flags() {
+        // Constructed metadata: 0x20924001 is the same documented e_flags
+        // example used by the decoder test. This is not ee-gcc output and does
+        // not establish what a PS2 toolchain emits.
+        let text = [
+            0x0A, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00,
+        ];
+        let mut fixture = ElfFixture::executable(0x2092_4001, 0x0010_0000);
+        fixture.load_segment(0x0010_0000, PF_R | PF_X, text.len() as u32, &text);
+        fixture.section(
+            ".text",
+            SHT_PROGBITS,
+            SHF_ALLOC | SHF_EXECINSTR,
+            0x0010_0000,
+            &text,
+            16,
+            0,
+        );
+        fixture.nobits_section(".bss", SHF_ALLOC | SHF_WRITE, 0x0010_0010, 0x20, 16);
+        let bytes = fixture.build();
+        assert_eq!(
+            bytes,
+            fixture.build(),
+            "fixture generation must be deterministic"
+        );
+
+        let image = parse(&bytes, ParseLimits::default()).expect("constructed fixture parses");
+        assert_eq!(image.file_type, ET_EXEC);
+        assert_eq!(image.machine, EM_MIPS);
+        assert_eq!(
+            image.flags, 0x2092_4001,
+            "declared e_flags must be preserved verbatim"
+        );
+        assert_eq!(image.entry_point, 0x0010_0000);
+        assert_eq!(image.loadable_segment_count(), 1);
+        assert_eq!(image.section_headers[1].name, ".text");
+        assert_eq!(image.section_headers[1].size, 16);
+        assert_eq!(image.section_headers[2].name, ".bss");
+        assert_eq!(image.section_headers[2].kind, SHT_NOBITS);
+        assert_eq!(image.section_headers[2].size, 0x20);
+
+        let flags = image.mips_elf_flags().expect("EM_MIPS flags decode");
+        assert_eq!(flags.raw, 0x2092_4001);
+        assert_eq!(flags.cpu_code, 0x92);
+        assert_eq!(flags.cpu_name(), "R5900");
+        assert_eq!(flags.abi_name(), "EABI64");
+        assert_eq!(flags.architecture_name(), "MIPS III");
+    }
+
+    #[test]
+    fn constructed_relocatable_fixture_resolves_symbols_and_relocations() {
+        let text = [0u8; 8];
+        let strtab = b"\0helper\0target\0";
+        let mut symtab = Vec::new();
+        symtab.extend_from_slice(&elf32_symbol(0, 0, 0, 0, 0));
+        symtab.extend_from_slice(&elf32_symbol(1, 0, 4, 0x02, 1)); // local FUNC in .text
+        symtab.extend_from_slice(&elf32_symbol(8, 0, 0, 0x12, 0)); // global FUNC, undefined
+        let rel = elf32_rel(4, 2, 2); // R_MIPS_32 against the global symbol
+
+        let mut fixture = ElfFixture::relocatable(0x2092_4001);
+        fixture.section(
+            ".text",
+            SHT_PROGBITS,
+            SHF_ALLOC | SHF_EXECINSTR,
+            0,
+            &text,
+            4,
+            0,
+        );
+        fixture.section(".strtab", SHT_STRTAB, 0, 0, strtab, 1, 0);
+        let symtab_index = fixture.section(".symtab", SHT_SYMTAB, 0, 0, &symtab, 4, 16);
+        fixture.link_to(symtab_index, ".strtab");
+        fixture.set_info(symtab_index, 2);
+        let rel_index = fixture.section(".rel.text", SHT_REL, 0, 0, &rel, 4, 8);
+        fixture.link_to(rel_index, ".symtab");
+        fixture.info_from_section(rel_index, ".text");
+
+        let bytes = fixture.build();
+        assert_eq!(
+            bytes,
+            fixture.build(),
+            "fixture generation must be deterministic"
+        );
+        let image =
+            parse(&bytes, ParseLimits::default()).expect("constructed ET_REL fixture parses");
+        assert_eq!(image.file_type, ET_REL);
+        assert!(!image.is_executable());
+        assert_eq!(image.flags, 0x2092_4001);
+        assert_eq!(
+            image
+                .section_headers
+                .iter()
+                .map(|section| section.name.as_str())
+                .collect::<Vec<_>>(),
+            ["", ".text", ".strtab", ".symtab", ".rel.text", ".shstrtab"]
+        );
+        assert_eq!(image.symbols.len(), 3);
+        assert_eq!(image.symbols[1].name, "helper");
+        assert_eq!(image.symbols[1].size, 4);
+        assert_eq!(image.symbols[1].binding, 0);
+        assert_eq!(image.symbols[1].kind, 2);
+        assert_eq!(image.symbols[1].section_index, 1);
+        assert_eq!(image.symbols[1].table_index, 1);
+        assert_eq!(image.symbols[1].table_section_index, 3);
+        assert_eq!(image.symbols[2].name, "target");
+        assert_eq!(image.symbols[2].binding, 1);
+        assert_eq!(image.symbols[2].kind, 2);
+        assert_eq!(image.symbols[2].section_index, 0);
+        assert_eq!(image.relocations.len(), 1);
+        let relocation = &image.relocations[0];
+        assert_eq!(relocation.offset, 4);
+        assert_eq!(relocation.symbol_index, 2);
+        assert_eq!(relocation.relocation_type, 2);
+        assert_eq!(relocation.addend, None);
+        assert_eq!(relocation.target_section_index, 1);
+        assert_eq!(relocation.symbol_table_section_index, 3);
+        assert_eq!(relocation.relocation_section_index, 4);
+    }
+
+    #[test]
+    fn rejects_elf64_big_endian_and_unknown_identification_versions() {
+        let mut bytes = minimal_elf();
+        bytes[4] = 2;
+        assert!(
+            parse(&bytes, ParseLimits::default())
+                .expect_err("ELF64 must be rejected")
+                .to_string()
+                .contains("ELF32")
+        );
+
+        let mut bytes = minimal_elf();
+        bytes[5] = 2;
+        assert!(
+            parse(&bytes, ParseLimits::default())
+                .expect_err("big-endian must be rejected")
+                .to_string()
+                .contains("little-endian")
+        );
+
+        let mut bytes = minimal_elf();
+        bytes[6] = 0;
+        assert!(
+            parse(&bytes, ParseLimits::default())
+                .expect_err("unknown identification version must be rejected")
+                .to_string()
+                .contains("identification version")
+        );
+    }
+
+    #[test]
+    fn rejects_section_alignment_that_is_not_a_power_of_two() {
+        let mut fixture = ElfFixture::relocatable(0);
+        fixture.section(".odd", SHT_PROGBITS, 0, 0, &[1, 2, 3, 4], 3, 0);
+        let error = parse(&fixture.build(), ParseLimits::default())
+            .expect_err("alignment 3 must be rejected");
+        assert!(error.to_string().contains("power of two"), "{error}");
+    }
+
+    #[test]
+    fn rejects_section_address_that_violates_its_alignment() {
+        let mut fixture = ElfFixture::relocatable(0);
+        fixture.section(
+            ".misaligned",
+            SHT_PROGBITS,
+            SHF_ALLOC,
+            0x0000_1002,
+            &[0; 4],
+            4,
+            0,
+        );
+        let error = parse(&fixture.build(), ParseLimits::default())
+            .expect_err("misaligned section address must be rejected");
+        assert!(error.to_string().contains("alignment"), "{error}");
+    }
+
+    #[test]
+    fn accepts_power_of_two_alignment_with_congruent_address() {
+        let text = [0u8; 16];
+        let mut fixture = ElfFixture::executable(0, 0x0010_0000);
+        fixture.load_segment(0x0010_0000, PF_R | PF_X, text.len() as u32, &text);
+        fixture.section(
+            ".text",
+            SHT_PROGBITS,
+            SHF_ALLOC | SHF_EXECINSTR,
+            0x0010_0000,
+            &text,
+            16,
+            0,
+        );
+        fixture.section(".note", SHT_PROGBITS, 0, 0, &[0; 4], 0, 0);
+        assert!(parse(&fixture.build(), ParseLimits::default()).is_ok());
     }
 
     fn elf_with_mips_abi_metadata() -> Vec<u8> {
@@ -3397,6 +3964,42 @@ mod tests {
     }
 
     #[test]
+    fn accepts_a_trailing_local_symbol_beyond_the_declared_boundary() {
+        // GNU ld for the EE target emits a local `_gp` symbol after it has
+        // already recorded sh_info, so the declared boundary can trail the
+        // last local symbol. Nothing in the parser depends on that split.
+        let strtab = b"\0one\0two\0three\0";
+        let mut symtab = Vec::new();
+        symtab.extend_from_slice(&elf32_symbol(0, 0, 0, 0, 0));
+        symtab.extend_from_slice(&elf32_symbol(1, 0, 0, 0x02, 1));
+        symtab.extend_from_slice(&elf32_symbol(5, 0, 0, 0x02, 1));
+        symtab.extend_from_slice(&elf32_symbol(9, 0, 0, 0x12, 1));
+
+        let mut fixture = ElfFixture::relocatable(0);
+        fixture.section(
+            ".text",
+            SHT_PROGBITS,
+            SHF_ALLOC | SHF_EXECINSTR,
+            0,
+            &[0u8; 8],
+            4,
+            0,
+        );
+        fixture.section(".strtab", SHT_STRTAB, 0, 0, strtab, 1, 0);
+        let symtab_index = fixture.section(".symtab", SHT_SYMTAB, 0, 0, &symtab, 4, 16);
+        fixture.link_to(symtab_index, ".strtab");
+        fixture.set_info(symtab_index, 2);
+
+        let image = parse(&fixture.build(), ParseLimits::default())
+            .expect("a trailing local symbol past sh_info is accepted");
+        assert_eq!(image.symbols.len(), 4);
+        assert_eq!(image.symbols[2].name, "two");
+        assert_eq!(image.symbols[2].binding, 0);
+        assert_eq!(image.symbols[3].name, "three");
+        assert_eq!(image.symbols[3].binding, 1);
+    }
+
+    #[test]
     fn accepts_an_empty_symbol_table_with_zero_local_boundary() {
         // Stripped retail MIPS images can carry a SHT_SYMTAB whose sh_size is
         // zero. ELF requires sh_info to be zero for such a table and there is
@@ -3742,6 +4345,99 @@ mod tests {
         assert_eq!(loaded[1].virtual_address, 0x0010_0010);
         assert_eq!(loaded[1].file_size, 0);
         assert_eq!(loaded[1].bytes.len(), 32);
+    }
+
+    // Three synthetic PT_LOADs: same-base BSS A and A-expanded, plus B.
+    // Every permutation must agree about overlap admission.
+    fn bss_extension_elf(order: [usize; 3], expanded_size: u32, other_file_size: u32) -> Vec<u8> {
+        let mut bytes = minimal_elf();
+        bytes.resize(152, 0);
+        put_u16(&mut bytes, 44, 3);
+        put_u32(&mut bytes, 24, 0x0010_0020);
+        let headers = [
+            (0x0010_0010, 0, 4, PF_R),
+            (0x0010_0020, other_file_size, 4, PF_R | PF_X),
+            (0x0010_0010, 0, expanded_size, PF_W),
+        ];
+        for (index, source) in order.into_iter().enumerate() {
+            let (address, file_size, memory_size, flags) = headers[source];
+            let offset = 52 + 32 * index;
+            for (field, value) in [
+                PT_LOAD,
+                148,
+                address,
+                address,
+                file_size,
+                memory_size,
+                flags,
+                1,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                put_u32(&mut bytes, offset + 4 * field, value);
+            }
+        }
+        put_u32(&mut bytes, 148, 0x0000_000D); // break in initialized B
+        bytes
+    }
+
+    const BSS_HEADER_ORDERS: [[usize; 3]; 6] = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+
+    #[test]
+    fn rejects_bss_extension_overlaps_in_every_header_order() {
+        for order in BSS_HEADER_ORDERS {
+            for other_file_size in [0, 4] {
+                let bytes = bss_extension_elf(order, 0x30, other_file_size);
+                let image = parse(&bytes, ParseLimits::default()).expect("bounded headers parse");
+                let error = load_segments(&bytes, &image, 1024)
+                    .expect_err("BSS growth must not cross another initialized or BSS segment");
+                assert_eq!(
+                    error.to_string(),
+                    "ELF PT_LOAD virtual memory ranges overlap"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bss_extension_preserves_adjacency_flags_zero_fill_and_limits() {
+        for order in BSS_HEADER_ORDERS {
+            for other_file_size in [0, 4] {
+                let bytes = bss_extension_elf(order, 0x10, other_file_size);
+                let image = parse(&bytes, ParseLimits::default()).expect("bounded headers parse");
+                let mut loaded = load_segments(&bytes, &image, 36).expect("adjacency is legal");
+                loaded.sort_by_key(|segment| segment.virtual_address);
+                assert_eq!(loaded.len(), 2);
+                assert_eq!(loaded[0].virtual_address, 0x0010_0010);
+                assert_eq!(loaded[0].file_size, 0);
+                assert_eq!(loaded[0].bytes, vec![0; 16]);
+                assert_eq!(loaded[0].flags, PF_R | PF_W);
+                assert_eq!(loaded[1].virtual_address, 0x0010_0020);
+                assert_eq!(loaded[1].file_size, other_file_size as usize);
+                assert_eq!(
+                    loaded[1].bytes,
+                    if other_file_size == 0 {
+                        vec![0; 4]
+                    } else {
+                        vec![13, 0, 0, 0]
+                    }
+                );
+                let error =
+                    load_segments(&bytes, &image, 19).expect_err("only merged bytes are charged");
+                assert_eq!(
+                    error.to_string(),
+                    "ELF PT_LOAD memory exceeds configured load limit"
+                );
+            }
+        }
     }
 
     /// Deterministic xorshift64 so mutation tests are reproducible without

@@ -7,6 +7,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::analysis::{BranchCondition, ControlFlowGraph, DelaySlotPolicy, Terminator};
+/// Version of the typed control-flow IR contract consumed by native code generation.
+/// Increment on compatibility-breaking semantic or externally consumed shape changes.
+pub const CONTROL_IR_SCHEMA_VERSION: u32 = 1;
+
 use crate::ir::{
     self, Instruction as ScalarInstruction, LiftError, VerifyError as ScalarVerifyError,
 };
@@ -463,6 +467,7 @@ fn lift_terminator(terminator: &Terminator) -> Result<ControlTerminator, Control
             delay_slot,
             link_register,
             return_pc,
+            .. // CFG-only resolved destination is consumed during block discovery.
         } => Ok(ControlTerminator::IndirectJump {
             guest_pc: instruction.pc,
             source_register: *source_register,

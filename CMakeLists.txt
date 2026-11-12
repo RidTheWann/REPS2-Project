@@ -64,8 +64,57 @@ target_include_directories(reps2_runtime INTERFACE
 )
 target_compile_features(reps2_runtime INTERFACE cxx_std_20)
 
+# RG REPS2 ENGINE is the native execution layer above the shared PS2 runtime.
+# Its OS loader is out-of-line; guest execution remains a coarse-grained C ABI.
+add_library(rg_reps2_engine STATIC engine/src/module_loader.cpp)
+add_library(RG::REPS2Engine ALIAS rg_reps2_engine)
+target_include_directories(rg_reps2_engine PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/engine/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(rg_reps2_engine PUBLIC REPS2::Runtime)
+if(CMAKE_DL_LIBS)
+    target_link_libraries(rg_reps2_engine PRIVATE ${CMAKE_DL_LIBS})
+endif()
+target_compile_features(rg_reps2_engine PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(rg_reps2_engine PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(rg_reps2_engine PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
+# Standalone bounded host for generated RG REPS2 ENGINE modules.
+add_executable(rg_reps2_engine_runner engine/src/main.cpp)
+set_target_properties(rg_reps2_engine_runner PROPERTIES
+    OUTPUT_NAME "rg-reps2-engine"
+)
+target_link_libraries(rg_reps2_engine_runner PRIVATE RG::REPS2Engine)
+target_compile_features(rg_reps2_engine_runner PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(rg_reps2_engine_runner PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(rg_reps2_engine_runner PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion
+    )
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
+    add_test(NAME rg_reps2_engine_runner_help COMMAND rg_reps2_engine_runner --help)
+    set_tests_properties(rg_reps2_engine_runner_help PROPERTIES
+        PASS_REGULAR_EXPRESSION "Usage:"
+    )
+    add_test(NAME rg_reps2_engine_runner_version COMMAND rg_reps2_engine_runner --version)
+    set_tests_properties(rg_reps2_engine_runner_version PROPERTIES
+        PASS_REGULAR_EXPRESSION "RG REPS2 ENGINE v0.2.0"
+    )
+    add_test(
+        NAME rg_reps2_engine_runner_error_smoke
+        COMMAND "${CMAKE_COMMAND}"
+            "-DREPS2_ENGINE_RUNNER=$<TARGET_FILE:rg_reps2_engine_runner>"
+            "-DREPS2_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/engine-runner-errors"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/engine_runner_error_smoke.cmake"
+    )
     add_test(
         NAME reps2_rust_tests
         COMMAND "${CMAKE_COMMAND}" -E env
@@ -134,6 +183,7 @@ if(BUILD_TESTING)
     endif()
 
     add_test(NAME reps2_codegen_smoke COMMAND reps2_codegen_smoke)
+
 
     set(REPS2_COMPARE_GENERATED_CPP "${REPS2_GENERATED_DIR}/compare_nor_program.cpp")
     add_custom_command(
@@ -717,6 +767,44 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_mmi0_pextlw_codegen_smoke COMMAND reps2_mmi0_pextlw_codegen_smoke)
 
+    set(REPS2_MMI0_PEXT5_PPAC5_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi0_pext5_ppac5_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_MMI0_PEXT5_PPAC5_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_MMI0_PEXT5_PPAC5_GENERATED_CPP}"
+            0x0000D000
+            0x70021F88  # pext5 r3, r2
+            0x70033FC8  # ppac5 r7, r3 (round-trip)
+            0x70052F88  # pext5 r5, r5 (destination aliases source)
+            0x700127C8  # ppac5 r4, r1
+            0x700637C8  # ppac5 r6, r6 (destination aliases source)
+            0x70020788  # pext5 r0, r2 (zero-register destination)
+            0x700107C8  # ppac5 r0, r1 (zero-register destination)
+            0x70004788  # pext5 r8, r0 (constant-zero source)
+            0x70004FC8  # ppac5 r9, r0 (constant-zero source)
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling R5900 MMI0 PEXT5/PPAC5 conversion"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_MMI0_PEXT5_PPAC5_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_mmi0_pext5_ppac5_codegen_fixture DEPENDS "${REPS2_MMI0_PEXT5_PPAC5_GENERATED_CPP}")
+    add_executable(reps2_mmi0_pext5_ppac5_codegen_smoke
+        "${REPS2_MMI0_PEXT5_PPAC5_GENERATED_CPP}"
+        tests/mmi0_pext5_ppac5_smoke.cpp
+    )
+    add_dependencies(reps2_mmi0_pext5_ppac5_codegen_smoke reps2_mmi0_pext5_ppac5_codegen_fixture)
+    target_link_libraries(reps2_mmi0_pext5_ppac5_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_mmi0_pext5_ppac5_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_mmi0_pext5_ppac5_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_mmi0_pext5_ppac5_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_mmi0_pext5_ppac5_codegen_smoke COMMAND reps2_mmi0_pext5_ppac5_codegen_smoke)
+
     set(REPS2_MMI0_PPACW_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi0_ppacw_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_MMI0_PPACW_GENERATED_CPP}"
@@ -927,6 +1015,116 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_cop1_codegen_smoke COMMAND reps2_cop1_codegen_smoke)
 
+    set(REPS2_COP2_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop2_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_COP2_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_COP2_GENERATED_CPP}"
+            0x0000E000
+            # SQC2 $vf0, 0x10($a0) -> stores hardwired constant {0,0,0,1.0f} at +0x10
+            0xF8800010
+            # LQC2 $vf5, 0x20($a0) -> loads preset pattern from +0x20 into VF5
+            0xD8850020
+            # SQC2 $vf5, 0x30($a0) -> stores VF5 back at +0x30
+            0xF8850030
+            # LQC2 $vf0, 0x40($a0) -> must NOT overwrite VF0 constant
+            0xD8800040
+            # SQC2 $vf0, 0x50($a0) -> stores constant again at +0x50
+            0xF8800050
+            0x00000000  # nop    delay-slot padding
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the synthetic R5900 COP2 data-movement block"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_COP2_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_cop2_codegen_fixture DEPENDS "${REPS2_COP2_GENERATED_CPP}")
+    add_executable(reps2_cop2_codegen_smoke
+        "${REPS2_COP2_GENERATED_CPP}"
+        tests/cop2_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_cop2_codegen_smoke reps2_cop2_codegen_fixture)
+    target_link_libraries(reps2_cop2_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_cop2_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_cop2_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_cop2_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_cop2_codegen_smoke COMMAND reps2_cop2_codegen_smoke)
+
+    set(REPS2_DMAC_DSTAT_GENERATED_CPP "${REPS2_GENERATED_DIR}/dmac_dstat_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_DMAC_DSTAT_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_DMAC_DSTAT_GENERATED_CPP}"
+            0x0000F000
+            0x3C021000  # lui  $v0, 0x1000
+            0x3442E010  # ori  $v0, $v0, 0xE010
+            0x8C430000  # lw   $v1, 0($v0)      D_STAT
+            0x30630020  # andi $v1, $v1, 0x20   SIF0 channel 5 status
+            0xAC430000  # sw   $v1, 0($v0)      acknowledge SIF0 if pending
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the bounded EE DMAC D_STAT access path"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_DMAC_DSTAT_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_dmac_dstat_codegen_fixture DEPENDS "${REPS2_DMAC_DSTAT_GENERATED_CPP}")
+    add_executable(reps2_dmac_dstat_codegen_smoke
+        "${REPS2_DMAC_DSTAT_GENERATED_CPP}"
+        tests/dmac_dstat_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_dmac_dstat_codegen_smoke reps2_dmac_dstat_codegen_fixture)
+    target_link_libraries(reps2_dmac_dstat_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_dmac_dstat_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_dmac_dstat_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_dmac_dstat_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_dmac_dstat_codegen_smoke COMMAND reps2_dmac_dstat_codegen_smoke)
+
+    set(REPS2_INTC_GENERATED_CPP "${REPS2_GENERATED_DIR}/intc_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_INTC_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_INTC_GENERATED_CPP}"
+            0x0000F000
+            0x3C021000  # lui  $v0, 0x1000
+            0x3442F000  # ori  $v0, $v0, 0xF000   I_STAT
+            0x8C430000  # lw   $v1, 0($v0)        read pending status
+            0xAC430000  # sw   $v1, 0($v0)        write-one-to-clear
+            0x34420010  # ori  $v0, $v0, 0x0010   I_MASK
+            0x8C430000  # lw   $v1, 0($v0)        read enable mask
+            0xAC430000  # sw   $v1, 0($v0)        write-one-to-toggle
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling the bounded EE INTC register access path"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_INTC_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_intc_codegen_fixture DEPENDS "${REPS2_INTC_GENERATED_CPP}")
+    add_executable(reps2_intc_codegen_smoke
+        "${REPS2_INTC_GENERATED_CPP}"
+        tests/intc_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_intc_codegen_smoke reps2_intc_codegen_fixture)
+    target_link_libraries(reps2_intc_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_intc_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_intc_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_intc_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_intc_codegen_smoke COMMAND reps2_intc_codegen_smoke)
+
     set(REPS2_COP1_ARITH_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/cop1_arith_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_ARITH_GENERATED_CPP}"
@@ -1047,6 +1245,88 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
 
     add_test(NAME reps2_cfg_codegen_smoke COMMAND reps2_cfg_codegen_smoke)
+    # Exercise the generated CFG initializer and budgeted dispatcher through
+    # the RG REPS2 ENGINE session and its owned EE RAM.
+    add_executable(rg_reps2_engine_smoke
+        "${REPS2_CFG_GENERATED_CPP}"
+        tests/rg_reps2_engine_smoke.cpp
+    )
+    add_dependencies(rg_reps2_engine_smoke reps2_cfg_codegen_fixture)
+    target_link_libraries(rg_reps2_engine_smoke PRIVATE RG::REPS2Engine)
+    target_compile_features(rg_reps2_engine_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(rg_reps2_engine_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(rg_reps2_engine_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME rg_reps2_engine_smoke COMMAND rg_reps2_engine_smoke)
+
+    # Load a real shared module through the platform loader on Windows and ELF.
+    add_library(rg_reps2_engine_dynamic_fixture SHARED
+        tests/rg_reps2_engine_dynamic_fixture.cpp
+    )
+    target_include_directories(rg_reps2_engine_dynamic_fixture PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/runtime/include"
+    )
+    target_compile_features(rg_reps2_engine_dynamic_fixture PRIVATE cxx_std_20)
+    set_target_properties(rg_reps2_engine_dynamic_fixture PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+    )
+    add_library(rg_reps2_engine_missing_symbol_fixture SHARED
+        tests/rg_reps2_engine_missing_symbol_fixture.cpp
+    )
+    add_executable(rg_reps2_engine_loader_smoke
+        tests/rg_reps2_engine_loader_smoke.cpp
+    )
+    target_link_libraries(rg_reps2_engine_loader_smoke PRIVATE RG::REPS2Engine)
+    target_compile_features(rg_reps2_engine_loader_smoke PRIVATE cxx_std_20)
+    add_dependencies(rg_reps2_engine_loader_smoke
+        rg_reps2_engine_dynamic_fixture
+        rg_reps2_engine_missing_symbol_fixture
+    )
+    if(MSVC)
+        target_compile_options(rg_reps2_engine_loader_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(rg_reps2_engine_loader_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(
+        NAME rg_reps2_engine_loader_smoke
+        COMMAND rg_reps2_engine_loader_smoke
+            "$<TARGET_FILE:rg_reps2_engine_dynamic_fixture>"
+            "$<TARGET_FILE:rg_reps2_engine_missing_symbol_fixture>"
+    )
+
+    if(MSVC)
+        # This smoke keeps many architectural state snapshots live in one test.
+        # The EE state grew with VU0 state, exceeding MSVC's default stack.
+        target_link_options(reps2_cfg_codegen_smoke PRIVATE /STACK:4194304)
+    endif()
+
+    # EE syscall HLE dispatch: the same generated fixture, driven with the HLE
+    # layer enabled and disabled, pins resume-after-service, delay-slot resume
+    # targets, the SetupThread stack contract and the unhandled-service stop.
+    add_executable(reps2_hle_syscall_codegen_smoke
+        "${REPS2_CFG_GENERATED_CPP}"
+        tests/hle_syscall_smoke.cpp
+    )
+    add_dependencies(reps2_hle_syscall_codegen_smoke reps2_cfg_codegen_fixture)
+    target_link_libraries(reps2_hle_syscall_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_hle_syscall_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_hle_syscall_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_hle_syscall_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+
+    add_test(NAME reps2_hle_syscall_codegen_smoke COMMAND reps2_hle_syscall_codegen_smoke)
 
     # The same synthetic CFG emitted as one dispatcher plus four block parts.
     # This pins the multi-translation-unit path: the dispatcher's sorted block
@@ -1095,6 +1375,22 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
 
     add_test(NAME reps2_cfg_split_codegen_smoke COMMAND reps2_cfg_split_codegen_smoke)
+    if(MSVC)
+        target_link_options(reps2_cfg_split_codegen_smoke PRIVATE /STACK:4194304)
+    endif()
+
+    # The host media boundary is runtime-only; it needs no generated code.
+    add_executable(reps2_host_media_smoke tests/host_media_smoke.cpp)
+    target_link_libraries(reps2_host_media_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_host_media_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_host_media_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_host_media_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_host_media_smoke COMMAND reps2_host_media_smoke)
 
     # The emitted `<stem>.native/` project must configure, compile and run the
     # same split fixture through its generated probe, with no hand-written
@@ -1104,6 +1400,9 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
         COMMAND "${CMAKE_COMMAND}"
             "-DREPS2_FRONTEND=${REPS2_FRONTEND_EXECUTABLE}"
             "-DREPS2_RUNTIME_INCLUDE=${CMAKE_CURRENT_SOURCE_DIR}/runtime/include"
+            "-DREPS2_ENGINE_INCLUDE=${CMAKE_CURRENT_SOURCE_DIR}/engine/include"
+            "-DREPS2_ENGINE_LOADER_SMOKE=$<TARGET_FILE:rg_reps2_engine_loader_smoke>"
+            "-DREPS2_ENGINE_RUNNER=$<TARGET_FILE:rg_reps2_engine_runner>"
             "-DREPS2_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-build-driver"
             "-DREPS2_CMAKE=${CMAKE_COMMAND}"
             "-DREPS2_CTEST=${CMAKE_CTEST_COMMAND}"
@@ -1112,4 +1411,20 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
 endif()
 
 install(PROGRAMS "${REPS2_FRONTEND_EXECUTABLE}" DESTINATION bin)
+install(TARGETS rg_reps2_engine
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+install(TARGETS rg_reps2_engine_runner RUNTIME DESTINATION bin)
 install(DIRECTORY runtime/include/ DESTINATION include)
+install(DIRECTORY engine/include/ DESTINATION include)
+# The bundle ships GPL-3.0-or-later object code, so convey the licence with it.
+install(FILES LICENSE DESTINATION .)
+
+# Deploy the compiler runtime next to the Windows executables. This makes the
+# install tree runnable on Windows machines without relying on a preinstalled
+# Visual C++ Redistributable.
+if(MSVC)
+    include(InstallRequiredSystemLibraries)
+endif()

@@ -45,6 +45,20 @@ impl Fpr {
     }
 }
 
+/// A validated VU0 vector register index. VF0 reads as the hardwired constant
+/// `{0.0, 0.0, 0.0, 1.0}` and ignores writes, so the emitter must never write
+/// `vf[0]` directly.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Vf(u8);
+
+impl Vf {
+    /// Returns the architectural register number.
+    #[must_use]
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
+
 /// The only FPU control registers the EE defines. FCR1..FCR30 are reserved and
 /// accessing them is not representable in this IR.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -166,6 +180,16 @@ pub enum Operation {
     },
     StoreFpuWord {
         src: Fpr,
+        base: Gpr,
+        offset: u16,
+    },
+    LoadVu0Quadword {
+        dst: Vf,
+        base: Gpr,
+        offset: u16,
+    },
+    StoreVu0Quadword {
+        src: Vf,
         base: Gpr,
         offset: u16,
     },
@@ -445,6 +469,16 @@ pub enum Operation {
     /// PROT3W: rotate the four 32-bit words left by one position.
     /// Result words are [rt1, rt2, rt0, rt3].
     ParallelRotate3Words {
+        dst: Gpr,
+        src: Gpr,
+    },
+    /// PEXT5 converts each word's low 1-5-5-5 halfword into 8-8-8-8 lanes.
+    ParallelExtend5 {
+        dst: Gpr,
+        src: Gpr,
+    },
+    /// PPAC5 truncates each word's 8-8-8-8 lanes into a 1-5-5-5 halfword.
+    ParallelPack5 {
         dst: Gpr,
         src: Gpr,
     },
@@ -825,6 +859,11 @@ fn fpr(index: u8) -> Fpr {
     Fpr(index & 0x1F)
 }
 
+fn vf(index: u8) -> Vf {
+    // Decoder register fields are five bits wide by construction.
+    Vf(index & 0x1F)
+}
+
 /// Lifts a sequential decoded instruction stream into the supported IR.
 /// Branches, memory operations, exceptions and other unsupported semantics
 /// are returned as an explicit error.
@@ -1021,6 +1060,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: gpr(instruction.rt),
             },
             Opcode::ParallelRotate3Words => Operation::ParallelRotate3Words {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            Opcode::ParallelExtend5 => Operation::ParallelExtend5 {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            Opcode::ParallelPack5 => Operation::ParallelPack5 {
                 dst: gpr(instruction.rd),
                 src: gpr(instruction.rt),
             },
@@ -1525,6 +1572,16 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 base: gpr(instruction.rs),
                 offset: instruction.immediate,
             },
+            Opcode::Lqc2 => Operation::LoadVu0Quadword {
+                dst: vf(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
+            },
+            Opcode::Sqc2 => Operation::StoreVu0Quadword {
+                src: vf(instruction.rt),
+                base: gpr(instruction.rs),
+                offset: instruction.immediate,
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1588,6 +1645,8 @@ mod tests {
             (0x2B << 26) | (4 << 21) | (7 << 16) | 4,
             (0x1E << 26) | (4 << 21) | (11 << 16) | 8,
             (0x1F << 26) | (4 << 21) | (12 << 16) | 12,
+            (0x36 << 26) | (4 << 21) | (13 << 16) | 0x0010,
+            (0x3E << 26) | (4 << 21) | (14 << 16) | 0x0020,
         ];
         let stream = words
             .iter()
@@ -1624,6 +1683,16 @@ mod tests {
             program.instructions()[10].operation,
             Operation::StoreQuadword { src, base, offset: 12 }
                 if src.index() == 12 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[11].operation,
+            Operation::LoadVu0Quadword { dst, base, offset: 0x10 }
+                if dst.index() == 13 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[12].operation,
+            Operation::StoreVu0Quadword { src, base, offset: 0x20 }
+                if src.index() == 14 && base.index() == 4
         ));
     }
 
@@ -2168,6 +2237,56 @@ mod tests {
             Operation::ParallelCopyUpperDoubleword { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PCPYUD verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi0_pext5_and_ppac5() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1E << 6) | 0x08,
+            (0x1C << 26) | (5 << 16) | (5 << 11) | (0x1E << 6) | 0x08,
+            (0x1C << 26) | (1 << 16) | (4 << 11) | (0x1F << 6) | 0x08,
+            (0x1C << 26) | (6 << 16) | (6 << 11) | (0x1F << 6) | 0x08,
+            (0x1C << 26) | (2 << 16) | (0x1E << 6) | 0x08,
+            (0x1C << 26) | (1 << 16) | (0x1F << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xCA00 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PEXT5/PPAC5 lift into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelExtend5 { dst, src }
+                if dst.index() == 3 && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelExtend5 { dst, src }
+                if dst.index() == 5 && src.index() == 5
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::ParallelPack5 { dst, src }
+                if dst.index() == 4 && src.index() == 1
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::ParallelPack5 { dst, src }
+                if dst.index() == 6 && src.index() == 6
+        ));
+        assert!(matches!(
+            program.instructions()[4].operation,
+            Operation::ParallelExtend5 { dst, src }
+                if dst.is_zero() && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[5].operation,
+            Operation::ParallelPack5 { dst, src }
+                if dst.is_zero() && src.index() == 1
+        ));
+        program.verify().expect("PEXT5/PPAC5 verify");
     }
 
     #[test]

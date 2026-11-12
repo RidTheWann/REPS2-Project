@@ -21,3 +21,6 @@ __pycache__/
 /rust/target/
 **/target/
 .aider*
+**/bin/
+**/obj/
+**/TestResults/
