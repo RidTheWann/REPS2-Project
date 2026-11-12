@@ -2,67 +2,88 @@
     x:Class="REPS2.Desktop.Pages.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Background="{StaticResource AppBackgroundBrush}">
+    Background="{ThemeResource AppBackgroundBrush}">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <Grid Padding="30" MaxWidth="950" RowSpacing="18" HorizontalAlignment="Left">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-            <StackPanel Spacing="5">
-                <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
-                <TextBlock Text="Configure the installed REPS2 developer SDK. The library remains offline-first." FontSize="13" Foreground="{StaticResource SecondaryTextBrush}"/>
+        <StackPanel Padding="28,24" Spacing="16" MaxWidth="960" HorizontalAlignment="Left">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Settings" Style="{StaticResource PageTitleStyle}"/>
+                <TextBlock Text="Configure the installed REPS2 developer SDK. The library remains offline-first."
+                           Style="{StaticResource PageSubtitleStyle}"/>
             </StackPanel>
-            <Border Grid.Row="1" Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+
+            <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="8">
-                    <TextBlock Text="GAME LIBRARY" FontSize="11" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
+                    <TextBlock Text="Game library" Style="{StaticResource SectionLabelStyle}"/>
                     <TextBox x:Name="LibraryRootBox" PlaceholderText="%LOCALAPPDATA%\REPS2\Library"/>
-                    <TextBlock Text="The source ISO is referenced at its original location. REPS2 stores validated metadata and derived artifacts in this library." FontSize="11" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                    <TextBlock Text="The source ISO stays at its original location. REPS2 stores validated metadata and derived artifacts in this library."
+                               Style="{StaticResource CaptionStyle}"/>
                 </StackPanel>
             </Border>
-            <Border Grid.Row="2" Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
-                <StackPanel Spacing="9">
-                    <TextBlock Text="REPS2 TOOLCHAIN" FontSize="11" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
-                    <TextBlock Text="Frontend executable (reps2.exe)" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
-                    <TextBox x:Name="FrontendPathBox" PlaceholderText="Auto-detected from tools\bin or LocalAppData"/>
-                    <TextBlock Text="Engine runner (rg-reps2-engine.exe)" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
-                    <TextBox x:Name="RunnerPathBox" PlaceholderText="Auto-detected from tools\bin or LocalAppData"/>
-                    <TextBlock Text="SDK include root (contains reps2\runtime and rg_reps2_engine)" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
-                    <TextBox x:Name="SdkIncludeRootBox" PlaceholderText="Portable SDK\include"/>
-                    <TextBlock Text="CMake executable" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
-                    <TextBox x:Name="CMakePathBox" PlaceholderText="Auto-detected from PATH"/>
-                </StackPanel>
-            </Border>
-            <Border Grid.Row="3" Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+
+            <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="10">
-                    <TextBlock Text="NATIVE BUILD &amp; PROBE" FontSize="11" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <TextBlock Text="Translation units" Width="180" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}"/>
-                        <ComboBox x:Name="TuCountBox" Width="120">
+                    <TextBlock Text="REPS2 toolchain" Style="{StaticResource SectionLabelStyle}"/>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Frontend executable (reps2.exe)" Style="{StaticResource CaptionStyle}"/>
+                        <TextBox x:Name="FrontendPathBox" PlaceholderText="Auto-detected from tools\bin or LocalAppData"/>
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Engine runner (rg-reps2-engine.exe)" Style="{StaticResource CaptionStyle}"/>
+                        <TextBox x:Name="RunnerPathBox" PlaceholderText="Auto-detected from tools\bin or LocalAppData"/>
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="SDK include root (contains reps2\runtime and rg_reps2_engine)" Style="{StaticResource CaptionStyle}"/>
+                        <TextBox x:Name="SdkIncludeRootBox" PlaceholderText="Portable SDK\include"/>
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="CMake executable" Style="{StaticResource CaptionStyle}"/>
+                        <TextBox x:Name="CMakePathBox" PlaceholderText="Auto-detected from PATH"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Native build and probe" Style="{StaticResource SectionLabelStyle}"/>
+                    <Grid ColumnSpacing="12" RowSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Translation units" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource SecondaryTextBrush}"/>
+                        <ComboBox x:Name="TuCountBox" Grid.Column="1" Width="120">
                             <ComboBoxItem Content="2" Tag="2"/><ComboBoxItem Content="4" Tag="4"/>
                             <ComboBoxItem Content="8" Tag="8"/><ComboBoxItem Content="16" Tag="16"/>
                         </ComboBox>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <TextBlock Text="Probe instruction budget" Width="180" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}"/>
-                        <ComboBox x:Name="ProbeBudgetBox" Width="160">
+                        <TextBlock Grid.Row="1" Text="Probe instruction budget" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource SecondaryTextBrush}"/>
+                        <ComboBox x:Name="ProbeBudgetBox" Grid.Row="1" Grid.Column="1" Width="150">
                             <ComboBoxItem Content="1 million" Tag="1000000"/>
                             <ComboBoxItem Content="5 million" Tag="5000000"/>
                             <ComboBoxItem Content="10 million" Tag="10000000"/>
                             <ComboBoxItem Content="25 million" Tag="25000000"/>
                         </ComboBox>
-                    </StackPanel>
-                    <CheckBox x:Name="DiagnosticsCheckBox" Content="Enable structured developer diagnostics for import and build commands" Foreground="{StaticResource PrimaryTextBrush}"/>
-                    <CheckBox x:Name="AutoCheckUpdatesCheckBox" Content="Automatically check for REPS2 Desktop Alpha updates on startup" Foreground="{StaticResource PrimaryTextBrush}"/>
-                    <TextBlock Text="When an update is found, the header button becomes Update now. REPS2 downloads and verifies the package, restarts through its helper, and rolls back if the new version does not complete startup." FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
-                    <TextBlock Text="Native compilation requires CMake and a Visual Studio C++ toolchain. The runner executes trusted native code with the current user's privileges; it is not a sandbox." FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
+                    </Grid>
+                    <CheckBox x:Name="DiagnosticsCheckBox" Content="Enable structured developer diagnostics for import and build commands"/>
+                    <CheckBox x:Name="AutoCheckUpdatesCheckBox" Content="Automatically check for Desktop Alpha updates on startup"/>
+                    <TextBlock Text="When an update is found, the header button becomes Update now. REPS2 verifies the package, restarts through its helper, and rolls back if the new version fails to start."
+                               Style="{StaticResource CaptionStyle}"/>
+                    <TextBlock Text="Native compilation requires CMake and a Visual Studio C++ toolchain. The runner executes trusted native code with the current user's privileges; it is not a sandbox."
+                               Style="{StaticResource CaptionStyle}"/>
                 </StackPanel>
             </Border>
-            <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="10">
-                <Button Click="Save_Click" Background="{StaticResource BrandBrush}" Foreground="#0A0F1C" BorderThickness="0" FontWeight="SemiBold">Save settings</Button>
-                <Button Click="Reset_Click">Reset defaults</Button>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Click="Save_Click" Style="{StaticResource AccentButtonStyle}" Content="Save settings"/>
+                <Button Click="Reset_Click" Content="Reset defaults"/>
             </StackPanel>
-            <TextBlock x:Name="SettingsStatus" Grid.Row="5" Text="Settings are stored locally." FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
-        </Grid>
+            <TextBlock x:Name="SettingsStatus" Text="Settings are stored locally."
+                       Style="{StaticResource CaptionStyle}"/>
+        </StackPanel>
     </ScrollViewer>
 </Page>
