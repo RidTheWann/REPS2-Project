@@ -132,3 +132,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0129](0129-ee-timer3-count-frontier.md) | Correct the Downhill Timer 3 MMIO frontier (`T3_COUNT`) | Accepted |
 | [0130](0130-kseg-alias-mmio-dispatch.md) | Normalize KSEG0/KSEG1 aliases before EE MMIO dispatch | Accepted |
 | [0131](0131-ee-timer3-compare-register.md) | EE Timer 3 compare register and run-report timer state | Accepted |
+| [0132](0132-r5900-madd-maddu.md) | R5900 MADD/MADDU HI/LO accumulation decode, lift, and AOT lowering | Accepted |

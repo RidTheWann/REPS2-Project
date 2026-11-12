@@ -329,8 +329,10 @@ if(BUILD_TESTING)
             0x73A00013
             0x7000F010
             0x7000F812
+            0x70220000
+            0x70620001
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
-        COMMENT "AOT-compiling the synthetic R5900 HI/LO and multiply block"
+        COMMENT "AOT-compiling the synthetic R5900 HI/LO, multiply, MADD/MADDU block"
         VERBATIM
     )
     set_source_files_properties("${REPS2_HILO_GENERATED_CPP}" PROPERTIES GENERATED TRUE)

@@ -28,7 +28,7 @@ For MULT/MULTU, the low 32 product bits are sign-extended into LO and copied to 
 
 This does not add:
 - multiply pipeline timing or interlock behavior;
-- HI1/LO1, MULT1/MULTU1, MADD/MADDU, MMI accumulators, or MMI0–MMI3;
+- HI1/LO1, MULT1/MULTU1, MMI accumulators, or MMI0–MMI3 (MADD/MADDU were later added by ADR 0132);
 - DIV/DIVU, whose divide-by-zero and 64-bit result-lane behavior must be separately researched and tested;
 - complete exception delivery, interrupts, or a full EE execution environment.
 
