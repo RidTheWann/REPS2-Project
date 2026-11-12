@@ -39,6 +39,13 @@ pub enum Opcode {
     Mtsah,
     Mult,
     Multu,
+    /// MADD adds the signed 64-bit product of the low words of rs and rt to
+    /// the 64-bit HI:LO pair: `{HI,LO} += sext32(rs) * sext32(rt)`. The rd and
+    /// sa fields are ignored.
+    MultiplyAccumulateSigned,
+    /// MADDU is the unsigned sibling of MADD:
+    /// `{HI,LO} += zext32(rs) * zext32(rt)`.
+    MultiplyAccumulateUnsigned,
     Div,
     Divu,
     Add,
@@ -344,6 +351,8 @@ impl Opcode {
             Self::Mtsah => "mtsah",
             Self::Mult => "mult",
             Self::Multu => "multu",
+            Self::MultiplyAccumulateSigned => "madd",
+            Self::MultiplyAccumulateUnsigned => "maddu",
             Self::Div => "div",
             Self::Divu => "divu",
             Self::Add => "add",
@@ -849,6 +858,13 @@ impl Instruction {
             Opcode::Mult | Opcode::Multu => {
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
+                effects.writes_hi = true;
+                effects.writes_lo = true;
+            }
+            Opcode::MultiplyAccumulateSigned | Opcode::MultiplyAccumulateUnsigned => {
+                effects.gpr_read_mask = rs | rt;
+                effects.reads_hi = true;
+                effects.reads_lo = true;
                 effects.writes_hi = true;
                 effects.writes_lo = true;
             }
@@ -1507,6 +1523,10 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x11 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mthi1,
                 0x12 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mflo1,
                 0x13 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mtlo1,
+                // MADD/MADDU live at the bottom of the SPECIAL2 space with
+                // the rd and sa fields ignored.
+                0x00 => Opcode::MultiplyAccumulateSigned,
+                0x01 => Opcode::MultiplyAccumulateUnsigned,
                 _ => Opcode::Unknown,
             },
             // COP0 system control instructions: MFC0, MTC0, EI, DI, ERET.
@@ -1805,6 +1825,43 @@ mod tests {
         assert_eq!(decode(base | (2 << 6) | 0x08, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(base | 0x09, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(base | 0x28, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_r5900_madd_and_maddu_with_hilo_accumulate_effects() {
+        // MADD/MADDU sit at SPECIAL2 function 0x00/0x01; rd and sa are ignored.
+        let madd = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6);
+        let decoded = decode(madd, 0x7000);
+        assert_eq!(decoded.opcode, Opcode::MultiplyAccumulateSigned);
+        assert_eq!(decoded.opcode.mnemonic(), "madd");
+        assert_eq!((decoded.rs, decoded.rt), (1, 2));
+        assert!(!decoded.has_delay_slot);
+        assert!(!decoded.is_control_transfer());
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 0, "MADD writes no GPR");
+        assert!(effects.reads_hi && effects.reads_lo);
+        assert!(effects.writes_hi && effects.writes_lo);
+        assert!(!effects.may_raise_exception);
+        assert!(!effects.unknown);
+
+        let maddu = (madd & !0x3F) | 0x01;
+        let decoded = decode(maddu, 0x7000);
+        assert_eq!(decoded.opcode, Opcode::MultiplyAccumulateUnsigned);
+        assert_eq!(decoded.opcode.mnemonic(), "maddu");
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 0);
+        assert!(effects.reads_hi && effects.reads_lo && effects.writes_hi && effects.writes_lo);
+
+        // GPR[0] as a source contributes no mask bit: it is hard-wired zero.
+        let madd_zero = (0x1C << 26) | (2 << 16);
+        let effects = decode(madd_zero, 0).effects();
+        assert_eq!(effects.gpr_read_mask, 1 << 2);
+
+        // Other SPECIAL2 function slots must stay unknown.
+        assert_eq!(decode((madd & !0x3F) | 0x02, 0).opcode, Opcode::Unknown);
     }
 
     #[test]

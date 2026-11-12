@@ -102,8 +102,16 @@ int main() {
     if (state.gpr[1].low != 0xFFFFFFFFFFFFFD00ULL) return 26;
     if (state.gpr[1].high != 0x1111222233334444ULL) return 27;
 
-    if (state.hi != 0xFFFFFFFFFFFFFFFFULL) return 28;
-    if (state.lo != 0xFFFFFFFFFFFFFD00ULL) return 29;
+    // Base HI/LO after the trailing MADD/MADDU (wrapping 64-bit accumulation):
+    //   The last MULT (rd=1, rs=1, rt=2) left HI:LO = -768 = 0xFFFFFFFF_FFFFFD00
+    //   and overwrote gpr[1].low with LO (0xFFFFFD00 = -768); the last MULTU
+    //   overwrote gpr[3].low with 0xFFFFFFD0.
+    //   MADD gpr1,gpr2: -768 * 48 = -36864 = 0xFFFFFFFFFFFF7000;
+    //     0xFFFFFFFFFFFFFD00 + 0xFFFFFFFFFFFF7000 = 0xFFFFFFFFFFFF6D00.
+    //   MADDU gpr3,gpr2: 0xFFFFFFD0 * 48 = 0x2FFFFFFC0;
+    //     0xFFFFFFFFFFFF6D00 + 0x2FFFFFFC0 = 0x0000002F_FFFF6400 (wrapping).
+    if (state.hi != 0x000000000000002FULL) return 28;
+    if (state.lo != 0xFFFFFFFFFFFF6400ULL) return 29;
     if (state.gpr[6].high != 0x6666777788889999ULL
         || state.gpr[10].high != 0xAAAA000011112222ULL
         || state.gpr[17].high != 0xBBBB000022223333ULL
