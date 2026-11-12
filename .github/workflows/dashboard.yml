@@ -1,0 +1,59 @@
+name: Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/ROADMAP.md"
+      - "docs/PROJECT_STATE.md"
+      - "docs/RELEASE_GATES.md"
+      - "scripts/generate_progress_dashboard.py"
+      - "scripts/test_progress_dashboard.py"
+      - ".github/workflows/dashboard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Generate roadmap dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test dashboard generator
+        working-directory: scripts
+        run: python -m unittest test_progress_dashboard -v
+
+      - name: Generate dashboard
+        run: python scripts/generate_progress_dashboard.py --output-dir _site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy dashboard
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
