@@ -71,7 +71,10 @@ $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerIn
 Write-Host "Portable package: $zipPath"
 
 if (-not $SkipInstaller) {
-    $makensis = if ($env:MAKENSIS) { $env:MAKENSIS } else { (Get-Command makensis -ErrorAction SilentlyContinue).Source }
+    $makensis = if ($env:MAKENSIS) { $env:MAKENSIS } else {
+        $command = Get-Command makensis -ErrorAction SilentlyContinue
+        if ($command) { $command.Source } else { $null }
+    }
     if (-not $makensis) {
         $candidate = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
         if (Test-Path -LiteralPath $candidate) { $makensis = $candidate }
