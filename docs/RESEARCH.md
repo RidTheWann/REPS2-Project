@@ -1417,6 +1417,26 @@ The direct-mapped KSEG0/KSEG1 aliases use the low 29 bits as the physical addres
 
 This is address selection only. It does not model cache effects, TLB mappings, or new devices. The Downhill access to `T3_COUNT` at `0xB0001800` remains unsupported; the adjacent `T3_COMP` remains unsupported as well. See ADR 0130 and the Timer 3 frontier correction in ADR 0129.
 
+## Timer 3 setup evidence and compare-register slice (ADR 0131)
+
+Static inspection of the generated translation units for the owner-supplied Downhill Domination USA ISO (`0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86`, boot ELF `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`) shows the relocated kernel patch configuring Timer 3:
+
+- **Observed:** `0x800763EC` loads `0xB0000000`, `0x800763F0` ORs in `0x1810`, and `0x800763F4` stores `$v1 = 0x83` to `T3_MODE` when the preceding branch selects that path.
+- **Observed:** `0x80076460` loads `0xB0000000`, `0x80076464` ORs in `0x1820`, and `0x80076468` stores `$a0` to `T3_COMP`; `0x80076470`..`0x80076480` then writes `0x583` to `T3_MODE` in a delay slot.
+- **Observed:** `0x800761A4` loads `T3_COUNT` (`lw $20, 0($2)`, `$2 = 0xB0001800`), and `0x80076408` loads `T3_COUNT` in a `jal` delay slot at `0x80076400`/`0x80076408`.
+- **Derived:** mode `0x83` selects clock field 3 (HBLANK) with `CUE`; mode `0x583` additionally sets `CMPE` and writes the compare-interrupt flag bit, which PS2TEK defines as write-one-to-clear.
+
+PS2TEK documents the register surface as a 16-bit `TN_COUNT` whose writes set the counter, a 32-bit `TN_MODE` (clock select 0 = bus clock, 1 = bus/16, 2 = bus/256, 3 = HBLANK; gate, zero-return, enable, compare/overflow interrupt and flag bits), and a 16-bit `TN_COMP` compare value. Timer 3 is reserved by the BIOS for alarm functions. HBLANK counting depends on a video timing model that REPS2 does not yet have.
+
+REPS2 now stores the documented 16-bit `T3_COMP` value and reports `timer3.mode`/`timer3.compare` in the engine run report. `T3_COUNT` remains fail-closed; no counter progression, compare match, overflow event or interrupt is synthesized.
+
+- **Observed (fresh probe, 2026-11-13, Windows x64/MSVC, runtime ABI 2, recovery main `0c4c04c` plus the ADR 0131 branch):** the runner stops as `unsupported_memory_access` at `0x800761A4` after 3,890,274 guest instructions. The report records `$2 = 0xFFFFFFFFB0001800`, `timer3.mode = 0`, `timer3.compare = 0`, and a 16-entry trace ending `0x80076168`..`0x800761A4`.
+- **Derived:** the faulting path reads `T3_COUNT` before any Timer 3 setup write executes; the static `T3_MODE`/`T3_COMP` stores at `0x800763F4`/`0x80076468` belong to paths not taken before this stop. A counter model must therefore be driven by a deterministic HBLANK/video or bus-time source rather than a value invented at the read site.
+
+Public references:
+- [PS2TEK EE Timers](https://israpps.github.io/ps2tek/)
+- [PS2SDK EE timer definitions](https://github.com/ps2dev/ps2sdk/blob/master/ee/kernel/include/timer.h)
+
 ## Provenance rules
 
 
