@@ -49,15 +49,24 @@ the probe.
 
 ## Scope and limitations
 
-This report records CMake's configured compiler identity and flags; it does not
-hash the compiler executable, capture arbitrary environment variables, or prove
-that a compiler wrapper's implementation is immutable. It is therefore provenance
-evidence, not yet a complete cache identity.
+The report is extended with SHA-256 for the configured compiler executable
+(and linker executable when CMake exposes one), a digest of sorted relative public
+runtime-header paths and contents, the explicit runtime ABI version, control-IR
+and frontend manifest schema versions, the exact source boot-ELF digest when
+available, the translated dispatcher/part-file digest, and the initial RAM-image
+digest. Local executable/include paths and timestamps remain excluded.
 
-A future cache key must combine a stable host-toolchain fingerprint with at least
-the input ISO digest, frontend/compiler version, IR and manifest schema, runtime
-ABI, target platform, and relevant build configuration. Cache lookup and stale
-artifact rejection remain separate work.
+A configuration-specific `reps2-native-build-identity-<config>.json` is emitted
+when the generated native target is built. Its `cache_key_sha256` is the SHA-256
+of that configuration's complete toolchain report bytes. Debug and Release
+reports therefore produce separate identities.
+
+This is a build-identity foundation, not a cache implementation: REPS2 does not
+yet look up, reuse, evict, or reject cached native artifacts. The current direct
+ELF native-build path identifies the boot ELF, not the parent ISO. A future
+per-game library cache must bind the boot ELF to the content-addressed ISO/disc
+identity. Compiler wrappers, external tools not represented by CMake metadata,
+and arbitrary process environment variables are not fully fingerprinted.
 
 The report does not imply that a generated probe, a successful native build, or a
 guest trap is evidence of retail-title boot or playability.

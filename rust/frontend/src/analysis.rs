@@ -1,6 +1,6 @@
 //! Reachability-guided executable analysis and delay-slot-aware control-flow graphs.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 
 use crate::elf::{self, Image, LoadedSegment};
@@ -94,6 +94,12 @@ pub enum EdgeKind {
     Jump,
     Call,
     ReturnContinuation,
+    /// The instruction after a `SYSCALL`, reached only when a host HLE service
+    /// answers the trap and resumes the guest. It is not the architectural
+    /// successor: without a serviced call the trap vectors through COP0 and no
+    /// guest code at this address runs. The edge exists so the continuation is
+    /// discovered and translated, because a serviced call has to resolve.
+    SyscallContinuation,
 }
 
 /// One statically known CFG edge.
@@ -133,6 +139,10 @@ pub enum Terminator {
         delay_slot: DecodedInstruction,
         link_register: Option<u8>,
         return_pc: Option<u32>,
+        /// Statically resolved target when the source register is constant
+        /// within this block. Even non-executable targets are retained so
+        /// they can be reported as external control flow.
+        resolved_target_pc: Option<u32>,
     },
     Return {
         instruction: DecodedInstruction,
@@ -217,18 +227,54 @@ impl Terminator {
                 edges
             }
             Self::IndirectJump {
+                resolved_target_pc,
                 link_register,
                 return_pc,
                 ..
-            } => match (link_register, return_pc) {
-                (Some(_), Some(return_pc)) => vec![Edge {
-                    from_block,
-                    to_pc: *return_pc,
-                    kind: EdgeKind::ReturnContinuation,
-                }],
-                _ => Vec::new(),
-            },
-            Self::Return { .. } | Self::Unsupported { .. } | Self::SegmentEnd { .. } => Vec::new(),
+            } => {
+                let mut edges = Vec::new();
+                if let Some(target_pc) = resolved_target_pc {
+                    edges.push(Edge {
+                        from_block,
+                        to_pc: *target_pc,
+                        kind: if link_register.is_some() {
+                            EdgeKind::Call
+                        } else {
+                            EdgeKind::Jump
+                        },
+                    });
+                }
+                if let (Some(_), Some(return_pc)) = (link_register, return_pc) {
+                    edges.push(Edge {
+                        from_block,
+                        to_pc: *return_pc,
+                        kind: EdgeKind::ReturnContinuation,
+                    });
+                }
+                edges
+            }
+            Self::Unsupported { instruction } => {
+                // A `SYSCALL` ends the block without an architectural successor:
+                // the trap vectors through COP0. A host HLE service still has to
+                // resume somewhere, so the fall-through is exposed as a
+                // continuation for discovery only.
+                if instruction.opcode == Opcode::Syscall {
+                    instruction
+                        .pc
+                        .checked_add(4)
+                        .map(|continuation_pc| {
+                            vec![Edge {
+                                from_block,
+                                to_pc: continuation_pc,
+                                kind: EdgeKind::SyscallContinuation,
+                            }]
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            }
+            Self::Return { .. } | Self::SegmentEnd { .. } => Vec::new(),
         }
     }
 
@@ -430,6 +476,34 @@ impl fmt::Display for AnalysisError {
 
 impl std::error::Error for AnalysisError {}
 
+impl AnalysisError {
+    /// Whether a failure only says that a speculative block start does not
+    /// decode as a representable CFG block.
+    ///
+    /// Heuristic roots and SYSCALL continuations are guesses about content, so
+    /// these content failures may be skipped and reported. Resource limits,
+    /// input/segment validation and internal ownership invariants are global
+    /// analysis failures and must never be converted into a partial success.
+    /// The match is exhaustive so every new error must be classified.
+    fn is_tolerable_speculative_decode_failure(&self) -> bool {
+        match self {
+            Self::MissingDelaySlot { .. }
+            | Self::UnsupportedDelaySlot { .. }
+            | Self::ControlTransferInDelaySlot { .. }
+            | Self::TargetEntersDelaySlot { .. } => true,
+            Self::Elf(_)
+            | Self::NoExecutableEntryPoints
+            | Self::EntryPointNotExecutable(_)
+            | Self::InvalidLoadedSegment { .. }
+            | Self::GuestPcOverflow(_)
+            | Self::InstructionLimitExceeded { .. }
+            | Self::BlockLimitExceeded { .. }
+            | Self::AliasedViewLimitExceeded { .. }
+            | Self::InternalBlockOwnershipError(_) => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OwnerLocation {
     Body(usize),
@@ -508,18 +582,27 @@ pub struct FunctionDiscovery {
     /// Addresses whose first word is `addiu $sp, $sp, -N`, the PS2/EE ABI
     /// callee prologue.
     pub prologue_candidates: BTreeSet<u32>,
-    /// Number of aligned words examined.
+    /// Code addresses stored as 32-bit words in file-backed, non-executable
+    /// segments: callback, vtable and syscall-handler tables. A title can reach
+    /// such a routine without any static `JAL`, so these are equally candidate
+    /// roots.
+    pub data_pointer_candidates: BTreeSet<u32>,
+    /// Number of aligned words examined in executable segments.
     pub scanned_words: u64,
+    /// Number of aligned words examined in non-executable segments.
+    pub scanned_data_words: u64,
     /// Whether the candidate limit stopped the scan before the end of `.text`.
     pub truncated: bool,
 }
 
 impl FunctionDiscovery {
-    /// The union of both evidence sets in deterministic address order.
+    /// The union of all evidence sets in deterministic address order.
     #[must_use]
     pub fn candidate_roots(&self) -> BTreeSet<u32> {
         self.call_targets
-            .union(&self.prologue_candidates)
+            .iter()
+            .chain(&self.prologue_candidates)
+            .chain(&self.data_pointer_candidates)
             .copied()
             .collect()
     }
@@ -527,8 +610,62 @@ impl FunctionDiscovery {
     /// Number of distinct candidate addresses.
     #[must_use]
     pub fn candidate_count(&self) -> usize {
-        self.call_targets.union(&self.prologue_candidates).count()
+        self.call_targets
+            .iter()
+            .chain(&self.prologue_candidates)
+            .chain(&self.data_pointer_candidates)
+            .collect::<BTreeSet<_>>()
+            .len()
     }
+
+    /// Cheap upper bound used to enforce the candidate limit inside the scan
+    /// loops without allocating per word.
+    fn candidate_upper_bound(&self) -> usize {
+        self.call_targets.len()
+            + self.prologue_candidates.len()
+            + self.data_pointer_candidates.len()
+    }
+}
+
+/// Section-declared executable byte ranges, sorted and merged.
+///
+/// Retail PS2 executables commonly place every loadable byte in a single
+/// writable-and-executable `PT_LOAD`, so the program-header `PF_X` flag cannot
+/// distinguish code from data. The section table still records `SHF_EXECINSTR`
+/// precisely (`.text`, `.vutext`, ...), so pointer-table discovery uses these
+/// ranges whenever the section table declares at least one.
+#[must_use]
+pub fn executable_section_ranges(image: &Image) -> Vec<(u32, u32)> {
+    let mut ranges = image
+        .section_headers
+        .iter()
+        .filter(|section| {
+            section.flags & elf::SHF_ALLOC != 0
+                && section.flags & elf::SHF_EXECINSTR != 0
+                && section.size != 0
+        })
+        .filter_map(|section| {
+            let start = section.virtual_address;
+            let end = start.checked_add(section.size)?;
+            Some((start, end))
+        })
+        .collect::<Vec<_>>();
+    ranges.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges {
+        match merged.last_mut() {
+            Some((_, last_end)) if start <= *last_end => {
+                *last_end = (*last_end).max(end);
+            }
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+/// True when `pc` lies inside one of the section-declared executable ranges.
+fn is_section_executable(ranges: &[(u32, u32)], pc: u32) -> bool {
+    ranges.iter().any(|&(start, end)| pc >= start && pc < end)
 }
 
 /// Scans file-backed executable bytes for function entry candidates.
@@ -538,14 +675,39 @@ impl FunctionDiscovery {
 /// admitted only when the target is itself backed by file bytes in an
 /// executable segment; a prologue is admitted only from an executable,
 /// file-backed word.
+///
+/// Pointer tables are read from every file-backed word that
+/// `section_exec_ranges` does not declare executable. When that list is empty
+/// the program-header rule is retained: only non-executable segments are data.
 #[must_use]
 pub fn discover_function_roots(
     segments: &[LoadedSegment],
+    section_exec_ranges: &[(u32, u32)],
     limits: AnalysisLimits,
 ) -> FunctionDiscovery {
+    // Section permissions replace the program-header rule only when they
+    // actually describe this image. A section table whose addresses live in a
+    // different address view than the segments would otherwise classify every
+    // code word as data.
+    let use_section_permissions = section_exec_ranges.iter().any(|&(start, end)| {
+        segments.iter().any(|segment| {
+            let segment_end = segment
+                .virtual_address
+                .saturating_add(segment.file_size as u32);
+            start < segment_end && segment.virtual_address < end
+        })
+    });
+
+    // A candidate is code when it is file-backed executable and, if the section
+    // table is usable, inside a section-declared executable range.
+    let admits_code = |pc: u32| {
+        crate::address::file_backed_executable_segment(segments, pc).is_some()
+            && (!use_section_permissions || is_section_executable(section_exec_ranges, pc))
+    };
+
     let mut discovery = FunctionDiscovery::default();
     for segment in segments {
-        if segment.flags & elf::PF_X == 0 {
+        if !use_section_permissions && segment.flags & elf::PF_X == 0 {
             continue;
         }
         let file_size = segment.file_size.min(segment.bytes.len());
@@ -555,26 +717,25 @@ pub fn discover_function_roots(
         let base = segment.virtual_address;
         let mut offset = ((4 - (base % 4)) % 4) as usize;
         while offset + 4 <= file_size {
-            if discovery.call_targets.len() + discovery.prologue_candidates.len()
-                >= limits.max_function_roots
-            {
+            if discovery.candidate_upper_bound() >= limits.max_function_roots {
                 discovery.truncated = true;
                 return discovery;
+            }
+            let Some(pc) = base.checked_add(offset as u32) else {
+                break;
+            };
+            if use_section_permissions && !is_section_executable(section_exec_ranges, pc) {
+                offset += 4;
+                continue;
             }
             let word = u32::from_le_bytes(
                 segment.bytes[offset..offset + 4]
                     .try_into()
                     .expect("four-byte discovery window"),
             );
-            let Some(pc) = base.checked_add(offset as u32) else {
-                break;
-            };
             discovery.scanned_words += 1;
             let instruction = mips::decode(word, pc);
-            if instruction.opcode == Opcode::Jal
-                && crate::address::file_backed_executable_segment(segments, instruction.target)
-                    .is_some()
-            {
+            if instruction.opcode == Opcode::Jal && admits_code(instruction.target) {
                 discovery.call_targets.insert(instruction.target);
             }
             if instruction.opcode == Opcode::Addiu
@@ -583,6 +744,49 @@ pub fn discover_function_roots(
                 && instruction.signed_immediate() < 0
             {
                 discovery.prologue_candidates.insert(pc);
+            }
+            offset += 4;
+        }
+    }
+
+    // File-backed words outside section-declared executable ranges hold pointer
+    // tables. A word that resolves into executable bytes is a candidate routine
+    // address: callback/vtable entries and, importantly for syscalls, the
+    // SetSyscall descriptor tables a title copies into kernel slots.
+    //
+    // A single writable+executable `PT_LOAD` cannot separate code from data, so
+    // when the section table declares executable ranges those ranges decide
+    // what is code and every other file-backed word is read.
+    for segment in segments {
+        if !use_section_permissions && segment.flags & elf::PF_X != 0 {
+            continue;
+        }
+        let file_size = segment.file_size.min(segment.bytes.len());
+        if file_size < 4 {
+            continue;
+        }
+        let base = segment.virtual_address;
+        let mut offset = ((4 - (base % 4)) % 4) as usize;
+        while offset + 4 <= file_size {
+            if discovery.candidate_count() >= limits.max_function_roots {
+                discovery.truncated = true;
+                return discovery;
+            }
+            let Some(pc) = base.checked_add(offset as u32) else {
+                break;
+            };
+            if use_section_permissions && is_section_executable(section_exec_ranges, pc) {
+                offset += 4;
+                continue;
+            }
+            let value = u32::from_le_bytes(
+                segment.bytes[offset..offset + 4]
+                    .try_into()
+                    .expect("four-byte pointer window"),
+            );
+            discovery.scanned_data_words += 1;
+            if value & 3 == 0 && admits_code(value) {
+                discovery.data_pointer_candidates.insert(value);
             }
             offset += 4;
         }
@@ -597,16 +801,55 @@ struct PreparedImage {
     roots: Vec<u32>,
 }
 
+/// A code image the guest copies into main RAM at run time.
+///
+/// Self-relocating drivers (for example ps2sdk's alarm patch blob) live in the
+/// ELF as data and are copied to an executable address before being called.
+/// Static analysis cannot infer that copy, so the caller supplies the
+/// destination address and the bytes already read from the input image. The
+/// destination becomes an authoritative root and an executable segment, but the
+/// initial RAM image is not changed: the guest's own copy remains observable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelocatedCodeRegion {
+    pub destination: u32,
+    pub bytes: Vec<u8>,
+}
+
+/// Appends each relocated region as an executable segment and an authoritative
+/// root. Extracted so synthetic tests can exercise the placement without an
+/// ELF wrapper.
+fn append_relocated_code(
+    segments: &mut Vec<LoadedSegment>,
+    entry_points: &mut Vec<EntryPoint>,
+    relocated: &[RelocatedCodeRegion],
+) {
+    for region in relocated {
+        segments.push(LoadedSegment {
+            virtual_address: region.destination,
+            flags: elf::PF_R | elf::PF_W | elf::PF_X,
+            file_size: region.bytes.len(),
+            bytes: region.bytes.clone(),
+        });
+        entry_points.push(EntryPoint {
+            address: region.destination,
+            labels: vec!["relocated".to_owned()],
+            is_elf_entry: false,
+        });
+    }
+}
+
 /// Materializes PT_LOAD segments and collects the authoritative entry points
 /// (the ELF entry and any `STT_FUNC` symbols that map to executable bytes).
 fn prepare(
     image: &Image,
     file_bytes: &[u8],
     limits: AnalysisLimits,
+    relocated: &[RelocatedCodeRegion],
 ) -> Result<PreparedImage, AnalysisError> {
-    let segments = elf::load_segments(file_bytes, image, limits.max_loaded_memory)
+    let mut segments = elf::load_segments(file_bytes, image, limits.max_loaded_memory)
         .map_err(|error| AnalysisError::Elf(error.to_string()))?;
-    let entry_points = collect_entry_points(image, &segments);
+    let mut entry_points = collect_entry_points(image, &segments);
+    append_relocated_code(&mut segments, &mut entry_points, relocated);
     let roots = entry_points
         .iter()
         .map(|entry| entry.address)
@@ -625,11 +868,22 @@ pub fn discover_elf(
     file_bytes: &[u8],
     limits: AnalysisLimits,
 ) -> Result<ControlFlowGraph, AnalysisError> {
+    discover_elf_with_relocated(image, file_bytes, limits, &[])
+}
+
+/// As [`discover_elf`], additionally treating each supplied relocated region as
+/// executable code at its destination address.
+pub fn discover_elf_with_relocated(
+    image: &Image,
+    file_bytes: &[u8],
+    limits: AnalysisLimits,
+    relocated: &[RelocatedCodeRegion],
+) -> Result<ControlFlowGraph, AnalysisError> {
     let PreparedImage {
         segments,
         entry_points,
         roots,
-    } = prepare(image, file_bytes, limits)?;
+    } = prepare(image, file_bytes, limits, relocated)?;
     discover_cfg(&segments, entry_points, &roots, limits)
 }
 
@@ -662,13 +916,36 @@ pub fn discover_elf_with_discovery(
     file_bytes: &[u8],
     limits: AnalysisLimits,
 ) -> Result<DiscoveryAnalysis, AnalysisError> {
+    discover_elf_with_discovery_and_relocated(image, file_bytes, limits, &[])
+}
+
+/// As [`discover_elf_with_discovery`], additionally treating each supplied
+/// relocated region as executable code at its destination address.
+pub fn discover_elf_with_discovery_and_relocated(
+    image: &Image,
+    file_bytes: &[u8],
+    limits: AnalysisLimits,
+    relocated: &[RelocatedCodeRegion],
+) -> Result<DiscoveryAnalysis, AnalysisError> {
     let PreparedImage {
         segments,
         mut entry_points,
         roots: authoritative,
-    } = prepare(image, file_bytes, limits)?;
-    let discovery = discover_function_roots(&segments, limits);
-
+    } = prepare(image, file_bytes, limits, relocated)?;
+    // Relocated regions are declared executable by the caller but are not
+    // covered by any ELF section, so without extending the executable ranges
+    // here, discovery would never scan them and function entries reached only
+    // inside the runtime-copied code (e.g. Downhill's 0x80076440) would stay
+    // unresolved. ADR 0127.
+    let mut exec_ranges = executable_section_ranges(image);
+    for region in relocated {
+        exec_ranges.push((
+            region.destination,
+            region.destination + region.bytes.len() as u32,
+        ));
+    }
+    exec_ranges.sort_unstable();
+    let discovery = discover_function_roots(&segments, &exec_ranges, limits);
     let authoritative_set: BTreeSet<u32> = authoritative.iter().copied().collect();
     let mut discovered_roots = Vec::new();
     for candidate in discovery.candidate_roots() {
@@ -889,39 +1166,26 @@ fn build_cfg(
 
         if let Some(owner) = owners.get(&start_pc).copied() {
             if owner.location == OwnerLocation::DelaySlot {
-                if lenient {
-                    skipped_blocks.push(start_pc);
-                    if heuristic_roots.contains(&start_pc) {
-                        rejected_roots.push(start_pc);
-                    }
-                    continue;
+                // A branch may legally target another instruction's delay
+                // slot: on hardware, when the target is reached by a jump,
+                // that word executes as an ordinary instruction (delay-slot-
+                // ness belongs to the branch, not the address). The address
+                // is already proven code (it is owned as a delay slot), so
+                // admitting it as a new block start is safe even for a
+                // heuristic-only edge. The owning branch block keeps the same
+                // word as its own delay slot. ADR 0126.
+            } else {
+                // All remaining split failures are ownership invariants, never
+                // tolerable speculation. A split adds one block; check capacity
+                // before mutating the graph.
+                if start_pc != owner.block_start && blocks.len() >= limits.max_blocks {
+                    return Err(AnalysisError::BlockLimitExceeded {
+                        limit: limits.max_blocks,
+                    });
                 }
-                let owning_control_pc = blocks
-                    .get(&owner.block_start)
-                    .and_then(|block: &BasicBlock| block.terminator.control_instruction())
-                    .map(|instruction| instruction.pc)
-                    .unwrap_or(owner.block_start);
-                return Err(AnalysisError::TargetEntersDelaySlot {
-                    target_pc: start_pc,
-                    owning_control_pc,
-                });
+                split_block_at(start_pc, owner, &mut blocks, &mut owners)?;
+                continue;
             }
-            if let Err(error) = split_block_at(start_pc, owner, &mut blocks, &mut owners) {
-                if lenient {
-                    skipped_blocks.push(start_pc);
-                    if heuristic_roots.contains(&start_pc) {
-                        rejected_roots.push(start_pc);
-                    }
-                    continue;
-                }
-                return Err(error);
-            }
-            if blocks.len() > limits.max_blocks {
-                return Err(AnalysisError::BlockLimitExceeded {
-                    limit: limits.max_blocks,
-                });
-            }
-            continue;
         }
 
         if !is_executable_view(start_pc) {
@@ -934,7 +1198,7 @@ fn build_cfg(
             });
         }
 
-        let block = match build_block(
+        let mut block = match build_block(
             segments,
             start_pc,
             &leaders,
@@ -945,7 +1209,7 @@ fn build_cfg(
             limits,
         ) {
             Ok(block) => block,
-            Err(_) if lenient => {
+            Err(error) if lenient && error.is_tolerable_speculative_decode_failure() => {
                 skipped_blocks.push(start_pc);
                 if heuristic_roots.contains(&start_pc) {
                     rejected_roots.push(start_pc);
@@ -955,11 +1219,35 @@ fn build_cfg(
             Err(error) => return Err(error),
         };
 
-        register_block_owners(&block, &mut owners)?;
-        let next_targets = block_targets(&block);
-        if let Terminator::IndirectJump { instruction, .. } = &block.terminator {
-            unresolved_indirect_jumps.insert(instruction.pc);
+        let indirect_target = match &block.terminator {
+            Terminator::IndirectJump {
+                instruction,
+                source_register,
+                ..
+            } => Some((
+                instruction.pc,
+                resolve_indirect_jump_target(&block, *source_register),
+            )),
+            _ => None,
+        };
+        if let Some((instruction_pc, target)) = indirect_target {
+            if let Terminator::IndirectJump {
+                resolved_target_pc, ..
+            } = &mut block.terminator
+            {
+                *resolved_target_pc = target;
+            }
+            if target.is_none() {
+                unresolved_indirect_jumps.insert(instruction_pc);
+            }
         }
+
+        register_block_owners(&block, &mut owners)?;
+        // A resolved indirect target is now an ordinary static edge. The
+        // common successor loop below either queues executable code or records
+        // a known non-executable destination as an external control-flow target.
+        let next_targets = block_targets(&block);
+        let trap_continuations = lenient_block_targets(&block);
         blocks.insert(start_pc, block);
 
         for target in next_targets {
@@ -982,6 +1270,23 @@ fn build_cfg(
                 &mut queued_lenient,
                 target,
                 lenient,
+            );
+        }
+
+        // A trap continuation is a guess even when the trapping block itself is
+        // authoritative: the address only holds code if a service is answered.
+        for target in trap_continuations {
+            if !is_executable_view(target) {
+                external_targets.insert(target);
+                continue;
+            }
+            leaders.insert(target);
+            enqueue_root(
+                &mut queue,
+                &mut queued_authoritative,
+                &mut queued_lenient,
+                target,
+                true,
             );
         }
     }
@@ -1127,6 +1432,7 @@ fn build_block(
                     delay_slot,
                     link_register,
                     return_pc,
+                    resolved_target_pc: None,
                 };
             }
             _ => {}
@@ -1155,12 +1461,11 @@ fn read_instruction_word(segments: &[LoadedSegment], pc: u32) -> Option<u32> {
 }
 
 fn increment_instruction_count(count: &mut usize, limit: usize) -> Result<(), AnalysisError> {
-    *count = count
-        .checked_add(1)
-        .ok_or(AnalysisError::InstructionLimitExceeded { limit })?;
-    if *count > limit {
+    if *count >= limit {
         return Err(AnalysisError::InstructionLimitExceeded { limit });
     }
+    // count < limit <= usize::MAX, so this cannot overflow.
+    *count += 1;
     Ok(())
 }
 
@@ -1174,16 +1479,22 @@ fn fetch_delay_slot(
         .pc
         .checked_add(4)
         .ok_or(AnalysisError::GuestPcOverflow(control.pc))?;
-    // A heuristic-only leader that happens to land in this delay slot is not an
-    // authoritative boundary claim. Ignoring it lets the authoritative control
-    // instruction decode; the candidate is rejected as a delay-slot interior
-    // when its own queue entry is visited.
-    if authoritative_leaders.contains(&delay_pc) || owners.contains_key(&delay_pc) {
+    // A block may already start at `delay_pc` (an admitted delay-slot-entry
+    // target): on hardware, jumping directly to that address executes the word
+    // as an ordinary instruction, while the owning branch still executes it as
+    // its delay slot. Both roles share the word, so a block-start owner is
+    // fine. An owner inside another block (Body/Control/DelaySlot of a
+    // different block start) would make the delay slot overlap that block's
+    // interior, which the CFG cannot represent.
+    if let Some(owner) = owners.get(&delay_pc)
+        && owner.block_start != delay_pc
+    {
         return Err(AnalysisError::TargetEntersDelaySlot {
             target_pc: delay_pc,
             owning_control_pc: control.pc,
         });
     }
+    let _ = authoritative_leaders;
     let Some(word) = read_instruction_word(segments, delay_pc) else {
         return Err(AnalysisError::MissingDelaySlot {
             control_pc: control.pc,
@@ -1244,11 +1555,87 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
     }
 }
 
+/// Successors the analysis must translate because guest register state requires
+/// them: the architectural successors of the terminator.
+/// Within-block constant propagation for the address register used by an
+/// indirect jump. Recognises the common address-loading idiom (e.g.
+/// `lui $t9, hi; ori $t9, $t9, lo` followed by `jr $t9` or `jalr $t9`) so a
+/// statically-known indirect target can be discovered as a normal block
+/// instead of an unresolved stop.
+///
+/// Conservative: never invents a target. Returns `None` when the source
+/// register's value cannot be determined from the block's immediate-forming
+/// instructions.
+fn resolve_indirect_jump_target(block: &BasicBlock, source_register: u8) -> Option<u32> {
+    if source_register == 0 {
+        // JR $zero is still a statically known transfer to guest address zero.
+        return Some(0);
+    }
+    let mut constants: HashMap<u8, u32> = HashMap::new();
+    for instruction in &block.instructions {
+        match instruction.opcode {
+            Opcode::Lui => {
+                constants.insert(instruction.rt, (instruction.immediate as u32) << 16);
+            }
+            Opcode::Ori | Opcode::Addiu | Opcode::Daddiu | Opcode::Andi | Opcode::Xori => {
+                let base = if instruction.rs == 0 {
+                    Some(0u32)
+                } else {
+                    constants.get(&instruction.rs).copied()
+                };
+                match base {
+                    Some(base) => {
+                        let result = match instruction.opcode {
+                            Opcode::Ori => base | instruction.immediate as u32,
+                            Opcode::Addiu | Opcode::Daddiu => {
+                                // JR/JALR consume the low 32-bit guest address;
+                                // the low lane is identical for wrapping 32-bit
+                                // addition and the EE's sign-extended DADDIU.
+                                base.wrapping_add(instruction.signed_immediate() as u32)
+                            }
+                            Opcode::Andi => base & instruction.immediate as u32,
+                            Opcode::Xori => base ^ instruction.immediate as u32,
+                            _ => unreachable!(),
+                        };
+                        constants.insert(instruction.rt, result);
+                    }
+                    None => {
+                        // Result depends on an unknown register.
+                        constants.remove(&instruction.rt);
+                    }
+                }
+            }
+            Opcode::Nop => {}
+            _ => {
+                // Any other instruction may clobber a register we do not
+                // precisely track; drop all tracked constants rather than
+                // risk a stale value.
+                constants.clear();
+            }
+        }
+    }
+    constants.get(&source_register).copied()
+}
+
 fn block_targets(block: &BasicBlock) -> Vec<u32> {
     block
         .terminator
         .outgoing_edges(block.start_pc)
         .into_iter()
+        .filter(|edge| edge.kind != EdgeKind::SyscallContinuation)
+        .map(|edge| edge.to_pc)
+        .collect()
+}
+
+/// Successors that are only real code if a host HLE service answers a trap.
+/// They are queued leniently, so a `SYSCALL` followed by data rather than code
+/// is reported as a skipped guess instead of aborting the analysis.
+fn lenient_block_targets(block: &BasicBlock) -> Vec<u32> {
+    block
+        .terminator
+        .outgoing_edges(block.start_pc)
+        .into_iter()
+        .filter(|edge| edge.kind == EdgeKind::SyscallContinuation)
         .map(|edge| edge.to_pc)
         .collect()
 }
@@ -1258,16 +1645,23 @@ fn register_block_owners(
     owners: &mut BTreeMap<u32, InstructionOwner>,
 ) -> Result<(), AnalysisError> {
     for (index, instruction) in block.instructions.iter().enumerate() {
-        if owners
-            .insert(
-                instruction.pc,
-                InstructionOwner {
-                    block_start: block.start_pc,
-                    location: OwnerLocation::Body(index),
-                },
-            )
-            .is_some()
-        {
+        let previous = owners.insert(
+            instruction.pc,
+            InstructionOwner {
+                block_start: block.start_pc,
+                location: OwnerLocation::Body(index),
+            },
+        );
+        // A block admitted at another block's delay-slot address replaces the
+        // DelaySlot marker: the word then has a dual role (delay slot of the
+        // owning branch, ordinary instruction when jumped to directly), which
+        // hardware executes exactly that way (ADR 0126).
+        let shares_delay_slot = previous.is_some_and(|prev| {
+            index == 0
+                && prev.location == OwnerLocation::DelaySlot
+                && instruction.pc == block.start_pc
+        });
+        if previous.is_some() && !shares_delay_slot {
             return Err(AnalysisError::InternalBlockOwnershipError(instruction.pc));
         }
     }
@@ -1286,18 +1680,27 @@ fn register_block_owners(
         return Err(AnalysisError::InternalBlockOwnershipError(instruction.pc));
     }
 
-    if let Some(delay_slot) = block.terminator.delay_slot()
-        && owners
-            .insert(
-                delay_slot.pc,
-                InstructionOwner {
-                    block_start: block.start_pc,
-                    location: OwnerLocation::DelaySlot,
-                },
-            )
-            .is_some()
-    {
-        return Err(AnalysisError::InternalBlockOwnershipError(delay_slot.pc));
+    if let Some(delay_slot) = block.terminator.delay_slot() {
+        // If an admitted block already starts at the delay-slot address, the
+        // word is shared: keep the block-start owner and record the delay-slot
+        // role only when the address is still free.
+        match owners.get(&delay_slot.pc) {
+            Some(existing) if existing.block_start == delay_slot.pc => {}
+            _ => {
+                if owners
+                    .insert(
+                        delay_slot.pc,
+                        InstructionOwner {
+                            block_start: block.start_pc,
+                            location: OwnerLocation::DelaySlot,
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(AnalysisError::InternalBlockOwnershipError(delay_slot.pc));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1414,6 +1817,36 @@ mod tests {
             labels: vec!["synthetic-entry".to_owned()],
             is_elf_entry: true,
         }
+    }
+
+    #[test]
+    fn relocated_region_becomes_an_executable_root() {
+        // addiu v0, zero, 1; jr ra; nop
+        let words = [0x2402_0001u32, 0x03E0_0008, 0x0000_0000];
+        let mut bytes = Vec::new();
+        for word in words {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let relocated = [RelocatedCodeRegion {
+            destination: 0x8000_2000,
+            bytes,
+        }];
+        let mut segments: Vec<LoadedSegment> = Vec::new();
+        let mut entries: Vec<EntryPoint> = Vec::new();
+        append_relocated_code(&mut segments, &mut entries, &relocated);
+        let roots = entries
+            .iter()
+            .map(|entry| entry.address)
+            .collect::<Vec<_>>();
+        let graph = discover_cfg(&segments, entries, &roots, AnalysisLimits::default())
+            .expect("relocated code decodes");
+        let block = graph
+            .blocks
+            .get(&0x8000_2000)
+            .expect("relocated destination is a block");
+        // addiu is the single non-control instruction; `jr $ra` plus its `nop`
+        // delay slot form the block terminator.
+        assert_eq!(block.instructions.len(), 1);
     }
 
     #[test]
@@ -1573,24 +2006,116 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_branch_target_that_enters_a_delay_slot() {
-        let words = [0x1100_0000, 0x0000_0000, 0x03E0_0008, 0x0000_0000];
+    fn admits_a_branch_target_that_enters_a_delay_slot() {
+        // 0x3000: beq $t0, $zero, 0x3004 — the taken target is the delay slot.
+        // On hardware, jumping directly to a delay-slot address executes that
+        // word as an ordinary instruction, so the CFG admits it as a new block
+        // start while the owning branch keeps it as its delay slot (ADR 0126).
+        let words = [0x1100_0000, 0x2408_0007, 0x03E0_0008, 0x0000_0000];
         let segments = [segment(0x3000, &words)];
         let roots = [0x3000];
-        let error = discover_cfg(
+        let built = discover_cfg(
             &segments,
             vec![entry(0x3000)],
             &roots,
             AnalysisLimits::default(),
         )
-        .expect_err("branch into delay slot is not a valid block boundary");
+        .expect("branch into a delay slot is admissible as an ordinary block start");
+        assert!(built.blocks.contains_key(&0x3000));
+        assert!(built.blocks.contains_key(&0x3004));
         assert!(matches!(
-            error,
-            AnalysisError::TargetEntersDelaySlot {
-                target_pc: 0x3004,
-                ..
-            }
+            &built.blocks[&0x3000].terminator,
+            Terminator::ConditionalBranch { delay_slot, .. } if delay_slot.pc == 0x3004
         ));
+        // The block starting at the delay-slot address decodes the same word
+        // (addiu $t0, $zero, 7) as an ordinary body instruction.
+        let admitted = &built.blocks[&0x3004];
+        assert_eq!(admitted.instructions.len(), 1);
+        assert_eq!(admitted.instructions[0].pc, 0x3004);
+        assert_eq!(admitted.instructions[0].opcode, Opcode::Addiu);
+    }
+
+    #[test]
+    fn admits_a_backedge_from_a_later_block_into_a_delay_slot() {
+        // Mirrors the real-title frontier at 0x0025C770/0x0025C7BC:
+        // 0x3000: beq -> 0x3010 (delay slot 0x3004)
+        // 0x3008: bgtz $t0 -> 0x3004 (backedge into the delay slot)
+        // 0x300C: nop
+        // 0x3010: jr $ra (delay slot 0x3014)
+        let words = [
+            0x1100_0004, // 0x3000: beq $t0, $zero, 0x3010
+            0x2408_0009, // 0x3004: addiu $t0, $zero, 9  (delay slot of the beq)
+            0x1D00_FFFE, // 0x3008: bgtz $t0, 0x3004
+            0x0000_0000, // 0x300C: nop (delay slot of the bgtz)
+            0x03E0_0008, // 0x3010: jr $ra
+            0x0000_0000, // 0x3014: return delay slot
+        ];
+        let segments = [segment(0x3000, &words)];
+        let built = discover_cfg(
+            &segments,
+            vec![entry(0x3000)],
+            &[0x3000],
+            AnalysisLimits::default(),
+        )
+        .expect("backedge into a delay slot is admissible");
+        assert!(built.blocks.contains_key(&0x3000));
+        assert!(built.blocks.contains_key(&0x3008));
+        assert!(
+            built.blocks.contains_key(&0x3004),
+            "delay-slot address must be admitted as a block when targeted"
+        );
+        let admitted = &built.blocks[&0x3004];
+        assert_eq!(admitted.instructions[0].opcode, Opcode::Addiu);
+    }
+
+    #[test]
+    fn admits_real_title_cache_loop_backedge_into_delay_slot() {
+        // Verbatim instruction words from the Downhill frontier around
+        // 0x0025C770: beq at 0x3000 has delay slot 0x3004; the cache loop's
+        // bgtz at 0x3038 branches back to 0x3004.
+        let words: [u32; 24] = [
+            0x1140_0014, // 0x3000: beq $t2, $zero, +0x14 -> 0x3040
+            0x254A_FFFF, // 0x3004: addiu $t2, $t2, -1   (delay slot, backedge target)
+            0x0000_000F, // 0x3008: sync
+            0xBD18_0000, // 0x300C: cache
+            0x0000_000F, // 0x3010: sync
+            0xBD18_0040, // 0x3014: cache
+            0x0000_000F, // 0x3018: sync
+            0xBD18_0080, // 0x301C: cache
+            0x0000_000F, // 0x3020: sync
+            0xBD18_00C0, // 0x3024: cache
+            0x0000_000F, // 0x3028: sync
+            0xBD18_0100, // 0x302C: cache
+            0x0000_000F, // 0x3030: sync
+            0xBD18_0140, // 0x3034: cache
+            0x1D40_FFF2, // 0x3038: bgtz $t2, -0x0E -> 0x3004
+            0x2508_0200, // 0x303C: addiu $t0, $t0, 0x200 (bgtz delay slot)
+            0x03E0_0008, // 0x3040: jr $ra
+            0x0000_0000, // 0x3044: return delay slot
+            0x2529_FFFF, // 0x3048: addiu $t1, $t1, -1
+            0x0000_0000, // 0x304C: nop
+            0x1D20_FFFA, // 0x3050: bgtz $t1, 0x3048
+            0x2508_0040, // 0x3054: addiu $t0, $t0, 0x40
+            0x03E0_0008, // 0x3058: jr $ra
+            0x0000_0000, // 0x305C: nop
+        ];
+        let segments = [segment(0x3000, &words)];
+        let built = discover_cfg(
+            &segments,
+            vec![entry(0x3000)],
+            &[0x3000],
+            AnalysisLimits::default(),
+        )
+        .expect("cache-loop backedge into a delay slot is admissible");
+        assert!(
+            built.blocks.contains_key(&0x3004),
+            "block at delay-slot address 0x3004 must exist; blocks near frontier: {:?}",
+            built
+                .blocks
+                .keys()
+                .filter(|pc| (0x3000..=0x3060).contains(*pc))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1707,14 +2232,24 @@ mod tests {
         )
         .expect("KSEG0 control flow");
 
-        // The call block and the callee block are reachable statically. A
-        // register-indirect `jr` return has no static destination, so no
-        // continuation block is invented for it.
+        // The call block and the callee block are reachable statically: the
+        // `jalr $8` target is resolved from the `lui`/`addiu` address load, so
+        // no indirect jump is left unresolved. The register-indirect `jr $ra`
+        // return has a runtime destination, so it is a `Return` terminator,
+        // not an unresolved indirect jump.
         assert_eq!(graph.blocks.len(), 2);
-        // Only the `jalr` target is unresolved; the callee itself was reached
-        // statically because the same image contains it.
-        assert_eq!(graph.unresolved_indirect_jumps, vec![0x8010_0008]);
+        assert!(graph.unresolved_indirect_jumps.is_empty());
         assert!(graph.external_targets.is_empty());
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x8010_0010,
+            kind: EdgeKind::Call,
+        }));
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x8010_0010,
+            kind: EdgeKind::ReturnContinuation,
+        }));
         assert!(matches!(
             graph.blocks[&0x8010_0000].terminator,
             Terminator::IndirectJump {
@@ -1722,20 +2257,15 @@ mod tests {
                 ..
             }
         ));
-        let callee = discover_cfg(
-            &segments,
-            vec![entry(0x8010_0010)],
-            &[0x8010_0010],
-            AnalysisLimits::default(),
-        )
-        .expect("KSEG0 callee");
-        assert_eq!(callee.blocks[&0x8010_0010].instructions.len(), 1);
+        // The callee is reached through the resolved indirect call, not
+        // through a separate manual root.
+        assert!(graph.blocks.contains_key(&0x8010_0010));
         assert_eq!(
-            callee.blocks[&0x8010_0010].instructions[0].opcode,
+            graph.blocks[&0x8010_0010].instructions[0].opcode,
             Opcode::Addiu
         );
         assert!(matches!(
-            callee.blocks[&0x8010_0010].terminator,
+            graph.blocks[&0x8010_0010].terminator,
             Terminator::Return { .. }
         ));
 
@@ -1745,6 +2275,214 @@ mod tests {
         // by the image, not guessed by the analyzer.
         assert!(!contains_executable_address(&segments, 0x0010_0010));
         assert!(contains_executable_address(&segments, 0x8010_0010));
+    }
+
+    #[test]
+    fn follows_constant_indirect_jump_target() {
+        //   lui  t9, 0x0010      # t9 = 0x00100000
+        //   ori  t9, t9, 0x0010  # t9 = 0x00100010
+        //   jr   t9              # indirect jump to 0x00100010
+        //   nop                  # delay slot
+        //   addiu t1, zero, 1    # target block at 0x00100010
+        //   jr   ra              # return
+        //   nop                  # return delay slot
+        let words = [
+            0x3C09_0010, // lui  $9, 0x0010
+            0x3529_0010, // ori  $9, $9, 0x0010
+            0x0120_0008, // jr   $9
+            0x0000_0000, // delay slot
+            0x2401_0001, // target: addiu $1, $0, 1
+            0x03E0_0008, // jr $ra
+            0x0000_0000, // return delay slot
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("constant indirect jump");
+
+        // The `jr $9` target is resolved to 0x00100010, so the target block is
+        // discovered and no indirect jump is left unresolved.
+        assert_eq!(graph.blocks.len(), 2);
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_0010));
+        assert!(matches!(
+            graph.blocks[&0x0010_0000].terminator,
+            Terminator::IndirectJump {
+                source_register: 9,
+                ..
+            }
+        ));
+        assert_eq!(
+            graph.blocks[&0x0010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn follows_daddiu_indirect_jump_target() {
+        // DADDIU sign-extends its immediate and performs 64-bit modulo
+        // arithmetic; JR consumes the low 32 bits of the resulting address.
+        //   lui    t9, 0x0011       # 0x00110000
+        //   daddiu t9, t9, -0x40   # 0x0010ffc0
+        //   jr     t9
+        //   nop
+        //   ... target at 0x0010ffc0 ...
+        let mut words = [0u32; 19];
+        words[0] = 0x3C09_0011; // lui $t9, 0x0011
+        words[1] = 0x6529_FFC0; // daddiu $t9, $t9, -0x40
+        words[2] = 0x0120_0008; // jr $t9
+        words[16] = 0x2401_0001; // addiu $at, $zero, 1 at 0x0010ffc0
+        words[17] = 0x03E0_0008; // jr $ra
+        let segments = [segment(0x0010_FF80, &words)];
+        let entry_pc = 0x0010_FF80;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("DADDIU-built indirect jump");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_FFC0));
+        assert_eq!(
+            graph.blocks[&0x0010_FFC0].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn follows_ori_xori_andi_indirect_jump_target() {
+        // Exercise the zero-extended logical-immediate transfer functions:
+        //   ori  t9, zero, 0xffff   # 0x0000ffff
+        //   xori t9, t9, 0x000f    # 0x0000fff0
+        //   andi t9, t9, 0xfff0    # 0x0000fff0
+        //   jr   t9
+        //   nop
+        // Target is inside this executable physical-RAM view at 0x0000fff0.
+        let mut words = [0u32; 63];
+        words[0] = 0x3409_FFFF;
+        words[1] = 0x3929_000F;
+        words[2] = 0x3129_FFF0;
+        words[3] = 0x0120_0008;
+        words[60] = 0x2401_0001; // addiu $at, $zero, 1 at 0x0000fff0
+        words[61] = 0x03E0_0008; // jr $ra
+        let segments = [segment(0x0000_FF00, &words)];
+        let entry_pc = 0x0000_FF00;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("logical-immediate indirect jump");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0000_FFF0));
+        assert_eq!(
+            graph.blocks[&0x0000_FFF0].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn indirect_jump_target_is_captured_before_delay_slot_clobber() {
+        // JR reads its target before the delay slot executes. The slot may
+        // overwrite the source register without changing the selected target.
+        //   lui  t9, 0x0010
+        //   ori  t9, t9, 0x0010
+        //   jr   t9
+        //   lui  t9, 0x0020       # delay slot clobbers t9 after target capture
+        //   addiu t1, zero, 1    # original target at 0x00100010
+        //   jr   ra
+        //   nop
+        let words = [
+            0x3C09_0010,
+            0x3529_0010,
+            0x0120_0008,
+            0x3C09_0020,
+            0x2401_0001,
+            0x03E0_0008,
+            0x0000_0000,
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("indirect jump with a clobbering delay slot");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.blocks.contains_key(&0x0010_0010));
+        assert!(!graph.blocks.contains_key(&0x0020_0000));
+        assert_eq!(
+            graph.blocks[&0x0010_0010].instructions[0].opcode,
+            Opcode::Addiu
+        );
+    }
+
+    #[test]
+    fn records_resolved_non_executable_indirect_target_as_external() {
+        // A constant target outside every executable view is known, but it is
+        // not translatable code. Preserve it as an external edge instead of
+        // silently dropping it or calling the source unresolved.
+        let words = [
+            0x3C09_0020, // lui $t9, 0x0020 -> 0x00200000
+            0x0120_0008, // jr $t9
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x0010_0000, &words)];
+        let entry_pc = 0x0010_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("constant indirect jump to external address");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert_eq!(graph.external_targets, vec![0x0020_0000]);
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0x0020_0000,
+            kind: EdgeKind::Jump,
+        }));
+    }
+
+    #[test]
+    fn resolves_indirect_jump_through_zero_register() {
+        // JR $zero has a constant target of guest address 0; if that address is
+        // backed by executable bytes, it should be discovered as a self-edge.
+        let words = [
+            0x0000_0008, // jr $zero
+            0x0000_0000, // delay slot
+        ];
+        let segments = [segment(0x0000_0000, &words)];
+        let entry_pc = 0x0000_0000;
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(entry_pc)],
+            &[entry_pc],
+            AnalysisLimits::default(),
+        )
+        .expect("JR $zero target");
+
+        assert!(graph.unresolved_indirect_jumps.is_empty());
+        assert!(graph.external_targets.is_empty());
+        assert!(graph.edges().contains(&Edge {
+            from_block: entry_pc,
+            to_pc: 0,
+            kind: EdgeKind::Jump,
+        }));
     }
 
     #[test]
@@ -1818,6 +2556,79 @@ mod tests {
     }
 
     #[test]
+    fn discovers_the_continuation_after_a_syscall_terminator() {
+        // A `SYSCALL` has no architectural successor, but a host HLE service
+        // resumes at the following instruction. `sp` receives the serviced
+        // result, which is why the continuation must be translated.
+        let words = [
+            0x2403_003C, // 0x4000: addiu $3, $zero, 0x3C (SetupThread)
+            0x0000_000C, // 0x4004: syscall
+            0x0040_E82D, // 0x4008: daddu $sp, $2, $zero
+            0x03E0_0008, // 0x400C: jr $ra
+            0x0000_0000, // 0x4010: return delay slot
+        ];
+        let segments = [segment(0x4000, &words)];
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x4000)],
+            &[0x4000],
+            AnalysisLimits::default(),
+        )
+        .expect("syscall continuation graph");
+
+        let block = &graph.blocks[&0x4000];
+        match &block.terminator {
+            Terminator::Unsupported { instruction } => {
+                assert_eq!(instruction.opcode, Opcode::Syscall);
+                assert_eq!(instruction.pc, 0x4004);
+            }
+            other => panic!("expected a trap terminator, got {other:?}"),
+        }
+        assert!(graph.edges().iter().any(|edge| {
+            edge.from_block == 0x4000
+                && edge.to_pc == 0x4008
+                && edge.kind == EdgeKind::SyscallContinuation
+        }));
+        // The continuation is real code here, so it is translated.
+        assert!(graph.blocks.contains_key(&0x4008));
+        assert_eq!(graph.blocks[&0x4008].instructions[0].opcode, Opcode::Daddu);
+    }
+
+    #[test]
+    fn treats_an_undecodable_syscall_continuation_as_a_skipped_guess() {
+        // Retail images put data and jump tables directly after a trap. The
+        // continuation is only code if a service is answered, so an
+        // undecodable one is a skipped guess, never a fatal analysis error.
+        let words = [
+            0x2403_003C, // 0x4000: addiu $3, $zero, 0x3C (SetupThread)
+            0x0000_000C, // 0x4004: syscall
+            0x1100_0001, // 0x4008: beq $t0, $zero, 0x4010
+            0x4200_0018, // 0x400C: delay slot: eret is a control transfer
+            0x2401_0001, // 0x4010: addiu $1, $zero, 1
+        ];
+        let segments = [segment(0x4000, &words)];
+        let built = build_cfg(
+            &segments,
+            vec![entry(0x4000)],
+            &[0x4000],
+            &BTreeSet::new(),
+            AnalysisLimits::default(),
+        )
+        .expect("an undecodable continuation does not abort the analysis");
+        let graph = built.graph;
+
+        assert!(graph.blocks.contains_key(&0x4000));
+        // The guess is dropped rather than translated, and the analysis still
+        // succeeds: it is reported through the skipped-block channel, so a
+        // retail tail of data after a trap cannot abort a discovery run.
+        assert!(!graph.blocks.contains_key(&0x4008));
+        assert_eq!(built.skipped_blocks, vec![0x4008]);
+        // It is a guess, not a candidate function root, so it is not reported
+        // as a rejected root.
+        assert!(built.rejected_roots.is_empty());
+    }
+
+    #[test]
     fn continues_to_reject_eret_in_a_delay_slot() {
         let words = [
             0x1100_0001, // beq $t0, $zero, 0x3008
@@ -1853,7 +2664,7 @@ mod tests {
             0x0C00_2400, // 0x1014: jal 0x9000, outside executable file bytes
         ];
         let segments = [segment(0x1000, &words)];
-        let discovery = discover_function_roots(&segments, AnalysisLimits::default());
+        let discovery = discover_function_roots(&segments, &[], AnalysisLimits::default());
 
         assert_eq!(discovery.scanned_words, 6);
         assert!(!discovery.truncated);
@@ -1874,13 +2685,15 @@ mod tests {
     }
 
     #[test]
-    fn tolerates_a_heuristic_root_inside_a_delay_slot() {
+    fn admits_a_heuristic_root_inside_a_delay_slot_as_a_normal_block() {
         // 0x3004 is the delay slot of the branch at 0x3000 but is also queued
-        // as a discovered candidate. The candidate must not stop the
-        // authoritative block from decoding; it is rejected when visited.
+        // as a discovered candidate. The word is already proven code (owned as
+        // a delay slot), so hardware semantics admit it as an ordinary block
+        // start too: jumping directly to it executes it as a normal
+        // instruction (ADR 0126). The owning branch keeps it as delay slot.
         let words = [
             0x1100_0001, // 0x3000: beq $t0, $zero, 0x3008
-            0x0000_0000, // 0x3004: delay slot (also a heuristic candidate)
+            0x2408_0009, // 0x3004: delay slot, also a heuristic candidate
             0x03E0_0008, // 0x3008: jr $ra
             0x0000_0000, // 0x300C: return delay slot
         ];
@@ -1895,16 +2708,16 @@ mod tests {
         )
         .expect("authoritative control flow still decodes");
 
-        assert_eq!(built.rejected_roots, vec![0x3004]);
-        assert_eq!(built.skipped_blocks, vec![0x3004]);
         assert!(built.graph.blocks.contains_key(&0x3000));
         assert!(built.graph.blocks.contains_key(&0x3008));
-        assert!(!built.graph.blocks.contains_key(&0x3004));
-        assert_eq!(built.graph.blocks.len(), 2);
+        assert!(built.graph.blocks.contains_key(&0x3004));
         assert!(matches!(
             &built.graph.blocks[&0x3000].terminator,
             Terminator::ConditionalBranch { delay_slot, .. } if delay_slot.pc == 0x3004
         ));
+        let admitted = &built.graph.blocks[&0x3004];
+        assert_eq!(admitted.instructions.len(), 1);
+        assert_eq!(admitted.instructions[0].opcode, Opcode::Addiu);
     }
 
     #[test]
@@ -1920,7 +2733,7 @@ mod tests {
             max_function_roots: 1,
             ..Default::default()
         };
-        let discovery = discover_function_roots(&segments, limits);
+        let discovery = discover_function_roots(&segments, &[], limits);
 
         assert!(discovery.truncated);
         assert_eq!(discovery.scanned_words, 1);
@@ -2002,12 +2815,326 @@ mod tests {
             .find(|entry| entry.address == 0x0010_0010)
             .expect("discovered prologue is an entry point");
         assert_eq!(discovered.labels, vec!["discovered".to_owned()]);
-        assert!(!discovered.is_elf_entry);
-        assert_eq!(
-            analysis.graph.blocks.keys().copied().collect::<Vec<_>>(),
-            vec![0x0010_0000, 0x0010_0010, 0x0010_001C, 0x0010_0030]
+    }
+
+    #[test]
+    fn discovery_scans_relocated_regions_for_prologues_and_jal_targets() {
+        // Synthetic stripped ELF whose entry JALs into a runtime-copied
+        // region. The region is not covered by any ELF section, so without
+        // extending the executable ranges used by discovery, the prologue at
+        // the JAL target would never become a root (ADR 0127).
+        let entry_words = [
+            0x0C04_0004u32, // 0x100000: jal 0x100010 -> actually target computed below
+            0x0000_0000,    // delay slot
+        ];
+        let mut file_bytes = Vec::new();
+        for word in &entry_words {
+            file_bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        // Fix the jal target to 0x8000_2000 (relocated destination).
+        let target = 0x8000_2000u32;
+        file_bytes[0..4]
+            .copy_from_slice(&((3u32 << 26) | ((target >> 2) & 0x3FF_FFFF)).to_le_bytes());
+
+        let file_size = u32::try_from(file_bytes.len()).expect("synthetic image size");
+        let image = Image {
+            file_type: elf::ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
+            machine: elf::EM_MIPS,
+            entry_point: 0x0010_0000,
+            flags: 0,
+            section_name_table_index: 0,
+            program_headers: vec![elf::ProgramHeader {
+                kind: elf::PT_LOAD,
+                offset: 0,
+                virtual_address: 0x0010_0000,
+                physical_address: 0x0010_0000,
+                file_size,
+                memory_size: file_size,
+                flags: elf::PF_R | PF_X,
+                alignment: 4,
+            }],
+            section_headers: vec![elf::SectionHeader {
+                name: ".text".to_owned(),
+                name_offset: 0,
+                kind: elf::SHT_PROGBITS,
+                flags: elf::SHF_ALLOC | elf::SHF_EXECINSTR,
+                virtual_address: 0x0010_0000,
+                offset: 0,
+                size: file_size,
+                link: 0,
+                info: 0,
+                alignment: 4,
+                entry_size: 0,
+            }],
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+            mips_reginfo: Vec::new(),
+            mips_reginfo_segments: Vec::new(),
+            mips_abi_flags_segments: Vec::new(),
+            mips_abi_flags: Vec::new(),
+            mips_options: Vec::new(),
+        };
+
+        // Relocated region: prologue at its start (addiu sp,-8; sd ra,0(sp))
+        // then jr ra; nop. A second prologue sits mid-region and is only
+        // reachable by discovery scanning the region (nothing branches to it
+        // directly), which is exactly what the real-title frontier needs.
+        let region_words = [
+            0x27BD_FFF8u32, // 0x8000_2000: addiu $sp, $sp, -8 (prologue)
+            0xFFBF_0000,    // 0x8000_2004: sd $ra, 0($sp)
+            0x03E0_0008,    // 0x8000_2008: jr $ra
+            0x0000_0000,    // 0x8000_200C: nop
+            0x27BD_FFF0, // 0x8000_2010: addiu $sp, $sp, -16 (mid-region prologue, no direct branch)
+            0xFFBF_0008, // 0x8000_2014: sd $ra, 8($sp)
+            0x03E0_0008, // 0x8000_2018: jr $ra
+            0x0000_0000, // 0x8000_201C: nop
+        ];
+        let mut bytes = Vec::new();
+        for word in &region_words {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let relocated = [RelocatedCodeRegion {
+            destination: 0x8000_2000,
+            bytes,
+        }];
+
+        let analysis = discover_elf_with_discovery_and_relocated(
+            &image,
+            &file_bytes,
+            AnalysisLimits::default(),
+            &relocated,
+        )
+        .expect("synthetic ELF with relocated region");
+        assert!(
+            analysis
+                .graph
+                .entry_points
+                .iter()
+                .any(|entry| entry.address == 0x8000_2000),
+            "JAL into the relocated region must be discovered; entry points: {:?}",
+            analysis
+                .graph
+                .entry_points
+                .iter()
+                .map(|entry| entry.address)
+                .collect::<Vec<_>>()
         );
-        assert_eq!(analysis.graph.decoded_instruction_count, 10);
+        assert!(
+            analysis.graph.blocks.contains_key(&0x8000_2000),
+            "relocated destination must be a translated block"
+        );
+        assert!(
+            analysis
+                .graph
+                .entry_points
+                .iter()
+                .any(|entry| entry.address == 0x8000_2010),
+            "mid-region prologue must be discovered by scanning the relocated region; entry points: {:?}",
+            analysis
+                .graph
+                .entry_points
+                .iter()
+                .map(|entry| entry.address)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            analysis.graph.blocks.contains_key(&0x8000_2010),
+            "mid-region prologue must be a translated block"
+        );
+    }
+
+    #[test]
+    fn syscall_continuation_cannot_swallow_instruction_limit() {
+        let segments = [segment(0x1000, &[0x0000_000C, 0, 0])]; // syscall; nop; nop
+        for limit in [1, 2] {
+            let result = discover_cfg(
+                &segments,
+                vec![entry(0x1000)],
+                &[0x1000],
+                AnalysisLimits {
+                    max_instructions: limit,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                result,
+                Err(AnalysisError::InstructionLimitExceeded { limit }),
+                "a speculative continuation must not turn budget exhaustion into success"
+            );
+        }
+        let graph = discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &[0x1000],
+            AnalysisLimits {
+                max_instructions: 3,
+                ..Default::default()
+            },
+        )
+        .expect("exact instruction budget admits the continuation");
+        assert_eq!(graph.decoded_instruction_count, 3);
+        assert_eq!(graph.blocks.len(), 2);
+    }
+
+    #[test]
+    fn instruction_count_rejects_exhaustion_without_mutation() {
+        for (initial, limit) in [(0, 0), (1, 1), (2, 1), (usize::MAX, usize::MAX)] {
+            let mut count = initial;
+            assert_eq!(
+                increment_instruction_count(&mut count, limit),
+                Err(AnalysisError::InstructionLimitExceeded { limit })
+            );
+            assert_eq!(count, initial, "a refused instruction consumes no capacity");
+        }
+        for limit in [1, usize::MAX] {
+            let mut count = limit - 1;
+            increment_instruction_count(&mut count, limit).expect("last available instruction");
+            assert_eq!(count, limit);
+        }
+    }
+
+    #[test]
+    fn heuristic_and_authoritative_roots_enforce_instruction_limits() {
+        // Exercise exhaustion in both ordinary instructions and delay slots.
+        for words in [[0, 0], [0x03E0_0008, 0]] {
+            let segments = [segment(0x1000, &[0x0000_000D]), segment(0x2000, &words)];
+            for heuristic in [BTreeSet::new(), BTreeSet::from([0x2000])] {
+                for limit in [1, 2, 3] {
+                    let result = build_cfg(
+                        &segments,
+                        vec![entry(0x1000), entry(0x2000)],
+                        &[0x1000, 0x2000],
+                        &heuristic,
+                        AnalysisLimits {
+                            max_instructions: limit,
+                            ..Default::default()
+                        },
+                    )
+                    .map(|built| built.graph);
+                    if limit < 3 {
+                        assert_eq!(
+                            result,
+                            Err(AnalysisError::InstructionLimitExceeded { limit })
+                        );
+                    } else {
+                        let graph = result.expect("exact budget admits both roots");
+                        assert_eq!(graph.decoded_instruction_count, 3);
+                        assert_eq!(graph.blocks.len(), 2);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn speculative_decode_errors_remain_tolerable_but_authoritative_errors_do_not() {
+        for (words, expected) in [
+            (
+                vec![0x03E0_0008],
+                AnalysisError::MissingDelaySlot {
+                    control_pc: 0x2000,
+                    delay_pc: 0x2004,
+                },
+            ),
+            (
+                vec![0x03E0_0008, 0x4200_0018],
+                AnalysisError::UnsupportedDelaySlot {
+                    control_pc: 0x2000,
+                    delay_pc: 0x2004,
+                },
+            ),
+            (
+                vec![0x03E0_0008, 0x03E0_0008],
+                AnalysisError::ControlTransferInDelaySlot {
+                    control_pc: 0x2000,
+                    delay_pc: 0x2004,
+                },
+            ),
+        ] {
+            let segments = [segment(0x1000, &[0x0000_000D]), segment(0x2000, &words)];
+            for heuristic in [BTreeSet::new(), BTreeSet::from([0x2000])] {
+                let result = build_cfg(
+                    &segments,
+                    vec![entry(0x1000), entry(0x2000)],
+                    &[0x1000, 0x2000],
+                    &heuristic,
+                    AnalysisLimits::default(),
+                );
+                if heuristic.is_empty() {
+                    assert_eq!(result.err(), Some(expected.clone()));
+                } else {
+                    let built = result.expect("only the speculative content error is skipped");
+                    assert_eq!(built.skipped_blocks, vec![0x2000]);
+                    assert_eq!(built.rejected_roots, vec![0x2000]);
+                    assert_eq!(built.graph.blocks.len(), 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resource_and_invariant_errors_are_not_tolerable_speculation() {
+        for error in [
+            AnalysisError::Elf("load limit".to_owned()),
+            AnalysisError::NoExecutableEntryPoints,
+            AnalysisError::EntryPointNotExecutable(0x1000),
+            AnalysisError::InvalidLoadedSegment {
+                virtual_address: 0x1000,
+                file_size: 8,
+                memory_size: 4,
+            },
+            AnalysisError::GuestPcOverflow(u32::MAX - 3),
+            AnalysisError::InstructionLimitExceeded { limit: 1 },
+            AnalysisError::BlockLimitExceeded { limit: 1 },
+            AnalysisError::AliasedViewLimitExceeded { limit: 1 },
+            AnalysisError::InternalBlockOwnershipError(0x1000),
+        ] {
+            assert!(
+                !error.is_tolerable_speculative_decode_failure(),
+                "{error:?}"
+            );
+        }
+        assert!(
+            AnalysisError::TargetEntersDelaySlot {
+                target_pc: 0x1004,
+                owning_control_pc: 0x1000,
+            }
+            .is_tolerable_speculative_decode_failure()
+        );
+    }
+
+    #[test]
+    fn splitting_lenient_and_authoritative_blocks_enforces_block_limit() {
+        // The backward jump discovers an interior leader after decoding the block.
+        let segments = [segment(0x1000, &[0, 0, 0x0800_0401, 0])];
+        for heuristic in [BTreeSet::new(), BTreeSet::from([0x1000])] {
+            for limit in [1, 2] {
+                let result = build_cfg(
+                    &segments,
+                    vec![entry(0x1000)],
+                    &[0x1000],
+                    &heuristic,
+                    AnalysisLimits {
+                        max_blocks: limit,
+                        max_instructions: 4,
+                        ..Default::default()
+                    },
+                )
+                .map(|built| built.graph);
+                if limit == 1 {
+                    assert_eq!(result, Err(AnalysisError::BlockLimitExceeded { limit }));
+                } else {
+                    let graph = result.expect("split fits the exact block budget");
+                    assert_eq!(
+                        graph.blocks.keys().copied().collect::<Vec<_>>(),
+                        vec![0x1000, 0x1004]
+                    );
+                    assert_eq!(graph.decoded_instruction_count, 4);
+                }
+            }
+        }
     }
 
     #[test]
@@ -2044,5 +3171,123 @@ mod tests {
             error,
             AnalysisError::InstructionLimitExceeded { limit: 1 }
         ));
+    }
+
+    #[test]
+    fn data_pointers_in_non_executable_segments_are_candidate_roots() {
+        let executable = segment(0x1000, &[0x03E0_0008]); // jr ra
+        let data_bytes = [
+            0x1000u32,   // pointer into executable code
+            0x0000_0003, // unaligned word: not a candidate
+            0xFFF0_0000, // outside every mapping: not a candidate
+            0x2000u32,   // self-reference: non-executable, not a candidate
+        ];
+        let mut bytes = Vec::with_capacity(data_bytes.len() * 4);
+        for word in &data_bytes {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let data = LoadedSegment {
+            virtual_address: 0x2000,
+            flags: 0,
+            file_size: bytes.len(),
+            bytes,
+        };
+        let discovery =
+            discover_function_roots(&[executable, data], &[], AnalysisLimits::default());
+        assert_eq!(discovery.scanned_data_words, 4);
+        assert_eq!(
+            discovery.data_pointer_candidates,
+            BTreeSet::from([0x1000u32])
+        );
+        assert!(discovery.candidate_roots().contains(&0x1000u32));
+    }
+
+    #[test]
+    fn section_permissions_separate_code_from_pointer_tables_in_one_rwx_segment() {
+        // Retail PS2 executables place every loadable byte in one
+        // writable+executable PT_LOAD, so the program headers cannot say which
+        // words are code. The section table can. A syscall-handler descriptor
+        // in `.data` points at a frameless leaf routine that neither a `jal`
+        // nor a stack prologue reaches, and a code word whose encoding happens
+        // to look like a pointer must not be read as data.
+        let words: [u32; 12] = [
+            0x03E0_0008, // 0x100000 .text: jr $ra (ELF entry)
+            0x2484_0004, // 0x100004 .text: addiu $a0, $a0, 4
+            0x03E0_0008, // 0x100008 .text: jr $ra
+            0x0000_0000, // 0x10000C .text: nop
+            0x2484_0004, // 0x100010 .text: addiu $a0, $a0, 4 (handler)
+            0x03E0_0008, // 0x100014 .text: jr $ra
+            0x0000_0000, // 0x100018 .text: nop (delay slot)
+            0x0010_0014, // 0x10001C .text: code word that looks like 0x100014
+            0x0000_0083, // 0x100020 .data: syscall number 0x83
+            0x0010_0010, // 0x100024 .data: handler address
+            0x0C00_0005, // 0x100028 .data: a word that decodes as jal 0x100014
+            0x0000_0000, // 0x10002C .data: padding
+        ];
+        let mut file_bytes = Vec::with_capacity(words.len() * 4);
+        for word in &words {
+            file_bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let file_size = u32::try_from(file_bytes.len()).expect("synthetic image size");
+
+        let section = |virtual_address: u32, size: u32, flags: u32| elf::SectionHeader {
+            name: String::new(),
+            name_offset: 0,
+            kind: elf::SHT_PROGBITS,
+            flags,
+            virtual_address,
+            offset: virtual_address - 0x0010_0000,
+            size,
+            link: 0,
+            info: 0,
+            alignment: 4,
+            entry_size: 0,
+        };
+        let image = Image {
+            file_type: elf::ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
+            machine: elf::EM_MIPS,
+            entry_point: 0x0010_0000,
+            flags: 0,
+            section_name_table_index: 0,
+            program_headers: vec![elf::ProgramHeader {
+                kind: elf::PT_LOAD,
+                offset: 0,
+                virtual_address: 0x0010_0000,
+                physical_address: 0x0010_0000,
+                file_size,
+                memory_size: file_size,
+                flags: elf::PF_R | elf::PF_W | elf::PF_X,
+                alignment: 4,
+            }],
+            section_headers: vec![
+                section(0x0010_0000, 0x20, elf::SHF_ALLOC | elf::SHF_EXECINSTR),
+                section(0x0010_0020, 0x10, elf::SHF_ALLOC | elf::SHF_WRITE),
+            ],
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+            mips_reginfo: Vec::new(),
+            mips_reginfo_segments: Vec::new(),
+            mips_abi_flags_segments: Vec::new(),
+            mips_abi_flags: Vec::new(),
+            mips_options: Vec::new(),
+        };
+
+        assert_eq!(
+            executable_section_ranges(&image),
+            vec![(0x0010_0000, 0x0010_0020)]
+        );
+
+        let analysis = discover_elf_with_discovery(&image, &file_bytes, AnalysisLimits::default())
+            .expect("single-segment synthetic ELF");
+        assert!(analysis.graph.blocks.contains_key(&0x0010_0010));
+        assert_eq!(
+            analysis.discovery.data_pointer_candidates,
+            BTreeSet::from([0x0010_0010])
+        );
+        // The `jal 0x100014` encoding sitting in `.data` is data, not code.
+        assert!(analysis.discovery.call_targets.is_empty());
+        assert!(analysis.discovery.candidate_roots().contains(&0x0010_0010));
     }
 }

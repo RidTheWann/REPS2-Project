@@ -23,6 +23,14 @@ Per-game records hold only data that is genuinely title-specific: disc identity,
 
 A single real game can be the first vertical-slice target, but it is a test target, not the architecture. The multi-game premise must be demonstrated with at least two genuinely different PS2 title identities/revisions reaching independently repeatable native boot-tested stages through the same shared analysis, code-generation, and runtime path. The longer-term compatibility catalog should grow across titles, revisions, and hardware feature profiles. A stable multi-game release targets at least two independently validated Playable titles.
 
+## Multi-architecture engine direction
+
+Windows x64 remains the first-class desktop target and the first implementation priority. The core compiler, guest IR semantics, generated-module contract, and runtime-facing data types must nevertheless remain independent of host pointer width and operating-system APIs so an Android ARM64 backend can be added without forking game semantics.
+
+The intended target split is per-build, not a single binary that executes incompatible machine code: x86-64 native modules are built for compatible Windows hosts; AArch64 native modules are built for compatible ARM64 hosts such as Android. Build and cache identities must include the requested target architecture, operating system/ABI, engine ABI, runtime ABI, and toolchain identity. Declaring Android as a design target does not claim current Android support or ARM64 code generation.
+
+The platform backends own filesystem/document access, graphics, audio, input, and application lifecycle. The shared engine owns guest semantics and module/runtime contracts. No host operating-system API may leak into the Rust IR or guest instruction semantics.
+
 ## End-to-end product pipeline
 
 ```

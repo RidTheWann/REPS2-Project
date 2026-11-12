@@ -33,6 +33,26 @@ int main() {
         return code;
     };
 
+    // Both CFG layouts must execute the color operations, including a likely
+    // delay slot that is either executed or annulled and a JR delay slot.
+    for (const bool taken_color : {false, true}) {
+        EeState color{};
+        color.pc = 0xD200U;
+        color.gpr[1] = {0x80FF'FFFF'1234'5678ULL, 0xFF00'0000'00F8'F8F8ULL};
+        color.gpr[2] = {0x0000'FFFF'0000'801FULL, 0x0000'7C00'1234'5678ULL};
+        color.gpr[4] = {0x1234, 0x5678};
+        color.gpr[10].low = taken_color ? 0 : 1;
+        color.gpr[31].low = 0xDE00U;
+        if (reps2::generated::execute_cfg(color, 32) != Status::external_control_flow
+            || color.pc != 0xDE00U
+            || color.gpr[3].low != 0x80F8'F8F8'8000'00F8ULL
+            || color.gpr[3].high != 0x00F8'0000'00A8'98C0ULL
+            || color.gpr[5].low != 0x0000'FFFF'0000'194FULL
+            || color.gpr[5].high != 0x0000'8000'0000'7FFFULL) return fail(200);
+        if (color.gpr[4].low != (taken_color ? 0x0000'FFFF'0000'801FULL : 0x1234ULL)
+            || color.gpr[4].high != (taken_color ? 0x0000'7C00'0000'5678ULL : 0x5678ULL)) return fail(201);
+    }
+
     // Conditional branch not taken: the delay slot and fallthrough block run,
     // then a direct jump's delay slot runs before the return.
     EeState not_taken{};

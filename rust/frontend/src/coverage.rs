@@ -132,15 +132,13 @@ pub fn profile(image: &Image, file_bytes: &[u8]) -> Result<DecoderProfile, Profi
         let skip = ((4 - (u64::from(header.virtual_address) % 4)) % 4) as usize;
         let file_offset = file_offset as usize;
         let file_size = file_size as usize;
-        if skip >= file_size {
+        let segment_bytes = &file_bytes[file_offset..file_offset + file_size];
+        if skip >= segment_bytes.len() {
             continue;
         }
-        for word_offset in (skip..=file_size.saturating_sub(4)).step_by(4) {
-            let word = u32::from_le_bytes(
-                file_bytes[file_offset + word_offset..file_offset + word_offset + 4]
-                    .try_into()
-                    .expect("four-byte coverage window"),
-            );
+        // Ignore partial words without borrowing bytes from outside this segment.
+        for word_bytes in segment_bytes[skip..].as_chunks::<4>().0 {
+            let word = u32::from_le_bytes(*word_bytes);
             profile.record_word(word);
         }
     }
@@ -349,6 +347,91 @@ mod tests {
         assert_eq!(scan.decoded_words, 1);
         assert_eq!(scan.stop_pc, 0x1008);
         assert_eq!(scan.stop_word, Some(0x7000_0468));
+    }
+
+    fn check_segment_word_boundaries(padding_size: usize) {
+        // Exact counts by virtual-address residue, then file size 0..=15.
+        // The file offset varies independently: alignment is a guest-PC rule.
+        let word_counts = [
+            [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3],
+            [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3],
+            [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3],
+            [0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3],
+        ];
+        let words = [0x2408_0005u32, 0x0000_000C, 0x7000_0468];
+        let mut failures = Vec::new();
+        for (residue, counts) in word_counts.iter().enumerate() {
+            let virtual_address = 0x1000 + residue as u32;
+            let entry = (virtual_address + 3) & !3;
+            let skip = (entry - virtual_address) as usize;
+            for (file_size, &scanned_words) in counts.iter().enumerate() {
+                for file_offset in 0..4 {
+                    let mut bytes = vec![0xCC; file_offset + file_size + padding_size];
+                    bytes[file_offset..file_offset + file_size].fill(0xA5);
+                    for (index, word) in words.iter().take(scanned_words as usize).enumerate() {
+                        let start = file_offset + skip + index * 4;
+                        bytes[start..start + 4].copy_from_slice(&word.to_le_bytes());
+                    }
+                    let mut image = image_with_segment(
+                        entry,
+                        virtual_address,
+                        file_size as u32,
+                        file_size as u32 + 16,
+                        PF_X,
+                    );
+                    image.program_headers[0].offset = file_offset as u32;
+                    image.program_headers[0].alignment = 1;
+                    let mut expected = DecoderProfile {
+                        file_backed_executable_bytes: file_size as u64,
+                        scanned_words,
+                        supported_words: u64::from(scanned_words >= 1),
+                        trap_words: u64::from(scanned_words >= 2),
+                        unsupported_words: u64::from(scanned_words >= 3),
+                        ..DecoderProfile::default()
+                    };
+                    if scanned_words >= 1 {
+                        expected.supported_opcodes.insert("addiu", 1);
+                        expected.entry_scan = Some(EntryScan {
+                            decoded_words: 1,
+                            stop_pc: entry + 4,
+                            stop_word: (scanned_words >= 2).then_some(0x0000_000C),
+                            stop: if scanned_words >= 2 {
+                                EntryScanStop::Trap("syscall")
+                            } else {
+                                EntryScanStop::SegmentEnd
+                            },
+                        });
+                    }
+                    if scanned_words >= 3 {
+                        expected
+                            .unsupported_families
+                            .insert(EncodingFamily::Mmi1, 1);
+                        expected.unsupported_encodings.insert(0x7000_0468, 1);
+                    }
+                    // Collect every failing coordinate, including panics, so the
+                    // EOF and padded matrices both run all 256 cases on regression.
+                    let context = format!(
+                        "size={file_size}, vaddr=0x{virtual_address:X}, offset={file_offset}, padding={padding_size}"
+                    );
+                    match std::panic::catch_unwind(|| profile(&image, &bytes)) {
+                        Ok(Ok(actual)) if actual == expected => {}
+                        actual => failures
+                            .push(format!("{context}: expected {expected:?}, got {actual:?}")),
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn segment_word_boundaries_at_eof() {
+        check_segment_word_boundaries(0);
+    }
+
+    #[test]
+    fn segment_word_boundaries_ignore_unrelated_padding() {
+        check_segment_word_boundaries(8);
     }
 
     #[test]

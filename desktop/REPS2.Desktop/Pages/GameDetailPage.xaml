@@ -1,0 +1,104 @@
+<Page
+    x:Class="REPS2.Desktop.Pages.GameDetailPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{StaticResource AppBackgroundBrush}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Padding="30" RowSpacing="18" MaxWidth="1200" HorizontalAlignment="Left">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <StackPanel Spacing="6">
+                <TextBlock Text="GAME DETAIL / EVIDENCE" FontSize="10" CharacterSpacing="140" Foreground="{StaticResource MutedTextBrush}"/>
+                <TextBlock x:Name="GameTitle" Text="Game title" FontSize="30" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
+                <TextBlock x:Name="GameSerial" Text="Serial" FontSize="13" FontFamily="Consolas" Foreground="{StaticResource SecondaryTextBrush}"/>
+            </StackPanel>
+
+            <Border Grid.Row="1" Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="12" Padding="20">
+                <Grid ColumnSpacing="24">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="CURRENT COMPATIBILITY STATE" FontSize="10" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="LifecycleText" Text="Imported" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource InfoBrush}"/>
+                        <TextBlock x:Name="EvidenceText" Text="Evidence summary" FontSize="13" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="RecoveryText" Text="" FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="9" VerticalAlignment="Center" MinWidth="190">
+                        <Button x:Name="RelinkButton" Click="Relink_Click" Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="14"/>
+                                <TextBlock Text="Relink original ISO"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="BuildButton" Click="Build_Click" Background="{StaticResource BrandBrush}" Foreground="#0A0F1C" BorderThickness="0">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE943;" FontSize="14"/>
+                                <TextBlock Text="Build native module"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="ProbeButton" Click="Probe_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE768;" FontSize="14"/>
+                                <TextBlock Text="Run bounded probe"/>
+                            </StackPanel>
+                        </Button>
+                        <TextBlock Text="Play is unavailable until gameplay acceptance passes."
+                                   FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="DISC IDENTITY" FontSize="11" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="IsoPath" Text="ISO path" FontSize="12" Foreground="{StaticResource PrimaryTextBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                        <TextBlock Text="ISO SHA-256" FontSize="10" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="IsoDigest" FontSize="11" FontFamily="Consolas" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                        <TextBlock Text="Boot ELF entry" FontSize="10" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="EntryPoint" FontSize="12" FontFamily="Consolas" Foreground="{StaticResource SecondaryTextBrush}"/>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="ANALYSIS COVERAGE" FontSize="11" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="BlocksValue" Text="—" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Text="Basic blocks" FontSize="11" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="InstructionsValue" Text="—" FontSize="18" Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Text="Decoded guest instructions" FontSize="11" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="UnsupportedValue" Text="—" FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Grid.Row="3" Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="NATIVE BUILD IDENTITY" FontSize="11" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
+                    <TextBlock x:Name="BuildStateText" Text="No verified native module" FontSize="13" Foreground="{StaticResource PrimaryTextBrush}"/>
+                    <TextBlock x:Name="BuildCacheKey" FontSize="11" FontFamily="Consolas" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                    <TextBlock x:Name="BuildModulePath" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="4" Background="{StaticResource SurfaceOneBrush}" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
+                <StackPanel Spacing="7">
+                    <TextBlock Text="ALPHA LIMITATIONS" FontSize="11" CharacterSpacing="100" Foreground="{StaticResource MutedTextBrush}"/>
+                    <TextBlock Text="• Imported, analyzed, translated and native-built are separate evidence states." FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
+                    <TextBlock Text="• A successful C++ build or bounded runner exit does not prove a game booted." FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
+                    <TextBlock Text="• The application never marks a game Playable automatically. A documented gameplay plan must pass first." FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </ScrollViewer>
+</Page>
