@@ -515,7 +515,9 @@ void print_error(
         }
         std::cout << '"';
     }
-    std::cout << "],\"sif\":{\"rpc_bind_sid\":" << state.hle.sif_cmd.last_rpc_bind_sid
+    std::cout << "],\"timer3\":{\"mode\":" << state.memory.timer3_mode
+              << ",\"compare\":" << state.memory.timer3_compare
+              << "},\"sif\":{\"rpc_bind_sid\":" << state.hle.sif_cmd.last_rpc_bind_sid
               << ",\"rpc_bind_server\":" << state.hle.sif_cmd.last_rpc_bind_server_sid
               << ",\"rpc_bind_had\":" << (state.hle.sif_cmd.last_rpc_bind_had_server ? 1U : 0U)
               << ",\"rpc_call_server\":" << state.hle.sif_cmd.last_rpc_call_server_sid
