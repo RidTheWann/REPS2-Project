@@ -6,6 +6,7 @@ on:
     paths:
       - "desktop/**"
       - ".github/workflows/desktop.yml"
+    tags: ["desktop-v*"]
   pull_request:
     branches: [main]
     paths:
@@ -46,3 +47,99 @@ jobs:
         with:
           name: reps2-desktop-alpha-windows-x64
           path: artifacts/desktop
+
+  package:
+    name: Package Windows x64 desktop
+    needs: windows-x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download desktop build
+        uses: actions/download-artifact@v4
+        with:
+          name: reps2-desktop-alpha-windows-x64
+          path: artifacts/desktop
+
+      - name: Build REPS2 SDK install tree
+        run: |
+          cmake -S . -B build-package -DBUILD_TESTING=OFF
+          cmake --build build-package --config Release --parallel
+          cmake --install build-package --config Release --prefix package-sdk
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      - name: Assemble package and setup executable
+        shell: pwsh
+        run: ./desktop/package-windows.ps1 -PublishDir artifacts/desktop -SdkDir package-sdk -OutputDir artifacts
+
+      - name: Install and uninstall smoke test
+        shell: pwsh
+        run: |
+          $setup = (Resolve-Path "artifacts/REPS2-Setup-windows-x64.exe").Path
+          Start-Process -FilePath $setup -ArgumentList "/S" -Wait
+          $root = Join-Path $env:LOCALAPPDATA "Programs\REPS2"
+          foreach ($file in @(
+              "REPS2.Desktop.exe",
+              "updater\REPS2.Desktop.Updater.exe",
+              "tools\bin\reps2.exe",
+              "tools\bin\rg-reps2-engine.exe")) {
+              if (-not (Test-Path -LiteralPath (Join-Path $root $file) -PathType Leaf)) {
+                  throw "Installed package is missing $file"
+              }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\REPS2\REPS2 Desktop.lnk"))) {
+              throw "The Start Menu shortcut was not created."
+          }
+          Start-Process -FilePath (Join-Path $root "Uninstall.exe") -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 2
+          if (Test-Path -LiteralPath $root) {
+              throw "The uninstaller did not remove the installation directory."
+          }
+
+      - name: Upload setup executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: reps2-desktop-setup-windows-x64
+          path: |
+            artifacts/REPS2-Setup-windows-x64.exe
+            artifacts/REPS2-Setup-windows-x64.exe.sha256
+
+      - name: Upload portable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: reps2-desktop-portable-windows-x64
+          path: |
+            artifacts/REPS2-Desktop-Alpha-windows-x64.zip
+            artifacts/REPS2-Desktop-Alpha-windows-x64.zip.sha256
+
+  release:
+    name: Publish Desktop Alpha release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            release-assets/reps2-desktop-setup-windows-x64/* \
+            release-assets/reps2-desktop-portable-windows-x64/* \
+            --prerelease \
+            --title "REPS2 Desktop Alpha ${GITHUB_REF_NAME#desktop-}" \
+            --generate-notes
