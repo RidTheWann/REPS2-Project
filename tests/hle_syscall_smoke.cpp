@@ -2327,30 +2327,36 @@ int test_timer3_mode_guard_register() {
         || reps2::runtime::load_u32(state.memory, 0xB000'1810U, value) != Status::ok
         || value != 0x0000'03DFU) return 212;
 
-    // The current mode-only slice must not accidentally treat adjacent timer
-    // registers as RAM or fabricate a counter/compare value.
+    // T3_COMP is the documented 16-bit compare storage register. Reads return
+    // the stored value zero-extended; writes retain only bits 0..15. No
+    // compare event is generated.
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CompareAddress, value) != Status::ok
+        || value != 0U) return 220;
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CompareAddress, 0x0001'ABCDU) != Status::ok
+        || reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CompareAddress, value) != Status::ok
+        || value != 0x0000'ABCDU) return 221;
+    if (reps2::runtime::load_u32(state.memory, 0xB000'1820U, value) != Status::ok
+        || value != 0x0000'ABCDU) return 222;
+    if (reps2::runtime::store_u32(state.memory, 0xB000'1820U, 0xFFFF'1234U) != Status::ok
+        || reps2::runtime::load_u32(state.memory, 0x1000'1820U, value) != Status::ok
+        || value != 0x0000'1234U) return 223;
+    if (reps2::runtime::load_u32(state.memory, 0x9000'1810U, value) != Status::ok
+        || value != 0x0000'03DFU) return 224;
+
+    // T3_COUNT remains unsupported in both physical and KSEG1 forms, and the
+    // compare register must not fabricate a counter value.
     value = 0xA5A5'5A5AU;
     if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value)
             != Status::unsupported_memory_access
         || value != 0xA5A5'5A5AU) return 202;
-    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CompareAddress, value)
-            != Status::unsupported_memory_access
-        || value != 0xA5A5'5A5AU) return 203;
     if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, 1U)
             != Status::unsupported_memory_access) return 204;
-    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CompareAddress, 1U)
-            != Status::unsupported_memory_access) return 205;
     // The observed failure address uses the EE's KSEG1 alias of T3_COUNT.
     if (reps2::runtime::load_u32(state.memory, 0xB000'1800U, value)
             != Status::unsupported_memory_access
         || value != 0xA5A5'5A5AU) return 206;
     if (reps2::runtime::store_u32(state.memory, 0xB000'1800U, 1U)
             != Status::unsupported_memory_access) return 207;
-    if (reps2::runtime::load_u32(state.memory, 0xB000'1820U, value)
-            != Status::unsupported_memory_access
-        || value != 0xA5A5'5A5AU) return 208;
-    if (reps2::runtime::store_u32(state.memory, 0xB000'1820U, 1U)
-            != Status::unsupported_memory_access) return 209;
     return 0;
 }
 
@@ -4184,7 +4190,7 @@ int main() {
         {"osd config read-back probe", &test_osd_config_read_back_probe},
         {"osd config refuses bad buffers", &test_osd_config_refuses_bad_buffers},
         {"osd config via dispatch", &test_osd_config_via_dispatch},
-        {"timer 3 mode guard register", &test_timer3_mode_guard_register},
+        {"timer 3 mode and compare registers", &test_timer3_mode_guard_register},
         {"service table names", &test_service_table_reports_names},
         {"find address matching entry", &test_find_address_returns_matching_entry_address},
         {"find address kseg alias match", &test_find_address_matches_kseg_aliases},
