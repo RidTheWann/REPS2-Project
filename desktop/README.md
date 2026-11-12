@@ -43,6 +43,14 @@ dotnet publish .\desktop\REPS2.Desktop\REPS2.Desktop.csproj -c Release -r win-x6
 dotnet publish .\desktop\REPS2.Desktop.Updater\REPS2.Desktop.Updater.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 \`\`\`
 
+To assemble the same package locally after publishing and building the SDK install tree, run:
+
+```powershell
+.\desktop\package-windows.ps1 -PublishDir <desktop-publish-dir> -SdkDir <cmake-install-prefix> -OutputDir <output-dir>
+```
+
+The script validates the publish/install inputs, downloads the current Microsoft Visual C++ x64 Redistributable from Microsoft's official endpoint, verifies its Authenticode signature, stages the package, writes the portable ZIP and SHA-256 sidecar, and (when NSIS is installed) compiles the setup executable and its sidecar. CI performs the same steps and then silently installs and uninstalls the setup.
+
 The CI workflow builds and verifies the REPS2 Windows SDK, tests the core services, publishes the self-contained WinUI app and updater helper, downloads the current Microsoft Visual C++ x64 Redistributable from Microsoft's official endpoint and validates its Authenticode signature, then creates both a Windows setup executable and a portable ZIP. CI silently installs and uninstalls the setup executable in a clean runner profile, verifies its installed files and Start Menu entry, and checks SHA-256 for both release packages before publishing them.
 
 ## First-time installation
