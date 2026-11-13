@@ -133,3 +133,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0130](0130-kseg-alias-mmio-dispatch.md) | Normalize KSEG0/KSEG1 aliases before EE MMIO dispatch | Accepted |
 | [0131](0131-ee-timer3-compare-register.md) | EE Timer 3 compare register and run-report timer state | Accepted |
 | [0132](0132-r5900-madd-maddu.md) | R5900 MADD/MADDU HI/LO accumulation decode, lift, and AOT lowering | Accepted |
+| [0133](0133-six-layer-product-architecture.md) | Six-layer product architecture and repository restructuring | Accepted |

@@ -82,7 +82,7 @@
                 <Button Click="Save_Click" Style="{StaticResource AccentButtonStyle}" Content="Save settings"/>
                 <Button Click="Reset_Click" Content="Reset defaults"/>
             </StackPanel>
-            <TextBlock x:Name="SettingsStatus" Text="Settings are stored locally."
+            <TextBlock x:Name="SettingsStatus" Text="{x:Bind ViewModel.Status, Mode=OneWay}"
                        Style="{StaticResource CaptionStyle}"/>
         </StackPanel>
     </ScrollViewer>

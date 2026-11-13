@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using REPS2.Desktop.Api.Ipc;
 using REPS2.Desktop.Core.Services;
 using Xunit;
 

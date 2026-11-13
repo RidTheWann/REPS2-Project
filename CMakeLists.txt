@@ -99,6 +99,13 @@ else()
 endif()
 
 include(CTest)
+
+# Layer 06: PC host backend (graphics/audio/input/display/platform contracts).
+option(REPS2_BUILD_HOST "Build the PC host backend layer" ON)
+if(REPS2_BUILD_HOST)
+    add_subdirectory(host)
+endif()
+
 if(BUILD_TESTING)
     add_test(NAME rg_reps2_engine_runner_help COMMAND rg_reps2_engine_runner --help)
     set_tests_properties(rg_reps2_engine_runner_help PROPERTIES

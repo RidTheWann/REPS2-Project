@@ -1,11 +1,13 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using REPS2.Desktop.Core.Services;
+using REPS2.Desktop.ViewModels;
 
 namespace REPS2.Desktop.Pages;
 
 public sealed partial class SettingsPage : Page
 {
+    public SettingsViewModel ViewModel { get; } = new(AppServices.Current.SettingsStore);
+
     public SettingsPage()
     {
         InitializeComponent();
@@ -36,34 +38,25 @@ public sealed partial class SettingsPage : Page
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            var current = AppServices.Current.Settings;
-            var settings = current with
-            {
-                LibraryRoot = string.IsNullOrWhiteSpace(LibraryRootBox.Text)
-                    ? AppServices.Current.Paths.Library : Path.GetFullPath(LibraryRootBox.Text.Trim()),
-                FrontendPath = FrontendPathBox.Text.Trim(),
-                EngineRunnerPath = RunnerPathBox.Text.Trim(),
-                SdkIncludeRoot = SdkIncludeRootBox.Text.Trim(),
-                CMakePath = CMakePathBox.Text.Trim(),
-                DeveloperDiagnostics = DiagnosticsCheckBox.IsChecked == true,
-                AutoCheckUpdates = AutoCheckUpdatesCheckBox.IsChecked == true,
-                TranslationUnitCount = SelectedInt(TuCountBox, current.TranslationUnitCount),
-                DefaultProbeBudget = SelectedInt(ProbeBudgetBox, current.DefaultProbeBudget)
-            };
-            await AppServices.Current.SettingsStore.SaveAsync(settings);
-            AppServices.Current.Settings = settings;
-            AppServices.Current.SettingsChanged?.Invoke(settings);
-            var resolution = ToolchainLocator.Resolve(settings, AppServices.Current.Paths);
-            SettingsStatus.Text = resolution.CanBuild
-                ? "Settings saved · frontend, SDK headers and CMake are available. Confirm MSVC Build Tools before compiling."
-                : "Settings saved · " + string.Join(" ", resolution.Notes);
-        }
-        catch (Exception ex)
-        {
-            SettingsStatus.Text = $"Settings could not be saved: {ex.Message}";
-        }
+        var current = AppServices.Current.Settings;
+        var settings = ViewModel.Compose(
+            current,
+            AppServices.Current.Paths.Library,
+            LibraryRootBox.Text,
+            FrontendPathBox.Text,
+            RunnerPathBox.Text,
+            SdkIncludeRootBox.Text,
+            CMakePathBox.Text,
+            DiagnosticsCheckBox.IsChecked == true,
+            AutoCheckUpdatesCheckBox.IsChecked == true,
+            SelectedInt(TuCountBox, current.TranslationUnitCount),
+            SelectedInt(ProbeBudgetBox, current.DefaultProbeBudget));
+
+        var saved = await ViewModel.SaveAsync(settings, AppServices.Current.Paths);
+        if (saved is null)
+            return;
+        AppServices.Current.Settings = saved;
+        AppServices.Current.SettingsChanged?.Invoke(saved);
     }
 
     private void Reset_Click(object sender, RoutedEventArgs e)
@@ -77,7 +70,6 @@ public sealed partial class SettingsPage : Page
         AutoCheckUpdatesCheckBox.IsChecked = true;
         SelectCombo(TuCountBox, "4");
         SelectCombo(ProbeBudgetBox, "5000000");
-        SettingsStatus.Text = "Defaults loaded. Press Save settings to persist.";
     }
 
     private static int SelectedInt(ComboBox combo, int fallback)
