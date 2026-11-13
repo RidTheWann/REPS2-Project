@@ -1,8 +1,8 @@
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
 
 namespace REPS2.Desktop.Core.Services;
 
-public sealed class LibraryService(DesktopPaths paths)
+public sealed class LibraryService(DesktopPaths paths) : IGameLibraryService
 {
     public async Task<LibrarySnapshot> ScanAsync(string libraryRoot, CancellationToken cancellationToken = default)
     {

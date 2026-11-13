@@ -51,6 +51,17 @@ The grid is grouped by milestone. Hover over a tile in the live dashboard for it
 
 **Compatibility boundary:** no PS2 title is currently verified as Boot-tested or Playable. Successful import, analysis, translation, native compilation, synthetic execution, or a bounded diagnostic run must not be interpreted as proof that a retail game boots.
 
+## Architecture at a glance
+
+REPS2 is one product in six layers (ADR 0133): the **WinUI 3 frontend**
+(`desktop/REPS2.Desktop`, MVVM), the versioned **application API**
+(`desktop/REPS2.Desktop.Api`, contracts + local process IPC), the **service
+layer** (`desktop/REPS2.Desktop.Core`), the **Rust backend toolchain**
+(`rust/`), **RG REPS2 ENGINE** with the C++20 PS2 runtime (`engine/`,
+`runtime/`), and the **PC host backend** (`host/`, graphics/audio/input/
+display contracts with a software reference renderer). See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for ownership rules.
+
 ## What REPS2 does
 
 REPS2 is designed around a multi-game PS2 ISO-to-native pipeline:

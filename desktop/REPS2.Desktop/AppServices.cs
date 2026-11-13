@@ -1,20 +1,30 @@
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
 using REPS2.Desktop.Core.Services;
 
 namespace REPS2.Desktop;
 
+// Composition root for the presentation layer. Services are injected as
+// their API-layer contracts; the UI never constructs backend implementations.
 public sealed class DesktopAppContext(
     DesktopPaths paths,
     DesktopSettings settings,
-    SettingsStore settingsStore,
-    LibraryService libraryService,
-    JobStore jobStore)
+    ISettingsService settingsStore,
+    IGameLibraryService libraryService,
+    IBuildService buildService,
+    ISessionService sessionService,
+    IDiagnosticsService diagnosticsService,
+    JobStore jobStore,
+    IToolchainClient toolchain)
 {
     public DesktopPaths Paths { get; } = paths;
     public DesktopSettings Settings { get; set; } = settings;
-    public SettingsStore SettingsStore { get; } = settingsStore;
-    public LibraryService LibraryService { get; } = libraryService;
+    public ISettingsService SettingsStore { get; } = settingsStore;
+    public IGameLibraryService LibraryService { get; } = libraryService;
+    public IBuildService BuildService { get; } = buildService;
+    public ISessionService SessionService { get; } = sessionService;
+    public IDiagnosticsService DiagnosticsService { get; } = diagnosticsService;
     public JobStore JobStore { get; } = jobStore;
+    public IToolchainClient Toolchain { get; } = toolchain;
     public Func<Task> AddGameAsync { get; set; } = () => Task.CompletedTask;
     public Func<GameSummary, Task> BuildAsync { get; set; } = _ => Task.CompletedTask;
     public Func<GameSummary, Task> RelinkSourceIsoAsync { get; set; } = _ => Task.CompletedTask;

@@ -1,19 +1,8 @@
+using REPS2.Desktop.Api.Contracts;
+
 namespace REPS2.Desktop.Core.Services;
 
-public sealed record DesktopSettings
-{
-    public string LibraryRoot { get; init; } = string.Empty;
-    public string FrontendPath { get; init; } = string.Empty;
-    public string EngineRunnerPath { get; init; } = string.Empty;
-    public string SdkIncludeRoot { get; init; } = string.Empty;
-    public string CMakePath { get; init; } = string.Empty;
-    public bool DeveloperDiagnostics { get; init; } = true;
-    public bool AutoCheckUpdates { get; init; } = true;
-    public int DefaultProbeBudget { get; init; } = 5_000_000;
-    public int TranslationUnitCount { get; init; } = 4;
-}
-
-public sealed class SettingsStore(DesktopPaths paths)
+public sealed class SettingsStore(DesktopPaths paths) : ISettingsService
 {
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions =
         new(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true };

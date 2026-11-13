@@ -15,8 +15,8 @@
 
             <StackPanel Spacing="4">
                 <TextBlock Text="Game detail" Style="{StaticResource CaptionStyle}"/>
-                <TextBlock x:Name="GameTitle" Text="Game title" Style="{StaticResource PageTitleStyle}"/>
-                <TextBlock x:Name="GameSerial" Text="Serial" FontSize="12" FontFamily="Cascadia Mono, Consolas"
+                <TextBlock x:Name="GameTitle" Text="{x:Bind ViewModel.Title, Mode=OneWay}" Style="{StaticResource PageTitleStyle}"/>
+                <TextBlock x:Name="GameSerial" Text="{x:Bind ViewModel.SerialLine, Mode=OneWay}" FontSize="12" FontFamily="Cascadia Mono, Consolas"
                            Foreground="{ThemeResource SecondaryTextBrush}"/>
             </StackPanel>
 
@@ -28,27 +28,29 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Spacing="6">
                         <TextBlock Text="Compatibility state" Style="{StaticResource SectionLabelStyle}"/>
-                        <TextBlock x:Name="LifecycleText" Text="Imported" FontSize="22" FontWeight="SemiBold"
+                        <TextBlock x:Name="LifecycleText" Text="{x:Bind ViewModel.LifecycleText, Mode=OneWay}" FontSize="22" FontWeight="SemiBold"
                                    Foreground="{ThemeResource BrandBrush}"/>
-                        <TextBlock x:Name="EvidenceText" Text="Evidence summary" FontSize="13"
+                        <TextBlock x:Name="EvidenceText" Text="{x:Bind ViewModel.EvidenceText, Mode=OneWay}" FontSize="13"
                                    Foreground="{ThemeResource SecondaryTextBrush}" TextWrapping="Wrap"/>
-                        <TextBlock x:Name="RecoveryText" Text="" FontSize="12"
+                        <TextBlock x:Name="RecoveryText" Text="{x:Bind ViewModel.RecoveryText, Mode=OneWay}" FontSize="12"
                                    Foreground="{ThemeResource DangerBrush}" TextWrapping="Wrap"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Center" MinWidth="196">
-                        <Button x:Name="RelinkButton" Click="Relink_Click" Visibility="Collapsed">
+                        <Button x:Name="RelinkButton" Click="Relink_Click" Visibility="{x:Bind ViewModel.RelinkVisible, Mode=OneWay}">
                             <StackPanel Orientation="Horizontal" Spacing="7">
                                 <FontIcon Glyph="&#xE8B7;" FontSize="13"/>
                                 <TextBlock Text="Relink original ISO"/>
                             </StackPanel>
                         </Button>
-                        <Button x:Name="BuildButton" Click="Build_Click" Style="{StaticResource AccentButtonStyle}">
+                        <Button x:Name="BuildButton" Click="Build_Click" Style="{StaticResource AccentButtonStyle}"
+                                Visibility="{x:Bind ViewModel.BuildVisible, Mode=OneWay}" IsEnabled="{x:Bind ViewModel.BuildEnabled, Mode=OneWay}">
                             <StackPanel Orientation="Horizontal" Spacing="7">
                                 <FontIcon Glyph="&#xE943;" FontSize="13"/>
                                 <TextBlock Text="Build native module"/>
                             </StackPanel>
                         </Button>
-                        <Button x:Name="ProbeButton" Click="Probe_Click">
+                        <Button x:Name="ProbeButton" Click="Probe_Click"
+                                Visibility="{x:Bind ViewModel.ProbeVisible, Mode=OneWay}" IsEnabled="{x:Bind ViewModel.ProbeEnabled, Mode=OneWay}">
                             <StackPanel Orientation="Horizontal" Spacing="7">
                                 <FontIcon Glyph="&#xE768;" FontSize="13"/>
                                 <TextBlock Text="Run bounded probe"/>
@@ -68,25 +70,25 @@
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel Spacing="8">
                         <TextBlock Text="Disc identity" Style="{StaticResource SectionLabelStyle}"/>
-                        <TextBlock x:Name="IsoPath" Text="ISO path" FontSize="12"
+                        <TextBlock x:Name="IsoPath" Text="{x:Bind ViewModel.IsoPath, Mode=OneWay}" FontSize="12"
                                    Foreground="{ThemeResource PrimaryTextBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
                         <TextBlock Text="ISO SHA-256" Style="{StaticResource CaptionStyle}"/>
-                        <TextBlock x:Name="IsoDigest" Style="{StaticResource MonoTextStyle}"/>
+                        <TextBlock x:Name="IsoDigest" Text="{x:Bind ViewModel.IsoDigest, Mode=OneWay}" Style="{StaticResource MonoTextStyle}"/>
                         <TextBlock Text="Boot ELF entry" Style="{StaticResource CaptionStyle}"/>
-                        <TextBlock x:Name="EntryPoint" FontSize="12" FontFamily="Cascadia Mono, Consolas"
+                        <TextBlock x:Name="EntryPoint" Text="{x:Bind ViewModel.EntryPoint, Mode=OneWay}" FontSize="12" FontFamily="Cascadia Mono, Consolas"
                                    Foreground="{ThemeResource SecondaryTextBrush}"/>
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="1" Style="{StaticResource CardStyle}">
                     <StackPanel Spacing="8">
                         <TextBlock Text="Analysis coverage" Style="{StaticResource SectionLabelStyle}"/>
-                        <TextBlock x:Name="BlocksValue" Text="—" FontSize="22" FontWeight="SemiBold"
+                        <TextBlock x:Name="BlocksValue" Text="{x:Bind ViewModel.BlocksValue, Mode=OneWay}" FontSize="22" FontWeight="SemiBold"
                                    Foreground="{ThemeResource PrimaryTextBrush}"/>
                         <TextBlock Text="Basic blocks" Style="{StaticResource CaptionStyle}"/>
-                        <TextBlock x:Name="InstructionsValue" Text="—" FontSize="16"
+                        <TextBlock x:Name="InstructionsValue" Text="{x:Bind ViewModel.InstructionsValue, Mode=OneWay}" FontSize="16"
                                    Foreground="{ThemeResource PrimaryTextBrush}" Margin="0,4,0,0"/>
                         <TextBlock Text="Decoded guest instructions" Style="{StaticResource CaptionStyle}"/>
-                        <TextBlock x:Name="UnsupportedValue" Text="—" FontSize="12"
+                        <TextBlock x:Name="UnsupportedValue" Text="{x:Bind ViewModel.UnsupportedLine, Mode=OneWay}" FontSize="12"
                                    Foreground="{ThemeResource SecondaryTextBrush}" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Border>
@@ -95,10 +97,10 @@
             <Border Grid.Row="3" Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="7">
                     <TextBlock Text="Native build identity" Style="{StaticResource SectionLabelStyle}"/>
-                    <TextBlock x:Name="BuildStateText" Text="No verified native module" FontSize="13"
+                    <TextBlock x:Name="BuildStateText" Text="{x:Bind ViewModel.BuildStateText, Mode=OneWay}" FontSize="13"
                                Foreground="{ThemeResource PrimaryTextBrush}"/>
-                    <TextBlock x:Name="BuildCacheKey" Style="{StaticResource MonoTextStyle}"/>
-                    <TextBlock x:Name="BuildModulePath" Style="{StaticResource CaptionStyle}"
+                    <TextBlock x:Name="BuildCacheKey" Text="{x:Bind ViewModel.BuildCacheKey, Mode=OneWay}" Style="{StaticResource MonoTextStyle}"/>
+                    <TextBlock x:Name="BuildModulePath" Text="{x:Bind ViewModel.BuildModulePath, Mode=OneWay}" Style="{StaticResource CaptionStyle}"
                                IsTextSelectionEnabled="True"/>
                 </StackPanel>
             </Border>

@@ -1,15 +1,6 @@
-namespace REPS2.Desktop.Core.Services;
+using REPS2.Desktop.Api.Contracts;
 
-public sealed record ToolchainResolution(
-    string? FrontendPath,
-    string? EngineRunnerPath,
-    string? SdkIncludeRoot,
-    string? CMakePath,
-    IReadOnlyList<string> Notes)
-{
-    public bool CanImport => FrontendPath is not null;
-    public bool CanBuild => FrontendPath is not null && SdkIncludeRoot is not null && CMakePath is not null;
-}
+namespace REPS2.Desktop.Core.Services;
 
 public static class ToolchainLocator
 {
