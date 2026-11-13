@@ -14,7 +14,8 @@ public sealed class DesktopAppContext(
     ISessionService sessionService,
     IDiagnosticsService diagnosticsService,
     JobStore jobStore,
-    IToolchainClient toolchain)
+    IToolchainClient toolchain,
+    IHostShellService hostShell)
 {
     public DesktopPaths Paths { get; } = paths;
     public DesktopSettings Settings { get; set; } = settings;
@@ -25,6 +26,7 @@ public sealed class DesktopAppContext(
     public IDiagnosticsService DiagnosticsService { get; } = diagnosticsService;
     public JobStore JobStore { get; } = jobStore;
     public IToolchainClient Toolchain { get; } = toolchain;
+    public IHostShellService HostShell { get; } = hostShell;
     public Func<Task> AddGameAsync { get; set; } = () => Task.CompletedTask;
     public Func<GameSummary, Task> BuildAsync { get; set; } = _ => Task.CompletedTask;
     public Func<GameSummary, Task> RelinkSourceIsoAsync { get; set; } = _ => Task.CompletedTask;
