@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
 
 namespace REPS2.Desktop.Core.Services;
 

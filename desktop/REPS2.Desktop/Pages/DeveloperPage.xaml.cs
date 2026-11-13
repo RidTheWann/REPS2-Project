@@ -1,10 +1,13 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using REPS2.Desktop.ViewModels;
 
 namespace REPS2.Desktop.Pages;
 
 public sealed partial class DeveloperPage : Page
 {
+    public DeveloperViewModel ViewModel { get; } = new();
+
     public DeveloperPage()
     {
         InitializeComponent();
@@ -21,10 +24,4 @@ public sealed partial class DeveloperPage : Page
 
     private async void SummaryLatest_Click(object sender, RoutedEventArgs e) =>
         await AppServices.Current.RunDeveloperCommandAsync("summary latest");
-
-    public void SetCommandOutput(string command, int exitCode, string output)
-    {
-        OutputHeader.Text = $"reps2 dev {command} · exit {exitCode}";
-        OutputText.Text = string.IsNullOrWhiteSpace(output) ? "(no output)" : output;
-    }
 }

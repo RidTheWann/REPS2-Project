@@ -8,6 +8,30 @@ Respect the existing boundary:
 - Rust owns ISO/ELF parsing, R5900 decoding, function/CFG analysis, typed IR, verification, deterministic C++ generation, build manifests, and CLI orchestration.
 - C++20 owns EE architectural state, memory/device models, the generated-code ABI, and shared platform/runtime services.
 - Generated source plus a deterministic machine-readable manifest is the frontend/runtime boundary. Do not add per-instruction Rust/C++ FFI.
+
+The product is organized in six layers (ADR 0133), and changes must respect
+their ownership:
+
+- **01 Frontend** — `desktop/REPS2.Desktop`: WinUI 3 presentation and MVVM view
+  models only. No compiler, build, or runtime logic; no direct process spawning.
+- **02 Application API** — `desktop/REPS2.Desktop.Api`: versioned contracts,
+  DTOs, service interfaces, and the process IPC client (`IToolchainClient`).
+  Contracts change deliberately; do not leak Core/engine internals through them.
+- **03 Service layer** — `desktop/REPS2.Desktop.Core`: game library, import,
+  build, session, settings and diagnostics orchestration. It implements the API
+  interfaces and never emulates PS2 hardware.
+- **04 Backend toolchain** — `rust/`: parsing, decoding, IR, verification,
+  deterministic code generation, manifests and CLI. No desktop concepts.
+- **05 RG REPS2 ENGINE** — `engine/` + `runtime/include`: PS2 system runtime.
+  It must remain independently testable and must never reference `desktop/`.
+- **06 Graphics & host backend** — `host/`: PC graphics/audio/input/display and
+  platform-window contracts plus the software reference backend. Runtime
+  subsystems consume host services through interfaces; no Win32/GPU headers in
+  runtime code.
+
+These are conceptual boundaries, not microservices. Only the Rust toolchain and
+engine runner are separate processes. Do not add per-layer network services,
+empty scaffolding projects, or duplicate abstractions.
 - Title-specific metadata and narrowly evidenced compatibility profiles may vary by title; instruction/device semantics and core recompiler behavior stay shared.
 
 Read `docs/PRODUCT_VISION.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/RELEASE_GATES.md`, and the relevant ADRs before changing architecture or acceptance gates.

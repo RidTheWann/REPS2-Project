@@ -8,4 +8,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\REPS2.Desktop.Api\REPS2.Desktop.Api.csproj" />
+  </ItemGroup>
 </Project>

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
-namespace REPS2.Desktop.Core.Services;
+namespace REPS2.Desktop.Api.Ipc;
 
 public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError, TimeSpan Duration)
 {
@@ -9,6 +9,7 @@ public sealed record ProcessResult(int ExitCode, string StandardOutput, string S
         new[] { StandardOutput.Trim(), StandardError.Trim() }.Where(value => value.Length > 0));
 }
 
+/// <summary>Local Windows process transport used by the IPC layer.</summary>
 public static class ProcessRunner
 {
     public static async Task<ProcessResult> RunAsync(

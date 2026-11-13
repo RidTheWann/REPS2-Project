@@ -1,10 +1,15 @@
 using System.Security.Cryptography;
 using System.Text.Json;
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
+using REPS2.Desktop.Api.Ipc;
 
 namespace REPS2.Desktop.Core.Services;
 
-public sealed class BuildCoordinator(DesktopPaths paths, JobStore jobs, SettingsStore settingsStore)
+public sealed class BuildCoordinator(
+    DesktopPaths paths,
+    JobStore jobs,
+    SettingsStore settingsStore,
+    IToolchainClient toolchain) : IBuildService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -41,16 +46,13 @@ public sealed class BuildCoordinator(DesktopPaths paths, JobStore jobs, Settings
         try
         {
             record = await SetStage(record, "ISO analysis and native project generation", "Running the REPS2 frontend.");
-            var frontendArgs = new List<string>();
-            if (settings.DeveloperDiagnostics)
-                frontendArgs.AddRange(["--dev", "--log-dir", diagnostics]);
-            frontendArgs.AddRange([
-                "recompile-iso", game.SourceIsoPath, outputRoot,
-                "--discover", "--tu-count", Math.Clamp(settings.TranslationUnitCount, 1, 16).ToString(),
-                "--hle-syscalls"
-            ]);
-            var frontend = await ProcessRunner.RunAsync(resolution.FrontendPath!, frontendArgs,
-                paths.Root, cancellationToken, TimeSpan.FromHours(2));
+            var frontend = await toolchain.RecompileIsoAsync(resolution.FrontendPath!, new RecompileIsoRequest(
+                game.SourceIsoPath,
+                outputRoot,
+                settings.TranslationUnitCount,
+                EnableHleSyscalls: true,
+                DeveloperDiagnostics: settings.DeveloperDiagnostics,
+                LogDirectory: diagnostics), cancellationToken);
             if (frontend.ExitCode != 0)
                 throw new BuildStepException("REPS2 ISO-to-native preparation failed.", frontend.ExitCode, frontend.CombinedOutput);
             var manifestPath = Path.Combine(outputRoot, "boot.manifest.json");
