@@ -1,20 +1,20 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
+using REPS2.Desktop.ViewModels;
 
 namespace REPS2.Desktop.Pages;
 
 public sealed partial class BuildQueuePage : Page
 {
-    private readonly ObservableCollection<JobRecord> _jobs = [];
     private bool _subscribed;
+
+    public BuildQueueViewModel ViewModel { get; } = new(AppServices.Current.JobStore);
 
     public BuildQueuePage()
     {
         InitializeComponent();
-        JobsList.ItemsSource = _jobs;
         Loaded += BuildQueuePage_Loaded;
         Unloaded += BuildQueuePage_Unloaded;
     }
@@ -26,7 +26,7 @@ public sealed partial class BuildQueuePage : Page
             AppServices.Current.JobUpdated += OnJobUpdated;
             _subscribed = true;
         }
-        await RefreshAsync();
+        await ViewModel.RefreshAsync();
     }
 
     private void BuildQueuePage_Unloaded(object sender, RoutedEventArgs e)
@@ -38,56 +38,11 @@ public sealed partial class BuildQueuePage : Page
         }
     }
 
-    public async Task RefreshAsync()
-    {
-        try
-        {
-            var jobs = await AppServices.Current.JobStore.LoadRecentAsync();
-            _jobs.Clear();
-            foreach (var job in jobs)
-                _jobs.Add(job);
-            UpdateSummary();
-            EmptyJobs.Visibility = _jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            JobsList.Visibility = _jobs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        }
-        catch (Exception ex)
-        {
-            QueueSummary.Text = $"Build history could not be loaded: {ex.Message}";
-            AppServices.Current.SetStatus("Build history could not be loaded · see local diagnostics");
-        }
-    }
+    public Task RefreshAsync() => ViewModel.RefreshAsync();
 
     private void OnJobUpdated(JobRecord job)
     {
-        DispatcherQueue.TryEnqueue(() => Upsert(job));
-    }
-
-    private void Upsert(JobRecord job)
-    {
-        var index = -1;
-        for (var i = 0; i < _jobs.Count; i++)
-        {
-            if (string.Equals(_jobs[i].JobId, job.JobId, StringComparison.Ordinal))
-            {
-                index = i;
-                break;
-            }
-        }
-
-        if (index >= 0)
-            _jobs[index] = job;
-        else
-            _jobs.Insert(0, job);
-
-        UpdateSummary();
-        EmptyJobs.Visibility = _jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        JobsList.Visibility = _jobs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private void UpdateSummary()
-    {
-        var running = _jobs.Count(job => string.Equals(job.Status, "Running", StringComparison.OrdinalIgnoreCase));
-        QueueSummary.Text = $"{_jobs.Count} recent job records · {running} running · updates persisted locally";
+        DispatcherQueue.TryEnqueue(() => ViewModel.Upsert(job));
     }
 
     private void OpenDirectory_Click(object sender, RoutedEventArgs e)

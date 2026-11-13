@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 
-namespace REPS2.Desktop.Core.Models;
+namespace REPS2.Desktop.Api.Contracts;
 
 // A WinUI DataTemplate x:DataType is materialized by generated XamlTypeInfo code.
 // Keep this presentation DTO parameterless and publicly settable so the XAML
@@ -49,12 +49,34 @@ public sealed record LibrarySnapshot(
     IReadOnlyList<string> Warnings,
     string LibraryRoot);
 
+public sealed record JobRecord
+{
+    public string Kind { get; init; } = ContractVersions.JobKind;
+    public int SchemaVersion { get; init; } = ContractVersions.DesktopSchemaVersion;
+    public required string JobId { get; init; }
+    public required string GameId { get; init; }
+    public required string GameName { get; init; }
+    public required string JobType { get; init; }
+    public required string Status { get; init; }
+    public required string Stage { get; init; }
+    public required DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+    public string UpdatedLabel => UpdatedAt.ToLocalTime().ToString("g");
+    public string? Message { get; init; }
+    public string? OutputDirectory { get; init; }
+    public string? DiagnosticsDirectory { get; init; }
+    public int? ExitCode { get; init; }
+    public bool HasOutputDirectory => !string.IsNullOrWhiteSpace(OutputDirectory);
+    public bool HasDiagnosticsDirectory => !string.IsNullOrWhiteSpace(DiagnosticsDirectory);
+    public string ExitCodeLabel => ExitCode is { } code ? $"Exit code: {code}" : "Exit code: not reported";
+}
+
 public sealed record NativeBuildRecord
 {
     [JsonPropertyName("kind")]
-    public string Kind { get; init; } = "reps2.desktop.native_build.v1";
+    public string Kind { get; init; } = ContractVersions.NativeBuildKind;
     [JsonPropertyName("schema_version")]
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = ContractVersions.DesktopSchemaVersion;
     [JsonPropertyName("game_id")]
     public required string GameId { get; init; }
     [JsonPropertyName("source_iso_sha256")]

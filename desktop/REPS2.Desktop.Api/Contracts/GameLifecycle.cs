@@ -1,5 +1,9 @@
-namespace REPS2.Desktop.Core.Models;
+namespace REPS2.Desktop.Api.Contracts;
 
+/// <summary>
+/// Evidence-gated compatibility lifecycle. States stay distinct: a native
+/// build or a bounded probe never promotes a title to Boot-tested or Playable.
+/// </summary>
 public enum GameLifecycle
 {
     Imported,

@@ -2,7 +2,7 @@
     x:Class="REPS2.Desktop.Pages.BuildQueuePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:models="using:REPS2.Desktop.Core.Models"
+    xmlns:models="using:REPS2.Desktop.Api.Contracts"
     Background="{ThemeResource AppBackgroundBrush}">
     <Grid Padding="28,24" RowSpacing="16">
         <Grid.RowDefinitions>
@@ -27,9 +27,10 @@
                 </StackPanel>
             </Button>
         </Grid>
-        <TextBlock x:Name="QueueSummary" Grid.Row="1" Text="No jobs recorded" Style="{StaticResource CaptionStyle}"/>
+        <TextBlock x:Name="QueueSummary" Grid.Row="1" Text="{x:Bind ViewModel.Summary, Mode=OneWay}" Style="{StaticResource CaptionStyle}"/>
         <Grid Grid.Row="2">
-            <ListView x:Name="JobsList" SelectionMode="None" Background="Transparent" BorderThickness="0">
+            <ListView x:Name="JobsList" ItemsSource="{x:Bind ViewModel.Jobs}" Visibility="{x:Bind ViewModel.JobsVisible, Mode=OneWay}"
+                      SelectionMode="None" Background="Transparent" BorderThickness="0">
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="models:JobRecord">
                         <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,10">
@@ -80,7 +81,8 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
-            <StackPanel x:Name="EmptyJobs" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" MaxWidth="400">
+            <StackPanel x:Name="EmptyJobs" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" MaxWidth="400"
+                        Visibility="{x:Bind ViewModel.EmptyVisible, Mode=OneWay}">
                 <FontIcon Glyph="&#xE823;" FontSize="26" Foreground="{ThemeResource MutedTextBrush}" HorizontalAlignment="Center"/>
                 <TextBlock Text="No build jobs yet" FontSize="18" FontWeight="SemiBold"
                            Foreground="{ThemeResource PrimaryTextBrush}" HorizontalAlignment="Center"/>

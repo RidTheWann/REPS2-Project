@@ -4,6 +4,35 @@
 
 REPS2 is a game-independent static recompilation toolchain. It must not require complete reverse engineering of all PS2 hardware before the first real executable can be translated. Development proceeds through vertical slices: choose an executable, discover the exact code and runtime behaviors it needs, implement those behaviors behind stable interfaces, then expand coverage.
 
+## Six-layer product architecture
+
+REPS2 is delivered as one desktop product composed of six architectural
+layers. They are boundaries, not six sequential execution stages; graphics,
+audio, input and storage operate as host services consumed by runtime
+subsystems. ADR 0133 records the restructuring that established them.
+
+| # | Layer | Location | Owns | Must not |
+|---|-------|----------|------|----------|
+| 01 | Frontend | `desktop/REPS2.Desktop` | WinUI 3 / .NET 10 GUI, navigation, page view models (MVVM) | Reimplement compiler, build, or runtime logic |
+| 02 | Application API | `desktop/REPS2.Desktop.Api` | Versioned contracts, DTOs, service interfaces, process IPC | Leak backend implementation details |
+| 03 | Application services | `desktop/REPS2.Desktop.Core` | Game library, import, build, session, settings, diagnostics orchestration | Emulate PS2 hardware |
+| 04 | Backend toolchain | `rust/` (`reps2-frontend`) | ISO/ELF parsing, R5900 decoding, IR, verification, deterministic C++ generation, manifests, native-project/cache metadata, CLI | Contain desktop or WinUI concerns |
+| 05 | RG REPS2 ENGINE | `engine/` + `runtime/include` | EE architectural state, memory/MMIO, HLE, DMA/INTC/SIF modeling, session loading and bounded execution | Depend on WinUI or the desktop |
+| 06 | Graphics & host backend | `host/` | PC-side contracts for graphics, audio, input, display and platform windows; software reference backend; DX12/Vulkan probing | Model PS2 device semantics |
+
+Communication rules:
+
+- The frontend calls application services through API-layer interfaces. It
+  never spawns tool processes directly; `IToolchainClient` wraps every
+  versioned external invocation.
+- Services coordinate use cases. Only `BuildCoordinator` drives CMake/MSVC,
+  and only through the IPC transport.
+- RG REPS2 ENGINE is independently testable through CTest and never references
+  `desktop/`. Host services (`host/`) are injected into runtime consumers as
+  interfaces; the runtime does not include Win32 or GPU headers.
+- The six layers are not microservices. All desktop layers run in one process;
+  only the Rust toolchain and engine runner are separate OS processes.
+
 ## Language boundaries
 
 ### Rust frontend

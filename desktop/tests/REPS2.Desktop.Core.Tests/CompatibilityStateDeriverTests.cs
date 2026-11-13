@@ -1,4 +1,4 @@
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
 using REPS2.Desktop.Core.Services;
 using Xunit;
 

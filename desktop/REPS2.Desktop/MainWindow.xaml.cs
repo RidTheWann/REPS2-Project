@@ -1,7 +1,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
+using REPS2.Desktop.Api.Ipc;
 using REPS2.Desktop.Core.Services;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -12,7 +13,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly DesktopPaths _paths = new();
     private DesktopSettings _settings = new();
-    private SettingsStore _settingsStore = null!;
+    private ISettingsService _settingsStore = null!;
     private bool _initialized;
     private bool _busy;
     private CancellationTokenSource? _buildCancellation;
@@ -33,8 +34,18 @@ public sealed partial class MainWindow : Window
         try
         {
             _settings = await _settingsStore.LoadAsync();
-            var context = new DesktopAppContext(_paths, _settings, _settingsStore,
-                new LibraryService(_paths), new JobStore(_paths));
+            var jobStore = new JobStore(_paths);
+            var toolchain = new ProcessToolchainClient(_paths.Root);
+            var context = new DesktopAppContext(
+                _paths,
+                _settings,
+                _settingsStore,
+                new LibraryService(_paths),
+                new BuildCoordinator(_paths, jobStore, new SettingsStore(_paths), toolchain),
+                new SessionService(toolchain),
+                new DiagnosticsService(toolchain),
+                jobStore,
+                toolchain);
             context.AddGameAsync = AddGameAsync;
             context.BuildAsync = BuildGameAsync;
             context.RelinkSourceIsoAsync = RelinkSourceIsoAsync;
@@ -255,12 +266,10 @@ public sealed partial class MainWindow : Window
         SetStatus("Importing ISO · validating the disc and boot ELF…");
         try
         {
-            var args = new List<string>();
-            if (_settings.DeveloperDiagnostics)
-                args.AddRange(["--dev", "--log-dir", _paths.Logs]);
-            args.AddRange(["add-game", file.Path, "--library", _settings.LibraryRoot]);
-            var result = await ProcessRunner.RunAsync(resolution.FrontendPath, args, _paths.Root,
-                timeout: TimeSpan.FromHours(2));
+            var result = await AppServices.Current.Toolchain.ImportGameAsync(
+                resolution.FrontendPath,
+                new ImportGameRequest(file.Path, _settings.LibraryRoot,
+                    _settings.DeveloperDiagnostics, _paths.Logs));
             if (result.ExitCode != 0)
             {
                 await ShowDialogAsync("Import failed", result.CombinedOutput.Length == 0
@@ -272,7 +281,7 @@ public sealed partial class MainWindow : Window
 
             var snapshot = await AppServices.Current.LibraryService.ScanAsync(_settings.LibraryRoot);
             if (ContentFrame.Content is Pages.LibraryPage page)
-                page.SetSnapshot(snapshot);
+                page.ViewModel.SetSnapshot(snapshot);
             var imported = snapshot.Games.FirstOrDefault(game =>
                 string.Equals(Path.GetFullPath(game.SourceIsoPath), Path.GetFullPath(file.Path),
                     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
@@ -350,8 +359,7 @@ public sealed partial class MainWindow : Window
         SetStatus($"Building native module · {game.DisplayName}");
         try
         {
-            var coordinator = new BuildCoordinator(_paths, AppServices.Current.JobStore, _settingsStore);
-            var build = await coordinator.BuildAsync(game, cancellation.Token, onProgress: job =>
+            var build = await AppServices.Current.BuildService.BuildAsync(game, cancellation.Token, onProgress: job =>
             {
                 SetStatus($"{job.Stage} · {job.GameName}");
                 AppServices.Current.PublishJobUpdate(job);
@@ -420,64 +428,22 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var ram = Path.Combine(game.BuildDirectory ?? string.Empty, "boot.ram.bin");
-        if (!File.Exists(ram))
-        {
-            await ShowDialogAsync("RAM image missing", "The native build record does not have its required initial EE RAM image.");
-            return;
-        }
-
         _busy = true;
         SetStatus($"Running bounded native probe · {game.DisplayName}");
         try
         {
-            var args = new[]
-            {
-                game.NativeModulePath, "--ram", ram, "--media", game.SourceIsoPath,
-                "--budget", Math.Clamp(_settings.DefaultProbeBudget, 1, 100_000_000).ToString(),
-                "--max-batches", "1", "--hle-syscalls", "--instruction-trace"
-            };
-            var result = await ProcessRunner.RunAsync(resolution.EngineRunnerPath, args, _paths.Root,
-                timeout: TimeSpan.FromMinutes(10));
-            var reportText = result.StandardOutput.Trim();
-            if (reportText.Length == 0)
-                reportText = result.CombinedOutput;
-            var reportName = $"probe-{game.GameId}-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.json";
-            var reportPath = Path.Combine(_paths.Reports, reportName);
-            await File.WriteAllTextAsync(reportPath, reportText);
-
-            if (result.ExitCode != 0)
-            {
-                await ShowDialogAsync("Execution probe failed",
-                    $"The engine runner exited with code {result.ExitCode}.\n\n{result.CombinedOutput}\n\nReport:\n{reportPath}");
-                SetStatus($"Probe failed · exit {result.ExitCode}");
-                return;
-            }
-
-            var outcome = "Report saved";
-            try
-            {
-                using var document = System.Text.Json.JsonDocument.Parse(reportText);
-                var root = document.RootElement;
-                if (!root.TryGetProperty("kind", out var kind)
-                    || kind.GetString() != "rg.reps2.engine.run_report.v1")
-                    throw new System.Text.Json.JsonException("Unexpected engine report kind.");
-                var reportOutcome = root.TryGetProperty("outcome", out var outcomeElement)
-                    ? outcomeElement.GetString() : "unknown";
-                var session = root.TryGetProperty("session", out var sessionElement) ? sessionElement : default;
-                var pc = session.ValueKind == System.Text.Json.JsonValueKind.Object
-                    && session.TryGetProperty("pc_hex", out var pcElement) ? pcElement.GetString() : "unknown";
-                var instructions = session.ValueKind == System.Text.Json.JsonValueKind.Object
-                    && session.TryGetProperty("instructions_executed", out var countElement) ? countElement.ToString() : "unknown";
-                outcome = $"Outcome: {reportOutcome}\nPC: {pc}\nInstructions: {instructions}";
-            }
-            catch (System.Text.Json.JsonException)
-            {
-                outcome = "The runner did not return a valid run-report JSON document.";
-            }
+            var report = await AppServices.Current.SessionService.RunBoundedProbeAsync(new BoundedProbeRequest(
+                game, resolution.EngineRunnerPath, _paths.Root, _paths.Reports,
+                Math.Clamp(_settings.DefaultProbeBudget, 1, 100_000_000)));
             await ShowDialogAsync("Bounded execution probe finished",
-                $"{outcome}\n\nReport:\n{reportPath}\n\nA bounded probe is not boot evidence. REPS2 will not promote this title to Boot-tested or Playable automatically.");
+                $"Outcome: {report.Outcome}\nPC: {report.ProgramCounterHex ?? "unknown"}\nInstructions: {report.InstructionsExecuted}\n\nReport:\n{report.ReportPath}\n\nA bounded probe is not boot evidence. REPS2 will not promote this title to Boot-tested or Playable automatically.");
             SetStatus($"Probe finished · {game.DisplayName} · report saved");
+        }
+        catch (ProbeExecutionException ex)
+        {
+            await ShowDialogAsync("Execution probe failed",
+                $"The engine runner exited with code {ex.Probe.Invocation.ExitCode}.\n\n{ex.Probe.Invocation.CombinedOutput}\n\nReport:\n{ex.Probe.ReportPath}");
+            SetStatus($"Probe failed · exit {ex.Probe.Invocation.ExitCode}");
         }
         catch (Exception ex)
         {
@@ -500,18 +466,16 @@ public sealed partial class MainWindow : Window
         }
         try
         {
-            var args = new List<string> { "--log-dir", _paths.Logs, "dev" };
-            args.AddRange(command.Split(' ', StringSplitOptions.RemoveEmptyEntries));
-            var result = await ProcessRunner.RunAsync(resolution.FrontendPath,
-                args, _paths.Root, timeout: TimeSpan.FromMinutes(2));
+            var result = await AppServices.Current.DiagnosticsService.RunCommandAsync(
+                resolution.FrontendPath, command, _paths.Logs);
             if (ContentFrame.Content is Pages.DeveloperPage page)
-                page.SetCommandOutput(command, result.ExitCode, result.CombinedOutput);
+                page.ViewModel.SetOutput(command, result.ExitCode, result.CombinedOutput);
             SetStatus($"Developer command · {command} · exit {result.ExitCode}");
         }
         catch (Exception ex)
         {
             if (ContentFrame.Content is Pages.DeveloperPage page)
-                page.SetCommandOutput(command, 1, ex.Message);
+                page.ViewModel.SetOutput(command, 1, ex.Message);
             SetStatus($"Developer command failed · {command}");
         }
     }

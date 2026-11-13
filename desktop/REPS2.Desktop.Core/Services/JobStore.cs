@@ -1,5 +1,5 @@
 using System.Text.Json;
-using REPS2.Desktop.Core.Models;
+using REPS2.Desktop.Api.Contracts;
 
 namespace REPS2.Desktop.Core.Services;
 
