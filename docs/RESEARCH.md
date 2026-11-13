@@ -1437,6 +1437,8 @@ PS2TEK documents the register surface as a 16-bit `TN_COUNT` whose writes set th
 
 REPS2 now stores the documented 16-bit `T3_COMP` value and reports `timer3.mode`/`timer3.compare` in the engine run report. `T3_COUNT` remains fail-closed; no counter progression, compare match, overflow event or interrupt is synthesized.
 
+Update (ADR 0134, 2026-11-14): `T3_COUNT` (`0x10001800`) is now modelled as a 16-bit storage register — guest writes set the counter, reads return the stored value zero-extended, reset 0 — and the run report gains `timer3.count`. With `T3_MODE = 0` (CUE clear) a read returns the reset value, which is the defined disabled-counter state, not a fabricated advance. Counter progression, compare matching, overflow events and interrupt delivery remain unmodelled and blocked on a deterministic guest-time source; runtime ABI is now 3.
+
 - **Observed (fresh probe, 2026-11-13, Windows x64/MSVC, runtime ABI 2, recovery main `0c4c04c` plus the ADR 0131 branch):** the runner stops as `unsupported_memory_access` at `0x800761A4` after 3,890,274 guest instructions. The report records `$2 = 0xFFFFFFFFB0001800`, `timer3.mode = 0`, `timer3.compare = 0`, and a 16-entry trace ending `0x80076168`..`0x800761A4`.
 - **Derived:** the faulting path reads `T3_COUNT` before any Timer 3 setup write executes; the static `T3_MODE`/`T3_COMP` stores at `0x800763F4`/`0x80076468` belong to paths not taken before this stop. A counter model must therefore be driven by a deterministic HBLANK/video or bus-time source rather than a value invented at the read site.
 

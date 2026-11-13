@@ -2343,20 +2343,23 @@ int test_timer3_mode_guard_register() {
     if (reps2::runtime::load_u32(state.memory, 0x9000'1810U, value) != Status::ok
         || value != 0x0000'03DFU) return 224;
 
-    // T3_COUNT remains unsupported in both physical and KSEG1 forms, and the
-    // compare register must not fabricate a counter value.
-    value = 0xA5A5'5A5AU;
-    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value)
-            != Status::unsupported_memory_access
-        || value != 0xA5A5'5A5AU) return 202;
-    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, 1U)
-            != Status::unsupported_memory_access) return 204;
-    // The observed failure address uses the EE's KSEG1 alias of T3_COUNT.
-    if (reps2::runtime::load_u32(state.memory, 0xB000'1800U, value)
-            != Status::unsupported_memory_access
-        || value != 0xA5A5'5A5AU) return 206;
-    if (reps2::runtime::store_u32(state.memory, 0xB000'1800U, 1U)
-            != Status::unsupported_memory_access) return 207;
+    // T3_COUNT is the documented 16-bit counter storage register: writes set
+    // the counter, reads return the stored value zero-extended, reset 0. No
+    // progression, compare match, overflow event or interrupt is generated.
+    // The observed Downhill failure address uses the KSEG1 alias of T3_COUNT,
+    // so the alias paths must reach the same storage.
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 0U) return 202;
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, 0x0001'ABCDU) != Status::ok
+        || reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 0x0000'ABCDU) return 204;
+    if (reps2::runtime::load_u32(state.memory, 0xB000'1800U, value) != Status::ok
+        || value != 0x0000'ABCDU) return 206;
+    if (reps2::runtime::store_u32(state.memory, 0xB000'1800U, 0xFFFF'1234U) != Status::ok
+        || reps2::runtime::load_u32(state.memory, 0x9000'1800U, value) != Status::ok
+        || value != 0x0000'1234U) return 207;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 0x0000'1234U) return 208;
     return 0;
 }
 
