@@ -537,6 +537,11 @@ void print_error(
               << ",\"ncmd_number\":" << state.hle.sif_cmd.last_ncmd_number
               << ",\"ncmd_retres\":" << state.hle.sif_cmd.last_ncmd_retres
               << ",\"ncmd_replied\":" << (state.hle.sif_cmd.last_ncmd_replied ? 1U : 0U)
+              << ",\"ncmd_read_calls\":" << state.hle.sif_cmd.ncmd_read_call_count
+              << ",\"ncmd_read_lbn\":" << state.hle.sif_cmd.last_ncmd_read_lbn
+              << ",\"ncmd_read_sectors\":" << state.hle.sif_cmd.last_ncmd_read_sectors
+              << ",\"ncmd_read_bytes\":" << state.hle.sif_cmd.last_ncmd_read_bytes
+              << ",\"ncmd_read_replied\":" << (state.hle.sif_cmd.last_ncmd_read_replied ? 1U : 0U)
               << ",\"searchfile_calls\":" << state.hle.sif_cmd.searchfile_call_count
               << ",\"searchfile_number\":" << state.hle.sif_cmd.last_searchfile_number
               << "}},\"runs\":[";
