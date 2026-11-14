@@ -38,3 +38,9 @@ public interface IDiagnosticsService
     Task<ToolInvocationResult> RunCommandAsync(
         string frontendPath, string command, string logDirectory, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Host-shell operations the presentation layer may request without spawning processes itself.</summary>
+public interface IHostShellService
+{
+    void OpenDirectory(string directoryPath);
+}
