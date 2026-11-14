@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
-using Microsoft.UI.Windowing;
 using REPS2.Desktop.Api.Contracts;
 using REPS2.Desktop.Api.Ipc;
 using REPS2.Desktop.Core.Services;
@@ -17,7 +16,6 @@ public sealed partial class MainWindow : Window
     private ISettingsService _settingsStore = null!;
     private bool _initialized;
     private bool _busy;
-    private bool _isBigPicture;
     private CancellationTokenSource? _buildCancellation;
     private DesktopReleaseInfo? _availableUpdate;
     private readonly UpdateService _updateService = new();
@@ -62,8 +60,9 @@ public sealed partial class MainWindow : Window
 
             ApplySettings(_settings);
             SetStatus("Ready · No title is marked Boot-tested or Playable");
-            SetActiveNavigation("Home");
-            Navigate("Home");
+            AppNavigation.SelectedItem = AppNavigation.MenuItems.OfType<NavigationViewItem>()
+                .First(item => Equals(item.Tag, "Library"));
+            Navigate("Library");
             await UpdateStartupSignal.SignalReadyAsync(_paths);
             if (_settings.AutoCheckUpdates)
                 _ = CheckForUpdatesAsync(silent: true);
@@ -191,18 +190,24 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void Navigation_Click(object sender, RoutedEventArgs e)
+    private void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (sender is not Button { Tag: string destination } || !_initialized)
+        if (args.SelectedItem is not NavigationViewItem item || item.Tag is not string tag || !_initialized)
             return;
-        Navigate(destination);
+        if (tag == "AddGame")
+        {
+            _ = AddGameAsync();
+            AppNavigation.SelectedItem = AppNavigation.MenuItems.OfType<NavigationViewItem>()
+                .First(candidate => Equals(candidate.Tag, "Library"));
+            return;
+        }
+        Navigate(tag);
     }
 
     private void Navigate(string destination)
     {
         switch (destination)
         {
-            case "Home": ContentFrame.Navigate(typeof(Pages.HomePage)); break;
             case "Library": ContentFrame.Navigate(typeof(Pages.LibraryPage)); break;
             case "BuildQueue": ContentFrame.Navigate(typeof(Pages.BuildQueuePage)); break;
             case "Developer": ContentFrame.Navigate(typeof(Pages.DeveloperPage)); break;
@@ -214,7 +219,6 @@ public sealed partial class MainWindow : Window
     {
         var heading = e.Content switch
         {
-            Pages.HomePage _ => "Home",
             Pages.LibraryPage _ => "Library",
             Pages.GameDetailPage _ => "Game detail",
             Pages.BuildQueuePage _ => "Build Queue",
@@ -222,28 +226,7 @@ public sealed partial class MainWindow : Window
             Pages.SettingsPage _ => "Settings",
             _ => "REPS2"
         };
-        SetActiveNavigation(e.Content is Pages.GameDetailPage ? "Library" : heading switch
-        {
-            "Build Queue" => "BuildQueue",
-            "Developer Center" => "Developer",
-            _ => heading
-        });
         SetStatus($"{heading} · Evidence-driven lifecycle");
-    }
-
-    private void SetActiveNavigation(string destination)
-    {
-        SetNavigationState(HomeNavigationButton, HomeNavigationIndicator, destination == "Home");
-        SetNavigationState(LibraryNavigationButton, LibraryNavigationIndicator, destination == "Library");
-        SetNavigationState(QueueNavigationButton, QueueNavigationIndicator, destination == "BuildQueue");
-        SetNavigationState(DeveloperNavigationButton, DeveloperNavigationIndicator, destination == "Developer");
-    }
-
-    private void SetNavigationState(Button button, Border indicator, bool isSelected)
-    {
-        button.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[
-            isSelected ? "PrimaryTextBrush" : "SecondaryTextBrush"];
-        indicator.Visibility = isSelected ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ContentFrame_NavigationFailed(object sender, NavigationFailedEventArgs e)
@@ -419,33 +402,6 @@ public sealed partial class MainWindow : Window
         CancelBuildButton.Content = "Cancelling…";
         SetStatus("Cancelling native build · stopping the active process tree…");
         _buildCancellation.Cancel();
-    }
-
-    private void ToggleTheme_Click(object sender, RoutedEventArgs e)
-    {
-        var useLightTheme = RootLayout.RequestedTheme == ElementTheme.Dark;
-        RootLayout.RequestedTheme = useLightTheme ? ElementTheme.Light : ElementTheme.Dark;
-        ThemeIcon.Glyph = useLightTheme ? "\uE708" : "\uE706";
-        ToolTipService.SetToolTip(ThemeButton, useLightTheme ? "Switch to dark theme" : "Switch to light theme");
-    }
-
-    private void BigPicture_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_isBigPicture)
-        {
-            Navigate("Home");
-            AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
-            BigPictureLabel.Text = "Exit Big Picture";
-            ToolTipService.SetToolTip(BigPictureButton, "Exit Big Picture mode");
-        }
-        else
-        {
-            AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-            BigPictureLabel.Text = "Big Picture";
-            ToolTipService.SetToolTip(BigPictureButton, "Enter Big Picture mode");
-        }
-
-        _isBigPicture = !_isBigPicture;
     }
 
     private async Task RunProbeAsync(GameSummary game)
