@@ -19,16 +19,21 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Spacing="4">
-                <TextBlock Text="Library" Style="{StaticResource PageTitleStyle}"/>
-                <TextBlock Text="One ISO per game. Analysis, native build and compatibility are tracked as separate evidence states."
+                <TextBlock Text="Your library" Style="{StaticResource PageTitleStyle}"/>
+                <TextBlock Text="The games you own, all in one place. Lifecycle labels reflect evidence, not assumptions."
                            Style="{StaticResource PageSubtitleStyle}"/>
             </StackPanel>
-            <Button Grid.Column="1" Click="Refresh_Click" VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Spacing="6">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Click="Refresh_Click" ToolTipService.ToolTip="Refresh library">
                     <FontIcon Glyph="&#xE72C;" FontSize="13"/>
-                    <TextBlock Text="Refresh"/>
-                </StackPanel>
-            </Button>
+                </Button>
+                <Button Click="AddGame_Click" Style="{StaticResource AccentButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE710;" FontSize="13"/>
+                        <TextBlock Text="Add game"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1" ColumnSpacing="8">
@@ -92,57 +97,61 @@
                       ScrollViewer.VerticalScrollMode="Auto">
                 <GridView.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="5"/>
+                        <ItemsWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="6"/>
                     </ItemsPanelTemplate>
                 </GridView.ItemsPanel>
                 <GridView.ItemTemplate>
                     <DataTemplate x:DataType="models:GameSummary">
-                        <Border Width="248" Height="212" Margin="0,0,10,10"
+                        <Border Width="178" Height="340" Margin="0,0,10,10"
                                 Background="{ThemeResource SurfaceOneBrush}"
                                 BorderBrush="{ThemeResource BorderSubtleBrush}"
-                                BorderThickness="1" CornerRadius="10" Padding="0">
-                            <Grid>
+                                BorderThickness="1" CornerRadius="8" Padding="0">
+                            <Grid RowSpacing="0">
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="88"/>
+                                    <RowDefinition Height="232"/>
                                     <RowDefinition Height="*"/>
-                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
-                                <Border Background="{ThemeResource SurfaceTwoBrush}" CornerRadius="9,9,0,0"
+                                <Border Background="{ThemeResource SurfaceTwoBrush}" CornerRadius="7,7,0,0"
                                         BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
-                                    <Grid Padding="14,12">
-                                        <TextBlock Text="PLAYSTATION 2" FontSize="10" FontWeight="SemiBold"
+                                    <Grid Padding="12">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="PLAYSTATION 2" FontSize="12" FontWeight="SemiBold"
                                                    CharacterSpacing="60" Foreground="{ThemeResource MutedTextBrush}"
                                                    VerticalAlignment="Top"/>
-                                        <TextBlock Text="PS2" FontSize="26" FontWeight="Bold"
-                                                   Foreground="{ThemeResource BorderSubtleBrush}"
-                                                   HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
+                                        <Grid Grid.Row="1">
+                                            <Ellipse Width="112" Height="112" Stroke="{ThemeResource BorderSubtleBrush}"
+                                                     StrokeThickness="1" HorizontalAlignment="Center"
+                                                     VerticalAlignment="Center"/>
+                                            <Ellipse Width="78" Height="78" Stroke="{ThemeResource NavigationAccentBrush}"
+                                                     StrokeThickness="1" Opacity="0.7" HorizontalAlignment="Center"
+                                                     VerticalAlignment="Center"/>
+                                            <TextBlock Text="PS2" FontSize="24" FontWeight="Light" CharacterSpacing="20"
+                                                       Foreground="{ThemeResource SecondaryTextBrush}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Grid>
+                                        <TextBlock Grid.Row="2" Text="NO GAME ART" FontSize="12"
+                                                   Foreground="{ThemeResource MutedTextBrush}" HorizontalAlignment="Center"/>
                                     </Grid>
                                 </Border>
-                                <StackPanel Grid.Row="1" Padding="14,10" Spacing="3">
-                                    <TextBlock Text="{x:Bind DisplayName}" FontSize="15" FontWeight="SemiBold"
-                                               Foreground="{ThemeResource PrimaryTextBrush}" TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="{x:Bind Subtitle}" FontSize="11" FontFamily="Cascadia Mono, Consolas"
-                                               Foreground="{ThemeResource SecondaryTextBrush}"/>
-                                    <TextBlock Text="{x:Bind EvidenceNote}" FontSize="11" Foreground="{ThemeResource MutedTextBrush}"
-                                               TextWrapping="Wrap" MaxLines="2"/>
-                                </StackPanel>
-                                <Grid Grid.Row="2" Padding="14,0,14,12" ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Border Background="{ThemeResource BrandSubtleBrush}" CornerRadius="5" Padding="7,3"
-                                            VerticalAlignment="Center">
-                                        <TextBlock Text="{x:Bind LifecycleLabel}" FontSize="11" FontWeight="SemiBold"
+                                <StackPanel Grid.Row="1" Padding="10,9" Spacing="5">
+                                    <TextBlock Text="{x:Bind DisplayName}" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource PrimaryTextBrush}" TextTrimming="CharacterEllipsis"
+                                               MaxLines="2"/>
+                                    <TextBlock Text="{x:Bind Subtitle}" FontSize="10" FontFamily="Cascadia Mono, Consolas"
+                                               Foreground="{ThemeResource SecondaryTextBrush}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <Border Background="{ThemeResource BrandSubtleBrush}" CornerRadius="5" Padding="6,3"
+                                            HorizontalAlignment="Left">
+                                        <TextBlock Text="{x:Bind LifecycleLabel}" FontSize="12" FontWeight="SemiBold"
                                                    Foreground="{ThemeResource BrandBrush}"/>
                                     </Border>
-                                    <TextBlock Text="Open details" Grid.Column="1" FontSize="11"
-                                               Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"
-                                               HorizontalAlignment="Right" Margin="0,0,6,0"/>
-                                    <FontIcon Grid.Column="2" Glyph="&#xE76C;" FontSize="11"
-                                              Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"/>
-                                </Grid>
+                                    <TextBlock Text="{x:Bind EvidenceNote}" FontSize="12"
+                                               Foreground="{ThemeResource MutedTextBrush}" TextWrapping="Wrap" MaxLines="2"/>
+                                </StackPanel>
                             </Grid>
                         </Border>
                     </DataTemplate>

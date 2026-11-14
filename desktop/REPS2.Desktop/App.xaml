@@ -22,6 +22,7 @@
                     <SolidColorBrush x:Key="BrandBrush" Color="#166534"/>
                     <SolidColorBrush x:Key="BrandSubtleBrush" Color="#E6F4EA"/>
                     <SolidColorBrush x:Key="BrandForegroundBrush" Color="#FFFFFF"/>
+                    <SolidColorBrush x:Key="NavigationAccentBrush" Color="#9D2638"/>
                     <SolidColorBrush x:Key="AccentFillBrush" Color="#1B6B3A"/>
                     <SolidColorBrush x:Key="AccentOnFillBrush" Color="#FFFFFF"/>
                     <SolidColorBrush x:Key="RunBrush" Color="#15803D"/>
@@ -44,6 +45,7 @@
                     <SolidColorBrush x:Key="BrandBrush" Color="#3FB950"/>
                     <SolidColorBrush x:Key="BrandSubtleBrush" Color="#173322"/>
                     <SolidColorBrush x:Key="BrandForegroundBrush" Color="#07130A"/>
+                    <SolidColorBrush x:Key="NavigationAccentBrush" Color="#C43C4B"/>
                     <SolidColorBrush x:Key="AccentFillBrush" Color="#238636"/>
                     <SolidColorBrush x:Key="AccentOnFillBrush" Color="#FFFFFF"/>
                     <SolidColorBrush x:Key="RunBrush" Color="#3FB950"/>
@@ -99,6 +101,15 @@
                 <Setter Property="CornerRadius" Value="7"/>
                 <Setter Property="MinHeight" Value="36"/>
                 <Setter Property="FontSize" Value="13"/>
+            </Style>
+            <Style x:Key="HeaderNavigationButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="Padding" Value="10,0"/>
+                <Setter Property="CornerRadius" Value="0"/>
+                <Setter Property="MinHeight" Value="58"/>
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="Foreground" Value="{ThemeResource SecondaryTextBrush}"/>
             </Style>
 
             <Style TargetType="TextBlock">

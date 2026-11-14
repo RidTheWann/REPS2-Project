@@ -3,87 +3,137 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="REPS2 Desktop Alpha">
-    <Grid Background="{ThemeResource AppBackgroundBrush}">
+    <Grid x:Name="RootLayout" RequestedTheme="Dark" Background="{ThemeResource AppBackgroundBrush}"
+          KeyDown="RootLayout_KeyDown">
         <Grid.RowDefinitions>
-            <RowDefinition Height="56"/>
+            <RowDefinition Height="68"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="30"/>
+            <RowDefinition Height="32"/>
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="{ThemeResource DeepSurfaceBrush}"
                 BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
-            <Grid Padding="20,0">
+            <Grid Padding="18,0" ColumnSpacing="10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                    <Border Width="30" Height="30" CornerRadius="8" Background="{ThemeResource BrandSubtleBrush}">
-                        <TextBlock Text="R" FontSize="15" FontWeight="Bold" Foreground="{ThemeResource BrandBrush}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <TextBlock Text="REPS2" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"
-                               Foreground="{ThemeResource PrimaryTextBrush}"/>
-                    <Border CornerRadius="4" Background="{ThemeResource SurfaceTwoBrush}" Padding="7,3" VerticalAlignment="Center">
-                        <TextBlock Text="Desktop Alpha" FontSize="10" FontWeight="SemiBold"
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <TextBlock Text="REPS2" FontSize="18" FontWeight="Bold"
+                               Foreground="{ThemeResource PrimaryTextBrush}" VerticalAlignment="Center"/>
+                    <Border CornerRadius="4" Background="{ThemeResource SurfaceTwoBrush}" Padding="7,3"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="ALPHA" FontSize="10" FontWeight="SemiBold"
                                    Foreground="{ThemeResource SecondaryTextBrush}"/>
                     </Border>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10"
-                            HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <Ellipse Width="7" Height="7" Fill="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"/>
-                        <TextBlock x:Name="ToolchainBadge" Text="Checking toolchain..." FontSize="12"
-                                   Foreground="{ThemeResource SecondaryTextBrush}" VerticalAlignment="Center"/>
-                    </StackPanel>
-                    <TextBlock x:Name="UpdateStatusText" Text="Updates checked on startup" FontSize="11"
-                               Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"
-                               MaxWidth="180" TextTrimming="CharacterEllipsis"/>
-                    <ProgressBar x:Name="UpdateProgress" Width="76" Height="3" Minimum="0" Maximum="100"
-                                 Visibility="Collapsed" VerticalAlignment="Center"/>
-                    <Button x:Name="CancelBuildButton" Content="Cancel build" Click="CancelBuild_Click"
-                            Padding="10,5" MinHeight="30" FontSize="11" Visibility="Collapsed"/>
-                    <Button x:Name="UpdateButton" Content="Check updates" Click="UpdateButton_Click"
-                            Padding="10,5" MinHeight="30" FontSize="11"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button x:Name="HomeNavigationButton" Tag="Home" Click="Navigation_Click"
+                            Style="{StaticResource HeaderNavigationButtonStyle}">
+                        <Grid MinWidth="52">
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                            <TextBlock Text="Home" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border x:Name="HomeNavigationIndicator" Grid.Row="1" Background="{ThemeResource NavigationAccentBrush}"
+                                    Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="LibraryNavigationButton" Tag="Library" Click="Navigation_Click"
+                            Style="{StaticResource HeaderNavigationButtonStyle}">
+                        <Grid MinWidth="58">
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                            <TextBlock Text="Library" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border x:Name="LibraryNavigationIndicator" Grid.Row="1" Background="{ThemeResource NavigationAccentBrush}"
+                                    Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
+                    <Button Content="Trophy" IsEnabled="False" Style="{StaticResource HeaderNavigationButtonStyle}"
+                            ToolTipService.ToolTip="Trophy data is not available in this Alpha."/>
+                    <Button Content="Stats" IsEnabled="False" Style="{StaticResource HeaderNavigationButtonStyle}"
+                            ToolTipService.ToolTip="Verified gameplay statistics are not available in this Alpha."/>
+                    <Button x:Name="QueueNavigationButton" Tag="BuildQueue" Click="Navigation_Click"
+                            Style="{StaticResource HeaderNavigationButtonStyle}">
+                        <Grid MinWidth="64">
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                            <TextBlock Text="Queue" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border x:Name="QueueNavigationIndicator" Grid.Row="1" Background="{ThemeResource NavigationAccentBrush}"
+                                    Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="DeveloperNavigationButton" Tag="Developer" Click="Navigation_Click"
+                            Style="{StaticResource HeaderNavigationButtonStyle}">
+                        <Grid MinWidth="82">
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                            <TextBlock Text="Developer" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border x:Name="DeveloperNavigationIndicator" Grid.Row="1" Background="{ThemeResource NavigationAccentBrush}"
+                                    Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
                 </StackPanel>
 
-                <Button x:Name="AddGameButton" Grid.Column="2" Click="AddGame_Click"
-                        Style="{StaticResource AccentButtonStyle}" Margin="16,0,0,0">
-                    <StackPanel Orientation="Horizontal" Spacing="7">
-                        <FontIcon Glyph="&#xE710;" FontSize="13"/>
-                        <TextBlock Text="Add game"/>
-                    </StackPanel>
-                </Button>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button x:Name="AddGameButton" Click="AddGame_Click" Style="{StaticResource AccentButtonStyle}"
+                            Padding="10,5" MinHeight="34" FontSize="12">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE710;" FontSize="12"/>
+                            <TextBlock Text="Add game"/>
+                        </StackPanel>
+                    </Button>
+                    <ProgressBar x:Name="UpdateProgress" Width="48" Height="3" Minimum="0" Maximum="100"
+                                 Visibility="Collapsed" VerticalAlignment="Center"/>
+                    <Button x:Name="UpdateButton" Content="Check updates" Click="UpdateButton_Click"
+                            Padding="8,5" MinHeight="32" FontSize="11"/>
+                    <Button x:Name="SettingsNavigationButton" Tag="Settings" Click="Navigation_Click"
+                            Padding="9,7" MinHeight="34" ToolTipService.ToolTip="Settings">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                            <FontIcon Glyph="&#xE713;" FontSize="15"/>
+                            <Border x:Name="SettingsNavigationIndicator" Grid.Row="1"
+                                    Background="{ThemeResource NavigationAccentBrush}" Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="BigPictureButton" Click="BigPicture_Click" Padding="9,7" MinHeight="34"
+                            ToolTipService.ToolTip="Enter Big Picture mode">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE740;" FontSize="14"/>
+                            <TextBlock x:Name="BigPictureLabel" Text="Big Picture" FontSize="11"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ThemeButton" Click="ToggleTheme_Click" Padding="9,7" MinHeight="34"
+                            ToolTipService.ToolTip="Switch to light theme">
+                        <FontIcon x:Name="ThemeIcon" Glyph="&#xE706;" FontSize="15"/>
+                    </Button>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <NavigationView x:Name="AppNavigation" Grid.Row="1"
-                        PaneDisplayMode="Left" IsPaneOpen="True" OpenPaneLength="212"
-                        CompactPaneLength="48" IsBackButtonVisible="Collapsed"
-                        IsSettingsVisible="False" SelectionChanged="Navigation_SelectionChanged"
-                        Background="{ThemeResource AppBackgroundBrush}">
-            <NavigationView.MenuItems>
-                <NavigationViewItem Content="Library" Tag="Library"><NavigationViewItem.Icon><SymbolIcon Symbol="Home"/></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Add Game" Tag="AddGame"><NavigationViewItem.Icon><SymbolIcon Symbol="Add"/></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Build Queue" Tag="BuildQueue"><NavigationViewItem.Icon><SymbolIcon Symbol="Clock"/></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Developer Center" Tag="Developer"><NavigationViewItem.Icon><SymbolIcon Symbol="Repair"/></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Settings" Tag="Settings"><NavigationViewItem.Icon><SymbolIcon Symbol="Setting"/></NavigationViewItem.Icon></NavigationViewItem>
-            </NavigationView.MenuItems>
-            <Frame x:Name="ContentFrame" NavigationFailed="ContentFrame_NavigationFailed"/>
-        </NavigationView>
+        <Frame x:Name="ContentFrame" Grid.Row="1" NavigationFailed="ContentFrame_NavigationFailed"/>
 
         <Border Grid.Row="2" Background="{ThemeResource StatusBarBrush}"
-                BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,1,0,0" Padding="16,0">
-            <Grid>
+                BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,1,0,0" Padding="14,0">
+            <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusText" Text="Ready · Imported does not mean playable" FontSize="11"
-                           Foreground="{ThemeResource SecondaryTextBrush}" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="1" Text="Windows x64 · RG REPS2 ENGINE" FontSize="11"
+                           Foreground="{ThemeResource SecondaryTextBrush}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button x:Name="CancelBuildButton" Grid.Column="1" Content="Cancel build" Click="CancelBuild_Click"
+                        Padding="7,0" MinHeight="26" FontSize="11" Visibility="Collapsed" Margin="0,0,12,0"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <TextBlock x:Name="ToolchainBadge" Text="Checking toolchain…" FontSize="11"
+                               Foreground="{ThemeResource SecondaryTextBrush}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="UpdateStatusText" Text="Updates checked on startup" FontSize="11"
+                               Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"
+                               MaxWidth="190" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <TextBlock Grid.Column="3" Text="Windows x64 · RG REPS2 ENGINE" FontSize="11"
                            Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
