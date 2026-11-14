@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using REPS2.Desktop.Api.Contracts;
@@ -52,20 +51,7 @@ public sealed partial class BuildQueuePage : Page
 
         try
         {
-            var fullPath = Path.GetFullPath(path);
-            var root = Path.GetFullPath(AppServices.Current.Paths.Root);
-            var relative = Path.GetRelativePath(root, fullPath);
-            var outsideRoot = Path.IsPathRooted(relative)
-                || relative == ".."
-                || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                || relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
-            if (outsideRoot)
-                throw new InvalidOperationException("The job directory is outside the REPS2 application data root.");
-
-            if (!Directory.Exists(fullPath))
-                throw new DirectoryNotFoundException($"The recorded job directory is no longer available: {fullPath}");
-
-            Process.Start(new ProcessStartInfo { FileName = fullPath, UseShellExecute = true });
+            AppServices.Current.HostShell.OpenDirectory(path);
         }
         catch (Exception ex)
         {
