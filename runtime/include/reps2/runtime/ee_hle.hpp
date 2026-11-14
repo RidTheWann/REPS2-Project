@@ -1870,6 +1870,17 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
 // sceCdNCmdDiskReady) sends no request bytes and reads a 4-byte `m_retres`;
 // the IOP answers 2 (SCECdComplete) for a ready disc and 6 (SCECdNotReady)
 // otherwise. The HLE answers from host media presence with the same values.
+//
+// Function 1 (CD_NCMD_READ, sceCdRead) is a disc sector read: the 24-byte
+// request is readData[6] (lbn, sectors, buf, the sceCdRMode word packed as
+// trycount | spindlctrl<<8 | datapattern<<16, the callback data buffer, and
+// &curReadPos), sent M_NOWAIT with no reply buffer. The HLE serves it straight
+// from the host media source into EE main RAM, records the completed byte
+// count at curReadPos, and lets the RPC_END raise the caller's semaphore.
+// Only SCECdSecS2048 (datapattern 0, 2048-byte user data) is served; any other
+// sector pattern, an absent source, an out-of-range LBN or an unwritable
+// destination fails closed with no reply and no memory mutation. ADR 0135.
+//
 // Every other NCMD function is recorded and refused (no RPC_END, caller
 // stays blocked) until modelled. ADR 0125.
 [[nodiscard]] inline bool serve_ee_cdvd_ncmd_call(
@@ -1880,7 +1891,60 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     ++sif.ncmd_call_count;
     sif.last_ncmd_number = call.rpc_number;
 
+    constexpr std::uint32_t kCdNcmdRead = 1U;
     constexpr std::uint32_t kCdNcmdDiskReady = 14U;
+    constexpr std::uint32_t kCdSecS2048 = 0U; // SCECdSecS2048: 2048-byte user data
+    if (call.rpc_number == kCdNcmdRead) {
+        ++sif.ncmd_read_call_count;
+        sif.last_ncmd_read_replied = false;
+        if (call.send_size != 24U) {
+            return false; // not the documented 6-word readData request
+        }
+        std::uint32_t lbn{}, sectors{}, buf{}, mode_word{}, intr_data{}, cur_read_pos{};
+        if (load_u32(state.memory, call.send_addr + 0U, lbn) != Status::ok
+            || load_u32(state.memory, call.send_addr + 4U, sectors) != Status::ok
+            || load_u32(state.memory, call.send_addr + 8U, buf) != Status::ok
+            || load_u32(state.memory, call.send_addr + 12U, mode_word) != Status::ok
+            || load_u32(state.memory, call.send_addr + 16U, intr_data) != Status::ok
+            || load_u32(state.memory, call.send_addr + 20U, cur_read_pos) != Status::ok) {
+            return false; // the request was not transferred
+        }
+        sif.last_ncmd_read_lbn = lbn;
+        sif.last_ncmd_read_sectors = sectors;
+        const std::uint32_t datapattern = (mode_word >> 16U) & 0xFFU;
+        if (datapattern != kCdSecS2048) {
+            return false; // only 2048-byte user-data sectors are served
+        }
+        const auto bytes64 = static_cast<std::uint64_t>(sectors) * kHostMediaSectorSize;
+        if (bytes64 > state.memory.main_ram.size()) {
+            return false; // the read cannot fit in EE main RAM
+        }
+        const auto bytes = static_cast<std::size_t>(bytes64);
+        std::uint32_t dest_physical{};
+        if (resolve_ee_memory_access(state.memory, buf, bytes, 1U, dest_physical) != Status::ok) {
+            return false; // destination outside main RAM
+        }
+        if (cur_read_pos != 0U) {
+            std::uint32_t pos_physical{};
+            if (resolve_ee_memory_access(state.memory, cur_read_pos, 4U, 4U, pos_physical) != Status::ok) {
+                return false; // the progress word is not writable
+            }
+        }
+        if (!state.media.read(lbn, sectors, state.memory.main_ram.subspan(dest_physical, bytes))) {
+            return false; // no source installed or LBN out of range: host writes nothing
+        }
+        if (cur_read_pos != 0U) {
+            // The read completed, so the progress word the guest polls via
+            // sceCdGetReadPos holds the full byte count. Auxiliary: a failed
+            // store does not unwrite the sectors that were already read.
+            (void)store_u32(state.memory, cur_read_pos, static_cast<std::uint32_t>(bytes));
+        }
+        sif.last_ncmd_read_bytes = static_cast<std::uint32_t>(bytes);
+        sif.last_ncmd_read_replied = true;
+        ++sif.ncmd_replies;
+        sif.last_ncmd_replied = true;
+        return true;
+    }
     if (call.rpc_number == kCdNcmdDiskReady) {
         if (call.send_size != 0U || call.recv_addr == 0U || call.recv_size < 4U) {
             return false; // not the documented empty-request + 4-byte reply
@@ -2061,8 +2125,13 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     if (!server->handler(state, call)) {
         return Status::ok; // the server refused: the IOP sends no RPC_END
     }
-    if (rmode == 0U) {
-        return Status::ok; // NOWAIT without an end function: no reply packet
+    if (rmode == 0U && end_function == 0U) {
+        // M_NOWAIT without an end function: nothing on the EE consumes a reply
+        // packet, so no RPC_END is modelled. A NOWAIT call that does publish an
+        // end function still completes through RPC_END (ps2sdk `_request_end`
+        // raises the client semaphore and invokes the callback), which is what
+        // unblocks e.g. sceCdRead's WaitSema. ADR 0135.
+        return Status::ok;
     }
 
     const std::uint32_t reply[kEeSifRpcRendPacketSize / 4U] = {
