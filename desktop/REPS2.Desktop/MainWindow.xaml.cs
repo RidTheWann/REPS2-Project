@@ -45,7 +45,8 @@ public sealed partial class MainWindow : Window
                 new SessionService(toolchain),
                 new DiagnosticsService(toolchain),
                 jobStore,
-                toolchain);
+                toolchain,
+                new HostShellService(_paths));
             context.AddGameAsync = AddGameAsync;
             context.BuildAsync = BuildGameAsync;
             context.RelinkSourceIsoAsync = RelinkSourceIsoAsync;
