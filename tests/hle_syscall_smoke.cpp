@@ -3721,6 +3721,22 @@ bool dummy_media_read(void*, std::uint32_t, std::uint32_t, std::span<std::uint8_
     return true;
 }
 
+// Deterministic synthetic disc image for CD_NCMD_READ tests: the byte at
+// offset i of sector s is ((lbn + s) * 131 + i) & 0xFF. The image holds 1024
+// sectors; reads at or past LBN 1024 fail, as an out-of-range host read must.
+bool pattern_media_read(void*, std::uint32_t lbn, std::uint32_t count, std::span<std::uint8_t> dest) noexcept {
+    if (lbn >= 1024U || static_cast<std::uint64_t>(lbn) + count > 1024U) {
+        return false;
+    }
+    for (std::uint32_t s = 0; s < count; ++s) {
+        for (std::uint32_t i = 0; i < 2048U; ++i) {
+            dest[static_cast<std::size_t>(s) * 2048U + i] =
+                static_cast<std::uint8_t>((lbn + s) * 131U + i);
+        }
+    }
+    return true;
+}
+
 int test_boot_environment_registers_the_diskready_servers() {
     SifWindow ram{};
     EeState state{};
@@ -3939,6 +3955,101 @@ int test_ncmd_diskready_answers_from_media_presence() {
     return 0;
 }
 
+int test_ncmd_read_serves_sectors_from_host_media() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.media.read_sectors = &pattern_media_read;
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    constexpr std::uint32_t kReadBuf = 0x4000U;
+    constexpr std::uint32_t kCurPos = 0x1D00U;
+
+    // CD_NCMD_READ (1): 24-byte readData request (lbn, sectors, buf, mode word,
+    // callback buffer, &curReadPos), sent M_NOWAIT with an end function on the
+    // client object. datapattern 0 = SCECdSecS2048.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdNCmd, 1U, 24U, 0U);
+    store_word(ram, kRpcCallPacket + 0x30U, 0U);  // rmode = M_NOWAIT
+    store_word(ram, kRpcClient + 0x1CU, 0x2000U); // end_function
+    store_word(ram, kRpcPayload + 0U, 16U);      // lbn
+    store_word(ram, kRpcPayload + 4U, 2U);       // sectors
+    store_word(ram, kRpcPayload + 8U, kReadBuf); // buf
+    store_word(ram, kRpcPayload + 12U, 0U);      // mode: datapattern = SCECdSecS2048
+    store_word(ram, kRpcPayload + 16U, 0U);      // callback data buffer
+    store_word(ram, kRpcPayload + 20U, kCurPos); // &curReadPos
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) return 1060;
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.ncmd_read_call_count != 1U || sif.last_ncmd_read_lbn != 16U
+        || sif.last_ncmd_read_sectors != 2U || sif.last_ncmd_read_bytes != 4096U
+        || !sif.last_ncmd_read_replied || sif.ncmd_replies != 1U) return 1061;
+    // sectors * 2048 user bytes landed in EE main RAM at buf.
+    for (std::uint32_t i = 0; i < 4096U; ++i) {
+        const std::uint32_t s = i / 2048U;
+        const std::uint32_t off = i % 2048U;
+        if (ram[kReadBuf + i] != static_cast<std::uint8_t>((16U + s) * 131U + off)) return 1062;
+    }
+    if (load_word(ram, kCurPos) != 4096U) return 1063;
+    // NOWAIT with an end function still completes through RPC_END and raises
+    // the client semaphore (ADR 0135).
+    if (load_word(ram, kRpcEePktbuf + 0x08U) != reps2::runtime::kEeSifCmdRpcEnd) return 1064;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 1065;
+    if (state.hle.semaphores[3].count != 1U) return 1066;
+
+    // A non-2048 datapattern is refused: no copy, no reply, no semaphore raise.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdNCmd, 1U, 24U, 0U);
+    store_word(ram, kRpcCallPacket + 0x30U, 0U);
+    store_word(ram, kRpcClient + 0x1CU, 0x2000U);
+    store_word(ram, kRpcPayload + 0U, 16U);
+    store_word(ram, kRpcPayload + 4U, 1U);
+    store_word(ram, kRpcPayload + 8U, kReadBuf);
+    store_word(ram, kRpcPayload + 12U, 1U << 16U); // datapattern = SCECdSecS2328
+    store_word(ram, kRpcPayload + 16U, 0U);
+    store_word(ram, kRpcPayload + 20U, kCurPos);
+    ram[kReadBuf] = 0xA5U;
+    const reps2::runtime::SifDmaTransfer raw{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &raw) != Status::ok) return 1067;
+    if (sif.last_ncmd_read_replied || sif.ncmd_replies != 1U) return 1068;
+    if (ram[kReadBuf] != 0xA5U) return 1069; // nothing was written
+    if (sif.rpc_call_replies != 1U || state.hle.semaphores[3].count != 1U) return 1070;
+
+    // An out-of-range LBN fails at the host source: refused, no copy.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdNCmd, 1U, 24U, 0U);
+    store_word(ram, kRpcCallPacket + 0x30U, 0U);
+    store_word(ram, kRpcClient + 0x1CU, 0x2000U);
+    store_word(ram, kRpcPayload + 0U, 2000U); // past the synthetic 1024-sector image
+    store_word(ram, kRpcPayload + 4U, 1U);
+    store_word(ram, kRpcPayload + 8U, kReadBuf);
+    store_word(ram, kRpcPayload + 12U, 0U);
+    store_word(ram, kRpcPayload + 16U, 0U);
+    store_word(ram, kRpcPayload + 20U, kCurPos);
+    const reps2::runtime::SifDmaTransfer oob{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &oob) != Status::ok) return 1071;
+    if (sif.last_ncmd_read_replied || ram[kReadBuf] != 0xA5U || sif.rpc_call_replies != 1U) return 1072;
+
+    // NOWAIT without an end function keeps the no-RPC_END behaviour even when
+    // the read itself succeeds: the data is served, but no reply packet is
+    // modelled because nothing consumes it.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdNCmd, 1U, 24U, 0U);
+    store_word(ram, kRpcCallPacket + 0x30U, 0U);
+    store_word(ram, kRpcClient + 0x1CU, 0U); // end_function = 0
+    store_word(ram, kRpcPayload + 0U, 16U);
+    store_word(ram, kRpcPayload + 4U, 1U);
+    store_word(ram, kRpcPayload + 8U, kReadBuf);
+    store_word(ram, kRpcPayload + 12U, 0U);
+    store_word(ram, kRpcPayload + 16U, 0U);
+    store_word(ram, kRpcPayload + 20U, kCurPos);
+    const reps2::runtime::SifDmaTransfer quiet{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &quiet) != Status::ok) return 1073;
+    if (sif.ncmd_read_call_count != 4U || !sif.last_ncmd_read_replied
+        || sif.last_ncmd_read_bytes != 2048U) return 1074;
+    if (ram[kReadBuf] != static_cast<std::uint8_t>(16U * 131U)) return 1075;
+    if (sif.rpc_call_replies != 1U || state.hle.semaphores[3].count != 1U) return 1076;
+    return 0;
+}
+
 int test_iop_reset_rearms_the_handshake_and_completes_the_boot() {
     SifWindow ram{};
     EeState state{};
@@ -4149,6 +4260,8 @@ int main() {
          &test_ncmd_and_searchfile_calls_are_recorded_and_refused},
         {"ncmd diskready answers from media presence",
          &test_ncmd_diskready_answers_from_media_presence},
+        {"ncmd read serves 2048-byte sectors from host media",
+         &test_ncmd_read_serves_sectors_from_host_media},
         {"boot environment registers the cdvd init server",
          &test_boot_environment_registers_the_cdvd_init_server},
         {"iop reset re-arms the handshake and completes the boot",
