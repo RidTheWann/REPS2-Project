@@ -5,7 +5,7 @@ REPS2 Desktop Alpha is the first native Windows application shell for REPS2. It 
 ## Included
 
 - WinUI 3 / .NET 10 Studio Dark desktop shell.
-- Library grid, title detail, text search, evidence-state filters (needs review, ready to build, native-built, playable), alphabetical sorting, result counts and clear-filter empty state; identity and compatibility evidence.
+- Home carousel populated only from the user's imported library; Library grid, title detail, text search, evidence-state filters (needs review, ready to build, native-built, playable), alphabetical sorting, result counts and clear-filter empty state; identity and compatibility evidence.
 - Native Windows ISO picker and one-ISO import through \`reps2 add-game\`.
 - Evidence-derived Imported, Analyzed, Translation incomplete, Translated, Native-built and Recovery-required states.
 - Safe source-ISO recovery from Game Detail: a moved image is relinked only after exact content-addressed SHA-256 and recorded-size verification; manifest replacement is atomic.
@@ -21,7 +21,7 @@ REPS2 Desktop Alpha is the first native Windows application shell for REPS2. It 
 - This Alpha does not contain a complete IOP interpreter, GS renderer, SPU2, controller gameplay, save/memory-card system or general-purpose PS2 compatibility promise.
 - The library currently discovers entries from \`Library/games/*/game.json\`. Delete, cache reuse, parallel/cancellable job management, cover metadata and MSIX signing are not shipped.
 - Probe reports are retained for inspection but do not automatically promote compatibility.
-- Game cover art is not redistributed; the library uses a neutral PS2 placeholder.
+- Game cover art is not redistributed; Home and Library use generated typographic PS2 title cards. Trophy and gameplay statistics remain unavailable until supported evidence exists.
 
 ## Build requirements
 
