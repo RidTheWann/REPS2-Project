@@ -840,6 +840,15 @@ struct EeSifCmdState {
     std::uint32_t last_ncmd_number{};
     std::uint32_t last_ncmd_retres{};
     bool last_ncmd_replied{};
+    // CD_NCMD_READ (function 1, PS2SDK ncmd.c sceCdRead) observations: the
+    // 24-byte request carries lbn/sectors/buf/mode/intr/curReadPos. Only
+    // SCECdSecS2048 (2048-byte user data) reads are served from host media.
+    // ADR 0135.
+    std::uint32_t ncmd_read_call_count{};
+    std::uint32_t last_ncmd_read_lbn{};
+    std::uint32_t last_ncmd_read_sectors{};
+    std::uint32_t last_ncmd_read_bytes{};
+    bool last_ncmd_read_replied{};
     std::uint32_t searchfile_call_count{};
     std::uint32_t last_searchfile_number{};
 
