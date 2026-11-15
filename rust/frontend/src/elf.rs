@@ -30,11 +30,13 @@ pub const SHT_SYMTAB_SHNDX: u32 = 18;
 pub const SHT_MIPS_REGINFO: u32 = 0x7000_0006;
 pub const SHT_MIPS_ABIFLAGS: u32 = 0x7000_002A;
 pub const SHT_MIPS_OPTIONS: u32 = 0x7000_000D;
+pub const SHT_MIPS_XHASH: u32 = 0x7000_002B;
 
 /// Human name of a documented MIPS processor-specific section type, or `None`
-/// for a value the MIPS psABI does not define. Values are taken verbatim from
+/// for a value outside the recognized MIPS ELF section set. Values are taken from
 /// the project-local PS2 EE toolchain header
-/// (`ee/mips64r5900el-ps2-elf/include/elf.h`). REPS2 interprets only
+/// (`ee/mips64r5900el-ps2-elf/include/elf.h`), with `SHT_MIPS_XHASH` also
+/// recognized from the NetBSD ELF header. REPS2 interprets only
 /// `SHT_MIPS_REGINFO`, `SHT_MIPS_ABIFLAGS` and `SHT_MIPS_OPTIONS`; every other
 /// named type is recognized metadata that is preserved but not interpreted, so
 /// it is not an "unknown" type.
@@ -81,6 +83,7 @@ pub const fn mips_section_type_name(kind: u32) -> Option<&'static str> {
         0x7000_0028 => "SHT_MIPS_XLATE_OLD",
         0x7000_0029 => "SHT_MIPS_PDR_EXCEPTION",
         0x7000_002A => "SHT_MIPS_ABIFLAGS",
+        SHT_MIPS_XHASH => "SHT_MIPS_XHASH",
         _ => return None,
     })
 }

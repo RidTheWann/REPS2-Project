@@ -34,12 +34,16 @@ overstates a title's risk.
 - **Observed (code):** `analyze_mips_compatibility` and `analyze_unresolved`
   each contained a loop over `image.section_headers` emitting
   `UnknownMipsSectionType` for the same condition.
+- **Observed (NetBSD ELF header):** `SHT_MIPS_XHASH` is assigned
+  `0x7000002b` and identified as the MIPS form of GNU hash metadata:
+  https://github.com/NetBSD/src/blob/907e9376ebf4a9f928d4a5d4f3898b91ecd35507/sys/sys/exec_elf.h
 
 ## Decision
 
 1. Add `elf::mips_section_type_name(u32) -> Option<&'static str>`: the documented
-   MIPS processor-specific section types with their psABI names, taken from the
-   local toolchain header. Values the psABI does not define return `None`.
+   MIPS processor-specific section types with their names, taken from the local
+   toolchain header and supplemented by `SHT_MIPS_XHASH`. Values outside this
+   recognized set return `None`.
 2. Classify MIPS processor-specific sections in exactly one place,
    `analyze_mips_compatibility`:
    - the three interpreted types (`SHT_MIPS_REGINFO`, `SHT_MIPS_ABIFLAGS`,
@@ -47,13 +51,16 @@ overstates a title's risk.
    - a documented-but-uninterpreted type emits the new
      `DiagnosticCode::MipsSectionNotInterpreted` (`MIPS-SECTION-NOT-INTERPRETED`)
      at `Severity::Advisory` with the type's name and with no blocked stage;
-   - a value the psABI does not define still emits
+   - an unrecognized processor-specific value still emits
      `DiagnosticCode::UnknownMipsSectionType` at `Severity::Unknown` and blocks
      `CompatibilityConfidence`.
 3. Remove the duplicate section loop from `analyze_unresolved`; its
    program-header and symbol checks stay, so each section type is reported once.
 4. Update `unknown_mips_section_type_is_unknown` to use a genuinely undefined
    value (`0x7000FFFF`) and add `documented_mips_section_type_is_advisory`.
+5. Recognize `SHT_MIPS_XHASH` (`0x7000002b`) as documented but uninterpreted
+   metadata, using the existing advisory classification rather than reporting
+   it as unknown.
 
 ## Alternatives considered
 
@@ -86,7 +93,19 @@ overstates a title's risk.
 
 - The name table is metadata recognition only; none of these sections are
   parsed or used by analysis.
-- It covers the types defined by the local toolchain header; a future psABI
-  addition would appear as `UnknownMipsSectionType` until added.
+- It covers the types defined by the local toolchain header plus
+  `SHT_MIPS_XHASH`; other documented additions would appear as
+  `UnknownMipsSectionType` until added.
 - This is a diagnostics-quality change; it does not advance real-title execution
   and makes no boot or Playable claim.
+
+## Addendum (2026-11-15): SHT_MIPS_XHASH
+
+The original name table omitted the documented `SHT_MIPS_XHASH` section type
+(`0x7000002b`). Recognize it as metadata but leave its payload uninterpreted;
+the existing advisory classification applies, so it does not become an
+unresolved compatibility blocker. `documented_mips_xhash_section_is_advisory`
+checks the name, severity, and absence of an unknown-section finding.
+
+Validation: `cargo fmt --all -- --check`, workspace Clippy with warnings denied,
+`cargo test --workspace --locked`, and the focused XHASH test pass.

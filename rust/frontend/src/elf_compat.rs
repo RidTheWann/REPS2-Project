@@ -704,7 +704,7 @@ fn analyze_mips_compatibility(image: &Image, report: &mut CompatibilityReport) {
 
     // Classify MIPS processor-specific sections. The three interpreted types are
     // skipped; a documented-but-uninterpreted type gets a named advisory finding;
-    // only a value the psABI does not define stays Unknown/unresolved.
+    // only an unrecognized processor-specific type stays Unknown/unresolved.
     for section in &image.section_headers {
         if !(0x7000_0000..=0x7FFF_FFFF).contains(&section.kind) {
             continue;
@@ -1792,7 +1792,7 @@ mod tests {
         image.section_headers.push(SectionHeader {
             name: ".MIPS.unknown".to_string(),
             name_offset: 20,
-            kind: 0x7000_FFFF, // Not defined by the MIPS psABI
+            kind: 0x7000_FFFF, // Not in the recognized MIPS section set
             flags: 0,
             virtual_address: 0,
             offset: 100,
@@ -1849,6 +1849,43 @@ mod tests {
                 .iter()
                 .all(|d| !(d.code == DiagnosticCode::UnknownMipsSectionType
                     && d.raw_value == "0x7000001E"))
+        );
+    }
+
+    #[test]
+    fn documented_mips_xhash_section_is_advisory() {
+        let mut image = minimal_mips_elf();
+        image.section_headers.push(SectionHeader {
+            name: ".MIPS.xhash".to_string(),
+            name_offset: 20,
+            kind: elf::SHT_MIPS_XHASH,
+            flags: 0,
+            virtual_address: 0,
+            offset: 100,
+            size: 16,
+            link: 0,
+            info: 0,
+            alignment: 4,
+            entry_size: 0,
+        });
+
+        let report = analyze_compatibility(&image);
+
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.raw_value == "0x7000002B")
+            .expect("SHT_MIPS_XHASH must be recognized");
+        assert_eq!(diag.code, DiagnosticCode::MipsSectionNotInterpreted);
+        assert_eq!(diag.severity, Severity::Advisory);
+        assert!(diag.message.contains("SHT_MIPS_XHASH"));
+        assert!(diag.blocks_stage.is_none());
+        assert!(
+            report.diagnostics.iter().all(|diagnostic| {
+                !(diagnostic.code == DiagnosticCode::UnknownMipsSectionType
+                    && diagnostic.raw_value == "0x7000002B")
+            }),
+            "documented MIPS XHASH must not be reported as unknown"
         );
     }
 
