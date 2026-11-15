@@ -921,6 +921,14 @@ struct EeSifCmdState {
     // no multitap adapter (ADR 0140).
     std::uint32_t mtap_call_count{};
     std::uint32_t last_mtap_number{};
+    // Multitap module-version query (0x80000905, Sony `libmtap`
+    // MTAP_GET_MOD_VERSION, function 1). The title's `sceMtapInit` binds all five
+    // multitap servers and then requires `(reply_word0 >> 8) == 3`
+    // (`LIBMTAP_VERSION_MAJOR`); the version word is served (ADR 0145).
+    std::uint32_t mtap_version_calls{};
+    std::uint32_t mtap_version_replies{};
+    std::uint32_t last_mtap_version{};
+    bool last_mtap_version_replied{};
 
     // SIF_CMD_RESET_CMD (0x80000003): the EE asked the IOP to reboot. The
     // resident HLE IOP re-arms its RPCINIT handshake and records the request;

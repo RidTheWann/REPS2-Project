@@ -1858,6 +1858,16 @@ inline constexpr std::uint32_t kEeSifServerMtapGetConnection = 0x8000'0903U;
 // the contiguous multitap bind sequence (ADR 0144); the sids stay fail-closed.
 inline constexpr std::uint32_t kEeSifServerMtapSony4 = 0x8000'0904U;
 inline constexpr std::uint32_t kEeSifServerMtapSony5 = 0x8000'0905U;
+// Sony `libmtap` MTAP_GET_MOD_VERSION (0x80000905): the version query is
+// function 1. `sceMtapGetModVersion` returns reply word 0, and `sceMtapInit`
+// requires `(word0 >> 8) == LIBMTAP_VERSION_MAJOR` (3, `LIBMTAP_VERSION_MINOR`
+// 0), reporting a mismatch and disabling multitap otherwise. REPS2 models no
+// MTAPMAN.IRX build to name, so it answers the library's own version word
+// (3.0 -> 0x0300); the title's check constrains only the major byte. See the
+// Sony `libmtap` decode (Digimon World 4) and the independent Downhill
+// Domination port, which answers the same word (ADR 0145).
+inline constexpr std::uint32_t kEeMtapGetModVersion = 1U;
+inline constexpr std::uint32_t kEeMtapModVersionWord = 0x0300U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2247,6 +2257,41 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     return false;
 }
 
+// Multitap module-version query (0x80000905, Sony `libmtap`
+// MTAP_GET_MOD_VERSION, function 1).
+//
+// The title's `sceMtapInit` (Sony `libmtap`) binds 0x80000901..0x80000905 and
+// then calls `sceMtapGetModVersion`, which issues function 1 on 0x80000905 and
+// returns reply word 0. `sceMtapInit` then requires `(version >> 8) == 3`
+// (`LIBMTAP_VERSION_MAJOR`) and otherwise reports a mismatch and disables
+// multitap. REPS2 has no MTAPMAN.IRX build to name, so it answers the library's
+// own version word (3.0 -> 0x0300): the title's check constrains only the major
+// byte. Every other function number is recorded and refused, so an unmodelled
+// multitap command still leaves the caller blocked. ADR 0145.
+[[nodiscard]] inline bool serve_ee_mtap_version_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.mtap_call_count;
+    sif.last_mtap_number = call.rpc_number;
+    ++sif.mtap_version_calls;
+    sif.last_mtap_version_replied = false;
+    if (call.rpc_number != kEeMtapGetModVersion) {
+        return false; // unmodelled multitap command: no reply, caller stays blocked
+    }
+    if (call.recv_addr == 0U || call.recv_size < 4U) {
+        return false; // no reply buffer the version word fits in
+    }
+    if (store_u32(state.memory, call.recv_addr, kEeMtapModVersionWord) != Status::ok) {
+        return false; // reply buffer not writable: no reply, no RPC_END
+    }
+    sif.last_mtap_version = kEeMtapModVersionWord;
+    sif.last_mtap_version_replied = true;
+    ++sif.mtap_version_replies;
+    return true;
+}
+
 // Answer an EE RPC bind the way the resident IOP SIFRPC module does.
 //
 // PS2SDK `iop/system/sifcmd/src/sifrpc.c` `_request_bind` looks the sid up with
@@ -2623,7 +2668,10 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerLoadFile, 0U, &serve_ee_loadfile_call);
     // The multitap servers (ADRs 0140/0143): registered so the title's binds
-    // succeed; the handler records and refuses every call.
+    // succeed. The four data servers record and refuse every call; the Sony
+    // extension 0x80000905 answers the module-version query so `sceMtapInit`'s
+    // `(version >> 8) == 3` check passes as it does against the resident
+    // module (ADR 0145).
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerMtapPortOpen, 0U, &serve_ee_mtap_call);
     (void)register_ee_sif_rpc_server(
@@ -2633,7 +2681,7 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerMtapSony4, 0U, &serve_ee_mtap_call);
     (void)register_ee_sif_rpc_server(
-        state, kEeSifServerMtapSony5, 0U, &serve_ee_mtap_call);
+        state, kEeSifServerMtapSony5, 0U, &serve_ee_mtap_version_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation

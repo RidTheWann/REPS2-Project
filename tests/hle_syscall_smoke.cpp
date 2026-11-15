@@ -4375,6 +4375,66 @@ int test_mtap_calls_are_recorded_and_refused() {
     return 0;
 }
 
+int test_mtap_mod_version_query_is_served() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Sony `libmtap` `sceMtapGetModVersion` issues function 1 on
+    // MTAP_GET_MOD_VERSION (0x80000905) with a 128-byte request/reply buffer
+    // (`sizeof(rpc_buffer)`) and returns reply word 0; `sceMtapInit` then
+    // requires `(version >> 8) == 3`. The handler answers the library's own
+    // version word (3.0 -> 0x0300) so the check passes and the caller is
+    // released. ADR 0145.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapSony5, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8230;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_call_count != 1U || sif.last_mtap_number != 1U) return 8231;
+    if (sif.mtap_version_calls != 1U || sif.mtap_version_replies != 1U) return 8232;
+    if (!sif.last_mtap_version_replied) return 8233;
+    if (sif.last_mtap_version != reps2::runtime::kEeMtapModVersionWord) return 8234;
+    if ((sif.last_mtap_version >> 8U) != 3U) return 8235;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 8236;
+    if (load_word(ram, kRpcReply) != reps2::runtime::kEeMtapModVersionWord) return 8237;
+    if (state.hle.semaphores[3].count == 0) return 8238;
+    return 0;
+}
+
+int test_mtap_mod_version_query_refuses_other_functions() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Only function 1 is modelled on 0x80000905; any other command is recorded
+    // and refused so the caller stays blocked. ADR 0145.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapSony5, 2U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8240;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_version_calls != 1U || sif.mtap_version_replies != 0U) return 8241;
+    if (sif.last_mtap_version_replied) return 8242;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 8243;
+    if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 8244;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8245;
+    if (state.hle.semaphores[3].count != 0) return 8246;
+    return 0;
+}
+
 int test_sif_loadfile_get_version_refuses_without_a_reply_buffer() {
     SifWindow ram{};
     EeState state{};
@@ -4842,6 +4902,10 @@ int main() {
          &test_bind_to_the_mtap_server_reaches_a_registered_server},
         {"mtap calls are recorded and refused",
          &test_mtap_calls_are_recorded_and_refused},
+        {"mtap mod version query is served",
+         &test_mtap_mod_version_query_is_served},
+        {"mtap mod version query refuses other functions",
+         &test_mtap_mod_version_query_refuses_other_functions},
         {"iso9660 resolves a disc path", &test_iso9660_resolves_a_disc_path},
         {"searchfile serves a file from host media",
          &test_searchfile_serves_a_file_from_host_media},

@@ -565,6 +565,10 @@ void print_error(
               << ",\"loadfile_replied\":" << (state.hle.sif_cmd.last_loadfile_replied ? 1U : 0U)
               << ",\"mtap_calls\":" << state.hle.sif_cmd.mtap_call_count
               << ",\"mtap_number\":" << state.hle.sif_cmd.last_mtap_number
+              << ",\"mtap_version_calls\":" << state.hle.sif_cmd.mtap_version_calls
+              << ",\"mtap_version_replies\":" << state.hle.sif_cmd.mtap_version_replies
+              << ",\"mtap_version\":" << state.hle.sif_cmd.last_mtap_version
+              << ",\"mtap_version_replied\":" << (state.hle.sif_cmd.last_mtap_version_replied ? 1U : 0U)
               << "}},\"runs\":[";
     for (std::size_t index = 0; index < runs.size(); ++index) {
         if (index != 0U) std::cout << ',';
