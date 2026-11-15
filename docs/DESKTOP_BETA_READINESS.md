@@ -114,7 +114,7 @@ A Desktop Beta is not ready until each applicable gate has reproducible evidence
 
 ## 4. Current increment and next sequencing
 
-The current Desktop-first change set is in PR #84 and is **not merged**:
+The Desktop-first change sets merged through PR #8 and PR #11 (HomePage redesign, library navigation). An earlier draft of this document referenced PR #84, which is not present in the recovered repository history (the 2026-11-13 recovery restored commits through `4bcbaf4`; PR numbers #72–#82 are not recoverable, see `docs/PROJECT_STATE.md`), so that reference is removed:
 
 - Evidence-aware Library filters, alphabetical sorting, expanded search, result
   counts, and clear-filter recovery.
