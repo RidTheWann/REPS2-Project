@@ -569,6 +569,11 @@ void print_error(
               << ",\"mtap_version_replies\":" << state.hle.sif_cmd.mtap_version_replies
               << ",\"mtap_version\":" << state.hle.sif_cmd.last_mtap_version
               << ",\"mtap_version_replied\":" << (state.hle.sif_cmd.last_mtap_version_replied ? 1U : 0U)
+              << ",\"mtap_port_calls\":" << state.hle.sif_cmd.mtap_port_calls
+              << ",\"mtap_port_replies\":" << state.hle.sif_cmd.mtap_port_replies
+              << ",\"mtap_port\":" << state.hle.sif_cmd.last_mtap_port
+              << ",\"mtap_port_result\":" << state.hle.sif_cmd.last_mtap_result
+              << ",\"mtap_port_replied\":" << (state.hle.sif_cmd.last_mtap_port_replied ? 1U : 0U)
               << "}},\"runs\":[";
     for (std::size_t index = 0; index < runs.size(); ++index) {
         if (index != 0U) std::cout << ',';

@@ -4355,11 +4355,11 @@ int test_mtap_calls_are_recorded_and_refused() {
     state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
     make_rpc_call_semaphore(state);
 
-    // The multitap client calls its server with function 1 (PS2SDK
-    // `ee/rpc/multitap/src/libmtap.c`: `sceSifCallRpc(&clientPortOpen, 1, 0,
-    // buf, 4, buf, 8, ...)`). No multitap is modelled, so the call is recorded
-    // and refused: no reply, no RPC_END, semaphore untouched.
-    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapPortOpen, 1U, 4U, 8U);
+    // The Sony priority server (0x80000904) is registered but its function is
+    // not modelled, so the call is recorded and refused: no reply, no RPC_END,
+    // semaphore untouched. (The port-open/close/connection servers are served
+    // with the "no adapter" result instead; ADR 0147.)
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapSony4, 1U, 4U, 8U);
     store_word(ram, kRpcPayload, 0U);
     store_word(ram, kRpcReply, 0xA5A5'A5A5U);
     const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4, 0U};
@@ -4432,6 +4432,144 @@ int test_mtap_mod_version_query_refuses_other_functions() {
     if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 8244;
     if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8245;
     if (state.hle.semaphores[3].count != 0) return 8246;
+    return 0;
+}
+
+int test_mtap_port_open_answers_no_adapter() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // sceMtapPortOpen(0): function 1 on MTAPSERV_PORT_OPEN (0x80000901), the port
+    // in request word 0, the result read from reply word 1 (ps2sdk libmtap
+    // `return mtapRpcBuffer[1]`). REPS2 models no multitap adapter, so the port is
+    // not open: reply word 1 = 0. Word 0 is the caller's own port echo and must be
+    // left untouched. ADR 0147.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapPortOpen, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0U);               // port 0
+    store_word(ram, kRpcReply, 0xDEAD'BEEFU);       // reply word 0 (port echo)
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);  // reply word 1 (result)
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8250;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_port_calls != 1U || sif.mtap_port_replies != 1U) return 8251;
+    if (!sif.last_mtap_port_replied) return 8252;
+    if (sif.last_mtap_port != 0U || sif.last_mtap_result != 0U) return 8253;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 8254;
+    if (load_word(ram, kRpcReply) != 0xDEAD'BEEFU) return 8255;
+    if (load_word(ram, kRpcReply + 4U) != 0U) return 8256;
+    if (state.hle.semaphores[3].count == 0) return 8257;
+    return 0;
+}
+
+int test_mtap_get_connection_answers_zero() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // sceMtapGetConnection(2): function 1 on MTAPSERV_GET_CONNECTION
+    // (0x80000903). No multitap adapter means no connections on the port:
+    // reply word 1 = 0. ADR 0147.
+    store_rpc_call_request(
+        ram, reps2::runtime::kEeSifServerMtapGetConnection, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 2U);               // port 2
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);  // reply word 1 (result)
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8260;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_port_replies != 1U || !sif.last_mtap_port_replied) return 8261;
+    if (sif.last_mtap_port != 2U || sif.last_mtap_result != 0U) return 8262;
+    if (load_word(ram, kRpcReply + 4U) != 0U) return 8263;
+    if (state.hle.semaphores[3].count == 0) return 8264;
+    return 0;
+}
+
+int test_mtap_port_command_refuses_other_functions() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Only function 1 is modelled on the port servers; another function is
+    // recorded and refused so the caller stays blocked. ADR 0147.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapPortOpen, 2U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0U);
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8270;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_port_calls != 1U || sif.mtap_port_replies != 0U) return 8271;
+    if (sif.last_mtap_port_replied) return 8272;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 8273;
+    if (load_word(ram, kRpcReply + 4U) != 0xA5A5'A5A5U) return 8274;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8275;
+    if (state.hle.semaphores[3].count != 0) return 8276;
+    return 0;
+}
+
+int test_mtap_port_open_refuses_without_a_request_word() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // No request word: the documented port was not transferred, so the call is
+    // refused (no reply, no RPC_END) rather than answered with a guessed port.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapPortOpen, 1U, 0U, 0x80U);
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, nullptr) != Status::ok) {
+        return 8280;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_port_calls != 1U || sif.mtap_port_replies != 0U) return 8281;
+    if (sif.last_mtap_port_replied) return 8282;
+    if (load_word(ram, kRpcReply + 4U) != 0xA5A5'A5A5U) return 8283;
+    if (state.hle.semaphores[3].count != 0) return 8284;
+    return 0;
+}
+
+int test_mtap_port_open_refuses_a_wrapping_reply_buffer() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // A reply buffer at 0xFFFFFFFC would make reply word 1 (recv_addr + 4) wrap
+    // to address 0. The handler must refuse instead of mutating RAM[0]: no reply,
+    // no RPC_END, no semaphore signal, and the word at address 0 stays as set.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapPortOpen, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcCallPacket + 0x28U, 0xFFFF'FFFCU); // recvbuf: word 1 wraps
+    store_word(ram, kRpcPayload, 0U);                      // port 0
+    store_word(ram, 0U, 0x5A5A'5A5AU);                     // RAM[0] sentinel
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8290;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_port_calls != 1U || sif.mtap_port_replies != 0U) return 8291;
+    if (sif.last_mtap_port_replied) return 8292;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 8293;
+    if (load_word(ram, 0U) != 0x5A5A'5A5AU) return 8294; // RAM[0] must be untouched
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8295;
+    if (state.hle.semaphores[3].count != 0) return 8296;
     return 0;
 }
 
@@ -4906,6 +5044,16 @@ int main() {
          &test_mtap_mod_version_query_is_served},
         {"mtap mod version query refuses other functions",
          &test_mtap_mod_version_query_refuses_other_functions},
+        {"mtap port open answers no adapter",
+         &test_mtap_port_open_answers_no_adapter},
+        {"mtap get connection answers zero",
+         &test_mtap_get_connection_answers_zero},
+        {"mtap port command refuses other functions",
+         &test_mtap_port_command_refuses_other_functions},
+        {"mtap port open refuses without a request word",
+         &test_mtap_port_open_refuses_without_a_request_word},
+        {"mtap port open refuses a wrapping reply buffer",
+         &test_mtap_port_open_refuses_a_wrapping_reply_buffer},
         {"iso9660 resolves a disc path", &test_iso9660_resolves_a_disc_path},
         {"searchfile serves a file from host media",
          &test_searchfile_serves_a_file_from_host_media},

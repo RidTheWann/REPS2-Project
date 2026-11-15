@@ -916,9 +916,9 @@ struct EeSifCmdState {
     bool last_loadfile_replied{};
     // Multitap port-open server (0x80000901, PS2SDK `ee/rpc/multitap/src/libmtap.c`
     // MTAPSERV_PORT_OPEN). The title binds it and retries until a server answers;
-    // registered so the bind succeeds like on the resident IOP `mtapman`, but no
-    // function is modelled: calls are recorded and refused because REPS2 models
-    // no multitap adapter (ADR 0140).
+    // registered so the bind succeeds like on the resident IOP `mtapman`.
+    // `mtap_call_count`/`last_mtap_number` count every multitap call across the
+    // servers (ADR 0140).
     std::uint32_t mtap_call_count{};
     std::uint32_t last_mtap_number{};
     // Multitap module-version query (0x80000905, Sony `libmtap`
@@ -929,6 +929,15 @@ struct EeSifCmdState {
     std::uint32_t mtap_version_replies{};
     std::uint32_t last_mtap_version{};
     bool last_mtap_version_replied{};
+    // Multitap port-open/close/connection servers (0x80000901/0x80000902/
+    // 0x80000903, PS2SDK `libmtap`): function 1 sends the port in request word 0
+    // and reads reply word 1. REPS2 models no multitap adapter, so every result
+    // is 0 — the port is not open and nothing is connected (ADR 0147).
+    std::uint32_t mtap_port_calls{};
+    std::uint32_t mtap_port_replies{};
+    std::uint32_t last_mtap_port{};
+    std::uint32_t last_mtap_result{};
+    bool last_mtap_port_replied{};
 
     // SIF_CMD_RESET_CMD (0x80000003): the EE asked the IOP to reboot. The
     // resident HLE IOP re-arms its RPCINIT handshake and records the request;

@@ -1846,8 +1846,8 @@ inline constexpr std::uint32_t kEeLoadfileVersionWord = 0x3030'3133U;
 // PS2SDK `ee/rpc/multitap/src/libmtap.c`: the multitap servers the client binds
 // — MTAPSERV_PORT_OPEN 0x80000901, MTAPSERV_PORT_CLOSE 0x80000902,
 // MTAPSERV_GET_CONNECTION 0x80000903. The resident IOP `mtapman` registers them,
-// so the binds succeed on real hardware; their functions stay fail-closed until
-// evidenced (ADRs 0140/0143).
+// so the binds succeed on real hardware; their function 1 is served with the
+// honest "no multitap adapter" result (ADR 0147).
 inline constexpr std::uint32_t kEeSifServerMtapPortOpen = 0x8000'0901U;
 inline constexpr std::uint32_t kEeSifServerMtapPortClose = 0x8000'0902U;
 inline constexpr std::uint32_t kEeSifServerMtapGetConnection = 0x8000'0903U;
@@ -1868,6 +1868,14 @@ inline constexpr std::uint32_t kEeSifServerMtapSony5 = 0x8000'0905U;
 // Domination port, which answers the same word (ADR 0145).
 inline constexpr std::uint32_t kEeMtapGetModVersion = 1U;
 inline constexpr std::uint32_t kEeMtapModVersionWord = 0x0300U;
+// PS2SDK `ee/rpc/multitap/src/libmtap.c`: the port-open/port-close/connection
+// servers (`0x80000901`/`0x80000902`/`0x80000903`) all use function 1, send the
+// requested port in request word 0, and read the result from reply word 1
+// (`return mtapRpcBuffer[1]`). REPS2 models no multitap adapter, so the honest
+// result of every one of those operations is 0 — the port is not open and no
+// controllers are connected through it. The 128-byte (`0x80`) request/reply
+// size is `sizeof(rpc_buffer)` in Sony `libmtap`. ADR 0147.
+inline constexpr std::uint32_t kEeMtapPortCommand = 1U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2292,6 +2300,49 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     return true;
 }
 
+// Multitap port-open / port-close / connection servers (PS2SDK `libmtap`
+// `MTAPSERV_PORT_OPEN` 0x80000901, `MTAPSERV_PORT_CLOSE` 0x80000902,
+// `MTAPSERV_GET_CONNECTION` 0x80000903, function 1).
+//
+// Each client sets request word 0 to the port and issues function 1, then reads
+// reply word 1 as the result (`sceMtapPortOpen`/`PortClose`/`GetConnection`
+// `return mtapRpcBuffer[1]`). REPS2 models no multitap adapter, so the truthful
+// result of opening/closing a port and of counting its connections is 0: the
+// port is not open and nothing is connected through it. The handler therefore
+// writes 0 into reply word 1 (leaving word 0, the caller's own port echo, as it
+// was) and answers, so the caller is released and the title sees "no multitap"
+// instead of blocking. It fabricates no controller: the only state it implies is
+// the honest absence of an adapter. Malformed requests (no request word, or no
+// room for reply word 1) are recorded and refused. ADR 0147.
+[[nodiscard]] inline bool serve_ee_mtap_port_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.mtap_call_count;
+    sif.last_mtap_number = call.rpc_number;
+    ++sif.mtap_port_calls;
+    sif.last_mtap_port_replied = false;
+    if (call.rpc_number != kEeMtapPortCommand) {
+        return false; // unmodelled multitap command: no reply, caller stays blocked
+    }
+    if (call.recv_addr == 0U || call.recv_addr > 0xFFFF'FFFBU || call.recv_size < 8U) {
+        return false; // no room for reply words 0..1 (or word 1 would wrap past 4 GiB)
+    }
+    std::uint32_t port{};
+    if (call.send_size < 4U || load_u32(state.memory, call.send_addr, port) != Status::ok) {
+        return false; // the documented one-word port request was not transferred
+    }
+    if (store_u32(state.memory, call.recv_addr + 4U, 0U) != Status::ok) {
+        return false; // reply word 1 not writable: no reply, no RPC_END
+    }
+    sif.last_mtap_port = port;
+    sif.last_mtap_result = 0U;
+    sif.last_mtap_port_replied = true;
+    ++sif.mtap_port_replies;
+    return true;
+}
+
 // Answer an EE RPC bind the way the resident IOP SIFRPC module does.
 //
 // PS2SDK `iop/system/sifcmd/src/sifrpc.c` `_request_bind` looks the sid up with
@@ -2668,16 +2719,17 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerLoadFile, 0U, &serve_ee_loadfile_call);
     // The multitap servers (ADRs 0140/0143): registered so the title's binds
-    // succeed. The four data servers record and refuse every call; the Sony
-    // extension 0x80000905 answers the module-version query so `sceMtapInit`'s
-    // `(version >> 8) == 3` check passes as it does against the resident
-    // module (ADR 0145).
+    // succeed. The port-open/close/connection servers answer function 1 with the
+    // honest "no multitap adapter" result 0 (ADR 0147); the Sony priority
+    // server 0x80000904 records and refuses every call; 0x80000905 answers the
+    // module-version query so `sceMtapInit`'s `(version >> 8) == 3` check passes
+    // as it does against the resident module (ADR 0145).
     (void)register_ee_sif_rpc_server(
-        state, kEeSifServerMtapPortOpen, 0U, &serve_ee_mtap_call);
+        state, kEeSifServerMtapPortOpen, 0U, &serve_ee_mtap_port_call);
     (void)register_ee_sif_rpc_server(
-        state, kEeSifServerMtapPortClose, 0U, &serve_ee_mtap_call);
+        state, kEeSifServerMtapPortClose, 0U, &serve_ee_mtap_port_call);
     (void)register_ee_sif_rpc_server(
-        state, kEeSifServerMtapGetConnection, 0U, &serve_ee_mtap_call);
+        state, kEeSifServerMtapGetConnection, 0U, &serve_ee_mtap_port_call);
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerMtapSony4, 0U, &serve_ee_mtap_call);
     (void)register_ee_sif_rpc_server(
