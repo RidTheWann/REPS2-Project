@@ -1843,11 +1843,21 @@ inline constexpr std::uint32_t kEeLoadfileGetVersion = 0xFFU;
 // The 4-byte version word the PS2SDK loadfile reference returns
 // (`loadfile_get_version`: `((u32 *)outbuffer)[0] = 0x30303133`).
 inline constexpr std::uint32_t kEeLoadfileVersionWord = 0x3030'3133U;
-// PS2SDK `ee/rpc/multitap/src/libmtap.c`: MTAPSERV_PORT_OPEN 0x80000901 is the
-// multitap port-open server the title binds. The resident IOP `mtapman`
-// registers it, so the bind succeeds on real hardware; its functions stay
-// fail-closed until evidenced (ADR 0140).
+// PS2SDK `ee/rpc/multitap/src/libmtap.c`: the multitap servers the client binds
+// — MTAPSERV_PORT_OPEN 0x80000901, MTAPSERV_PORT_CLOSE 0x80000902,
+// MTAPSERV_GET_CONNECTION 0x80000903. The resident IOP `mtapman` registers them,
+// so the binds succeed on real hardware; their functions stay fail-closed until
+// evidenced (ADRs 0140/0143).
 inline constexpr std::uint32_t kEeSifServerMtapPortOpen = 0x8000'0901U;
+inline constexpr std::uint32_t kEeSifServerMtapPortClose = 0x8000'0902U;
+inline constexpr std::uint32_t kEeSifServerMtapGetConnection = 0x8000'0903U;
+// Sony `libmtap` extensions served by `MTAPMAN.IRX`, absent from ps2sdk: the
+// title's `sceMtapInit` binds the contiguous 0x80000901..0x80000905 range, and
+// the observed bind after 0x80000903 is 0x80000904 (`MTAP_CHANGE_THREAD_PRIORITY`)
+// with 0x80000905 (`MTAP_GET_MOD_VERSION`) next. Identity is **inferred** from
+// the contiguous multitap bind sequence (ADR 0144); the sids stay fail-closed.
+inline constexpr std::uint32_t kEeSifServerMtapSony4 = 0x8000'0904U;
+inline constexpr std::uint32_t kEeSifServerMtapSony5 = 0x8000'0905U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2612,10 +2622,18 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     // succeeds; the handler records and refuses every call.
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerLoadFile, 0U, &serve_ee_loadfile_call);
-    // The multitap port-open server (ADR 0140): registered so the title's bind
-    // succeeds; the handler records and refuses every call.
+    // The multitap servers (ADRs 0140/0143): registered so the title's binds
+    // succeed; the handler records and refuses every call.
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerMtapPortOpen, 0U, &serve_ee_mtap_call);
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerMtapPortClose, 0U, &serve_ee_mtap_call);
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerMtapGetConnection, 0U, &serve_ee_mtap_call);
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerMtapSony4, 0U, &serve_ee_mtap_call);
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerMtapSony5, 0U, &serve_ee_mtap_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation

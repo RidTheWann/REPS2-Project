@@ -4312,6 +4312,14 @@ int test_boot_environment_registers_the_mtap_port_open_server() {
     reps2::runtime::initialize_hle_boot_environment(state);
     if (reps2::runtime::find_ee_sif_rpc_server(
             state, reps2::runtime::kEeSifServerMtapPortOpen) == nullptr) return 8200;
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerMtapPortClose) == nullptr) return 8500;
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerMtapGetConnection) == nullptr) return 8501;
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerMtapSony4) == nullptr) return 8506;
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerMtapSony5) == nullptr) return 8507;
     return 0;
 }
 
@@ -4322,6 +4330,13 @@ int test_bind_to_the_mtap_server_reaches_a_registered_server() {
     reps2::runtime::initialize_hle_boot_environment(state);
     state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
     make_rpc_call_semaphore(state);
+
+    store_rpc_bind_request(ram, reps2::runtime::kEeSifServerMtapPortClose);
+    if (reps2::runtime::process_sif_command(state, kRpcBindPacket) != Status::ok) return 8502;
+    if (!state.hle.sif_cmd.last_rpc_bind_had_server) return 8503;
+    if (state.hle.sif_cmd.last_rpc_bind_server_sid
+        != reps2::runtime::kEeSifServerMtapPortClose) return 8504;
+    if (load_word(ram, kRpcClient + 0x24U) != reps2::runtime::kEeSifServerMtapPortClose) return 8505;
 
     store_rpc_bind_request(ram, reps2::runtime::kEeSifServerMtapPortOpen);
     if (reps2::runtime::process_sif_command(state, kRpcBindPacket) != Status::ok) return 8210;

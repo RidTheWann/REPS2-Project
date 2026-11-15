@@ -143,3 +143,5 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0140](0140-mtap-port-open-server-registration.md) | Register the multitap port-open RPC server (0x80000901) so its bind succeeds; calls recorded and refused | Proposed |
 | [0141](0141-cdvd-searchfile-iso9660.md) | Serve CDVD SearchFile from the host ISO 9660 metadata with a bounded reader | Proposed |
 | [0142](0142-ee-timer3-count-progression.md) | EE Timer 3 count progression on a deterministic guest-time source (one instruction = one modelled BUSCLK cycle) | Proposed |
+| [0143](0143-mtap-remaining-servers-registration.md) | Register the remaining multitap RPC servers (0x80000902, 0x80000903); calls recorded and refused | Proposed |
+| [0144](0144-mtap-sony-extended-servers.md) | Register the Sony multitap extension servers (0x80000904, 0x80000905); the observed version-query call is recorded and refused | Proposed |
