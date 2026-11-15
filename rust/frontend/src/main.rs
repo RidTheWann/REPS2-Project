@@ -986,6 +986,7 @@ fn compile_elf(
                 &bytes,
                 limits,
                 &relocated_regions,
+                &options.extra_roots,
             )
             .map_err(analysis_error_message)?;
             Ok((
@@ -993,9 +994,14 @@ fn compile_elf(
                 Some((discovery, accepted_roots, skipped_roots, skipped_blocks)),
             ))
         } else {
-            let graph =
-                analysis::discover_elf_with_relocated(&image, &bytes, limits, &relocated_regions)
-                    .map_err(analysis_error_message)?;
+            let graph = analysis::discover_elf_with_relocated(
+                &image,
+                &bytes,
+                limits,
+                &relocated_regions,
+                &options.extra_roots,
+            )
+            .map_err(analysis_error_message)?;
             Ok((graph, None))
         }
     })?;
@@ -1073,6 +1079,7 @@ fn compile_elf(
                 size: spec.size,
             })
             .collect(),
+        extra_roots: options.extra_roots.clone(),
     };
     let manifest_output = output.with_extension("manifest.json");
     run_pipeline_stage(session, "artifact.write_manifest", "artifacts", || {
@@ -1136,6 +1143,12 @@ fn compile_elf(
                 "    0x{:08X} <- 0x{:08X} (0x{:X} bytes)",
                 spec.destination, spec.source, spec.size
             );
+        }
+    }
+    if !options.extra_roots.is_empty() {
+        println!("  Extra analysis roots: {}", options.extra_roots.len());
+        for root in &options.extra_roots {
+            println!("    0x{root:08X}");
         }
     }
     if let Some((found, accepted_roots, skipped_roots, skipped_blocks)) = &discovery {
@@ -1305,6 +1318,7 @@ struct RecompileOptions {
     probe_budget: u64,
     hle_syscalls: bool,
     relocated_code: Vec<RelocatedCodeSpec>,
+    extra_roots: Vec<u32>,
     parent_iso: Option<PathBuf>,
     limits: LimitOptions,
 }
@@ -1318,6 +1332,7 @@ impl Default for RecompileOptions {
             probe_budget: 0,
             hle_syscalls: false,
             relocated_code: Vec::new(),
+            extra_roots: Vec::new(),
             parent_iso: None,
             limits: LimitOptions::default(),
         }
@@ -1403,6 +1418,18 @@ fn parse_recompile_options(arguments: &[String]) -> Result<RecompileOptions, Str
                     .get(index + 1)
                     .ok_or_else(|| "--relocated-code requires a value".to_owned())?;
                 options.relocated_code.push(parse_relocated_code(value)?);
+                index += 2;
+            }
+            "--extra-root" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--extra-root requires a value".to_owned())?;
+                let address = parse_hex(value)
+                    .map_err(|error| format!("invalid extra root {value:?}: {error}"))?;
+                if address & 3 != 0 {
+                    return Err(format!("extra root {value:?} is not word-aligned"));
+                }
+                options.extra_roots.push(address);
                 index += 2;
             }
             "--parent-iso" => {
@@ -2034,6 +2061,15 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x0000_0000, // return delay slot
     ];
 
+    // SIF RPC end function (ADR 0136): the dispatcher enters this block with
+    // the end_param in $a0, so it signals that semaphore as a guest would.
+    let hle_end_callback = [
+        0x2403_0042, // addiu v1, zero, 0x42 (SignalSema)
+        0x0000_000C, // syscall
+        0x03E0_0008, // jr ra: back through the dispatcher sentinel
+        0x0000_0000, // return delay slot
+    ];
+
     // Color conversion in a normal block, an annulled/taken likely delay,
     // and a return delay slot. Shared by single- and split-unit native tests.
     let mmi_color = [
@@ -2081,6 +2117,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xE500, &hle_set_syscall),
         segment(0xE600, &hle_syscall_handler),
         segment(0xE700, &hle_call_registered_handler),
+        segment(0xE800, &hle_end_callback),
     ];
     // Each conditional trap is an independent one-instruction segment, so a
     // false predicate retires to an untranslated boundary instead of flowing
@@ -2126,6 +2163,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xE500, "hle-set-syscall-fixture"),
         entry(0xE600, "hle-syscall-handler-fixture"),
         entry(0xE700, "hle-call-registered-handler-fixture"),
+        entry(0xE800, "hle-end-callback-fixture"),
     ];
     entries.extend(
         (0..conditional_traps.len())
@@ -2139,7 +2177,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         // Keep the continuation PCs as explicit fixture roots as a regression
         // guard for multi-root analysis; production CFG discovery also reaches
         // them through its lenient SyscallContinuation edges.
-        0xE004, 0xE104, 0xE304, 0xE404, 0xE504, 0xE600, 0xE604, 0xE700, 0xE704,
+        0xE004, 0xE104, 0xE304, 0xE404, 0xE504, 0xE600, 0xE604, 0xE700, 0xE704, 0xE800, 0xE808,
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);
@@ -2230,10 +2268,10 @@ fn usage() {
     );
     println!("  reps2 profile-elf <elf-file>");
     println!(
-        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--parent-iso <disc.iso>] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+        "  reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--parent-iso <disc.iso>] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE] [--extra-root PC] [--max-blocks N] [--max-instructions N] [--max-roots N]"
     );
     println!(
-        "  reps2 recompile-iso <disc.iso> <new-output-directory> [--discover] [--tu-count N] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE] [--max-blocks N] [--max-instructions N] [--max-roots N]"
+        "  reps2 recompile-iso <disc.iso> <new-output-directory> [--discover] [--tu-count N] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE] [--extra-root PC] [--max-blocks N] [--max-instructions N] [--max-roots N]"
     );
     println!("  reps2 decode <instruction-word-hex> [pc-hex]");
     println!(
@@ -2292,6 +2330,9 @@ fn usage() {
     );
     println!(
         "--relocated-code DEST:SOURCE:SIZE (hexadecimal, repeatable) analyses SIZE bytes read from the input image at virtual address SOURCE as executable guest code at DEST. Use it for code a title copies into RAM at run time; the guest's own copy stays observable and the initial RAM image is unchanged."
+    );
+    println!(
+        "--extra-root PC (hexadecimal, repeatable) adds PC as an authoritative analysis root, recorded in the manifest. Use it for caller-published code addresses that discovery does not reach, such as an observed SIF RPC end-function address. Misaligned or unmapped roots fail the analysis."
     );
     println!(
         "--max-blocks/--max-instructions/--max-roots override the default analysis bounds (250000 blocks, 2000000 instructions, 500000 discovered roots). Overrides must be positive and stay below the CLI ceilings."
@@ -2599,6 +2640,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_extra_roots_and_rejects_misaligned() {
+        let options = parse_recompile_options(&[
+            "--extra-root".to_owned(),
+            "0x00246CD0".to_owned(),
+            "--extra-root".to_owned(),
+            "246cd4".to_owned(),
+        ])
+        .expect("extra roots");
+        assert_eq!(options.extra_roots, vec![0x0024_6CD0, 0x0024_6CD4]);
+        let bad = parse_recompile_options(&["--extra-root".to_owned(), "0x246CD2".to_owned()]);
+        assert!(bad.is_err());
+        let unknown = parse_recompile_options(&["--extra-root".to_owned()]);
+        assert!(unknown.is_err());
+    }
+
+    #[test]
     fn parses_recompile_options_in_any_order() {
         let options = parse_recompile_options(&[
             "--tu-count".to_owned(),
@@ -2626,6 +2683,7 @@ mod tests {
                 probe_budget: 4096,
                 hle_syscalls: false,
                 relocated_code: Vec::new(),
+                extra_roots: Vec::new(),
                 parent_iso: Some(PathBuf::from("parent.iso")),
                 limits: LimitOptions {
                     max_blocks: 300_000,

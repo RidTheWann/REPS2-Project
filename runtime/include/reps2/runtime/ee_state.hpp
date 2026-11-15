@@ -443,11 +443,24 @@ struct EeSyscallHandlerFrame {
     std::uint32_t handler_address{};
     std::uint32_t resume_pc{};
     std::uint32_t slot{};
+    // A SIF RPC end function is a guest callback, not a syscall handler: it has
+    // no service result, so returning restores the whole saved context instead
+    // of keeping the callee's $v0.
+    bool is_guest_callback{};
 };
 
 // Handlers can themselves issue syscalls, so dispatch keeps a small stack of
 // frames rather than a single slot.
 inline constexpr std::size_t kEeMaxSyscallHandlerDepth = 8;
+
+// End functions an RPC reply has queued for the dispatcher, in reply order.
+// A full queue refuses the callback and records it; it never drops one silently
+// or runs it out of order.
+struct EeGuestCallback {
+    std::uint32_t address{};
+    std::uint32_t parameter{};
+};
+inline constexpr std::size_t kEeMaxPendingGuestCallbacks = 8;
 
 enum class EeSetSyscallRejection : std::uint8_t {
     none,
@@ -1135,6 +1148,16 @@ struct EeHleState {
     std::uint8_t syscall_handler_depth{};
     std::uint64_t guest_handler_dispatches{};
     std::uint64_t guest_handler_returns{};
+    // SIF RPC end functions queued by a call reply and run by the dispatcher.
+    std::array<EeGuestCallback, kEeMaxPendingGuestCallbacks> pending_guest_callbacks{};
+    std::size_t pending_guest_callback_head{};
+    std::size_t pending_guest_callback_count{};
+    std::uint64_t guest_callbacks_requested{};
+    std::uint64_t guest_callbacks_started{};
+    std::uint64_t guest_callbacks_completed{};
+    std::uint64_t guest_callbacks_refused{};
+    std::uint32_t last_guest_callback_address{};
+    std::uint32_t last_guest_callback_parameter{};
     std::array<EeSema, kEeMaxSemaphores> semaphores{};
 };
 

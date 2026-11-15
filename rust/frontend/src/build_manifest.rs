@@ -96,6 +96,9 @@ pub struct BuildManifest {
     /// Runtime-copied code images declared for analysis (destination, source
     /// virtual address and byte size). Empty when none were supplied.
     pub relocated_code: Vec<ManifestRelocatedCode>,
+    /// Caller-published authoritative analysis roots (e.g. an observed SIF RPC
+    /// end-function address). Empty when none were supplied.
+    pub extra_roots: Vec<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -303,6 +306,19 @@ impl BuildManifest {
             output.push_str("\n  ],\n");
         }
 
+        output.push_str("  \"extra_roots\": [");
+        if self.extra_roots.is_empty() {
+            output.push_str("],\n");
+        } else {
+            for (index, root) in self.extra_roots.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                output.push_str(&format!("\n    \"0x{root:08X}\""));
+            }
+            output.push_str("\n  ],\n");
+        }
+
         output.push_str("  \"playable\": false\n");
         output.push_str("}\n");
         output
@@ -340,6 +356,7 @@ mod tests {
             ram_output: "game.ram.bin".to_owned(),
             ram_image_bytes: 32 * 1024 * 1024,
             relocated_code: Vec::new(),
+            extra_roots: Vec::new(),
         }
     }
 

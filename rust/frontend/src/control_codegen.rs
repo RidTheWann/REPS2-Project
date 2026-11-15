@@ -96,6 +96,8 @@ using reps2::runtime::return_from_ee_exception;
 using reps2::runtime::dispatch_ee_syscall;
 using reps2::runtime::ee_syscall_handler_return_pending;
 using reps2::runtime::return_from_ee_syscall_handler;
+using reps2::runtime::ee_guest_callback_pending;
+using reps2::runtime::enter_ee_guest_callback;
 
 ";
 
@@ -137,6 +139,16 @@ const EXECUTE_CFG_TAIL: &str = "\
             const Status handler_status = return_from_ee_syscall_handler(state);
             if (handler_status != Status::ok) {
                 return handler_status;
+            }
+            continue;
+        }
+        // A SIF RPC reply can queue the client's end function. The kernel runs
+        // it in interrupt context; here the dispatcher enters it as guest code
+        // before the interrupted caller continues (ADR 0136).
+        if (ee_guest_callback_pending(state)) {
+            const Status callback_status = enter_ee_guest_callback(state);
+            if (callback_status != Status::ok) {
+                return callback_status;
             }
             continue;
         }
@@ -845,6 +857,14 @@ mod tests {
             );
         }
         assert_eq!(emit_cpp_units(&program, 1).expect("one unit").len(), 1);
+    }
+
+    #[test]
+    fn dispatcher_enters_pending_guest_callbacks() {
+        let program = program_with_blocks();
+        let units = emit_cpp_units(&program, 1).expect("emit single unit");
+        assert!(units[0].contains("ee_guest_callback_pending(state)"));
+        assert!(units[0].contains("enter_ee_guest_callback(state)"));
     }
 
     #[test]

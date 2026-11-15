@@ -396,6 +396,7 @@ pub enum AnalysisError {
         owning_control_pc: u32,
     },
     GuestPcOverflow(u32),
+    MisalignedExtraRoot(u32),
     InstructionLimitExceeded {
         limit: usize,
     },
@@ -460,6 +461,9 @@ impl fmt::Display for AnalysisError {
                 "control-flow target 0x{target_pc:08X} enters the delay slot of 0x{owning_control_pc:08X}"
             ),
             Self::GuestPcOverflow(pc) => write!(formatter, "guest PC overflows after 0x{pc:08X}"),
+            Self::MisalignedExtraRoot(pc) => {
+                write!(formatter, "extra root 0x{pc:08X} is not word-aligned")
+            }
             Self::InstructionLimitExceeded { limit } => {
                 write!(formatter, "analysis exceeded the {limit} instruction limit")
             }
@@ -496,6 +500,7 @@ impl AnalysisError {
             | Self::EntryPointNotExecutable(_)
             | Self::InvalidLoadedSegment { .. }
             | Self::GuestPcOverflow(_)
+            | Self::MisalignedExtraRoot(_)
             | Self::InstructionLimitExceeded { .. }
             | Self::BlockLimitExceeded { .. }
             | Self::AliasedViewLimitExceeded { .. }
@@ -845,11 +850,27 @@ fn prepare(
     file_bytes: &[u8],
     limits: AnalysisLimits,
     relocated: &[RelocatedCodeRegion],
+    extra_roots: &[u32],
 ) -> Result<PreparedImage, AnalysisError> {
     let mut segments = elf::load_segments(file_bytes, image, limits.max_loaded_memory)
         .map_err(|error| AnalysisError::Elf(error.to_string()))?;
     let mut entry_points = collect_entry_points(image, &segments);
     append_relocated_code(&mut segments, &mut entry_points, relocated);
+    // Caller-published roots (e.g. a SIF RPC end function address observed in a
+    // run report) are authoritative: they must decode or the analysis fails,
+    // and they are recorded in the manifest so the input is reproducible.
+    for &address in extra_roots {
+        if address & 3 != 0 {
+            return Err(AnalysisError::MisalignedExtraRoot(address));
+        }
+        if !entry_points.iter().any(|entry| entry.address == address) {
+            entry_points.push(EntryPoint {
+                address,
+                labels: vec!["extra-root".to_owned()],
+                is_elf_entry: false,
+            });
+        }
+    }
     let roots = entry_points
         .iter()
         .map(|entry| entry.address)
@@ -868,7 +889,7 @@ pub fn discover_elf(
     file_bytes: &[u8],
     limits: AnalysisLimits,
 ) -> Result<ControlFlowGraph, AnalysisError> {
-    discover_elf_with_relocated(image, file_bytes, limits, &[])
+    discover_elf_with_relocated(image, file_bytes, limits, &[], &[])
 }
 
 /// As [`discover_elf`], additionally treating each supplied relocated region as
@@ -878,12 +899,13 @@ pub fn discover_elf_with_relocated(
     file_bytes: &[u8],
     limits: AnalysisLimits,
     relocated: &[RelocatedCodeRegion],
+    extra_roots: &[u32],
 ) -> Result<ControlFlowGraph, AnalysisError> {
     let PreparedImage {
         segments,
         entry_points,
         roots,
-    } = prepare(image, file_bytes, limits, relocated)?;
+    } = prepare(image, file_bytes, limits, relocated, extra_roots)?;
     discover_cfg(&segments, entry_points, &roots, limits)
 }
 
@@ -916,7 +938,7 @@ pub fn discover_elf_with_discovery(
     file_bytes: &[u8],
     limits: AnalysisLimits,
 ) -> Result<DiscoveryAnalysis, AnalysisError> {
-    discover_elf_with_discovery_and_relocated(image, file_bytes, limits, &[])
+    discover_elf_with_discovery_and_relocated(image, file_bytes, limits, &[], &[])
 }
 
 /// As [`discover_elf_with_discovery`], additionally treating each supplied
@@ -926,12 +948,13 @@ pub fn discover_elf_with_discovery_and_relocated(
     file_bytes: &[u8],
     limits: AnalysisLimits,
     relocated: &[RelocatedCodeRegion],
+    extra_roots: &[u32],
 ) -> Result<DiscoveryAnalysis, AnalysisError> {
     let PreparedImage {
         segments,
         mut entry_points,
         roots: authoritative,
-    } = prepare(image, file_bytes, limits, relocated)?;
+    } = prepare(image, file_bytes, limits, relocated, extra_roots)?;
     // Relocated regions are declared executable by the caller but are not
     // covered by any ELF section, so without extending the executable ranges
     // here, discovery would never scan them and function entries reached only
@@ -2905,6 +2928,7 @@ mod tests {
             &file_bytes,
             AnalysisLimits::default(),
             &relocated,
+            &[],
         )
         .expect("synthetic ELF with relocated region");
         assert!(
@@ -2943,6 +2967,89 @@ mod tests {
             analysis.graph.blocks.contains_key(&0x8000_2010),
             "mid-region prologue must be a translated block"
         );
+    }
+
+    #[test]
+    fn extra_roots_become_authoritative_entry_points() {
+        // Entry at 0x1000 is a plain return; 0x1008 holds a second function no
+        // symbol, JAL or stored pointer references, so discovery alone never
+        // reaches it. An explicit extra root must translate it and fail the
+        // analysis when misaligned.
+        let words = [
+            0x03E0_0008u32, // 0x1000: jr $ra
+            0x0000_0000,    // 0x1004: delay slot
+            0x2402_0001,    // 0x1008: addiu $v0, $zero, 1
+            0x03E0_0008,    // 0x100C: jr $ra
+            0x0000_0000,    // 0x1010: delay slot
+        ];
+        let mut file_bytes = Vec::new();
+        for word in &words {
+            file_bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        let file_size = u32::try_from(file_bytes.len()).expect("synthetic image size");
+        let image = Image {
+            file_type: elf::ET_EXEC,
+            os_abi: 0,
+            abi_version: 0,
+            machine: elf::EM_MIPS,
+            entry_point: 0x1000,
+            flags: 0,
+            section_name_table_index: 0,
+            program_headers: vec![elf::ProgramHeader {
+                kind: elf::PT_LOAD,
+                offset: 0,
+                virtual_address: 0x1000,
+                physical_address: 0x1000,
+                file_size,
+                memory_size: file_size,
+                flags: elf::PF_R | PF_X,
+                alignment: 4,
+            }],
+            section_headers: Vec::new(),
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+            mips_reginfo: Vec::new(),
+            mips_reginfo_segments: Vec::new(),
+            mips_abi_flags_segments: Vec::new(),
+            mips_abi_flags: Vec::new(),
+            mips_options: Vec::new(),
+        };
+
+        let plain = discover_elf_with_discovery(&image, &file_bytes, AnalysisLimits::default())
+            .expect("discovery without the extra root");
+        assert!(!plain.graph.blocks.contains_key(&0x1008));
+
+        let analysis = discover_elf_with_discovery_and_relocated(
+            &image,
+            &file_bytes,
+            AnalysisLimits::default(),
+            &[],
+            &[0x1008],
+        )
+        .expect("extra root decodes");
+        assert!(
+            analysis.graph.blocks.contains_key(&0x1008),
+            "extra root must be a translated block"
+        );
+        let entry = analysis
+            .graph
+            .entry_points
+            .iter()
+            .find(|entry| entry.address == 0x1008)
+            .expect("extra root is an entry point");
+        assert_eq!(entry.labels, vec!["extra-root".to_owned()]);
+
+        let misaligned = discover_elf_with_discovery_and_relocated(
+            &image,
+            &file_bytes,
+            AnalysisLimits::default(),
+            &[],
+            &[0x1002],
+        );
+        assert!(matches!(
+            misaligned,
+            Err(AnalysisError::MisalignedExtraRoot(0x1002))
+        ));
     }
 
     #[test]

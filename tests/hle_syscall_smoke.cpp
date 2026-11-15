@@ -910,6 +910,28 @@ int test_sif_get_reg_via_dispatch() {
     return 0;
 }
 
+int test_deci2_call_reports_no_deci2_device() {
+    EeState state{};
+    state.hle.syscall_enabled = true;
+    state.pc = 0xE400U; // fixture: syscall; jr ra — $v0 keeps the service result
+    state.gpr[3].low = 0x7CU; // Deci2Call (__NR_Deci2Call, ps2sdk syscallnr.h)
+    state.gpr[4].low = 1U;    // sceDeci2Open's function number
+    state.gpr[5].low = 0x0093B440U; // args array (observed in the title probe)
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    const Status status = reps2::generated::execute_cfg(state, 16U);
+    if (status != Status::external_control_flow || state.pc != kUnreachableReturnPc) {
+        return 1093;
+    }
+    if (state.hle.syscall_handled_count != 1U || state.hle.last_syscall_number != 0x7CU) {
+        return 1094;
+    }
+    // REPS2 models no DECI2 device: the call must fail closed with the
+    // documented generic error, never a fabricated success.
+    if (state.gpr[2].low != 0xFFFF'FFFF'FFFF'FFFFU) return 1095; // DECI2_ERR_INVALID, sign-extended
+    return 0;
+}
+
 int test_sif_set_reg_writes_the_shared_register_file() {
     EeState state{};
     // Write a hardware register and read it back through sceSifGetReg.
@@ -4050,6 +4072,87 @@ int test_ncmd_read_serves_sectors_from_host_media() {
     return 0;
 }
 
+int test_rpc_call_end_function_runs_guest_callback() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.syscall_enabled = true;
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state); // sema 3 completes the call itself
+    // The producer semaphore the guest callback is expected to raise, standing
+    // in for libcdvd's nCmdSemaId: created with count 0, like the title's.
+    state.hle.semaphores[7].in_use = true;
+    state.hle.semaphores[7].count = 0;
+    state.hle.semaphores[7].max_count = 1;
+    ++state.hle.semaphore_count;
+    if (!reps2::runtime::register_ee_sif_rpc_server(
+            state, kRpcTestServerSid, 0U, &serve_test_server)) {
+        return 1080;
+    }
+
+    // M_NOWAIT call with the client's end function installed (ADR 0135 shape).
+    store_rpc_call_request(ram, kRpcTestServerSid, 3U, 4U, 4U);
+    store_word(ram, kRpcCallPacket + 0x30U, 0U);  // rmode = M_NOWAIT
+    store_word(ram, kRpcClient + 0x1CU, 0xE800U); // end_function
+    store_word(ram, kRpcClient + 0x20U, 7U);      // end_param -> semaphore id
+    store_word(ram, kRpcPayload, 41U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1081;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 1082;
+    // The reply alone does not raise semaphore 7 — only the guest callback does.
+    if (state.hle.semaphores[7].count != 0) return 1083;
+
+    // Resume at a PC with no translated block. The pending end function runs
+    // first with end_param in $a0, returns through the dispatcher sentinel, and
+    // the caller context saved at entry is restored before the fetch fails.
+    state.pc = kUnreachableReturnPc;
+    state.gpr[3].low = 0x55U; // callback sets $v1; the caller value must return
+    state.gpr[4].low = 0x66U; // end_param is passed in $a0, then restored
+    const Status status = reps2::generated::execute_cfg(state, 64U);
+    if (status != Status::external_control_flow) return 1084;
+    if (state.pc != kUnreachableReturnPc) return 1085;
+    if (state.hle.semaphores[7].count != 1) return 1086;
+    if (state.gpr[3].low != 0x55U || state.gpr[4].low != 0x66U) return 1087;
+    return 0;
+}
+
+int test_rpc_call_end_function_refuses_an_unusable_address() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+    state.hle.semaphores[7].in_use = true;
+    state.hle.semaphores[7].max_count = 1;
+    ++state.hle.semaphore_count;
+    if (!reps2::runtime::register_ee_sif_rpc_server(
+            state, kRpcTestServerSid, 0U, &serve_test_server)) {
+        return 1088;
+    }
+
+    // A misaligned callback address is not executable guest code: the reply is
+    // still delivered, but no callback is queued and nothing is fabricated.
+    store_rpc_call_request(ram, kRpcTestServerSid, 3U, 4U, 4U);
+    store_word(ram, kRpcCallPacket + 0x30U, 0U);
+    store_word(ram, kRpcClient + 0x1CU, 0xE802U); // misaligned
+    store_word(ram, kRpcClient + 0x20U, 7U);
+    store_word(ram, kRpcPayload, 41U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1089;
+    }
+    if (state.hle.semaphores[7].count != 0) return 1090;
+    state.pc = kUnreachableReturnPc;
+    if (reps2::generated::execute_cfg(state, 64U) != Status::external_control_flow) return 1091;
+    if (state.hle.semaphores[7].count != 0) return 1092;
+    return 0;
+}
+
 int test_iop_reset_rearms_the_handshake_and_completes_the_boot() {
     SifWindow ram{};
     EeState state{};
@@ -4155,6 +4258,7 @@ int main() {
         {"sif get reg stops on an unmodelled register",
          &test_sif_get_reg_stops_on_an_unmodelled_register},
         {"sif get reg via dispatch", &test_sif_get_reg_via_dispatch},
+        {"deci2 call reports no deci2 device", &test_deci2_call_reports_no_deci2_device},
         {"sif set reg writes the shared register file",
          &test_sif_set_reg_writes_the_shared_register_file},
         {"sif set reg stops on an unmodelled register",
@@ -4262,6 +4366,10 @@ int main() {
          &test_ncmd_diskready_answers_from_media_presence},
         {"ncmd read serves 2048-byte sectors from host media",
          &test_ncmd_read_serves_sectors_from_host_media},
+        {"sif rpc call end function runs the guest callback",
+         &test_rpc_call_end_function_runs_guest_callback},
+        {"sif rpc call end function refuses an unusable address",
+         &test_rpc_call_end_function_refuses_an_unusable_address},
         {"boot environment registers the cdvd init server",
          &test_boot_environment_registers_the_cdvd_init_server},
         {"iop reset re-arms the handshake and completes the boot",

@@ -9,11 +9,11 @@ The CLI is the developer and automation interface. This reference covers the com
     reps2 disc-info <disc-image.iso>
     reps2 add-game <disc-image.iso> [--library <directory>]
     reps2 extract-boot-elf <disc-image.iso> <output.elf>
-    reps2 recompile-iso <disc-image.iso> <new-output-directory> [--discover] [--tu-count N] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE]... [--max-blocks N] [--max-instructions N] [--max-roots N]
+    reps2 recompile-iso <disc-image.iso> <new-output-directory> [--discover] [--tu-count N] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE]... [--extra-root PC]... [--max-blocks N] [--max-instructions N] [--max-roots N]
     reps2 elf-info <elf-file>
     reps2 analyze-elf <elf-file> [--discover] [--max-blocks N] [--max-instructions N] [--max-roots N]
     reps2 profile-elf <elf-file>
-    reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--parent-iso <disc.iso>] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE]... [--max-blocks N] [--max-instructions N] [--max-roots N]
+    reps2 recompile-elf <input-elf> <output.cpp> [--discover] [--tu-count N] [--native-build] [--parent-iso <disc.iso>] [--probe-budget N] [--hle-syscalls] [--relocated-code DEST:SOURCE:SIZE]... [--extra-root PC]... [--max-blocks N] [--max-instructions N] [--max-roots N]
     reps2 decode <instruction-word-hex> [pc-hex]
     reps2 compile-words <output.cpp> <base-pc-hex> <instruction-word-hex>...
 
@@ -180,7 +180,7 @@ Direct branches, J/JAL, JR/JALR and the supported REGIMM branches are represente
 
 ### Discovery and translation units
 
-With `--discover`, the same translation starts from the discovered candidate roots as well; stripping retail binaries yields thousands of candidates and a correspondingly large CFG. Every block is emitted as its own `block_0xXXXXXXXX` function dispatched through a sorted table. `--tu-count N` writes the dispatcher to the requested output and N block parts beside it as `<stem>.partNNNN.cpp` (stale parts from an earlier run are removed); the default of 1 keeps a single self-contained file. On Black/USA, `--discover --tu-count 8` produces a 15.84 MiB dispatcher plus eight 17.89-23.87 MiB parts that compile and link with MSVC `/O2 /W4 /permissive-` in about 149 s sequentially with zero warnings.
+With `--discover`, the same translation starts from the discovered candidate roots as well; stripping retail binaries yields thousands of candidates and a correspondingly large CFG. Every block is emitted as its own `block_0xXXXXXXXX` function dispatched through a sorted table. `--tu-count N` writes the dispatcher to the requested output and N block parts beside it as `<stem>.partNNNN.cpp` (stale parts from an earlier run are removed); the default of 1 keeps a single self-contained file. On Black/USA, `--discover --tu-count 8` produces a 15.84 MiB dispatcher plus eight 17.89-23.87 MiB parts that compile and link with MSVC `/O2 /W4 /permissive-` in about 149 s sequentially with zero warnings. `--extra-root PC` (repeatable) adds a caller-published address as an authoritative analysis root — for code that discovery cannot reach, such as an observed SIF RPC end-function address — and records it in the manifest's `extra_roots` array; a misaligned or unmapped root fails the analysis instead of being skipped.
 
 ### Build manifest
 

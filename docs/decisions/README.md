@@ -134,3 +134,7 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0131](0131-ee-timer3-compare-register.md) | EE Timer 3 compare register and run-report timer state | Accepted |
 | [0132](0132-r5900-madd-maddu.md) | R5900 MADD/MADDU HI/LO accumulation decode, lift, and AOT lowering | Accepted |
 | [0133](0133-six-layer-product-architecture.md) | Six-layer product architecture and repository restructuring | Accepted |
+| [0134](0134-ee-timer3-count-storage.md) | EE Timer 3 count as a 16-bit storage register | Accepted |
+| [0135](0135-cdvd-ncmd-read-hle.md) | Serve CD_NCMD_READ from the host media source; NOWAIT+end-function RPC_END | Accepted |
+| [0136](0136-guest-rpc-end-callback.md) | Run SIF RPC end functions as guest callbacks through the dispatcher; `--extra-root` | Proposed |
+| [0137](0137-deci2-call-fail-closed.md) | Deci2Call (0x7C) fails closed with DECI2_ERR_INVALID; no DECI2 device modelled | Proposed |

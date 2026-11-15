@@ -518,6 +518,12 @@ void print_error(
     std::cout << "],\"timer3\":{\"mode\":" << state.memory.timer3_mode
               << ",\"compare\":" << state.memory.timer3_compare
               << ",\"count\":" << state.memory.timer3_count
+              << "},\"callbacks\":{\"requested\":" << state.hle.guest_callbacks_requested
+              << ",\"started\":" << state.hle.guest_callbacks_started
+              << ",\"completed\":" << state.hle.guest_callbacks_completed
+              << ",\"refused\":" << state.hle.guest_callbacks_refused
+              << ",\"last_address\":" << state.hle.last_guest_callback_address
+              << ",\"last_parameter\":" << state.hle.last_guest_callback_parameter
               << "},\"sif\":{\"rpc_bind_sid\":" << state.hle.sif_cmd.last_rpc_bind_sid
               << ",\"rpc_bind_server\":" << state.hle.sif_cmd.last_rpc_bind_server_sid
               << ",\"rpc_bind_had\":" << (state.hle.sif_cmd.last_rpc_bind_had_server ? 1U : 0U)

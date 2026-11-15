@@ -60,6 +60,11 @@ inline constexpr std::uint32_t kEeSyscallSifSetDChain = 0x78U;
 inline constexpr std::uint32_t kEeSyscallSifStopDma = 0x6BU;
 inline constexpr std::uint32_t kEeSyscallSifSetReg = 0x79U;
 inline constexpr std::uint32_t kEeSyscallSifGetReg = 0x7AU;
+inline constexpr std::uint32_t kEeSyscallDeci2Call = 0x7CU; // __NR_Deci2Call (ps2sdk syscallnr.h)
+// DECI2_ERR_INVALID from ps2sdk ee/kernel/include/deci2.h: the documented
+// generic DECI2 failure. REPS2 models no DECI2 device, so Deci2Call reports
+// this instead of a fabricated success.
+inline constexpr std::int32_t kEeDeci2ErrInvalid = -1;
 inline constexpr std::uint32_t kEeSyscallFlushCache = 0x64U;
 inline constexpr std::uint32_t kEeSyscallFindAddress = 0x83U;
 
@@ -1470,6 +1475,9 @@ inline constexpr std::uint32_t kEeSifRpcClientSemaIdOffset = 0x08U;
 inline constexpr std::uint32_t kEeSifRpcClientBufOffset = 0x14U;
 inline constexpr std::uint32_t kEeSifRpcClientCbufOffset = 0x18U;
 inline constexpr std::uint32_t kEeSifRpcClientEndFunctionOffset = 0x1CU;
+// SifRpcClientData_t.end_param follows end_function; _request_end passes it as
+// the end function's only argument (PS2SDK common/include/sifrpc-common.h).
+inline constexpr std::uint32_t kEeSifRpcClientEndParamOffset = 0x20U;
 inline constexpr std::uint32_t kEeSifRpcClientServerOffset = 0x24U;
 // `PACKET_F_ALLOC` from PS2SDK ee/kernel/src/sifrpc.c.
 inline constexpr std::uint32_t kEeSifRpcPacketAllocFlag = 0x01U;
@@ -1494,6 +1502,86 @@ struct SifCmdHeader {
     case kEeSifCmdRpcRdata:    return "SIF_CMD_RPC_RDATA";
     }
     return "SIF_CMD_UNKNOWN";
+}
+
+// Queue a SIF RPC end function for the dispatcher (ADR 0136). The kernel calls
+// the client's end function in interrupt context; REPS2 runs replies
+// synchronously, so the callback is queued and entered by the generated
+// dispatcher before the interrupted guest continues. An unusable address or a
+// full queue refuses the callback and records it rather than executing
+// something the guest did not publish.
+[[nodiscard]] inline bool request_ee_guest_callback(
+    EeState& state,
+    std::uint32_t address,
+    std::uint32_t parameter
+) noexcept {
+    auto& hle = state.hle;
+    ++hle.guest_callbacks_requested;
+    if (address == 0U
+        || (address & 0x3U) != 0U
+        || address == kEeSyscallHandlerReturnPc
+        || address == 0xFFFF'FFFFU
+        || hle.pending_guest_callback_count >= kEeMaxPendingGuestCallbacks) {
+        ++hle.guest_callbacks_refused;
+        return false;
+    }
+    const std::size_t index =
+        (hle.pending_guest_callback_head + hle.pending_guest_callback_count)
+        % kEeMaxPendingGuestCallbacks;
+    hle.pending_guest_callbacks[index] = EeGuestCallback{address, parameter};
+    ++hle.pending_guest_callback_count;
+    return true;
+}
+
+[[nodiscard]] inline bool ee_guest_callback_pending(const EeState& state) noexcept {
+    return state.hle.pending_guest_callback_count != 0U;
+}
+
+// Enter the oldest queued callback through the dispatcher. The caller context
+// is saved like a syscall handler's, but its return path restores everything:
+// _request_end runs in interrupt context, so register changes must not leak
+// into the interrupted guest. The callback receives end_param in $a0 and
+// returns through $ra to the dispatcher sentinel.
+[[nodiscard]] inline Status enter_ee_guest_callback(EeState& state) noexcept {
+    auto& hle = state.hle;
+    if (hle.pending_guest_callback_count == 0U) {
+        return Status::ok;
+    }
+    if (hle.syscall_handler_depth >= kEeMaxSyscallHandlerDepth) {
+        ++hle.guest_callbacks_refused;
+        return Status::syscall_handler_overflow;
+    }
+    const EeGuestCallback callback =
+        hle.pending_guest_callbacks[hle.pending_guest_callback_head];
+    hle.pending_guest_callback_head =
+        (hle.pending_guest_callback_head + 1U) % kEeMaxPendingGuestCallbacks;
+    --hle.pending_guest_callback_count;
+
+    EeSyscallHandlerFrame& frame = hle.syscall_handler_frames[hle.syscall_handler_depth];
+    frame.saved_gpr = state.gpr;
+    frame.saved_hi = state.hi;
+    frame.saved_lo = state.lo;
+    frame.saved_hi1 = state.hi1;
+    frame.saved_lo1 = state.lo1;
+    frame.saved_fpr = state.fpr;
+    frame.saved_acc = state.acc;
+    frame.saved_fcsr = state.fcsr;
+    frame.saved_sa = state.sa;
+    frame.saved_vu0 = state.vu0;
+    frame.saved_cop0 = state.cop0;
+    frame.handler_address = callback.address;
+    frame.resume_pc = state.pc;
+    frame.slot = 0U;
+    frame.is_guest_callback = true;
+
+    ++hle.syscall_handler_depth;
+    ++hle.guest_callbacks_started;
+    hle.last_guest_callback_address = callback.address;
+    hle.last_guest_callback_parameter = callback.parameter;
+    state.gpr[4].low = sign_extend_word(callback.parameter);
+    state.gpr[31].low = sign_extend_word(kEeSyscallHandlerReturnPc);
+    state.pc = callback.address;
+    return Status::ok;
 }
 
 // EE-side handling of SIF_CMD_RPC_END, the reply an IOP RPC server sends when
@@ -1527,6 +1615,20 @@ struct SifCmdHeader {
             && store_u32(state.memory, cd + kEeSifRpcClientBufOffset, buf) == Status::ok
             && store_u32(state.memory, cd + kEeSifRpcClientCbufOffset, cbuf) == Status::ok) {
             state.hle.sif_cmd.last_rpc_bind_cd = cd;
+        }
+    }
+
+    // A call reply runs the client's end function before the caller resumes
+    // (PS2SDK `_request_end`), passing end_param as its only argument. The
+    // callback is translated guest code, so it is queued for the dispatcher
+    // rather than executed here. See ADR 0136.
+    if (end_cid == kEeSifCmdRpcCall) {
+        std::uint32_t end_function{}, end_param{};
+        if (load_u32(state.memory, cd + kEeSifRpcClientEndFunctionOffset, end_function) == Status::ok
+            && load_u32(state.memory, cd + kEeSifRpcClientEndParamOffset, end_param) == Status::ok
+            && end_function != 0U) {
+            state.hle.sif_cmd.last_rpc_call_end_function = end_function;
+            (void)request_ee_guest_callback(state, end_function, end_param);
         }
     }
 
@@ -2371,6 +2473,17 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
 // kEeSyscallTableBase, so a window covering that table reports the slots the
 // guest registered. The observed Downhill Domination and Black call sites pass
 // a kernel window (0x80000000..0x80080000) and a code address as the target.
+// Deci2Call (0x7C): the DECI2 debug protocol call. REPS2 models no DECI2
+// device, so every call returns DECI2_ERR_INVALID (-1) in $v0 — the
+// documented generic failure (ps2sdk deci2.h) — and never a fabricated
+// success. The observed Downhill caller at 0x0025F400 issues
+// Deci2Call(1, args) (sceDeci2Open) and ignores the result. ADR 0137.
+[[nodiscard]] inline Status hle_deci2_call(EeState& state) noexcept {
+    state.gpr[kEeSyscallResultRegister].low =
+        sign_extend_word(static_cast<std::uint32_t>(kEeDeci2ErrInvalid));
+    return Status::ok;
+}
+
 [[nodiscard]] inline Status hle_find_address(EeState& state) noexcept {
     const std::uint32_t table_start = ee_syscall_argument(state, 0);
     const std::uint32_t table_end = ee_syscall_argument(state, 1);
@@ -2480,12 +2593,15 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     }
     const EeSyscallHandlerFrame& frame =
         state.hle.syscall_handler_frames[state.hle.syscall_handler_depth - 1U];
+    const bool guest_callback = frame.is_guest_callback;
     const Gpr128 result = state.gpr[kEeSyscallResultRegister];
     const std::uint32_t resume_pc = frame.resume_pc;
 
     state.gpr = frame.saved_gpr;
     state.gpr[0] = {};
-    state.gpr[kEeSyscallResultRegister] = result;
+    if (!guest_callback) {
+        state.gpr[kEeSyscallResultRegister] = result;
+    }
     state.hi = frame.saved_hi;
     state.lo = frame.saved_lo;
     state.hi1 = frame.saved_hi1;
@@ -2498,11 +2614,17 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     state.cop0 = frame.saved_cop0;
 
     --state.hle.syscall_handler_depth;
-    ++state.hle.guest_handler_returns;
-    finish_ee_syscall_memory_trace(state);
-    state.hle.last_syscall_v0_after =
-        static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
-    state.hle.last_syscall_resume_pc = resume_pc;
+    if (guest_callback) {
+        // _request_end runs in interrupt context: the callback's result and
+        // register changes are not the interrupted caller's.
+        ++state.hle.guest_callbacks_completed;
+    } else {
+        ++state.hle.guest_handler_returns;
+        finish_ee_syscall_memory_trace(state);
+        state.hle.last_syscall_v0_after =
+            static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
+        state.hle.last_syscall_resume_pc = resume_pc;
+    }
     state.pc = resume_pc;
     return Status::ok;
 }
@@ -2537,6 +2659,7 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallSifSetDChain, "SifSetDChain", &hle_sif_set_d_chain},
     {kEeSyscallSifSetReg, "SifSetReg", &hle_sif_set_reg},
     {kEeSyscallSifGetReg, "SifGetReg", &hle_sif_get_reg},
+    {kEeSyscallDeci2Call, "Deci2Call", &hle_deci2_call},
     {kEeSyscallFindAddress, "FindAddress", &hle_find_address},
 };
 inline constexpr std::size_t kEeSyscallServiceCount =
