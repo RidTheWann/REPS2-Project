@@ -574,6 +574,24 @@ void print_error(
               << ",\"mtap_port\":" << state.hle.sif_cmd.last_mtap_port
               << ",\"mtap_port_result\":" << state.hle.sif_cmd.last_mtap_result
               << ",\"mtap_port_replied\":" << (state.hle.sif_cmd.last_mtap_port_replied ? 1U : 0U)
+              << ",\"pad_calls\":" << state.hle.sif_cmd.pad_call_count
+              << ",\"pad_number\":" << state.hle.sif_cmd.last_pad_number
+              << ",\"pad_ext_calls\":" << state.hle.sif_cmd.pad_ext_calls
+              << ",\"pad_ext_number\":" << state.hle.sif_cmd.last_pad_ext_number
+              << ",\"pad_version_calls\":" << state.hle.sif_cmd.pad_version_calls
+              << ",\"pad_version_replies\":" << state.hle.sif_cmd.pad_version_replies
+              << ",\"pad_version\":" << state.hle.sif_cmd.last_pad_version
+              << ",\"pad_version_replied\":" << (state.hle.sif_cmd.last_pad_version_replied ? 1U : 0U)
+              << ",\"pad_init_calls\":" << state.hle.sif_cmd.pad_init_calls
+              << ",\"pad_init_replies\":" << state.hle.sif_cmd.pad_init_replies
+              << ",\"pad_init_result\":" << state.hle.sif_cmd.last_pad_init_result
+              << ",\"pad_init_replied\":" << (state.hle.sif_cmd.last_pad_init_replied ? 1U : 0U)
+              << ",\"pad_open_calls\":" << state.hle.sif_cmd.pad_open_calls
+              << ",\"pad_open_replies\":" << state.hle.sif_cmd.pad_open_replies
+              << ",\"pad_port\":" << state.hle.sif_cmd.last_pad_port
+              << ",\"pad_slot\":" << state.hle.sif_cmd.last_pad_slot
+              << ",\"pad_handle\":" << state.hle.sif_cmd.last_pad_handle
+              << ",\"pad_open_replied\":" << (state.hle.sif_cmd.last_pad_open_replied ? 1U : 0U)
               << "}},\"runs\":[";
     for (std::size_t index = 0; index < runs.size(); ++index) {
         if (index != 0U) std::cout << ',';

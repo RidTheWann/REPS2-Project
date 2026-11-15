@@ -1876,6 +1876,30 @@ inline constexpr std::uint32_t kEeMtapModVersionWord = 0x0300U;
 // controllers are connected through it. The 128-byte (`0x80`) request/reply
 // size is `sizeof(rpc_buffer)` in Sony `libmtap`. ADR 0147.
 inline constexpr std::uint32_t kEeMtapPortCommand = 1U;
+// PS2SDK `ee/rpc/pad/src/libpad.c`: the pad servers the client binds —
+// PAD_BIND_RPC_ID1_NEW 0x80000100 and PAD_BIND_RPC_ID2_NEW 0x80000101. The
+// resident IOP `padman` registers both (`iop/input/padman/src/rpcserver.c`),
+// so the binds succeed on real hardware; the title's `scePadInit` retries
+// until both answer (observed Downhill Domination 0x00244DB8..0x00244E54).
+inline constexpr std::uint32_t kEeSifServerPad1 = 0x8000'0100U;
+inline constexpr std::uint32_t kEeSifServerPad2 = 0x8000'0101U;
+// Every padman RPC call uses function 1; the command travels in request word 0
+// and the result in reply word 3 (`data[3] = ...` in `rpcserver.c`).
+inline constexpr std::uint32_t kEePadCommand = 1U;
+inline constexpr std::uint32_t kEePadCmdOpen = 0x01U;
+inline constexpr std::uint32_t kEePadCmdInit = 0x10U;
+inline constexpr std::uint32_t kEePadCmdGetModVer = 0x12U;
+// Retail SDK PADMAN module version 0x04,0x22 (ps2sdk `iop/input/padman/src/
+// freepad.c` comment: "last sdk 3.1.0 and sdk 3.0.3 has PADMAN module version
+// 0x04,0x22"); `padGetModVersion` returns `_irx_id.v` and the title checks
+// `(version >> 8) == 4`. The open-source ps2sdk padman reports 0x0306 and the
+// retail BOOTROM XPADMAN string stays unknown. ADR 0148.
+inline constexpr std::uint32_t kEePadModVersionWord = 0x0422U;
+// padman's success result: `padInit` returns 1 on success (ps2sdk
+// `padInit.c`) and `padPortOpen` returns 1 once the port/slot threads start —
+// even with no pad attached, since absence is reported asynchronously through
+// INFO_MODE, which REPS2 leaves fail-closed. ADR 0148.
+inline constexpr std::uint32_t kEePadSuccessResult = 1U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2343,6 +2367,94 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     return true;
 }
 
+// Pad RPC server 0x80000100 (PS2SDK `PAD_BIND_RPC_ID1_NEW`, served by the
+// resident IOP `padman`). Every call uses function 1, carries the command in
+// request word 0 and the result in reply word 3 (`data[3] = ...` in
+// `rpcserver.c`). Modelled commands: GET_MODVER (0x12) answers the retail
+// PADMAN module version word 0x0422, INIT (0x10) answers 1 (`padInit` returns
+// 1 on success), and OPEN (0x01) answers 1 (`padPortOpen` returns 1 once the
+// port/slot is opened — even with no pad attached, since pad absence is
+// reported asynchronously via INFO_MODE, which stays fail-closed here; REPS2
+// models no controller, and no pad data is ever fabricated). Any other
+// command is recorded and refused, so an unmodelled pad call leaves the
+// caller blocked. ADR 0148.
+[[nodiscard]] inline bool serve_ee_pad_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.pad_call_count;
+    sif.last_pad_number = call.rpc_number;
+    if (call.rpc_number != kEePadCommand) {
+        return false; // unmodelled pad function: no reply, caller stays blocked
+    }
+    if (call.recv_addr == 0U || call.recv_addr > 0xFFFF'FFF3U || call.recv_size < 16U) {
+        return false; // no room for reply word 3 (or word 3 would wrap past 4 GiB)
+    }
+    std::uint32_t command{};
+    if (call.send_size < 4U || load_u32(state.memory, call.send_addr, command) != Status::ok) {
+        return false; // the documented command word was not transferred
+    }
+    const std::uint32_t result_addr = call.recv_addr + 0xCU; // reply word 3
+    switch (command) {
+    case kEePadCmdGetModVer: {
+        if (store_u32(state.memory, result_addr, kEePadModVersionWord) != Status::ok) {
+            return false; // reply word 3 not writable: no reply, no RPC_END
+        }
+        ++sif.pad_version_calls;
+        sif.last_pad_version = kEePadModVersionWord;
+        sif.last_pad_version_replied = true;
+        ++sif.pad_version_replies;
+        return true;
+    }
+    case kEePadCmdInit: {
+        if (store_u32(state.memory, result_addr, kEePadSuccessResult) != Status::ok) {
+            return false; // reply word 3 not writable: no reply, no RPC_END
+        }
+        ++sif.pad_init_calls;
+        sif.last_pad_init_result = kEePadSuccessResult;
+        sif.last_pad_init_replied = true;
+        ++sif.pad_init_replies;
+        return true;
+    }
+    case kEePadCmdOpen: {
+        std::uint32_t port{};
+        std::uint32_t slot{};
+        if (call.send_size < 12U
+            || load_u32(state.memory, call.send_addr + 4U, port) != Status::ok
+            || load_u32(state.memory, call.send_addr + 8U, slot) != Status::ok) {
+            return false; // the port/slot words were not transferred
+        }
+        if (store_u32(state.memory, result_addr, kEePadSuccessResult) != Status::ok) {
+            return false; // padPortOpen success; pad absence is async and unmodelled
+        }
+        ++sif.pad_open_calls;
+        sif.last_pad_port = port;
+        sif.last_pad_slot = slot;
+        sif.last_pad_handle = kEePadSuccessResult;
+        sif.last_pad_open_replied = true;
+        ++sif.pad_open_replies;
+        return true;
+    }
+    default:
+        return false; // unmodelled pad command: no reply, caller stays blocked
+    }
+}
+
+// Pad extension server 0x80000101 (PS2SDK `PAD_BIND_RPC_ID2_NEW`, the padman
+// `RpcServerExt`). Registered so the title's second bind succeeds exactly as
+// on the resident IOP `padman`; every call is recorded and refused until a
+// command is modelled. ADR 0148.
+[[nodiscard]] inline bool serve_ee_pad_ext_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.pad_ext_calls;
+    sif.last_pad_ext_number = call.rpc_number;
+    return false;
+}
+
 // Answer an EE RPC bind the way the resident IOP SIFRPC module does.
 //
 // PS2SDK `iop/system/sifcmd/src/sifrpc.c` `_request_bind` looks the sid up with
@@ -2734,6 +2846,15 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
         state, kEeSifServerMtapSony4, 0U, &serve_ee_mtap_call);
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerMtapSony5, 0U, &serve_ee_mtap_version_call);
+    // The pad servers (ADR 0148): registered so the title's `scePadInit` binds
+    // succeed like on the resident IOP `padman`. 0x80000100 answers the
+    // GET_MODVER query with the retail PADMAN word 0x0422, INIT with 1
+    // (`padInit` success) and OPEN with 1 (`padPortOpen` success; pad absence
+    // is async and unmodelled); 0x80000101 records and refuses every call.
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerPad1, 0U, &serve_ee_pad_call);
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerPad2, 0U, &serve_ee_pad_ext_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation

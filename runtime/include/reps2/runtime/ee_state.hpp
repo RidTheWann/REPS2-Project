@@ -938,6 +938,31 @@ struct EeSifCmdState {
     std::uint32_t last_mtap_port{};
     std::uint32_t last_mtap_result{};
     bool last_mtap_port_replied{};
+    // Pad RPC servers (0x80000100/0x80000101, PS2SDK `libpad`
+    // PAD_BIND_RPC_ID1/2_NEW): the title's `scePadInit` retries both binds until
+    // a server answers; both are registered like on the resident IOP `padman`.
+    // Function 1 carries the command in request word 0 and the result in reply
+    // word 3. INIT/OPEN answer 1, padman's success result (`padInit`/
+    // `padPortOpen`); no controller is modelled and pad absence is reported
+    // asynchronously through commands that stay fail-closed. ADR 0148.
+    std::uint32_t pad_call_count{};
+    std::uint32_t last_pad_number{};
+    std::uint32_t pad_ext_calls{};
+    std::uint32_t last_pad_ext_number{};
+    std::uint32_t pad_version_calls{};
+    std::uint32_t pad_version_replies{};
+    std::uint32_t last_pad_version{};
+    bool last_pad_version_replied{};
+    std::uint32_t pad_init_calls{};
+    std::uint32_t pad_init_replies{};
+    std::uint32_t last_pad_init_result{};
+    bool last_pad_init_replied{};
+    std::uint32_t pad_open_calls{};
+    std::uint32_t pad_open_replies{};
+    std::uint32_t last_pad_port{};
+    std::uint32_t last_pad_slot{};
+    std::uint32_t last_pad_handle{};
+    bool last_pad_open_replied{};
 
     // SIF_CMD_RESET_CMD (0x80000003): the EE asked the IOP to reboot. The
     // resident HLE IOP re-arms its RPCINIT handshake and records the request;

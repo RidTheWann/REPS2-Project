@@ -148,3 +148,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0145](0145-mtap-mod-version-query.md) | Serve the multitap module-version query (0x80000905, function 1) with the `libmtap` version word 0x0300 | Proposed |
 | [0146](0146-mips-abi2-compatibility-diagnostic.md) | Classify the alternate MIPS n32 ABI for PS2 compatibility | Proposed |
 | [0147](0147-mtap-port-and-connection-bodies.md) | Serve the multitap port-open/close/connection commands (0x80000901–0x80000903) as "no adapter" (result 0) | Proposed |
+| [0148](0148-pad-rpc-servers.md) | Serve the pad RPC servers (0x80000100/0x80000101): GET_MODVER with the retail PADMAN word 0x0422, INIT/OPEN with padman's success result 1 | Proposed |

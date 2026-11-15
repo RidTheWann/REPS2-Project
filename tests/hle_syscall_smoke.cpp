@@ -4573,6 +4573,256 @@ int test_mtap_port_open_refuses_a_wrapping_reply_buffer() {
     return 0;
 }
 
+int test_boot_environment_registers_the_pad_servers() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerPad1) == nullptr) return 8300;
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerPad2) == nullptr) return 8301;
+    return 0;
+}
+
+int test_bind_to_the_pad_server_reaches_a_registered_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_bind_request(ram, reps2::runtime::kEeSifServerPad1);
+    if (reps2::runtime::process_sif_command(state, kRpcBindPacket) != Status::ok) return 8302;
+    if (!state.hle.sif_cmd.last_rpc_bind_had_server) return 8303;
+    if (state.hle.sif_cmd.last_rpc_bind_server_sid
+        != reps2::runtime::kEeSifServerPad1) return 8304;
+    if (load_word(ram, kRpcClient + 0x24U) != reps2::runtime::kEeSifServerPad1) return 8305;
+    return 0;
+}
+
+int test_pad_mod_version_query_is_served() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // padGetModVersion(): function 1 on 0x80000100, command PAD_RPCCMD_GET_MODVER
+    // (0x12) in request word 0, result read from reply word 3 (ps2sdk padman
+    // `RpcGetModVersion` writes `data[3]`). The retail PADMAN version word is
+    // 0x0422; reply word 0 is the caller's own command echo and stays untouched.
+    // ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad1, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0x12U);              // command: GET_MODVER
+    store_word(ram, kRpcReply, 0xDEAD'BEEFU);        // reply word 0 (command echo)
+    store_word(ram, kRpcReply + 0xCU, 0xA5A5'A5A5U);  // reply word 3 (result)
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8310;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_call_count != 1U || sif.pad_version_calls != 1U || sif.pad_version_replies != 1U)
+        return 8311;
+    if (!sif.last_pad_version_replied || sif.last_pad_version != 0x0422U) return 8312;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 8313;
+    if (load_word(ram, kRpcReply) != 0xDEAD'BEEFU) return 8314;
+    if (load_word(ram, kRpcReply + 0xCU) != 0x0422U) return 8315;
+    if (state.hle.semaphores[3].count == 0) return 8316;
+    return 0;
+}
+
+int test_pad_init_answers_success() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // padPortInit -> PAD_RPCCMD_INIT (0x10): `padInit` returns 1 on success, and
+    // that result travels in reply word 3. ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad1, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0x10U);             // command: INIT
+    store_word(ram, kRpcReply + 0xCU, 0xA5A5'A5A5U); // reply word 3 (result)
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8320;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_init_calls != 1U || sif.pad_init_replies != 1U) return 8321;
+    if (!sif.last_pad_init_replied || sif.last_pad_init_result != 1U) return 8322;
+    if (load_word(ram, kRpcReply + 0xCU) != 1U) return 8323;
+    if (state.hle.semaphores[3].count == 0) return 8324;
+    return 0;
+}
+
+int test_pad_open_answers_padman_success() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // scePadPortOpen(1, 0): function 1 on 0x80000100, command PAD_RPCCMD_OPEN
+    // (0x01) in request word 0, port in word 1, slot in word 2; the result is
+    // reply word 3. `padPortOpen` returns 1 once the port/slot is opened, even
+    // with no pad attached (absence is async via INFO_MODE, which REPS2 leaves
+    // fail-closed), so the honest answer is 1 — no controller is fabricated.
+    // ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad1, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0x01U);             // command: OPEN
+    store_word(ram, kRpcPayload + 4U, 1U);           // port 1
+    store_word(ram, kRpcPayload + 8U, 0U);           // slot 0
+    store_word(ram, kRpcReply + 0xCU, 0xA5A5'A5A5U); // reply word 3 (result)
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8330;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_open_calls != 1U || sif.pad_open_replies != 1U) return 8331;
+    if (!sif.last_pad_open_replied || sif.last_pad_handle != 1U) return 8332;
+    if (sif.last_pad_port != 1U || sif.last_pad_slot != 0U) return 8333;
+    if (load_word(ram, kRpcReply + 0xCU) != 1U) return 8334;
+    if (state.hle.semaphores[3].count == 0) return 8335;
+    return 0;
+}
+
+int test_pad_command_refuses_unmodelled_commands() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Only OPEN/INIT/GET_MODVER are modelled; another command is recorded and
+    // refused so the caller stays blocked. ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad1, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0x02U);             // unmodelled command
+    store_word(ram, kRpcReply + 0xCU, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8340;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_call_count != 1U || sif.pad_version_replies != 0U || sif.pad_init_replies != 0U
+        || sif.pad_open_replies != 0U) return 8341;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 8342;
+    if (load_word(ram, kRpcReply + 0xCU) != 0xA5A5'A5A5U) return 8343;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8344;
+    if (state.hle.semaphores[3].count != 0) return 8345;
+    return 0;
+}
+
+int test_pad_call_refuses_other_functions() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Every padman call uses function 1; another function is refused. ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad1, 2U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0x12U);
+    store_word(ram, kRpcReply + 0xCU, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8350;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_call_count != 1U || sif.last_pad_number != 2U) return 8351;
+    if (sif.pad_version_replies != 0U || sif.last_rpc_call_replied) return 8352;
+    if (load_word(ram, kRpcReply + 0xCU) != 0xA5A5'A5A5U) return 8353;
+    if (state.hle.semaphores[3].count != 0) return 8354;
+    return 0;
+}
+
+int test_pad_open_refuses_without_a_request_word() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // No command word transferred: refused rather than answered with a guessed
+    // command. ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad1, 1U, 0U, 0x80U);
+    store_word(ram, kRpcReply + 0xCU, 0xA5A5'A5A5U);
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, nullptr) != Status::ok) {
+        return 8360;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_call_count != 1U || sif.pad_open_replies != 0U) return 8361;
+    if (load_word(ram, kRpcReply + 0xCU) != 0xA5A5'A5A5U) return 8362;
+    if (state.hle.semaphores[3].count != 0) return 8363;
+    return 0;
+}
+
+int test_pad_open_refuses_a_wrapping_reply_buffer() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // A reply buffer at 0xFFFFFFF4 would make reply word 3 (recv_addr + 0xC)
+    // wrap to address 0. The handler must refuse instead of mutating RAM[0]:
+    // no reply, no RPC_END, no semaphore signal, and the word at address 0
+    // stays as set. ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad1, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcCallPacket + 0x28U, 0xFFFF'FFF4U); // recvbuf: word 3 wraps
+    store_word(ram, kRpcPayload, 0x01U);                   // command: OPEN
+    store_word(ram, kRpcPayload + 4U, 0U);                 // port 0
+    store_word(ram, kRpcPayload + 8U, 0U);                 // slot 0
+    store_word(ram, 0U, 0x5A5A'5A5AU);                     // RAM[0] sentinel
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8370;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_call_count != 1U || sif.pad_open_replies != 0U) return 8371;
+    if (sif.last_pad_open_replied || sif.last_rpc_call_replied || sif.rpc_call_replies != 0U)
+        return 8372;
+    if (load_word(ram, 0U) != 0x5A5A'5A5AU) return 8373; // RAM[0] must be untouched
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8374;
+    if (state.hle.semaphores[3].count != 0) return 8375;
+    return 0;
+}
+
+int test_pad_ext_server_calls_are_recorded_and_refused() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // The pad extension server 0x80000101 is registered so the bind succeeds,
+    // but no command is modelled: the call is recorded and refused. ADR 0148.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerPad2, 1U, 0x80U, 0x80U);
+    store_word(ram, kRpcPayload, 0x12U);
+    store_word(ram, kRpcReply + 0xCU, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x80U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8380;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.pad_ext_calls != 1U || sif.last_pad_ext_number != 1U) return 8381;
+    if (sif.pad_call_count != 0U || sif.last_rpc_call_replied || sif.rpc_call_replies != 0U)
+        return 8382;
+    if (load_word(ram, kRpcReply + 0xCU) != 0xA5A5'A5A5U) return 8383;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8384;
+    if (state.hle.semaphores[3].count != 0) return 8385;
+    return 0;
+}
+
 int test_sif_loadfile_get_version_refuses_without_a_reply_buffer() {
     SifWindow ram{};
     EeState state{};
@@ -5054,6 +5304,26 @@ int main() {
          &test_mtap_port_open_refuses_without_a_request_word},
         {"mtap port open refuses a wrapping reply buffer",
          &test_mtap_port_open_refuses_a_wrapping_reply_buffer},
+        {"boot environment registers the pad servers",
+         &test_boot_environment_registers_the_pad_servers},
+        {"bind to the pad server reaches a registered server",
+         &test_bind_to_the_pad_server_reaches_a_registered_server},
+        {"pad mod version query is served",
+         &test_pad_mod_version_query_is_served},
+        {"pad init answers success",
+         &test_pad_init_answers_success},
+        {"pad open answers padman success",
+         &test_pad_open_answers_padman_success},
+        {"pad command refuses unmodelled commands",
+         &test_pad_command_refuses_unmodelled_commands},
+        {"pad call refuses other functions",
+         &test_pad_call_refuses_other_functions},
+        {"pad open refuses without a request word",
+         &test_pad_open_refuses_without_a_request_word},
+        {"pad open refuses a wrapping reply buffer",
+         &test_pad_open_refuses_a_wrapping_reply_buffer},
+        {"pad ext server calls are recorded and refused",
+         &test_pad_ext_server_calls_are_recorded_and_refused},
         {"iso9660 resolves a disc path", &test_iso9660_resolves_a_disc_path},
         {"searchfile serves a file from host media",
          &test_searchfile_serves_a_file_from_host_media},
