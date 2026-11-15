@@ -518,6 +518,7 @@ void print_error(
     std::cout << "],\"timer3\":{\"mode\":" << state.memory.timer3_mode
               << ",\"compare\":" << state.memory.timer3_compare
               << ",\"count\":" << state.memory.timer3_count
+              << ",\"cycles\":" << state.memory.guest_bus_cycles
               << "},\"callbacks\":{\"requested\":" << state.hle.guest_callbacks_requested
               << ",\"started\":" << state.hle.guest_callbacks_started
               << ",\"completed\":" << state.hle.guest_callbacks_completed
@@ -549,7 +550,21 @@ void print_error(
               << ",\"ncmd_read_bytes\":" << state.hle.sif_cmd.last_ncmd_read_bytes
               << ",\"ncmd_read_replied\":" << (state.hle.sif_cmd.last_ncmd_read_replied ? 1U : 0U)
               << ",\"searchfile_calls\":" << state.hle.sif_cmd.searchfile_call_count
+              << ",\"searchfile_replies\":" << state.hle.sif_cmd.searchfile_replies
               << ",\"searchfile_number\":" << state.hle.sif_cmd.last_searchfile_number
+              << ",\"searchfile_send\":" << state.hle.sif_cmd.last_searchfile_send_size
+              << ",\"searchfile_found\":" << (state.hle.sif_cmd.last_searchfile_found ? 1U : 0U)
+              << ",\"searchfile_lsn\":" << state.hle.sif_cmd.last_searchfile_lsn
+              << ",\"searchfile_size\":" << state.hle.sif_cmd.last_searchfile_size
+              << ",\"searchfile_replied\":" << (state.hle.sif_cmd.last_searchfile_replied ? 1U : 0U)
+              << ",\"loadfile_calls\":" << state.hle.sif_cmd.loadfile_call_count
+              << ",\"loadfile_replies\":" << state.hle.sif_cmd.loadfile_replies
+              << ",\"loadfile_number\":" << state.hle.sif_cmd.last_loadfile_number
+              << ",\"loadfile_send\":" << state.hle.sif_cmd.last_loadfile_send_size
+              << ",\"loadfile_recv\":" << state.hle.sif_cmd.last_loadfile_recv_size
+              << ",\"loadfile_replied\":" << (state.hle.sif_cmd.last_loadfile_replied ? 1U : 0U)
+              << ",\"mtap_calls\":" << state.hle.sif_cmd.mtap_call_count
+              << ",\"mtap_number\":" << state.hle.sif_cmd.last_mtap_number
               << "}},\"runs\":[";
     for (std::size_t index = 0; index < runs.size(); ++index) {
         if (index != 0U) std::cout << ',';

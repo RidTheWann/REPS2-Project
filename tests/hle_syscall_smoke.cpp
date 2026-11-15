@@ -2385,6 +2385,69 @@ int test_timer3_mode_guard_register() {
     return 0;
 }
 
+int test_timer3_counter_progression_and_status_flags() {
+    SyscallTableWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    std::uint32_t value = 0U;
+
+    // CUE off: the counter never moves, whatever guest time elapses.
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3ModeAddress, 0x0000'0003U)
+        != Status::ok) return 8300;
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, 5U) != Status::ok) return 8301;
+    reps2::runtime::advance_ee_timer3(state, 100000U);
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 5U) return 8302;
+
+    // CUE on with the HBLANK clock (CLKS 3): one tick per 9370 modelled cycles.
+    // Compare 20 with CMPE set latches EQUF when the counter passes it.
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CompareAddress, 20U) != Status::ok) return 8303;
+    if (reps2::runtime::store_u32(
+            state.memory, reps2::runtime::kEeTimer3ModeAddress, 0x0000'0183U) != Status::ok) return 8304;
+    // 9369 cycles: not yet a tick, so the counter is unchanged.
+    reps2::runtime::advance_ee_timer3(state, 9369U);
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 5U) return 8305;
+    // 1 more cycle completes one HBLANK tick.
+    reps2::runtime::advance_ee_timer3(state, 1U);
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 6U) return 8306;
+    // 15 more ticks reach the compare value and latch EQUF.
+    reps2::runtime::advance_ee_timer3(state, 15U * 9370U);
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 21U) return 8307;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3ModeAddress, value) != Status::ok
+        || (value & reps2::runtime::kEeTimer3EqufBit) == 0U) return 8308;
+    // Writing one to EQUF clears the latch without disturbing CUE.
+    if (reps2::runtime::store_u32(
+            state.memory, reps2::runtime::kEeTimer3ModeAddress,
+            0x0000'0183U | reps2::runtime::kEeTimer3EqufBit) != Status::ok) return 8309;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3ModeAddress, value) != Status::ok
+        || (value & reps2::runtime::kEeTimer3EqufBit) != 0U) return 8310;
+    if ((value & reps2::runtime::kEeTimer3CueBit) == 0U) return 8311;
+
+    // A wrap past 0xFFFF latches OVFF and the counter returns to the low bits.
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, 0xFFFFU) != Status::ok) return 8312;
+    reps2::runtime::advance_ee_timer3(state, 2U * 9370U);
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 1U) return 8313;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3ModeAddress, value) != Status::ok
+        || (value & reps2::runtime::kEeTimer3OvffBit) == 0U) return 8314;
+
+    // ZRET clears the counter at the compare match instead of passing it.
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, 0U) != Status::ok) return 8315;
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeTimer3CompareAddress, 3U) != Status::ok) return 8316;
+    if (reps2::runtime::store_u32(
+            state.memory, reps2::runtime::kEeTimer3ModeAddress,
+            0x0000'01C3U) != Status::ok) return 8317; // HBLANK, CUE, ZRET, CMPE
+    reps2::runtime::advance_ee_timer3(state, 5U * 9370U);
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3CountAddress, value) != Status::ok
+        || value != 0U) return 8318;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeTimer3ModeAddress, value) != Status::ok
+        || (value & reps2::runtime::kEeTimer3EqufBit) == 0U) return 8319;
+    return 0;
+}
+
 int test_set_syscall_rejection_leaves_the_table_untouched() {
     SyscallTableWindow ram{};
     EeState state{};
@@ -3453,10 +3516,15 @@ int test_sif_rpc_server_registration_is_bounded_and_unique() {
     // distinct server, as it is for the two CDVD disk-ready queues.
     if (reps2::runtime::register_ee_sif_rpc_server(state, 1U, 0U, &serve_test_server)) return 793;
     if (!reps2::runtime::register_ee_sif_rpc_server(state, 1U, 1U, &serve_test_server)) return 794;
-    for (std::uint32_t sid = 2U; sid < 10U; ++sid) {
-        (void)reps2::runtime::register_ee_sif_rpc_server(state, sid, 0U, &serve_test_server);
+    // Fill the table to its bound with distinct sids, then assert that one more
+    // registration is refused rather than growing the table.
+    std::uint32_t sid = 2U;
+    while (reps2::runtime::register_ee_sif_rpc_server(state, sid, 0U, &serve_test_server)) {
+        ++sid;
     }
     if (state.hle.sif_cmd.server_count != reps2::runtime::kEeMaxSifRpcServers) return 795;
+    if (reps2::runtime::register_ee_sif_rpc_server(
+            state, sid + 1U, 0U, &serve_test_server)) return 798;
     if (reps2::runtime::find_ee_sif_rpc_server(state, 0U) != nullptr) return 796;
     // The lowest queue wins, matching the active-queue walk in `search_svdata`.
     const auto* found = reps2::runtime::find_ee_sif_rpc_server(state, 1U);
@@ -3759,6 +3827,224 @@ bool pattern_media_read(void*, std::uint32_t lbn, std::uint32_t count, std::span
     return true;
 }
 
+// Synthetic ISO 9660 image for the SearchFile tests: a primary volume
+// descriptor at LSN 16 whose root record points at a one-sector root directory
+// at LSN 20 containing ".", ".." and "FILE.EXT;1" (LSN 21, 1234 bytes). Built by
+// this test, not read from any disc.
+constexpr std::uint32_t kIsoImageSectors = 64U;
+constexpr std::uint32_t kIsoRootLba = 20U;
+constexpr std::uint32_t kIsoFileLba = 21U;
+constexpr std::uint32_t kIsoFileSize = 1234U;
+std::array<std::uint8_t, kIsoImageSectors * 2048U> g_iso_image{};
+
+void iso_store_both_endian_u32(std::uint8_t* field, std::uint32_t value) {
+    field[0] = static_cast<std::uint8_t>(value & 0xFFU);
+    field[1] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+    field[2] = static_cast<std::uint8_t>((value >> 16U) & 0xFFU);
+    field[3] = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
+    field[4] = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
+    field[5] = static_cast<std::uint8_t>((value >> 16U) & 0xFFU);
+    field[6] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+    field[7] = static_cast<std::uint8_t>(value & 0xFFU);
+}
+
+std::size_t iso_store_directory_record(
+    std::uint8_t* sector,
+    std::size_t offset,
+    std::uint32_t lsn,
+    std::uint32_t size,
+    bool directory,
+    const std::uint8_t* name,
+    std::size_t name_length
+) {
+    const std::size_t record_length = ((33U + name_length + 1U) / 2U) * 2U;
+    std::uint8_t* record = sector + offset;
+    record[0] = static_cast<std::uint8_t>(record_length);
+    record[1] = 0U;
+    iso_store_both_endian_u32(record + 2, lsn);
+    iso_store_both_endian_u32(record + 10, size);
+    for (std::size_t index = 0U; index < 7U; ++index) {
+        record[18U + index] = static_cast<std::uint8_t>(index + 1U); // any date
+    }
+    record[25] = directory ? 0x02U : 0x00U;
+    record[28] = 1U; // volume sequence number, little-endian half
+    record[32] = static_cast<std::uint8_t>(name_length);
+    for (std::size_t index = 0U; index < name_length; ++index) {
+        record[33U + index] = name[index];
+    }
+    return offset + record_length;
+}
+
+// The ISO "." / ".." self and parent records carry a single 0x00 / 0x01 byte.
+constexpr std::uint8_t kIsoSelfName = 0x00U;
+constexpr std::uint8_t kIsoParentName = 0x01U;
+
+void iso_build_test_image() {
+    g_iso_image.fill(0U);
+    std::uint8_t* const pvd = g_iso_image.data() + 16U * 2048U;
+    pvd[0] = 1U;
+    pvd[1] = 'C';
+    pvd[2] = 'D';
+    pvd[3] = '0';
+    pvd[4] = '0';
+    pvd[5] = '1';
+    pvd[6] = 1U;
+    (void)iso_store_directory_record(
+        pvd, 156U, kIsoRootLba, 2048U, true, &kIsoSelfName, 1U);
+
+    std::uint8_t* const root = g_iso_image.data() + kIsoRootLba * 2048U;
+    std::size_t offset = iso_store_directory_record(
+        root, 0U, kIsoRootLba, 2048U, true, &kIsoSelfName, 1U);
+    offset = iso_store_directory_record(
+        root, offset, kIsoRootLba, 2048U, true, &kIsoParentName, 1U);
+    constexpr char kFileName[] = "FILE.EXT;1";
+    (void)iso_store_directory_record(
+        root, offset, kIsoFileLba, kIsoFileSize, false,
+        reinterpret_cast<const std::uint8_t*>(kFileName), sizeof(kFileName) - 1U);
+}
+
+bool iso_media_read(void*, std::uint32_t lbn, std::uint32_t count, std::span<std::uint8_t> dest) noexcept {
+    if (lbn >= kIsoImageSectors
+        || static_cast<std::uint64_t>(lbn) + count > kIsoImageSectors
+        || dest.size() < static_cast<std::size_t>(count) * 2048U) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < static_cast<std::size_t>(count) * 2048U; ++index) {
+        dest[index] = g_iso_image[static_cast<std::size_t>(lbn) * 2048U + index];
+    }
+    return true;
+}
+
+int test_iso9660_resolves_a_disc_path() {
+    iso_build_test_image();
+    reps2::runtime::HostMediaSource media{nullptr, &iso_media_read};
+
+    reps2::runtime::EeIsoFileEntry entry{};
+    {
+        std::uint8_t probe_sector[reps2::runtime::kEeIsoSectorSize]{};
+        reps2::runtime::EeIsoDirectoryRecord root{};
+        if (!reps2::runtime::iso_read_root_record(media, probe_sector, root)) return 8400;
+        if (root.lsn != kIsoRootLba || !root.is_directory) return 8401;
+    }
+    if (!reps2::runtime::iso_resolve_path(media, "\\FILE.EXT;1", entry)) return 8402;
+    if (!entry.found || entry.lsn != kIsoFileLba || entry.size != kIsoFileSize) return 8403;
+    if (std::string_view(entry.name) != "FILE.EXT") return 8404;
+    // The recording date is packed the way cdvdman does it: sec from record
+    // byte 5, and the year as (iso_byte + 1900) as a 16-bit LE pair at
+    // date[6..7] — the fixture's record byte 0 is 1, so the year is 1901.
+    if (entry.date[1] != 6U) return 8405;
+    if (entry.date[6] != 0x6DU || entry.date[7] != 0x07U) return 8411;
+
+    // The comparison is tolerant: a lower-case name without the ";1" suffix and
+    // a "cdrom0:"-prefixed path both resolve the same entry.
+    reps2::runtime::EeIsoFileEntry lower{};
+    if (!reps2::runtime::iso_resolve_path(media, "file.ext", lower)) return 8406;
+    if (lower.lsn != kIsoFileLba) return 8407;
+    reps2::runtime::EeIsoFileEntry prefixed{};
+    if (!reps2::runtime::iso_resolve_path(media, "cdrom0:\\FILE.EXT;1", prefixed)) return 8408;
+    if (prefixed.lsn != kIsoFileLba) return 8409;
+
+    // A multi-extent file record (flags 0x80) is refused, not truncated.
+    std::uint8_t* const root = g_iso_image.data() + kIsoRootLba * 2048U;
+    std::size_t offset = 0U;
+    while (offset + 1U <= 2048U) {
+        const std::uint8_t length = root[offset];
+        if (length == 0U) break;
+        if (root[offset + 32U] == 10U) { // the FILE.EXT;1 record
+            root[offset + 25U] = 0x80U;
+            break;
+        }
+        offset += length;
+    }
+    reps2::runtime::EeIsoFileEntry multi{};
+    if (reps2::runtime::iso_resolve_path(media, "\\FILE.EXT;1", multi)) return 8412;
+    return 0;
+}
+
+int test_searchfile_serves_a_file_from_host_media() {
+    iso_build_test_image();
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.media.read_sectors = &iso_media_read;
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    constexpr std::uint32_t kSearchFileDest = 0x3000U;
+    // SearchFilePkt: 32-byte padding, 256-byte name, then the caller's
+    // sceCdlFILE pointer at offset 288 of the 292-byte request.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdSearchFile, 0U, 292U, 4U);
+    const char* const path = "\\FILE.EXT;1";
+    for (std::size_t index = 0U; path[index] != '\0'; ++index) {
+        ram[kRpcPayload + 32U + index] = static_cast<std::uint8_t>(path[index]);
+    }
+    store_word(ram, kRpcPayload + 288U, kSearchFileDest);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 292U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8420;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.searchfile_call_count != 1U || sif.searchfile_replies != 1U) return 8421;
+    if (!sif.last_searchfile_found || !sif.last_searchfile_replied) return 8422;
+    if (sif.last_searchfile_lsn != kIsoFileLba || sif.last_searchfile_size != kIsoFileSize) return 8423;
+    if (load_word(ram, kRpcReply) != 1U) return 8424;
+    // The 32-byte sceCdlFILE: lsn, size, 16-byte name, 8-byte date.
+    if (load_word(ram, kSearchFileDest) != kIsoFileLba) return 8425;
+    if (load_word(ram, kSearchFileDest + 4U) != kIsoFileSize) return 8426;
+    if (load_word(ram, kSearchFileDest + 8U) != 0x454C4946U) return 8427;  // "FILE"
+    if (load_word(ram, kSearchFileDest + 12U) != 0x5458452EU) return 8428; // ".EXT"
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 8429;
+    if (state.hle.semaphores[3].count != 1U) return 8430;
+
+    // The 296-byte request form (with the layer field) places the caller's
+    // sceCdlFILE pointer at offset 292 instead of 288.
+    constexpr std::uint32_t kSearchFileDest296 = 0x3100U;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdSearchFile, 0U, 296U, 4U);
+    store_word(ram, kRpcPayload + 292U, kSearchFileDest296);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload296{kRpcPayload, 0U, 296U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload296) != Status::ok) {
+        return 8432;
+    }
+    if (sif.searchfile_call_count != 2U) return 8433;
+    if (load_word(ram, kRpcReply) != 1U) return 8434;
+    if (load_word(ram, kSearchFileDest296) != kIsoFileLba) return 8435;
+    if (load_word(ram, kSearchFileDest296 + 4U) != kIsoFileSize) return 8436;
+    return 0;
+}
+
+int test_searchfile_reports_a_missing_file() {
+    iso_build_test_image();
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.media.read_sectors = &iso_media_read;
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdSearchFile, 0U, 292U, 4U);
+    const char* const path = "\\NOPE.DAT";
+    for (std::size_t index = 0U; path[index] != '\0'; ++index) {
+        ram[kRpcPayload + 32U + index] = static_cast<std::uint8_t>(path[index]);
+    }
+    store_word(ram, kRpcPayload + 288U, 0x3000U);
+    store_word(ram, 0x3000U, 0xA5A5'A5A5U); // the caller's structure, pre-set
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 292U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8440;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.searchfile_replies != 1U || sif.last_searchfile_found) return 8441;
+    if (load_word(ram, kRpcReply) != 0U) return 8442;                 // result word: not found
+    if (load_word(ram, 0x3000U) != 0xA5A5'A5A5U) return 8443;         // no structure written
+    if (!sif.last_rpc_call_replied) return 8444;                      // the RPC still completes
+    return 0;
+}
+
 int test_boot_environment_registers_the_diskready_servers() {
     SifWindow ram{};
     EeState state{};
@@ -3933,6 +4219,169 @@ int test_ncmd_and_searchfile_calls_are_recorded_and_refused() {
     }
     if (sif.searchfile_call_count != 1U || sif.last_searchfile_number != 0U) return 1024;
     if (sif.rpc_call_replies != 0U || state.hle.semaphores[3].count != 0) return 1025;
+    return 0;
+}
+
+int test_boot_environment_registers_the_sif_loadfile_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerLoadFile) == nullptr) return 1026;
+    return 0;
+}
+
+int test_bind_to_the_sif_loadfile_server_reaches_a_registered_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_bind_request(ram, reps2::runtime::kEeSifServerLoadFile);
+    if (reps2::runtime::process_sif_command(state, kRpcBindPacket) != Status::ok) return 1033;
+    if (!state.hle.sif_cmd.last_rpc_bind_had_server) return 1034;
+    if (state.hle.sif_cmd.last_rpc_bind_server_sid != reps2::runtime::kEeSifServerLoadFile) return 1035;
+    if (load_word(ram, kRpcClient + 0x24U) != reps2::runtime::kEeSifServerLoadFile) return 1036;
+    return 0;
+}
+
+int test_sif_loadfile_calls_are_recorded_and_refused() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // A module-load call is recorded by number but refused: no reply, no
+    // RPC_END, semaphore untouched. PS2SDK `common/include/loadfile-common.h`
+    // makes SifLoadModule LF_F_MOD_LOAD (0).
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerLoadFile, 0U, 4U, 4U);
+    store_word(ram, kRpcPayload, 0U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1027;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.loadfile_call_count != 1U || sif.last_loadfile_number != 0U) return 1028;
+    if (sif.loadfile_replies != 0U || sif.last_loadfile_replied) return 1029;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 1047;
+    if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 1030;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 1031;
+    if (state.hle.semaphores[3].count != 0) return 1032;
+    return 0;
+}
+
+int test_sif_loadfile_get_version_answers_the_reference_word() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // LF_F_GET_VERSION (0xFF) is the one loadfile function modelled: the
+    // handler writes the PS2SDK reference's 4-byte version word and answers, so
+    // the caller is released.
+    store_rpc_call_request(
+        ram, reps2::runtime::kEeSifServerLoadFile,
+        reps2::runtime::kEeLoadfileGetVersion, 4U, 4U);
+    store_word(ram, kRpcPayload, 0U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1037;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.loadfile_call_count != 1U) return 1038;
+    if (sif.last_loadfile_number != reps2::runtime::kEeLoadfileGetVersion) return 1039;
+    if (sif.loadfile_replies != 1U || !sif.last_loadfile_replied) return 1040;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 1041;
+    if (load_word(ram, kRpcReply) != reps2::runtime::kEeLoadfileVersionWord) return 1042;
+    return 0;
+}
+
+int test_boot_environment_registers_the_mtap_port_open_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerMtapPortOpen) == nullptr) return 8200;
+    return 0;
+}
+
+int test_bind_to_the_mtap_server_reaches_a_registered_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_bind_request(ram, reps2::runtime::kEeSifServerMtapPortOpen);
+    if (reps2::runtime::process_sif_command(state, kRpcBindPacket) != Status::ok) return 8210;
+    if (!state.hle.sif_cmd.last_rpc_bind_had_server) return 8211;
+    if (state.hle.sif_cmd.last_rpc_bind_server_sid
+        != reps2::runtime::kEeSifServerMtapPortOpen) return 8212;
+    if (load_word(ram, kRpcClient + 0x24U) != reps2::runtime::kEeSifServerMtapPortOpen) return 8213;
+    return 0;
+}
+
+int test_mtap_calls_are_recorded_and_refused() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // The multitap client calls its server with function 1 (PS2SDK
+    // `ee/rpc/multitap/src/libmtap.c`: `sceSifCallRpc(&clientPortOpen, 1, 0,
+    // buf, 4, buf, 8, ...)`). No multitap is modelled, so the call is recorded
+    // and refused: no reply, no RPC_END, semaphore untouched.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMtapPortOpen, 1U, 4U, 8U);
+    store_word(ram, kRpcPayload, 0U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8220;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mtap_call_count != 1U || sif.last_mtap_number != 1U) return 8221;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 8222;
+    if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 8223;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8224;
+    if (state.hle.semaphores[3].count != 0) return 8225;
+    return 0;
+}
+
+int test_sif_loadfile_get_version_refuses_without_a_reply_buffer() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // A version query with no reply buffer (or one smaller than the one word)
+    // changes nothing and sends no RPC_END.
+    store_rpc_call_request(
+        ram, reps2::runtime::kEeSifServerLoadFile,
+        reps2::runtime::kEeLoadfileGetVersion, 4U, 2U);
+    store_word(ram, kRpcPayload, 0U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1043;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.loadfile_replies != 0U || sif.last_loadfile_replied) return 1044;
+    if (sif.rpc_call_replies != 0U) return 1045;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 1046;
     return 0;
 }
 
@@ -4362,6 +4811,27 @@ int main() {
          &test_boot_environment_registers_the_ncmd_and_searchfile_servers},
         {"ncmd and searchfile calls are recorded and refused",
          &test_ncmd_and_searchfile_calls_are_recorded_and_refused},
+        {"boot environment registers the sif loadfile server",
+         &test_boot_environment_registers_the_sif_loadfile_server},
+        {"bind to the sif loadfile server reaches a registered server",
+         &test_bind_to_the_sif_loadfile_server_reaches_a_registered_server},
+        {"sif loadfile calls are recorded and refused",
+         &test_sif_loadfile_calls_are_recorded_and_refused},
+        {"sif loadfile get version answers the reference word",
+         &test_sif_loadfile_get_version_answers_the_reference_word},
+        {"sif loadfile get version refuses without a reply buffer",
+         &test_sif_loadfile_get_version_refuses_without_a_reply_buffer},
+        {"boot environment registers the mtap port-open server",
+         &test_boot_environment_registers_the_mtap_port_open_server},
+        {"bind to the mtap server reaches a registered server",
+         &test_bind_to_the_mtap_server_reaches_a_registered_server},
+        {"mtap calls are recorded and refused",
+         &test_mtap_calls_are_recorded_and_refused},
+        {"iso9660 resolves a disc path", &test_iso9660_resolves_a_disc_path},
+        {"searchfile serves a file from host media",
+         &test_searchfile_serves_a_file_from_host_media},
+        {"searchfile reports a missing file",
+         &test_searchfile_reports_a_missing_file},
         {"ncmd diskready answers from media presence",
          &test_ncmd_diskready_answers_from_media_presence},
         {"ncmd read serves 2048-byte sectors from host media",
@@ -4415,6 +4885,8 @@ int main() {
         {"osd config refuses bad buffers", &test_osd_config_refuses_bad_buffers},
         {"osd config via dispatch", &test_osd_config_via_dispatch},
         {"timer 3 mode and compare registers", &test_timer3_mode_guard_register},
+        {"timer 3 counter progression and status flags",
+         &test_timer3_counter_progression_and_status_flags},
         {"service table names", &test_service_table_reports_names},
         {"find address matching entry", &test_find_address_returns_matching_entry_address},
         {"find address kseg alias match", &test_find_address_matches_kseg_aliases},

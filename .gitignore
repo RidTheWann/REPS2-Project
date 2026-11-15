@@ -1,4 +1,5 @@
 /build/
+/build-wt/
 /out/
 __pycache__/
 *.mutate.tmp

@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "reps2/runtime/ee_state.hpp"
+#include "reps2/runtime/iso9660.hpp"
 
 // EE kernel syscall HLE (high-level emulation) layer.
 //
@@ -1831,6 +1832,22 @@ inline constexpr std::uint32_t kEeSifServerCdDiskReadyAlt = 0x8000'059CU;
 // PS2SDK `ee/rpc/cdvd/src/libcdvd.c`: CD_SERVER_NCMD / CD_SERVER_SEARCHFILE.
 inline constexpr std::uint32_t kEeSifServerCdNCmd = 0x8000'0595U;
 inline constexpr std::uint32_t kEeSifServerCdSearchFile = 0x8000'0597U;
+// PS2SDK `ee/kernel/src/loadfile.c` binds the SIF loadfile server id 0x80000006
+// (the resident IOP `loadfile` module) and retries until a server answers. A
+// retail title that loads an IRX reaches this bind, so the server exists on the
+// resident IOP; its call functions stay fail-closed until evidenced (ADR 0138).
+inline constexpr std::uint32_t kEeSifServerLoadFile = 0x8000'0006U;
+// PS2SDK `common/include/loadfile-common.h` function numbers. Only the version
+// query is answered; the rest stay fail-closed (ADR 0139).
+inline constexpr std::uint32_t kEeLoadfileGetVersion = 0xFFU;
+// The 4-byte version word the PS2SDK loadfile reference returns
+// (`loadfile_get_version`: `((u32 *)outbuffer)[0] = 0x30303133`).
+inline constexpr std::uint32_t kEeLoadfileVersionWord = 0x3030'3133U;
+// PS2SDK `ee/rpc/multitap/src/libmtap.c`: MTAPSERV_PORT_OPEN 0x80000901 is the
+// multitap port-open server the title binds. The resident IOP `mtapman`
+// registers it, so the bind succeeds on real hardware; its functions stay
+// fail-closed until evidenced (ADR 0140).
+inline constexpr std::uint32_t kEeSifServerMtapPortOpen = 0x8000'0901U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2063,9 +2080,14 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     return false;
 }
 
-// SearchFile server (0x80000597). Same fail-closed registry: the ISO9660
-// path-table walker it needs is not implemented, so calls are recorded and
-// refused. ADR 0125.
+// SearchFile server (0x80000597). PS2SDK `ee/rpc/cdvd/src/libcdvd.c`
+// `sceCdSearchFile` sends `SearchFilePkt` { 32-byte padding, 256-byte name,
+// pointer to the caller's `sceCdlFILE` } and reads a 4-byte result: 1 when the
+// file was found and 0 otherwise. On success the IOP also transfers the 32-byte
+// `sceCdlFILE` into the caller's structure. The reply is resolved from the host
+// media's own ISO 9660 metadata (ADR 0141) instead of a modelled path table:
+// an unreadable, absent or unmatched path answers 0 and writes no structure, so
+// the caller's own error handling runs.
 [[nodiscard]] inline bool serve_ee_cdvd_searchfile_call(
     EeState& state,
     const EeSifRpcCall& call
@@ -2073,6 +2095,145 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     auto& sif = state.hle.sif_cmd;
     ++sif.searchfile_call_count;
     sif.last_searchfile_number = call.rpc_number;
+    sif.last_searchfile_send_size = call.send_size;
+    sif.last_searchfile_replied = false;
+    if (call.rpc_number != 0U) {
+        return false; // cdvdfsv's fscall serves function 0
+    }
+    // The name is a 256-byte NUL-terminated field at packet offset 32; the
+    // caller's `sceCdlFILE` pointer follows the 256-byte name, so it sits at 288
+    // for the 292-byte request and at 292 for the 296-byte one.
+    if (call.send_size < 292U || call.send_addr == 0U) {
+        return false; // request not transferred
+    }
+    const std::uint32_t name_address = call.send_addr + 32U;
+    char name[256]{};
+    for (std::size_t index = 0U; index + 1U < sizeof(name); ++index) {
+        std::uint8_t byte{};
+        if (load_u8(state.memory, name_address + static_cast<std::uint32_t>(index), byte) != Status::ok) {
+            return false;
+        }
+        name[index] = static_cast<char>(byte);
+        if (byte == 0U) {
+            break;
+        }
+    }
+    if (name[0] == '\0') {
+        return false; // no path to resolve
+    }
+    const std::uint32_t file_pointer_offset = call.send_size >= 296U ? 292U : 288U;
+    std::uint32_t file_pointer{};
+    if (load_u32(state.memory, call.send_addr + file_pointer_offset, file_pointer) != Status::ok) {
+        return false;
+    }
+    if (call.recv_addr == 0U || call.recv_size < 4U) {
+        return false; // no result word the caller reads
+    }
+
+    EeIsoFileEntry entry{};
+    const bool found = iso_resolve_path(state.media, name, entry);
+    ++sif.searchfile_replies;
+    sif.last_searchfile_replied = true;
+    sif.last_searchfile_found = found;
+    sif.last_searchfile_lsn = found ? entry.lsn : 0U;
+    sif.last_searchfile_size = found ? entry.size : 0U;
+    // Write the structure first and the result word last, so the caller only
+    // ever sees "found" together with a fully written structure.
+    if (found && file_pointer != 0U) {
+        const std::uint32_t words[8] = {
+            entry.lsn,
+            entry.size,
+            static_cast<std::uint32_t>(
+                static_cast<std::uint8_t>(entry.name[0]))
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[1])) << 8U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[2])) << 16U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[3])) << 24U),
+            static_cast<std::uint32_t>(
+                static_cast<std::uint8_t>(entry.name[4]))
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[5])) << 8U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[6])) << 16U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[7])) << 24U),
+            static_cast<std::uint32_t>(
+                static_cast<std::uint8_t>(entry.name[8]))
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[9])) << 8U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[10])) << 16U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[11])) << 24U),
+            static_cast<std::uint32_t>(
+                static_cast<std::uint8_t>(entry.name[12]))
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[13])) << 8U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[14])) << 16U)
+                | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(entry.name[15])) << 24U),
+            static_cast<std::uint32_t>(entry.date[0])
+                | (static_cast<std::uint32_t>(entry.date[1]) << 8U)
+                | (static_cast<std::uint32_t>(entry.date[2]) << 16U)
+                | (static_cast<std::uint32_t>(entry.date[3]) << 24U),
+            static_cast<std::uint32_t>(entry.date[4])
+                | (static_cast<std::uint32_t>(entry.date[5]) << 8U)
+                | (static_cast<std::uint32_t>(entry.date[6]) << 16U)
+                | (static_cast<std::uint32_t>(entry.date[7]) << 24U),
+        };
+        for (std::uint32_t index = 0U; index < 8U; ++index) {
+            if (store_u32(state.memory, file_pointer + index * 4U, words[index]) != Status::ok) {
+                return false; // structure not writable: no result word, caller stays blocked
+            }
+        }
+    }
+    if (store_u32(state.memory, call.recv_addr, found ? 1U : 0U) != Status::ok) {
+        return false;
+    }
+    return true;
+}
+
+// SIF loadfile server (0x80000006, PS2SDK `ee/kernel/src/loadfile.c`). The bind
+// is registered so it succeeds exactly as on the resident IOP (ADR 0138). Only
+// the version query is answered here; every other function — the module/ELF
+// loads, the address get/set, the module stop/unload and the searches — is
+// recorded and refused, because REPS2 executes no IOP module and cannot report
+// that one was loaded. A caller waiting on a load therefore stays blocked
+// instead of receiving a fabricated success. ADR 0138 / 0139.
+//
+// `LF_F_GET_VERSION` (0xFF): the PS2SDK loadfile reference
+// (`iop/system/loadfile/src/loadfile.c loadfile_get_version`) writes one 4-byte
+// word, `0x30303133` ("3100"), into the caller's output buffer and answers.
+// REPS2 answers the same word so the caller's version probe completes; this is
+// the PS2SDK reference's module version, and the retail IOP module's own version
+// string is not established by any available evidence.
+[[nodiscard]] inline bool serve_ee_loadfile_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.loadfile_call_count;
+    sif.last_loadfile_number = call.rpc_number;
+    sif.last_loadfile_send_size = call.send_size;
+    sif.last_loadfile_recv_size = call.recv_size;
+    sif.last_loadfile_replied = false;
+    if (call.rpc_number != kEeLoadfileGetVersion) {
+        return false; // no module load is modelled: refuse and record
+    }
+    if (call.recv_addr == 0U || call.recv_size < 4U) {
+        return false; // no reply buffer the reference's one word fits in
+    }
+    if (store_u32(state.memory, call.recv_addr, kEeLoadfileVersionWord) != Status::ok) {
+        return false;
+    }
+    ++sif.loadfile_replies;
+    sif.last_loadfile_replied = true;
+    return true;
+}
+
+// Multitap port-open server (0x80000901, PS2SDK `MTAPSERV_PORT_OPEN`). The bind
+// is registered so it succeeds exactly as on the resident IOP `mtapman`, but no
+// function is modelled: every call is recorded and refused, so a caller that
+// waits for a multitap adapter stays blocked instead of receiving a fabricated
+// port-open success. REPS2 models no multitap hardware. ADR 0140.
+[[nodiscard]] inline bool serve_ee_mtap_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.mtap_call_count;
+    sif.last_mtap_number = call.rpc_number;
     return false;
 }
 
@@ -2447,6 +2608,14 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
         state, kEeSifServerCdNCmd, 0U, &serve_ee_cdvd_ncmd_call);
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerCdSearchFile, 0U, &serve_ee_cdvd_searchfile_call);
+    // The SIF loadfile server (ADR 0138): registered so the title's bind
+    // succeeds; the handler records and refuses every call.
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerLoadFile, 0U, &serve_ee_loadfile_call);
+    // The multitap port-open server (ADR 0140): registered so the title's bind
+    // succeeds; the handler records and refuses every call.
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerMtapPortOpen, 0U, &serve_ee_mtap_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation

@@ -57,5 +57,7 @@ Evidence for what the call is:
   rebuilt with this runtime, `D:\REPS2-DevTests\DownhillDomination\PostADR136b\run-report-deci2.json`):
   the `0x7C` stop at `0x0025AB14` is gone; the run exhausts the 80M budget
   (79,999,942 instructions, 16 batches) in a pure delay loop at `0x0025E880`,
-  with `rpc_bind_sid=0x80000596 had=0` — the next frontier. Budget exhaustion
+  with `rpc_bind_sid=2147483654=0x80000006 had=0` (written as `0x80000596` in the
+  original record — a decimal mis-transcription, corrected in ADR 0138) — the
+  next frontier. Budget exhaustion
   is not a boot stage. Details in `docs/PROJECT_STATE.md` / `docs/RESEARCH.md`.

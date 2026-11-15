@@ -138,3 +138,8 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0135](0135-cdvd-ncmd-read-hle.md) | Serve CD_NCMD_READ from the host media source; NOWAIT+end-function RPC_END | Accepted |
 | [0136](0136-guest-rpc-end-callback.md) | Run SIF RPC end functions as guest callbacks through the dispatcher; `--extra-root` | Proposed |
 | [0137](0137-deci2-call-fail-closed.md) | Deci2Call (0x7C) fails closed with DECI2_ERR_INVALID; no DECI2 device modelled | Proposed |
+| [0138](0138-sif-loadfile-server-registration.md) | Register the SIF loadfile RPC server (0x80000006) so its bind succeeds; calls recorded and refused | Proposed |
+| [0139](0139-loadfile-get-version.md) | Serve the loadfile version query (`LF_F_GET_VERSION`, 0xFF) with the PS2SDK reference word; other functions refused | Proposed |
+| [0140](0140-mtap-port-open-server-registration.md) | Register the multitap port-open RPC server (0x80000901) so its bind succeeds; calls recorded and refused | Proposed |
+| [0141](0141-cdvd-searchfile-iso9660.md) | Serve CDVD SearchFile from the host ISO 9660 metadata with a bounded reader | Proposed |
+| [0142](0142-ee-timer3-count-progression.md) | EE Timer 3 count progression on a deterministic guest-time source (one instruction = one modelled BUSCLK cycle) | Proposed |
