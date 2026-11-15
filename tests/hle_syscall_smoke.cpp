@@ -4823,6 +4823,145 @@ int test_pad_ext_server_calls_are_recorded_and_refused() {
     return 0;
 }
 
+int test_boot_environment_registers_the_mcserv_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerMcServ) == nullptr) return 8400;
+    return 0;
+}
+
+int test_bind_to_the_mcserv_server_reaches_a_registered_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_bind_request(ram, reps2::runtime::kEeSifServerMcServ);
+    if (reps2::runtime::process_sif_command(state, kRpcBindPacket) != Status::ok) return 8402;
+    if (!state.hle.sif_cmd.last_rpc_bind_had_server) return 8403;
+    if (state.hle.sif_cmd.last_rpc_bind_server_sid
+        != reps2::runtime::kEeSifServerMcServ) return 8404;
+    if (load_word(ram, kRpcClient + 0x24U) != reps2::runtime::kEeSifServerMcServ) return 8405;
+    return 0;
+}
+
+int test_mcserv_init_is_served_with_module_versions() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // sceMcInit: fno 0xFE (XMCSERV INIT) on 0x80000400, 48-byte mcDescParam_t
+    // request (fd in word 0), 12-byte mcRpcStat_t reply {result,
+    // mcserv_version, mcman_version}. The title requires mcserv >= 0x20A and
+    // mcman >= 0x20E; REPS2 answers result 0 (sceMcResSucceed) with those minimum
+    // version words. ADR 0149.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMcServ, 0xFEU, 0x30U, 0x0CU);
+    store_word(ram, kRpcPayload, 0xFFFF'FFFFU);      // fd (unused by McRetOnly)
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);        // result
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);   // mcserv_version
+    store_word(ram, kRpcReply + 8U, 0xA5A5'A5A5U);   // mcman_version
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x30U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8410;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mc_call_count != 1U || sif.mc_init_calls != 1U || sif.mc_init_replies != 1U) return 8411;
+    if (!sif.last_mc_init_replied || sif.last_mc_result != 0U) return 8412;
+    if (sif.last_mc_serv_version != 0x020AU || sif.last_mc_man_version != 0x020EU) return 8413;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 8414;
+    if (load_word(ram, kRpcReply) != 0U) return 8415;
+    if (load_word(ram, kRpcReply + 4U) != 0x020AU) return 8416;
+    if (load_word(ram, kRpcReply + 8U) != 0x020EU) return 8417;
+    if (state.hle.semaphores[3].count == 0) return 8418;
+    return 0;
+}
+
+int test_mcserv_refuses_other_functions() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Only fno 0xFE (INIT) is modelled; the title's next call is the get-info
+    // poll (fno 0x15), which stays fail-closed: recorded, no reply, no RPC_END.
+    // ADR 0149.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMcServ, 0x15U, 0x30U, 4U);
+    store_word(ram, kRpcPayload, 0U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x30U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8420;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mc_call_count != 1U || sif.last_mc_number != 0x15U) return 8421;
+    if (sif.mc_init_replies != 0U || sif.last_rpc_call_replied || sif.rpc_call_replies != 0U)
+        return 8422;
+    if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 8423;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8424;
+    if (state.hle.semaphores[3].count != 0) return 8425;
+    return 0;
+}
+
+int test_mcserv_init_refuses_without_a_request_word() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMcServ, 0xFEU, 0U, 0x0CU);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, nullptr) != Status::ok) {
+        return 8430;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mc_call_count != 1U || sif.mc_init_replies != 0U) return 8431;
+    if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 8432;
+    if (state.hle.semaphores[3].count != 0) return 8433;
+    return 0;
+}
+
+int test_mcserv_init_refuses_a_wrapping_reply_buffer() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // A reply buffer at 0xFFFFFFF8 would make reply word 2 (recv_addr + 8) wrap
+    // to address 0. The handler must refuse instead of mutating RAM[0]: no
+    // reply, no RPC_END, no semaphore signal, and the word at address 0 stays
+    // as set. ADR 0149.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMcServ, 0xFEU, 0x30U, 0x0CU);
+    store_word(ram, kRpcCallPacket + 0x28U, 0xFFFF'FFF8U); // recvbuf: word 2 wraps
+    store_word(ram, kRpcPayload, 0U);                      // fd 0
+    store_word(ram, 0U, 0x5A5A'5A5AU);                     // RAM[0] sentinel
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x30U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8440;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.mc_call_count != 1U || sif.mc_init_replies != 0U) return 8441;
+    if (sif.last_mc_init_replied || sif.last_rpc_call_replied || sif.rpc_call_replies != 0U)
+        return 8442;
+    if (load_word(ram, 0U) != 0x5A5A'5A5AU) return 8443; // RAM[0] must be untouched
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8444;
+    if (state.hle.semaphores[3].count != 0) return 8445;
+    return 0;
+}
+
 int test_sif_loadfile_get_version_refuses_without_a_reply_buffer() {
     SifWindow ram{};
     EeState state{};
@@ -5324,6 +5463,18 @@ int main() {
          &test_pad_open_refuses_a_wrapping_reply_buffer},
         {"pad ext server calls are recorded and refused",
          &test_pad_ext_server_calls_are_recorded_and_refused},
+        {"boot environment registers the mcserv server",
+         &test_boot_environment_registers_the_mcserv_server},
+        {"bind to the mcserv server reaches a registered server",
+         &test_bind_to_the_mcserv_server_reaches_a_registered_server},
+        {"mcserv init is served with module versions",
+         &test_mcserv_init_is_served_with_module_versions},
+        {"mcserv refuses other functions",
+         &test_mcserv_refuses_other_functions},
+        {"mcserv init refuses without a request word",
+         &test_mcserv_init_refuses_without_a_request_word},
+        {"mcserv init refuses a wrapping reply buffer",
+         &test_mcserv_init_refuses_a_wrapping_reply_buffer},
         {"iso9660 resolves a disc path", &test_iso9660_resolves_a_disc_path},
         {"searchfile serves a file from host media",
          &test_searchfile_serves_a_file_from_host_media},

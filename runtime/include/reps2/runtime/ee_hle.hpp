@@ -1900,6 +1900,26 @@ inline constexpr std::uint32_t kEePadModVersionWord = 0x0422U;
 // even with no pad attached, since absence is reported asynchronously through
 // INFO_MODE, which REPS2 leaves fail-closed. ADR 0148.
 inline constexpr std::uint32_t kEePadSuccessResult = 1U;
+// PS2SDK `ee/rpc/memorycard/src/libmc.c`: the memory-card SIF RPC server the
+// client binds — rpc_id 0x80000400 for the SIO2 interface (the resident IOP
+// `mcserv`, `iop/memorycard/mcserv/src/mcserv.c`; ps2tek lists `80000400h -
+// Memory cards (MCSERV)`). The title's `sceMcInit` retries the bind until the
+// server answers (observed Downhill Domination 0x00245EF8..0x00245F68).
+inline constexpr std::uint32_t kEeSifServerMcServ = 0x8000'0400U;
+// mcserv dispatches on the RPC function number (fno), not a request word:
+// XMCSERV INIT is fno 0xFE (`MC_RPCCMD_INIT`, `libmc.c` XMC row). The title
+// issues it with a 48-byte `mcDescParam_t` request and a 12-byte
+// `mcRpcStat_t` reply `{result, mcserv_version, mcman_version}`
+// (`common/include/libmc-common.h`).
+inline constexpr std::uint32_t kEeMcCmdInit = 0xFEU;
+// INIT reply words 1/2: the title then requires `mcserv_version >= 0x20A` and
+// `mcman_version >= 0x20E` (`slti` checks at 0x00245FBC/0x00245FE0, else it
+// prints "libmc: too old release of mcserv/mcman.irx" and fails). REPS2 has no
+// MCSERV/MCMAN build to name, so it answers the minimum words the title's own
+// checks accept; ps2sdk's own mcserv/mcman report 0x208/0x20B and the exact
+// retail module strings stay unknown. ADR 0149.
+inline constexpr std::uint32_t kEeMcServVersionWord = 0x020AU;
+inline constexpr std::uint32_t kEeMcManVersionWord = 0x020EU;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2455,6 +2475,47 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     return false;
 }
 
+// Memory-card RPC server 0x80000400 (MCSERV, resident IOP `mcserv`). mcserv
+// dispatches on the RPC function number: the title's `sceMcInit` issues fno
+// 0xFE (XMCSERV INIT) with a 48-byte request and a 12-byte reply
+// `{result, mcserv_version, mcman_version}`. REPS2 models no memory card, but
+// INIT itself does not touch hardware: `sceMcInit` returns `sceMcResSucceed`
+// (0), so the honest reply is result 0 with the module-version words the
+// title's own checks accept (0x20A/0x20E). Every other function number —
+// including the get-info poll the title issues next — is recorded and
+// refused, so an unmodelled mc command leaves the caller blocked. ADR 0149.
+[[nodiscard]] inline bool serve_ee_mcserv_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.mc_call_count;
+    sif.last_mc_number = call.rpc_number;
+    if (call.rpc_number != kEeMcCmdInit) {
+        return false; // unmodelled mcserv function: no reply, caller stays blocked
+    }
+    if (call.recv_addr == 0U || call.recv_addr > 0xFFFF'FFF7U || call.recv_size < 12U) {
+        return false; // no room for reply words 0..2 (or word 2 would wrap past 4 GiB)
+    }
+    std::uint32_t fd{};
+    if (call.send_size < 4U || load_u32(state.memory, call.send_addr, fd) != Status::ok) {
+        return false; // the documented request word was not transferred
+    }
+    if (store_u32(state.memory, call.recv_addr, 0U) != Status::ok
+        || store_u32(state.memory, call.recv_addr + 4U, kEeMcServVersionWord) != Status::ok
+        || store_u32(state.memory, call.recv_addr + 8U, kEeMcManVersionWord) != Status::ok) {
+        return false; // reply not writable: no reply, no RPC_END
+    }
+    ++sif.mc_init_calls;
+    sif.last_mc_fd = fd;
+    sif.last_mc_result = 0U;
+    sif.last_mc_serv_version = kEeMcServVersionWord;
+    sif.last_mc_man_version = kEeMcManVersionWord;
+    sif.last_mc_init_replied = true;
+    ++sif.mc_init_replies;
+    return true;
+}
+
 // Answer an EE RPC bind the way the resident IOP SIFRPC module does.
 //
 // PS2SDK `iop/system/sifcmd/src/sifrpc.c` `_request_bind` looks the sid up with
@@ -2855,6 +2916,12 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
         state, kEeSifServerPad1, 0U, &serve_ee_pad_call);
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerPad2, 0U, &serve_ee_pad_ext_call);
+    // The memory-card server (ADR 0149): registered so the title's `sceMcInit`
+    // bind succeeds like on the resident IOP `mcserv`. fno 0xFE (XMCSERV INIT)
+    // is answered with `{0, 0x20A, 0x20E}` (success + the version words the
+    // title's checks accept); every other function is recorded and refused.
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerMcServ, 0U, &serve_ee_mcserv_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation

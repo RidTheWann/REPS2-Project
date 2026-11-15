@@ -592,6 +592,15 @@ void print_error(
               << ",\"pad_slot\":" << state.hle.sif_cmd.last_pad_slot
               << ",\"pad_handle\":" << state.hle.sif_cmd.last_pad_handle
               << ",\"pad_open_replied\":" << (state.hle.sif_cmd.last_pad_open_replied ? 1U : 0U)
+              << ",\"mc_calls\":" << state.hle.sif_cmd.mc_call_count
+              << ",\"mc_number\":" << state.hle.sif_cmd.last_mc_number
+              << ",\"mc_init_calls\":" << state.hle.sif_cmd.mc_init_calls
+              << ",\"mc_init_replies\":" << state.hle.sif_cmd.mc_init_replies
+              << ",\"mc_fd\":" << state.hle.sif_cmd.last_mc_fd
+              << ",\"mc_result\":" << state.hle.sif_cmd.last_mc_result
+              << ",\"mc_serv_version\":" << state.hle.sif_cmd.last_mc_serv_version
+              << ",\"mc_man_version\":" << state.hle.sif_cmd.last_mc_man_version
+              << ",\"mc_init_replied\":" << (state.hle.sif_cmd.last_mc_init_replied ? 1U : 0U)
               << "}},\"runs\":[";
     for (std::size_t index = 0; index < runs.size(); ++index) {
         if (index != 0U) std::cout << ',';

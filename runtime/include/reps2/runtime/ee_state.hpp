@@ -963,6 +963,20 @@ struct EeSifCmdState {
     std::uint32_t last_pad_slot{};
     std::uint32_t last_pad_handle{};
     bool last_pad_open_replied{};
+    // Memory-card RPC server (0x80000400, MCSERV; PS2SDK `libmc` rpc_id for the
+    // SIO2 interface): the title's `sceMcInit` retries the bind until a server
+    // answers; registered like on the resident IOP `mcserv`. mcserv dispatches
+    // on the function number; fno 0xFE (XMCSERV INIT) replies 12 bytes
+    // `{result, mcserv_version, mcman_version}`. ADR 0149.
+    std::uint32_t mc_call_count{};
+    std::uint32_t last_mc_number{};
+    std::uint32_t mc_init_calls{};
+    std::uint32_t mc_init_replies{};
+    std::uint32_t last_mc_fd{};
+    std::uint32_t last_mc_result{};
+    std::uint32_t last_mc_serv_version{};
+    std::uint32_t last_mc_man_version{};
+    bool last_mc_init_replied{};
 
     // SIF_CMD_RESET_CMD (0x80000003): the EE asked the IOP to reboot. The
     // resident HLE IOP re-arms its RPCINIT handshake and records the request;

@@ -149,3 +149,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0146](0146-mips-abi2-compatibility-diagnostic.md) | Classify the alternate MIPS n32 ABI for PS2 compatibility | Proposed |
 | [0147](0147-mtap-port-and-connection-bodies.md) | Serve the multitap port-open/close/connection commands (0x80000901–0x80000903) as "no adapter" (result 0) | Proposed |
 | [0148](0148-pad-rpc-servers.md) | Serve the pad RPC servers (0x80000100/0x80000101): GET_MODVER with the retail PADMAN word 0x0422, INIT/OPEN with padman's success result 1 | Proposed |
+| [0149](0149-mcserv-init-server.md) | Register the memory-card server (0x80000400) and serve XMCSERV INIT (fno 0xFE) with `{0, 0x20A, 0x20E}` | Proposed |
