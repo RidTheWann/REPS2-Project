@@ -66,7 +66,7 @@ public sealed partial class LibraryPage : Page
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
-    private async void AddGame_Click(object sender, RoutedEventArgs e) => await AppServices.Current.AddGameAsync();
+    private void AddGame_Click(object sender, RoutedEventArgs e) => AppServices.Current.NavigateTo("AddGame");
 
     private void GamesGrid_ItemClick(object sender, ItemClickEventArgs e)
     {

@@ -32,8 +32,14 @@ public sealed class DesktopAppContext(
     public Func<GameSummary, Task> RelinkSourceIsoAsync { get; set; } = _ => Task.CompletedTask;
     public Func<GameSummary, Task> RunProbeAsync { get; set; } = _ => Task.CompletedTask;
     public Action<GameSummary> OpenGame { get; set; } = _ => { };
+    public Action<GameSummary> OpenReadiness { get; set; } = _ => { };
+    public Action EnterBigPicture { get; set; } = () => { };
+    public Action<string> NavigateTo { get; set; } = _ => { };
     public Func<string, Task> RunDeveloperCommandAsync { get; set; } = _ => Task.CompletedTask;
     public Action<string> SetStatus { get; set; } = _ => { };
+    public Func<Task> UpdateDesktopAsync { get; set; } = () => Task.CompletedTask;
+    public string UpdateStatus { get; set; } = "Desktop Alpha · Check published releases";
+    public Action ReturnToDesktop { get; set; } = () => { };
     public Action<DesktopSettings>? SettingsChanged { get; set; }
     public event Action<JobRecord>? JobUpdated;
 

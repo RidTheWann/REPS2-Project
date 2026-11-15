@@ -18,6 +18,7 @@ public sealed class LibraryViewModel(IGameLibraryService library, Func<DesktopSe
     private bool _emptyVisible = true;
     private bool _emptyAddVisible = true;
     private bool _clearFiltersVisible;
+    private bool _errorVisible;
     private LibraryFilterMode _filter = LibraryFilterMode.All;
     private LibrarySortMode _sort = LibrarySortMode.NameAscending;
     private string _search = string.Empty;
@@ -25,6 +26,11 @@ public sealed class LibraryViewModel(IGameLibraryService library, Func<DesktopSe
     public ObservableCollection<GameSummary> VisibleGames { get; } = [];
 
     public string LibraryCount { get => _libraryCount; private set => Set(ref _libraryCount, value); }
+    public string CollectionLabel => $"COLLECTION / {_allGames.Count:00} TITLES";
+    public string PageTitle => _allGames.Count == 0 ? "Your library starts here" : "Your library";
+    public string PageSubtitle => _allGames.Count == 0
+        ? "A quiet home for the games you own."
+        : "The games you own. All in one place.";
     public string BuiltCount { get => _builtCount; private set => Set(ref _builtCount, value); }
     public string PlayableCount { get => _playableCount; private set => Set(ref _playableCount, value); }
     public string Notice { get => _notice; private set => Set(ref _notice, value); }
@@ -33,8 +39,10 @@ public sealed class LibraryViewModel(IGameLibraryService library, Func<DesktopSe
     public string EmptyStateDescription { get => _emptyStateDescription; private set => Set(ref _emptyStateDescription, value); }
     public bool GamesVisible { get => _gamesVisible; private set => Set(ref _gamesVisible, value); }
     public bool EmptyVisible { get => _emptyVisible; private set => Set(ref _emptyVisible, value); }
+    public bool CollectionControlsVisible => _allGames.Count > 0 && !ErrorVisible;
     public bool EmptyAddVisible { get => _emptyAddVisible; private set => Set(ref _emptyAddVisible, value); }
     public bool ClearFiltersVisible { get => _clearFiltersVisible; private set => Set(ref _clearFiltersVisible, value); }
+    public bool ErrorVisible { get => _errorVisible; private set => Set(ref _errorVisible, value); }
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
@@ -47,19 +55,27 @@ public sealed class LibraryViewModel(IGameLibraryService library, Func<DesktopSe
         {
             EmptyStateTitle = "Library could not be read";
             EmptyStateDescription = ex.Message;
-            EmptyVisible = true;
+            EmptyVisible = false;
             GamesVisible = false;
+            EmptyAddVisible = false;
+            ClearFiltersVisible = false;
+            ErrorVisible = true;
+            OnPropertyChanged(nameof(CollectionControlsVisible));
         }
     }
 
     public void SetSnapshot(LibrarySnapshot snapshot)
     {
+        ErrorVisible = false;
         _allGames = snapshot.Games;
         LibraryCount = $"{_allGames.Count} titles";
+        OnPropertyChanged(nameof(CollectionLabel));
+        OnPropertyChanged(nameof(PageTitle));
+        OnPropertyChanged(nameof(PageSubtitle));
         BuiltCount = $"{_allGames.Count(game => game.Lifecycle is GameLifecycle.NativeBuilt or GameLifecycle.ExecutionBlocked or GameLifecycle.BootTested or GameLifecycle.Playable)} titles";
         PlayableCount = $"{_allGames.Count(game => game.Lifecycle == GameLifecycle.Playable)} titles";
         Notice = snapshot.Warnings.Count == 0
-            ? $"Library: {snapshot.LibraryRoot}   ·   {snapshot.Warnings.Count} integrity warnings"
+            ? "Local library · Original ISOs stay external · Cover art does not indicate compatibility"
             : string.Join("  ·  ", snapshot.Warnings.Take(3));
         ApplyFilter();
     }
@@ -94,11 +110,13 @@ public sealed class LibraryViewModel(IGameLibraryService library, Func<DesktopSe
         ResultsSummary = $"{filtered.Count:N0} of {_allGames.Count:N0} titles";
         GamesVisible = hasResults;
         EmptyVisible = !hasResults;
+        ErrorVisible = false;
         EmptyAddVisible = !hasGames;
         ClearFiltersVisible = hasGames && hasActiveFilter;
-        EmptyStateTitle = hasGames ? "No titles match these filters" : "Your library is ready";
+        EmptyStateTitle = hasGames ? "No titles match these filters" : "Make room for the classics.";
         EmptyStateDescription = hasGames
             ? "Change the search or lifecycle filter, or clear the filters to see your full library."
-            : "Add one raw PS2 ISO you own. REPS2 validates it and leaves the source file untouched.";
+            : "Add your first owner-supplied ISO to inspect its metadata and begin building your collection.";
+        OnPropertyChanged(nameof(CollectionControlsVisible));
     }
 }

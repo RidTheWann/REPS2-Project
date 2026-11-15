@@ -15,6 +15,7 @@ public sealed class HomeViewModel(IGameLibraryService library, Func<DesktopSetti
     public string FeaturedSerial => SelectedGame?.Subtitle ?? string.Empty;
     public string FeaturedLifecycle => SelectedGame?.LifecycleLabel ?? string.Empty;
     public string FeaturedEvidence => SelectedGame?.EvidenceNote ?? string.Empty;
+    public IReadOnlyList<GameSummary> Games => _games;
     public string PreviousTitle => _games.Count > 1 ? _games[PreviousIndex].DisplayName : string.Empty;
     public string NextTitle => _games.Count > 1 ? _games[NextIndex].DisplayName : string.Empty;
     public string CollectionCount => $"{_games.Count:N0} {(_games.Count == 1 ? "TITLE" : "TITLES")}";
@@ -42,12 +43,14 @@ public sealed class HomeViewModel(IGameLibraryService library, Func<DesktopSetti
                 .OrderBy(game => game.DisplayName, StringComparer.CurrentCultureIgnoreCase)
                 .ToArray();
             _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, _games.Count - 1));
+            OnPropertyChanged(nameof(Games));
             NotifySelectionChanged();
         }
         catch (Exception ex)
         {
             _games = [];
             _selectedIndex = 0;
+            OnPropertyChanged(nameof(Games));
             ErrorMessage = ex.Message;
             NotifySelectionChanged();
         }
@@ -72,6 +75,25 @@ public sealed class HomeViewModel(IGameLibraryService library, Func<DesktopSetti
             return;
         _selectedIndex = NextIndex;
         NotifySelectionChanged();
+    }
+
+    public void SelectGame(string? gameId)
+    {
+        if (string.IsNullOrWhiteSpace(gameId))
+            return;
+
+        for (var index = 0; index < _games.Count; index++)
+        {
+            if (!string.Equals(_games[index].GameId, gameId, StringComparison.Ordinal))
+                continue;
+
+            if (_selectedIndex == index)
+                return;
+
+            _selectedIndex = index;
+            NotifySelectionChanged();
+            return;
+        }
     }
 
     private void NotifySelectionChanged()

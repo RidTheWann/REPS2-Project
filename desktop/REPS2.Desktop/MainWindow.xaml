@@ -6,14 +6,14 @@
     <Grid x:Name="RootLayout" RequestedTheme="Dark" Background="{ThemeResource AppBackgroundBrush}"
           KeyDown="RootLayout_KeyDown">
         <Grid.RowDefinitions>
-            <RowDefinition Height="68"/>
+        <RowDefinition x:Name="HeaderRow" Height="76"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="32"/>
+        <RowDefinition x:Name="StatusRow" Height="48"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="{ThemeResource DeepSurfaceBrush}"
+        <Border x:Name="ShellHeader" Grid.Row="0" Background="{ThemeResource DeepSurfaceBrush}"
                 BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
-            <Grid Padding="18,0" ColumnSpacing="10">
+            <Grid Padding="32,0" ColumnSpacing="16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
@@ -49,34 +49,39 @@
                                     Visibility="Collapsed"/>
                         </Grid>
                     </Button>
-                    <Button Content="Trophy" IsEnabled="False" Style="{StaticResource HeaderNavigationButtonStyle}"
-                            ToolTipService.ToolTip="Trophy data is not available in this Alpha."/>
-                    <Button Content="Stats" IsEnabled="False" Style="{StaticResource HeaderNavigationButtonStyle}"
-                            ToolTipService.ToolTip="Verified gameplay statistics are not available in this Alpha."/>
-                    <Button x:Name="QueueNavigationButton" Tag="BuildQueue" Click="Navigation_Click"
+                    <Button x:Name="TrophyNavigationButton" Tag="Trophy" Click="Navigation_Click"
+                            Style="{StaticResource HeaderNavigationButtonStyle}">
+                        <Grid MinWidth="58">
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                            <TextBlock Text="Trophy" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border x:Name="TrophyNavigationIndicator" Grid.Row="1"
+                                    Background="{ThemeResource NavigationAccentBrush}" Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="StatisticsNavigationButton" Tag="Statistics" Click="Navigation_Click"
+                            Style="{StaticResource HeaderNavigationButtonStyle}">
+                        <Grid MinWidth="58">
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                            <TextBlock Text="Statistik" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border x:Name="StatisticsNavigationIndicator" Grid.Row="1"
+                                    Background="{ThemeResource NavigationAccentBrush}" Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="ProfileNavigationButton" Tag="Profile" Click="Navigation_Click"
                             Style="{StaticResource HeaderNavigationButtonStyle}">
                         <Grid MinWidth="64">
                             <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
-                            <TextBlock Text="Queue" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <Border x:Name="QueueNavigationIndicator" Grid.Row="1" Background="{ThemeResource NavigationAccentBrush}"
-                                    Visibility="Collapsed"/>
-                        </Grid>
-                    </Button>
-                    <Button x:Name="DeveloperNavigationButton" Tag="Developer" Click="Navigation_Click"
-                            Style="{StaticResource HeaderNavigationButtonStyle}">
-                        <Grid MinWidth="82">
-                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
-                            <TextBlock Text="Developer" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <Border x:Name="DeveloperNavigationIndicator" Grid.Row="1" Background="{ThemeResource NavigationAccentBrush}"
-                                    Visibility="Collapsed"/>
+                            <TextBlock Text="Profile" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border x:Name="ProfileNavigationIndicator" Grid.Row="1"
+                                    Background="{ThemeResource NavigationAccentBrush}" Visibility="Collapsed"/>
                         </Grid>
                     </Button>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6"
                             HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button x:Name="AddGameButton" Click="AddGame_Click" Style="{StaticResource AccentButtonStyle}"
-                            Padding="10,5" MinHeight="34" FontSize="12">
+                    <Button x:Name="AddGameButton" Click="AddGame_Click"
+                            Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon Glyph="&#xE710;" FontSize="12"/>
                             <TextBlock Text="Add game"/>
@@ -85,26 +90,27 @@
                     <ProgressBar x:Name="UpdateProgress" Width="48" Height="3" Minimum="0" Maximum="100"
                                  Visibility="Collapsed" VerticalAlignment="Center"/>
                     <Button x:Name="UpdateButton" Content="Check updates" Click="UpdateButton_Click"
-                            Padding="8,5" MinHeight="32" FontSize="11"/>
-                    <Button x:Name="SettingsNavigationButton" Tag="Settings" Click="Navigation_Click"
-                            Padding="9,7" MinHeight="34" ToolTipService.ToolTip="Settings">
-                        <Grid>
-                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
-                            <FontIcon Glyph="&#xE713;" FontSize="15"/>
-                            <Border x:Name="SettingsNavigationIndicator" Grid.Row="1"
-                                    Background="{ThemeResource NavigationAccentBrush}" Visibility="Collapsed"/>
-                        </Grid>
-                    </Button>
-                    <Button x:Name="BigPictureButton" Click="BigPicture_Click" Padding="9,7" MinHeight="34"
+                            Visibility="Collapsed"/>
+                    <Button x:Name="BigPictureButton" Click="BigPicture_Click" Padding="12,8" MinHeight="48"
                             ToolTipService.ToolTip="Enter Big Picture mode">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon Glyph="&#xE740;" FontSize="14"/>
-                            <TextBlock x:Name="BigPictureLabel" Text="Big Picture" FontSize="11"/>
+                            <TextBlock x:Name="BigPictureLabel" Text="Big Picture" FontSize="14"/>
                         </StackPanel>
                     </Button>
-                    <Button x:Name="ThemeButton" Click="ToggleTheme_Click" Padding="9,7" MinHeight="34"
+                    <Button x:Name="ThemeButton" Click="ToggleTheme_Click" Padding="12,8" MinWidth="48" MinHeight="48"
+                            AutomationProperties.Name="Toggle application theme"
                             ToolTipService.ToolTip="Switch to light theme">
                         <FontIcon x:Name="ThemeIcon" Glyph="&#xE706;" FontSize="15"/>
+                    </Button>
+                    <Button x:Name="SettingsNavigationButton" Tag="Settings" Click="Navigation_Click"
+                            Padding="12,8" MinWidth="128" MinHeight="48"
+                            AutomationProperties.Name="Open settings"
+                            ToolTipService.ToolTip="Open settings">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE713;" FontSize="14"/>
+                            <TextBlock Text="Settings" FontSize="14"/>
+                        </StackPanel>
                     </Button>
                 </StackPanel>
             </Grid>
@@ -112,29 +118,59 @@
 
         <Frame x:Name="ContentFrame" Grid.Row="1" NavigationFailed="ContentFrame_NavigationFailed"/>
 
-        <Border Grid.Row="2" Background="{ThemeResource StatusBarBrush}"
-                BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,1,0,0" Padding="14,0">
-            <Grid ColumnSpacing="16">
+        <Border x:Name="ShellStatusBar" Grid.Row="2" Background="{ThemeResource StatusBarBrush}"
+                BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,1,0,0" Padding="32,0">
+            <Grid ColumnSpacing="24">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="StatusText" Text="Ready · Imported does not mean playable" FontSize="11"
-                           Foreground="{ThemeResource SecondaryTextBrush}" VerticalAlignment="Center"
+                <TextBlock x:Name="StatusText" Text="DESKTOP ALPHA" FontSize="11"
+                           Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis"/>
-                <Button x:Name="CancelBuildButton" Grid.Column="1" Content="Cancel build" Click="CancelBuild_Click"
+                <TextBlock x:Name="CollectionNoticeText" Grid.Column="1"
+                           Text="Illustrative collection · Compatibility unverified" FontSize="11"
+                           Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button x:Name="CancelBuildButton" Grid.Column="2" Content="Cancel build" Click="CancelBuild_Click"
                         Padding="7,0" MinHeight="26" FontSize="11" Visibility="Collapsed" Margin="0,0,12,0"/>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                    <TextBlock x:Name="ToolchainBadge" Text="Checking toolchain…" FontSize="11"
-                               Foreground="{ThemeResource SecondaryTextBrush}" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="UpdateStatusText" Text="Updates checked on startup" FontSize="11"
-                               Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"
-                               MaxWidth="190" TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
-                <TextBlock Grid.Column="3" Text="Windows x64 · RG REPS2 ENGINE" FontSize="11"
-                           Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="ToolchainBadge" Grid.Column="2" Text="Checking toolchain…" FontSize="11"
+                           Foreground="{ThemeResource SecondaryTextBrush}" VerticalAlignment="Center"
+                           Visibility="Collapsed"/>
+                <TextBlock x:Name="UpdateStatusText" Grid.Column="2" Text="Updates checked on startup" FontSize="11"
+                           Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center"
+                           MaxWidth="190" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
+                <Button x:Name="QueueNavigationButton" Grid.Column="2" Tag="BuildQueue" Click="Navigation_Click"
+                        Padding="7,0" MinHeight="26" FontSize="11" ToolTipService.ToolTip="Open build queue"
+                        Visibility="Collapsed">
+                    <Grid MinWidth="58">
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                        <TextBlock Text="Queue" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="QueueNavigationIndicator" Grid.Row="1"
+                                Background="{ThemeResource NavigationAccentBrush}" Visibility="Collapsed"/>
+                    </Grid>
+                </Button>
+                <Button x:Name="DeveloperNavigationButton" Grid.Column="3" Tag="Developer" Click="Navigation_Click"
+                        Padding="8,0" MinHeight="40" FontSize="11" ToolTipService.ToolTip="Open Developer mode">
+                    <Grid MinWidth="86">
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="2"/></Grid.RowDefinitions>
+                        <TextBlock Text="Developer mode" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="DeveloperNavigationIndicator" Grid.Row="1"
+                                Background="{ThemeResource NavigationAccentBrush}" Visibility="Collapsed"/>
+                    </Grid>
+                </Button>
+                <Button x:Name="EngineMonitorButton" Grid.Column="4" Tag="EngineMonitor" Click="Navigation_Click"
+                        Padding="8,0" MinHeight="40" FontSize="11" ToolTipService.ToolTip="Open engine monitor">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <FontIcon Glyph="&#xE950;" FontSize="12"/>
+                        <TextBlock Text="RG REPS2 ENGINE"/>
+                    </StackPanel>
+                </Button>
+                <TextBlock x:Name="StatusMessage" Visibility="Collapsed"
+                           AutomationProperties.LiveSetting="Polite"/>
             </Grid>
         </Border>
     </Grid>

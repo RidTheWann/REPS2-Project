@@ -19,41 +19,41 @@
                     <SolidColorBrush x:Key="PrimaryTextBrush" Color="#16181C"/>
                     <SolidColorBrush x:Key="SecondaryTextBrush" Color="#4B5563"/>
                     <SolidColorBrush x:Key="MutedTextBrush" Color="#667085"/>
-                    <SolidColorBrush x:Key="BrandBrush" Color="#166534"/>
-                    <SolidColorBrush x:Key="BrandSubtleBrush" Color="#E6F4EA"/>
+                    <SolidColorBrush x:Key="BrandBrush" Color="#9D2638"/>
+                    <SolidColorBrush x:Key="BrandSubtleBrush" Color="#F9EAEC"/>
                     <SolidColorBrush x:Key="BrandForegroundBrush" Color="#FFFFFF"/>
                     <SolidColorBrush x:Key="NavigationAccentBrush" Color="#9D2638"/>
-                    <SolidColorBrush x:Key="AccentFillBrush" Color="#1B6B3A"/>
+                    <SolidColorBrush x:Key="AccentFillBrush" Color="#9D2638"/>
                     <SolidColorBrush x:Key="AccentOnFillBrush" Color="#FFFFFF"/>
-                    <SolidColorBrush x:Key="RunBrush" Color="#15803D"/>
+                    <SolidColorBrush x:Key="RunBrush" Color="#9D2638"/>
                     <SolidColorBrush x:Key="BorderSubtleBrush" Color="#D7DCE3"/>
                     <SolidColorBrush x:Key="DangerBrush" Color="#B42318"/>
                     <SolidColorBrush x:Key="InfoBrush" Color="#1D4ED8"/>
-                    <SolidColorBrush x:Key="BuiltBrush" Color="#15803D"/>
+                    <SolidColorBrush x:Key="BuiltBrush" Color="#475467"/>
                     <SolidColorBrush x:Key="StatusBarBrush" Color="#FAFBFC"/>
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Default">
-                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0E1013"/>
-                    <SolidColorBrush x:Key="DeepSurfaceBrush" Color="#121418"/>
-                    <SolidColorBrush x:Key="SurfaceOneBrush" Color="#16191E"/>
-                    <SolidColorBrush x:Key="SurfaceTwoBrush" Color="#1C2026"/>
-                    <SolidColorBrush x:Key="SurfaceThreeBrush" Color="#232830"/>
-                    <SolidColorBrush x:Key="InsetBrush" Color="#101317"/>
-                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#F2F4F7"/>
-                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#B7BEC8"/>
-                    <SolidColorBrush x:Key="MutedTextBrush" Color="#8B94A1"/>
-                    <SolidColorBrush x:Key="BrandBrush" Color="#3FB950"/>
-                    <SolidColorBrush x:Key="BrandSubtleBrush" Color="#173322"/>
-                    <SolidColorBrush x:Key="BrandForegroundBrush" Color="#07130A"/>
+                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#090B0D"/>
+                    <SolidColorBrush x:Key="DeepSurfaceBrush" Color="#101214"/>
+                    <SolidColorBrush x:Key="SurfaceOneBrush" Color="#181B1E"/>
+                    <SolidColorBrush x:Key="SurfaceTwoBrush" Color="#22262A"/>
+                    <SolidColorBrush x:Key="SurfaceThreeBrush" Color="#34393E"/>
+                    <SolidColorBrush x:Key="InsetBrush" Color="#101214"/>
+                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#F4F5F6"/>
+                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#AFB5BC"/>
+                    <SolidColorBrush x:Key="MutedTextBrush" Color="#858E98"/>
+                    <SolidColorBrush x:Key="BrandBrush" Color="#C43C4B"/>
+                    <SolidColorBrush x:Key="BrandSubtleBrush" Color="#2A171B"/>
+                    <SolidColorBrush x:Key="BrandForegroundBrush" Color="#F4F5F6"/>
                     <SolidColorBrush x:Key="NavigationAccentBrush" Color="#C43C4B"/>
-                    <SolidColorBrush x:Key="AccentFillBrush" Color="#238636"/>
-                    <SolidColorBrush x:Key="AccentOnFillBrush" Color="#FFFFFF"/>
-                    <SolidColorBrush x:Key="RunBrush" Color="#3FB950"/>
-                    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#2B313A"/>
-                    <SolidColorBrush x:Key="DangerBrush" Color="#F97066"/>
+                    <SolidColorBrush x:Key="AccentFillBrush" Color="#F4F5F6"/>
+                    <SolidColorBrush x:Key="AccentOnFillBrush" Color="#101214"/>
+                    <SolidColorBrush x:Key="RunBrush" Color="#C43C4B"/>
+                    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#34393E"/>
+                    <SolidColorBrush x:Key="DangerBrush" Color="#C43C4B"/>
                     <SolidColorBrush x:Key="InfoBrush" Color="#7FB2FF"/>
-                    <SolidColorBrush x:Key="BuiltBrush" Color="#3FB950"/>
-                    <SolidColorBrush x:Key="StatusBarBrush" Color="#111418"/>
+                    <SolidColorBrush x:Key="BuiltBrush" Color="#AFB5BC"/>
+                    <SolidColorBrush x:Key="StatusBarBrush" Color="#101214"/>
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -64,7 +64,7 @@
                 <Setter Property="TextWrapping" Value="Wrap"/>
             </Style>
             <Style x:Key="PageSubtitleStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="FontSize" Value="14"/>
                 <Setter Property="Foreground" Value="{ThemeResource SecondaryTextBrush}"/>
                 <Setter Property="TextWrapping" Value="Wrap"/>
             </Style>
@@ -74,7 +74,7 @@
                 <Setter Property="Foreground" Value="{ThemeResource SecondaryTextBrush}"/>
             </Style>
             <Style x:Key="CaptionStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="11"/>
+                <Setter Property="FontSize" Value="12"/>
                 <Setter Property="Foreground" Value="{ThemeResource MutedTextBrush}"/>
                 <Setter Property="TextWrapping" Value="Wrap"/>
             </Style>
@@ -89,18 +89,21 @@
                 <Setter Property="Background" Value="{ThemeResource SurfaceOneBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource BorderSubtleBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="CornerRadius" Value="10"/>
-                <Setter Property="Padding" Value="18"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="Padding" Value="24"/>
             </Style>
             <Style x:Key="AccentButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                 <Setter Property="Background" Value="{ThemeResource AccentFillBrush}"/>
                 <Setter Property="Foreground" Value="{ThemeResource AccentOnFillBrush}"/>
                 <Setter Property="BorderThickness" Value="0"/>
                 <Setter Property="FontWeight" Value="SemiBold"/>
-                <Setter Property="Padding" Value="14,8"/>
-                <Setter Property="CornerRadius" Value="7"/>
-                <Setter Property="MinHeight" Value="36"/>
+                <Setter Property="Padding" Value="20,12"/>
+                <Setter Property="CornerRadius" Value="6"/>
+                <Setter Property="MinHeight" Value="48"/>
                 <Setter Property="FontSize" Value="13"/>
+            </Style>
+            <Style x:Key="AccentButtonTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource AccentOnFillBrush}"/>
             </Style>
             <Style x:Key="HeaderNavigationButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                 <Setter Property="Background" Value="Transparent"/>
@@ -108,12 +111,12 @@
                 <Setter Property="Padding" Value="10,0"/>
                 <Setter Property="CornerRadius" Value="0"/>
                 <Setter Property="MinHeight" Value="58"/>
-                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="FontSize" Value="14"/>
                 <Setter Property="Foreground" Value="{ThemeResource SecondaryTextBrush}"/>
             </Style>
 
             <Style TargetType="TextBlock">
-                <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+                <Setter Property="FontFamily" Value="Inter, Segoe UI Variable Text, Segoe UI"/>
                 <Setter Property="Foreground" Value="{ThemeResource PrimaryTextBrush}"/>
             </Style>
             <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
@@ -121,9 +124,9 @@
                 <Setter Property="Foreground" Value="{ThemeResource PrimaryTextBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource BorderSubtleBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="Padding" Value="14,8"/>
-                <Setter Property="CornerRadius" Value="7"/>
-                <Setter Property="MinHeight" Value="36"/>
+                <Setter Property="Padding" Value="20,12"/>
+                <Setter Property="CornerRadius" Value="6"/>
+                <Setter Property="MinHeight" Value="48"/>
                 <Setter Property="FontSize" Value="13"/>
             </Style>
             <Style TargetType="TextBox" BasedOn="{StaticResource DefaultTextBoxStyle}">
@@ -131,16 +134,16 @@
                 <Setter Property="Foreground" Value="{ThemeResource PrimaryTextBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource BorderSubtleBrush}"/>
                 <Setter Property="PlaceholderForeground" Value="{ThemeResource MutedTextBrush}"/>
-                <Setter Property="CornerRadius" Value="7"/>
-                <Setter Property="MinHeight" Value="38"/>
+                <Setter Property="CornerRadius" Value="6"/>
+                <Setter Property="MinHeight" Value="48"/>
                 <Setter Property="FontSize" Value="13"/>
             </Style>
             <Style TargetType="ComboBox" BasedOn="{StaticResource DefaultComboBoxStyle}">
                 <Setter Property="Background" Value="{ThemeResource InsetBrush}"/>
                 <Setter Property="Foreground" Value="{ThemeResource PrimaryTextBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource BorderSubtleBrush}"/>
-                <Setter Property="MinHeight" Value="38"/>
-                <Setter Property="CornerRadius" Value="7"/>
+                <Setter Property="MinHeight" Value="48"/>
+                <Setter Property="CornerRadius" Value="6"/>
                 <Setter Property="FontSize" Value="13"/>
             </Style>
             <Style TargetType="CheckBox" BasedOn="{StaticResource DefaultCheckBoxStyle}">

@@ -4,91 +4,65 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:models="using:REPS2.Desktop.Api.Contracts"
     Background="{ThemeResource AppBackgroundBrush}">
-    <Grid Padding="28,24,28,24" RowSpacing="16">
+    <Grid Padding="64,32" RowSpacing="24">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" ColumnSpacing="16">
+        <Grid ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <StackPanel Spacing="4">
-                <TextBlock Text="Your library" Style="{StaticResource PageTitleStyle}"/>
-                <TextBlock Text="The games you own, all in one place. Lifecycle labels reflect evidence, not assumptions."
+            <StackPanel Spacing="6">
+                <TextBlock Text="{x:Bind ViewModel.CollectionLabel, Mode=OneWay}" FontSize="12"
+                           FontWeight="SemiBold" CharacterSpacing="45"
+                           Foreground="{ThemeResource MutedTextBrush}"/>
+                <TextBlock Text="{x:Bind ViewModel.PageTitle, Mode=OneWay}" Style="{StaticResource PageTitleStyle}"/>
+                <TextBlock Text="{x:Bind ViewModel.PageSubtitle, Mode=OneWay}"
                            Style="{StaticResource PageSubtitleStyle}"/>
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <Button Click="Refresh_Click" ToolTipService.ToolTip="Refresh library">
-                    <FontIcon Glyph="&#xE72C;" FontSize="13"/>
-                </Button>
-                <Button Click="AddGame_Click" Style="{StaticResource AccentButtonStyle}">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE710;" FontSize="13"/>
-                        <TextBlock Text="Add game"/>
-                    </StackPanel>
-                </Button>
-            </StackPanel>
+            <Button Grid.Column="1" Click="AddGame_Click" Style="{StaticResource AccentButtonStyle}"
+                    Visibility="{x:Bind ViewModel.CollectionControlsVisible, Mode=OneWay}"
+                    VerticalAlignment="Center" MinWidth="170">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE710;" FontSize="13"/>
+                    <TextBlock Text="ADD GAME" Style="{StaticResource AccentButtonTextStyle}"/>
+                </StackPanel>
+            </Button>
         </Grid>
 
-        <Grid Grid.Row="1" ColumnSpacing="8">
+        <Grid Grid.Row="1" ColumnSpacing="16"
+              Visibility="{x:Bind ViewModel.CollectionControlsVisible, Mode=OneWay}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="160"/>
-                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="218"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="204"/>
             </Grid.ColumnDefinitions>
-            <TextBox x:Name="SearchBox" PlaceholderText="Search title, serial, disc ID, or status" TextChanged="SearchBox_TextChanged"/>
-            <ComboBox x:Name="LibraryFilterBox" Grid.Column="1" SelectedIndex="0" SelectedValuePath="Tag"
-                      SelectionChanged="Filters_SelectionChanged">
+            <TextBox x:Name="SearchBox" PlaceholderText="Search your collection"
+                     TextChanged="SearchBox_TextChanged"/>
+            <ComboBox x:Name="LibraryFilterBox" Grid.Column="1" SelectedIndex="0"
+                      SelectedValuePath="Tag" SelectionChanged="Filters_SelectionChanged">
                 <ComboBoxItem Content="All titles" Tag="All"/>
                 <ComboBoxItem Content="Needs review" Tag="NeedsReview"/>
                 <ComboBoxItem Content="Ready to build" Tag="ReadyToBuild"/>
                 <ComboBoxItem Content="Native-built or later" Tag="NativeBuilt"/>
                 <ComboBoxItem Content="Playable only" Tag="Playable"/>
             </ComboBox>
-            <ComboBox x:Name="LibrarySortBox" Grid.Column="2" SelectedIndex="0" SelectedValuePath="Tag"
+            <TextBlock Grid.Column="2" Text="{x:Bind ViewModel.ResultsSummary, Mode=OneWay}"
+                       Style="{StaticResource CaptionStyle}" VerticalAlignment="Center"/>
+            <ComboBox x:Name="LibrarySortBox" Grid.Column="3" SelectedIndex="0" SelectedValuePath="Tag"
                       SelectionChanged="Filters_SelectionChanged">
-                <ComboBoxItem Content="Title · A to Z" Tag="NameAscending"/>
-                <ComboBoxItem Content="Title · Z to A" Tag="NameDescending"/>
+                <ComboBoxItem Content="Sort: Title A–Z" Tag="NameAscending"/>
+                <ComboBoxItem Content="Sort: Title Z–A" Tag="NameDescending"/>
             </ComboBox>
-            <TextBlock x:Name="ResultsSummary" Grid.Column="3" Text="{x:Bind ViewModel.ResultsSummary, Mode=OneWay}"
-                       Style="{StaticResource CaptionStyle}" VerticalAlignment="Center" Margin="4,0,0,0"/>
         </Grid>
 
-        <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="0">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Padding="18,12" Spacing="2">
-                    <TextBlock Text="Titles" Style="{StaticResource SectionLabelStyle}"/>
-                    <TextBlock x:Name="LibraryCount" Text="{x:Bind ViewModel.LibraryCount, Mode=OneWay}" FontSize="20" FontWeight="SemiBold"
-                               Foreground="{ThemeResource PrimaryTextBrush}"/>
-                </StackPanel>
-                <Border Grid.Column="1" BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="1,0,1,0">
-                    <StackPanel Padding="18,12" Spacing="2">
-                        <TextBlock Text="Native-built" Style="{StaticResource SectionLabelStyle}"/>
-                        <TextBlock x:Name="BuiltCount" Text="{x:Bind ViewModel.BuiltCount, Mode=OneWay}" FontSize="20" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource BuiltBrush}"/>
-                    </StackPanel>
-                </Border>
-                <StackPanel Grid.Column="2" Padding="18,12" Spacing="2">
-                    <TextBlock Text="Playable" Style="{StaticResource SectionLabelStyle}"/>
-                    <TextBlock x:Name="PlayableCount" Text="{x:Bind ViewModel.PlayableCount, Mode=OneWay}" FontSize="20" FontWeight="SemiBold"
-                               Foreground="{ThemeResource SecondaryTextBrush}"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="2">
             <GridView x:Name="GamesGrid" ItemsSource="{x:Bind ViewModel.VisibleGames}" IsItemClickEnabled="True"
                       Visibility="{x:Bind ViewModel.GamesVisible, Mode=OneWay}"
                       SelectionMode="None" ItemClick="GamesGrid_ItemClick"
@@ -102,92 +76,101 @@
                 </GridView.ItemsPanel>
                 <GridView.ItemTemplate>
                     <DataTemplate x:DataType="models:GameSummary">
-                        <Border Width="178" Height="340" Margin="0,0,10,10"
-                                Background="{ThemeResource SurfaceOneBrush}"
-                                BorderBrush="{ThemeResource BorderSubtleBrush}"
-                                BorderThickness="1" CornerRadius="8" Padding="0">
-                            <Grid RowSpacing="0">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="232"/>
-                                    <RowDefinition Height="*"/>
-                                </Grid.RowDefinitions>
-                                <Border Background="{ThemeResource SurfaceTwoBrush}" CornerRadius="7,7,0,0"
-                                        BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
-                                    <Grid Padding="12">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="*"/>
-                                            <RowDefinition Height="Auto"/>
-                                        </Grid.RowDefinitions>
-                                        <TextBlock Text="PLAYSTATION 2" FontSize="12" FontWeight="SemiBold"
-                                                   CharacterSpacing="60" Foreground="{ThemeResource MutedTextBrush}"
-                                                   VerticalAlignment="Top"/>
-                                        <Grid Grid.Row="1">
-                                            <Ellipse Width="112" Height="112" Stroke="{ThemeResource BorderSubtleBrush}"
-                                                     StrokeThickness="1" HorizontalAlignment="Center"
-                                                     VerticalAlignment="Center"/>
-                                            <Ellipse Width="78" Height="78" Stroke="{ThemeResource NavigationAccentBrush}"
-                                                     StrokeThickness="1" Opacity="0.7" HorizontalAlignment="Center"
-                                                     VerticalAlignment="Center"/>
-                                            <TextBlock Text="PS2" FontSize="24" FontWeight="Light" CharacterSpacing="20"
-                                                       Foreground="{ThemeResource SecondaryTextBrush}"
-                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                        </Grid>
-                                        <TextBlock Grid.Row="2" Text="NO GAME ART" FontSize="12"
-                                                   Foreground="{ThemeResource MutedTextBrush}" HorizontalAlignment="Center"/>
+                        <StackPanel Width="202" Margin="0,0,16,14" Spacing="12">
+                            <Border Width="202" Height="286" CornerRadius="4"
+                                    Background="{ThemeResource SurfaceOneBrush}"
+                                    BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="1">
+                                <Grid Padding="14">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid>
+                                        <TextBlock Text="REPS2" FontSize="12" FontWeight="Bold"/>
+                                        <TextBlock Text="PS2" FontSize="11" CharacterSpacing="20"
+                                                   Foreground="{ThemeResource MutedTextBrush}"
+                                                   HorizontalAlignment="Right"/>
                                     </Grid>
-                                </Border>
-                                <StackPanel Grid.Row="1" Padding="10,9" Spacing="5">
-                                    <TextBlock Text="{x:Bind DisplayName}" FontSize="13" FontWeight="SemiBold"
-                                               Foreground="{ThemeResource PrimaryTextBrush}" TextTrimming="CharacterEllipsis"
-                                               MaxLines="2"/>
-                                    <TextBlock Text="{x:Bind Subtitle}" FontSize="10" FontFamily="Cascadia Mono, Consolas"
-                                               Foreground="{ThemeResource SecondaryTextBrush}"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <Border Background="{ThemeResource BrandSubtleBrush}" CornerRadius="5" Padding="6,3"
-                                            HorizontalAlignment="Left">
-                                        <TextBlock Text="{x:Bind LifecycleLabel}" FontSize="12" FontWeight="SemiBold"
-                                                   Foreground="{ThemeResource BrandBrush}"/>
-                                    </Border>
-                                    <TextBlock Text="{x:Bind EvidenceNote}" FontSize="12"
-                                               Foreground="{ThemeResource MutedTextBrush}" TextWrapping="Wrap" MaxLines="2"/>
-                                </StackPanel>
-                            </Grid>
-                        </Border>
+                                    <Grid Grid.Row="1">
+                                        <Ellipse Width="128" Height="128" Stroke="{ThemeResource BorderSubtleBrush}"
+                                                 StrokeThickness="1" HorizontalAlignment="Center"
+                                                 VerticalAlignment="Center"/>
+                                        <Ellipse Width="88" Height="88" Stroke="{ThemeResource NavigationAccentBrush}"
+                                                 StrokeThickness="1" HorizontalAlignment="Center"
+                                                 VerticalAlignment="Center"/>
+                                        <TextBlock Text="PS2" FontSize="28" FontWeight="Light" CharacterSpacing="20"
+                                                   Foreground="{ThemeResource SecondaryTextBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <TextBlock Grid.Row="2" Text="{x:Bind DisplayName}" FontSize="12"
+                                               FontWeight="SemiBold" TextWrapping="Wrap" MaxLines="2"
+                                               TextAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <TextBlock Text="{x:Bind DisplayName}" FontSize="14" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                            <TextBlock Text="{x:Bind LifecycleLabel}" FontSize="12"
+                                       Foreground="{ThemeResource MutedTextBrush}"/>
+                        </StackPanel>
                     </DataTemplate>
                 </GridView.ItemTemplate>
             </GridView>
 
-            <StackPanel x:Name="EmptyStatePanel" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440"
-                        Visibility="{x:Bind ViewModel.EmptyVisible, Mode=OneWay}">
-                <Border Width="56" Height="56" CornerRadius="14" Background="{ThemeResource SurfaceTwoBrush}"
-                        BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="1" HorizontalAlignment="Center">
-                    <FontIcon Glyph="&#xE7FC;" FontSize="24" Foreground="{ThemeResource BrandBrush}"
-                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
-                <TextBlock x:Name="EmptyStateTitle" Text="{x:Bind ViewModel.EmptyStateTitle, Mode=OneWay}" FontSize="20" FontWeight="SemiBold"
-                           Foreground="{ThemeResource PrimaryTextBrush}" HorizontalAlignment="Center"/>
-                <TextBlock x:Name="EmptyStateDescription"
-                           Text="{x:Bind ViewModel.EmptyStateDescription, Mode=OneWay}"
-                           Style="{StaticResource PageSubtitleStyle}" TextAlignment="Center"/>
-                <Button x:Name="EmptyAddButton" Click="AddGame_Click" Style="{StaticResource AccentButtonStyle}"
-                        Visibility="{x:Bind ViewModel.EmptyAddVisible, Mode=OneWay}"
-                        HorizontalAlignment="Center" Margin="0,4,0,0">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE710;" FontSize="13"/>
-                        <TextBlock Text="Add your first game"/>
+            <Grid x:Name="EmptyStatePanel" Visibility="{x:Bind ViewModel.EmptyVisible, Mode=OneWay}">
+                <Border Background="{ThemeResource SurfaceOneBrush}" CornerRadius="8">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Spacing="18" MaxWidth="720" Padding="24">
+                        <Border Width="112" Height="150" CornerRadius="6"
+                                Background="{ThemeResource SurfaceTwoBrush}"
+                                BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="1">
+                            <Grid>
+                                <TextBlock Text="PS2" FontSize="24" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource SecondaryTextBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Border Width="64" Height="1" Background="{ThemeResource BorderSubtleBrush}"
+                                        VerticalAlignment="Center" Margin="0,38,0,0"/>
+                            </Grid>
+                        </Border>
+                        <TextBlock x:Name="EmptyStateTitle" Text="{x:Bind ViewModel.EmptyStateTitle, Mode=OneWay}"
+                                   FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   TextAlignment="Center"/>
+                        <TextBlock x:Name="EmptyStateDescription"
+                                   Text="{x:Bind ViewModel.EmptyStateDescription, Mode=OneWay}"
+                                   Style="{StaticResource PageSubtitleStyle}" TextAlignment="Center"
+                                   AutomationProperties.LiveSetting="Polite"/>
+                        <Button x:Name="EmptyAddButton" Click="AddGame_Click"
+                                Visibility="{x:Bind ViewModel.EmptyAddVisible, Mode=OneWay}"
+                                Style="{StaticResource AccentButtonStyle}" MinWidth="170">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE710;" FontSize="13"/>
+                                <TextBlock Text="ADD GAME" Style="{StaticResource AccentButtonTextStyle}"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="ClearFiltersButton" Click="ClearFilters_Click"
+                                Visibility="{x:Bind ViewModel.ClearFiltersVisible, Mode=OneWay}"
+                                Content="Clear filters"/>
                     </StackPanel>
-                </Button>
-                <Button x:Name="ClearFiltersButton" Click="ClearFilters_Click"
-                        Visibility="{x:Bind ViewModel.ClearFiltersVisible, Mode=OneWay}"
-                        HorizontalAlignment="Center">
-                    <TextBlock Text="Clear filters"/>
-                </Button>
+                </Border>
+            </Grid>
+
+            <StackPanel x:Name="ErrorStatePanel" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Spacing="12" MaxWidth="560"
+                        Visibility="{x:Bind ViewModel.ErrorVisible, Mode=OneWay}">
+                <TextBlock Text="The library could not be read" FontSize="22" FontWeight="SemiBold"
+                           HorizontalAlignment="Center"/>
+                <TextBlock Text="{x:Bind ViewModel.EmptyStateDescription, Mode=OneWay}"
+                           Style="{StaticResource PageSubtitleStyle}" TextAlignment="Center"
+                           AutomationProperties.LiveSetting="Assertive"/>
+                <Button Click="Refresh_Click" Content="Try again" HorizontalAlignment="Center"/>
             </StackPanel>
         </Grid>
 
-        <TextBlock x:Name="LibraryNotice" Grid.Row="4"
-                   Text="{x:Bind ViewModel.Notice, Mode=OneWay}"
-                   Style="{StaticResource CaptionStyle}"/>
+        <Border Grid.Row="3" Background="{ThemeResource SurfaceOneBrush}" CornerRadius="6"
+                Padding="14,10"
+                Visibility="{x:Bind ViewModel.CollectionControlsVisible, Mode=OneWay}">
+            <TextBlock x:Name="LibraryNotice" Text="{x:Bind ViewModel.Notice, Mode=OneWay}"
+                       Style="{StaticResource CaptionStyle}"/>
+        </Border>
     </Grid>
 </Page>

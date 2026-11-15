@@ -20,45 +20,111 @@
                            Foreground="{ThemeResource SecondaryTextBrush}"/>
             </StackPanel>
 
-            <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="20">
+            <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="0">
                 <Grid ColumnSpacing="24">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="250"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="Compatibility state" Style="{StaticResource SectionLabelStyle}"/>
-                        <TextBlock x:Name="LifecycleText" Text="{x:Bind ViewModel.LifecycleText, Mode=OneWay}" FontSize="22" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource BrandBrush}"/>
-                        <TextBlock x:Name="EvidenceText" Text="{x:Bind ViewModel.EvidenceText, Mode=OneWay}" FontSize="13"
-                                   Foreground="{ThemeResource SecondaryTextBrush}" TextWrapping="Wrap"/>
-                        <TextBlock x:Name="RecoveryText" Text="{x:Bind ViewModel.RecoveryText, Mode=OneWay}" FontSize="12"
-                                   Foreground="{ThemeResource DangerBrush}" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Center" MinWidth="196">
-                        <Button x:Name="RelinkButton" Click="Relink_Click" Visibility="{x:Bind ViewModel.RelinkVisible, Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                <FontIcon Glyph="&#xE8B7;" FontSize="13"/>
-                                <TextBlock Text="Relink original ISO"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="BuildButton" Click="Build_Click" Style="{StaticResource AccentButtonStyle}"
-                                Visibility="{x:Bind ViewModel.BuildVisible, Mode=OneWay}" IsEnabled="{x:Bind ViewModel.BuildEnabled, Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                <FontIcon Glyph="&#xE943;" FontSize="13"/>
-                                <TextBlock Text="Build native module"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="ProbeButton" Click="Probe_Click"
-                                Visibility="{x:Bind ViewModel.ProbeVisible, Mode=OneWay}" IsEnabled="{x:Bind ViewModel.ProbeEnabled, Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                <FontIcon Glyph="&#xE768;" FontSize="13"/>
-                                <TextBlock Text="Run bounded probe"/>
-                            </StackPanel>
-                        </Button>
-                        <TextBlock Text="Play is unavailable until gameplay acceptance passes."
-                                   Style="{StaticResource CaptionStyle}" TextAlignment="Center"/>
-                    </StackPanel>
+                    <Border Background="{ThemeResource SurfaceTwoBrush}" Padding="16"
+                            BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,0,1,0">
+                        <StackPanel Spacing="8" VerticalAlignment="Center">
+                            <Border Width="192" Height="248" CornerRadius="7"
+                                    Background="{ThemeResource SurfaceOneBrush}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="PLAYSTATION 2" FontSize="12" FontWeight="SemiBold"
+                                               CharacterSpacing="45" Foreground="{ThemeResource MutedTextBrush}"
+                                               Margin="12,10"/>
+                                    <Grid Grid.Row="1">
+                                        <Ellipse Width="128" Height="128" Stroke="{ThemeResource BorderSubtleBrush}"
+                                                 StrokeThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Ellipse Width="94" Height="94" Stroke="{ThemeResource NavigationAccentBrush}"
+                                                 StrokeThickness="1" Opacity="0.7" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <TextBlock Text="PS2" FontSize="30" FontWeight="Light" CharacterSpacing="25"
+                                                   Foreground="{ThemeResource SecondaryTextBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <TextBlock Grid.Row="2" Text="{x:Bind ViewModel.LifecycleText, Mode=OneWay}"
+                                               FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource BrandBrush}"
+                                               TextWrapping="Wrap" TextAlignment="Center" Margin="8,4,8,12"/>
+                                </Grid>
+                            </Border>
+                            <TextBlock Text="Artwork is illustrative. Compatibility is determined by evidence."
+                                       FontSize="12" Foreground="{ThemeResource MutedTextBrush}"
+                                       TextWrapping="Wrap" MaxWidth="200"/>
+                        </StackPanel>
+                    </Border>
+                    <Grid Grid.Column="1" Padding="24,20,20,20" RowSpacing="14">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="READINESS &amp; PROVENANCE" FontSize="12" FontWeight="SemiBold"
+                                       CharacterSpacing="35" Foreground="{ThemeResource MutedTextBrush}"/>
+                            <TextBlock x:Name="LifecycleText" Text="{x:Bind ViewModel.LifecycleText, Mode=OneWay}"
+                                       FontSize="24" FontWeight="SemiBold" Foreground="{ThemeResource BrandBrush}"/>
+                            <TextBlock x:Name="EvidenceText" Text="{x:Bind ViewModel.EvidenceText, Mode=OneWay}"
+                                       FontSize="14" Foreground="{ThemeResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="RecoveryText" Text="{x:Bind ViewModel.RecoveryText, Mode=OneWay}"
+                                       FontSize="13" Foreground="{ThemeResource DangerBrush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                            <Button Click="Readiness_Click" Style="{StaticResource AccentButtonStyle}"
+                                    AutomationProperties.Name="Check readiness for this title"
+                                    ToolTipService.ToolTip="Check title readiness. This does not launch a game.">
+                                <TextBlock Text="CHECK READINESS" Style="{StaticResource AccentButtonTextStyle}"/>
+                            </Button>
+                            <Button Click="ViewIso_Click">
+                                <TextBlock Text="View ISO"/>
+                            </Button>
+                            <Button x:Name="RelinkButton" Click="Relink_Click"
+                                    Visibility="{x:Bind ViewModel.RelinkVisible, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="13"/>
+                                    <TextBlock Text="Relink original ISO"/>
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="BuildButton" Click="Build_Click" Style="{StaticResource AccentButtonStyle}"
+                                    Visibility="{x:Bind ViewModel.BuildVisible, Mode=OneWay}"
+                                    IsEnabled="{x:Bind ViewModel.BuildEnabled, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <FontIcon Glyph="&#xE943;" FontSize="13"/>
+                                    <TextBlock Text="Build native module" Style="{StaticResource AccentButtonTextStyle}"/>
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="ProbeButton" Click="Probe_Click"
+                                    Visibility="{x:Bind ViewModel.ProbeVisible, Mode=OneWay}"
+                                    IsEnabled="{x:Bind ViewModel.ProbeEnabled, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <FontIcon Glyph="&#xE768;" FontSize="13"/>
+                                    <TextBlock Text="Run bounded probe"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                        <Border Grid.Row="2" Background="{ThemeResource AppBackgroundBrush}"
+                                BorderBrush="{ThemeResource BorderSubtleBrush}" BorderThickness="0,1,0,0"
+                                Padding="12,10">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Launch unavailable · No retail title is verified as Boot-tested or Playable."
+                                           FontSize="13" Foreground="{ThemeResource DangerBrush}"
+                                           TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Click="Readiness_Click">
+                                    <TextBlock Text="Readiness details"/>
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -76,6 +142,9 @@
                         <TextBlock x:Name="IsoDigest" Text="{x:Bind ViewModel.IsoDigest, Mode=OneWay}" Style="{StaticResource MonoTextStyle}"/>
                         <TextBlock Text="Boot ELF entry" Style="{StaticResource CaptionStyle}"/>
                         <TextBlock x:Name="EntryPoint" Text="{x:Bind ViewModel.EntryPoint, Mode=OneWay}" FontSize="12" FontFamily="Cascadia Mono, Consolas"
+                                   Foreground="{ThemeResource SecondaryTextBrush}"/>
+                        <TextBlock Text="Source policy" Style="{StaticResource CaptionStyle}"/>
+                        <TextBlock Text="Original ISO stays external" FontSize="12"
                                    Foreground="{ThemeResource SecondaryTextBrush}"/>
                     </StackPanel>
                 </Border>

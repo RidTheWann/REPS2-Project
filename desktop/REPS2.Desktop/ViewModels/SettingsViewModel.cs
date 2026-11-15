@@ -10,11 +10,12 @@ public sealed class SettingsViewModel(ISettingsService settingsService) : ViewMo
     public string Status { get => _status; private set => Set(ref _status, value); }
 
     public DesktopSettings Compose(
-        DesktopSettings current, string defaultLibraryRoot, string libraryRoot, string frontendPath,
+        DesktopSettings current, string theme, string defaultLibraryRoot, string libraryRoot, string frontendPath,
         string runnerPath, string sdkIncludeRoot, string cmakePath, bool developerDiagnostics,
-        bool autoCheckUpdates, int translationUnitCount, int probeBudget) =>
+        bool autoCheckUpdates, bool reduceMotion, bool confirmBeforeExit, int translationUnitCount, int probeBudget) =>
         current with
         {
+            Theme = theme,
             LibraryRoot = string.IsNullOrWhiteSpace(libraryRoot) ? defaultLibraryRoot : Path.GetFullPath(libraryRoot.Trim()),
             FrontendPath = frontendPath.Trim(),
             EngineRunnerPath = runnerPath.Trim(),
@@ -22,6 +23,8 @@ public sealed class SettingsViewModel(ISettingsService settingsService) : ViewMo
             CMakePath = cmakePath.Trim(),
             DeveloperDiagnostics = developerDiagnostics,
             AutoCheckUpdates = autoCheckUpdates,
+            ReduceMotion = reduceMotion,
+            ConfirmBeforeExit = confirmBeforeExit,
             TranslationUnitCount = translationUnitCount,
             DefaultProbeBudget = probeBudget
         };

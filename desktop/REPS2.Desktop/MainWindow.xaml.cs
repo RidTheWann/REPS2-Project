@@ -19,6 +19,8 @@ public sealed partial class MainWindow : Window
     private bool _initialized;
     private bool _busy;
     private bool _isBigPicture;
+    private bool _allowWindowClose;
+    private string? _bigPictureGameId;
     private CancellationTokenSource? _buildCancellation;
     private DesktopReleaseInfo? _availableUpdate;
     private readonly UpdateService _updateService = new();
@@ -26,6 +28,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(1440, 900));
+        AppWindow.Closing += AppWindow_Closing;
         _paths.EnsureApplicationDirectories();
         _settingsStore = new SettingsStore(_paths);
         ContentFrame.Navigated += ContentFrame_Navigated;
@@ -55,9 +59,14 @@ public sealed partial class MainWindow : Window
             context.RelinkSourceIsoAsync = RelinkSourceIsoAsync;
             context.RunProbeAsync = RunProbeAsync;
             context.OpenGame = OpenGame;
+            context.OpenReadiness = game => ContentFrame.Navigate(typeof(Pages.ReadinessPage), game);
+            context.EnterBigPicture = () => BigPicture_Click(this, new RoutedEventArgs());
+            context.NavigateTo = Navigate;
             context.RunDeveloperCommandAsync = RunDeveloperCommandAsync;
             context.SetStatus = SetStatus;
+            context.ReturnToDesktop = ReturnToDesktop;
             context.SettingsChanged = ApplySettings;
+            context.UpdateDesktopAsync = UpdateDesktopAsync;
             AppServices.Current = context;
             _initialized = true;
 
@@ -80,6 +89,30 @@ public sealed partial class MainWindow : Window
         _settings = settings;
         if (!_initialized)
             return;
+
+        var useLightTheme = string.Equals(settings.Theme, "Light", StringComparison.OrdinalIgnoreCase);
+        RootLayout.RequestedTheme = useLightTheme ? ElementTheme.Light : ElementTheme.Dark;
+        var titleBarColor = useLightTheme
+            ? Windows.UI.Color.FromArgb(255, 243, 244, 246)
+            : Windows.UI.Color.FromArgb(255, 16, 18, 20);
+        var titleBarTextColor = useLightTheme
+            ? Windows.UI.Color.FromArgb(255, 22, 24, 28)
+            : Windows.UI.Color.FromArgb(255, 244, 245, 246);
+        AppWindow.TitleBar.BackgroundColor = titleBarColor;
+        AppWindow.TitleBar.ForegroundColor = titleBarTextColor;
+        AppWindow.TitleBar.ButtonBackgroundColor = titleBarColor;
+        AppWindow.TitleBar.ButtonForegroundColor = titleBarTextColor;
+        AppWindow.TitleBar.ButtonHoverBackgroundColor = useLightTheme
+            ? Windows.UI.Color.FromArgb(255, 238, 240, 243)
+            : Windows.UI.Color.FromArgb(255, 34, 38, 42);
+        AppWindow.TitleBar.ButtonHoverForegroundColor = titleBarTextColor;
+        AppWindow.TitleBar.ButtonPressedBackgroundColor = useLightTheme
+            ? Windows.UI.Color.FromArgb(255, 215, 220, 227)
+            : Windows.UI.Color.FromArgb(255, 52, 57, 62);
+        AppWindow.TitleBar.ButtonPressedForegroundColor = titleBarTextColor;
+        ThemeIcon.Glyph = useLightTheme ? "\uE708" : "\uE706";
+        ToolTipService.SetToolTip(ThemeButton, useLightTheme ? "Switch to dark theme" : "Switch to light theme");
+
         var toolchain = ToolchainLocator.Resolve(_settings, _paths);
         ToolchainBadge.Text = toolchain.CanImport
             ? toolchain.CanBuild ? "Frontend + native toolchain ready" : "Frontend ready · native build setup needed"
@@ -87,6 +120,11 @@ public sealed partial class MainWindow : Window
     }
 
     private async void UpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        await UpdateDesktopAsync();
+    }
+
+    private async Task UpdateDesktopAsync()
     {
         if (_availableUpdate is not null)
             await DownloadAndApplyUpdateAsync(_availableUpdate);
@@ -102,6 +140,7 @@ public sealed partial class MainWindow : Window
         UpdateButton.IsEnabled = false;
         UpdateButton.Content = "Checking…";
         UpdateStatusText.Text = "Checking Alpha releases";
+        AppServices.Current.UpdateStatus = "Checking published releases…";
         try
         {
             var result = await _updateService.CheckForUpdatesAsync();
@@ -110,6 +149,7 @@ public sealed partial class MainWindow : Window
             {
                 UpdateButton.Content = $"Update {_availableUpdate.Version}";
                 UpdateStatusText.Text = "Update available";
+                AppServices.Current.UpdateStatus = $"Update {_availableUpdate.Version} available";
                 UpdateStatusText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["InfoBrush"];
                 SetStatus($"REPS2 Desktop {_availableUpdate.Version} is available · one-click update ready");
             }
@@ -117,6 +157,7 @@ public sealed partial class MainWindow : Window
             {
                 UpdateButton.Content = "Check updates";
                 UpdateStatusText.Text = result.Message;
+                AppServices.Current.UpdateStatus = result.Message;
                 UpdateStatusText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SecondaryTextBrush"];
                 if (!silent)
                     SetStatus(result.Message);
@@ -127,6 +168,7 @@ public sealed partial class MainWindow : Window
             _availableUpdate = null;
             UpdateButton.Content = "Check updates";
             UpdateStatusText.Text = "Update check unavailable";
+            AppServices.Current.UpdateStatus = "Update check unavailable";
             UpdateStatusText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["MutedTextBrush"];
             if (!silent)
                 await ShowDialogAsync("Could not check for updates", ex.Message);
@@ -149,6 +191,7 @@ public sealed partial class MainWindow : Window
         UpdateProgress.IsIndeterminate = true;
         UpdateButton.Content = "Downloading…";
         UpdateStatusText.Text = $"Downloading {release.Version}";
+        AppServices.Current.UpdateStatus = $"Downloading {release.Version}…";
         SetStatus($"Downloading and verifying REPS2 Desktop {release.Version}…");
         try
         {
@@ -168,6 +211,7 @@ public sealed partial class MainWindow : Window
 
             UpdateProgress.IsIndeterminate = true;
             UpdateStatusText.Text = "Verified · restarting";
+            AppServices.Current.UpdateStatus = "Verified · restarting";
             UpdateButton.Content = "Applying update…";
             SetStatus("Package checksum verified · handing off to the REPS2 updater");
             var launcher = new UpdateLauncher(_paths);
@@ -181,6 +225,7 @@ public sealed partial class MainWindow : Window
             UpdateProgress.Value = 0;
             UpdateButton.Content = $"Update {release.Version}";
             UpdateStatusText.Text = "Update could not be applied";
+            AppServices.Current.UpdateStatus = "Update could not be applied";
             UpdateStatusText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["DangerBrush"];
             await ShowDialogAsync("REPS2 update failed", ex.Message);
             SetStatus("Update failed · the current installation was left in place");
@@ -203,10 +248,16 @@ public sealed partial class MainWindow : Window
     {
         switch (destination)
         {
+            case "Welcome": ContentFrame.Navigate(typeof(Pages.WelcomePage)); break;
             case "Home": ContentFrame.Navigate(typeof(Pages.HomePage)); break;
             case "Library": ContentFrame.Navigate(typeof(Pages.LibraryPage)); break;
+            case "AddGame": ContentFrame.Navigate(typeof(Pages.AddGamePage)); break;
+            case "Trophy": ContentFrame.Navigate(typeof(Pages.TrophyPage)); break;
+            case "Statistics": ContentFrame.Navigate(typeof(Pages.StatisticsPage)); break;
+            case "Profile": ContentFrame.Navigate(typeof(Pages.ProfilePage)); break;
             case "BuildQueue": ContentFrame.Navigate(typeof(Pages.BuildQueuePage)); break;
             case "Developer": ContentFrame.Navigate(typeof(Pages.DeveloperPage)); break;
+            case "EngineMonitor": ContentFrame.Navigate(typeof(Pages.EngineMonitorPage)); break;
             case "Settings": ContentFrame.Navigate(typeof(Pages.SettingsPage)); break;
         }
     }
@@ -215,18 +266,36 @@ public sealed partial class MainWindow : Window
     {
         var heading = e.Content switch
         {
+            Pages.WelcomePage _ => "Welcome",
             Pages.HomePage _ => "Home",
+            Pages.BigPicturePage _ => "Big Picture",
             Pages.LibraryPage _ => "Library",
+            Pages.AddGamePage _ => "Add game",
+            Pages.TrophyPage _ => "Trophy",
+            Pages.StatisticsPage _ => "Statistik",
+            Pages.ProfilePage _ => "Profil",
             Pages.GameDetailPage _ => "Game detail",
+            Pages.ReadinessPage _ => "Readiness",
             Pages.BuildQueuePage _ => "Build Queue",
             Pages.DeveloperPage _ => "Developer Center",
+            Pages.EngineMonitorPage _ => "Engine monitor",
             Pages.SettingsPage _ => "Settings",
             _ => "REPS2"
         };
-        SetActiveNavigation(e.Content is Pages.GameDetailPage ? "Library" : heading switch
+        var hideShell = (e.Content is Pages.WelcomePage or Pages.BigPicturePage) || _isBigPicture;
+        ShellHeader.Visibility = hideShell ? Visibility.Collapsed : Visibility.Visible;
+        ShellStatusBar.Visibility = hideShell ? Visibility.Collapsed : Visibility.Visible;
+        HeaderRow.Height = new GridLength(hideShell ? 0 : 76);
+        StatusRow.Height = new GridLength(hideShell ? 0 : 48);
+        SetActiveNavigation(e.Content is Pages.GameDetailPage or Pages.ReadinessPage or Pages.AddGamePage ? "Library" : heading switch
         {
             "Build Queue" => "BuildQueue",
             "Developer Center" => "Developer",
+            "Engine monitor" => "Developer",
+            "Big Picture" => "Home",
+            "Statistik" => "Statistics",
+            "Profil" => "Profile",
+            "Welcome" => "Home",
             _ => heading
         });
         SetStatus($"{heading} · Evidence-driven lifecycle");
@@ -236,9 +305,13 @@ public sealed partial class MainWindow : Window
     {
         SetNavigationState(HomeNavigationButton, HomeNavigationIndicator, destination == "Home");
         SetNavigationState(LibraryNavigationButton, LibraryNavigationIndicator, destination == "Library");
+        SetNavigationState(TrophyNavigationButton, TrophyNavigationIndicator, destination == "Trophy");
+        SetNavigationState(StatisticsNavigationButton, StatisticsNavigationIndicator, destination == "Statistics");
+        SetNavigationState(ProfileNavigationButton, ProfileNavigationIndicator, destination == "Profile");
         SetNavigationState(QueueNavigationButton, QueueNavigationIndicator, destination == "BuildQueue");
         SetNavigationState(DeveloperNavigationButton, DeveloperNavigationIndicator, destination == "Developer");
-        SettingsNavigationIndicator.Visibility = destination == "Settings" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsNavigationButton.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[
+            destination == "Settings" ? "PrimaryTextBrush" : "SecondaryTextBrush"];
     }
 
     private void SetNavigationState(Button button, Border indicator, bool isSelected)
@@ -254,7 +327,7 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private async void AddGame_Click(object sender, RoutedEventArgs e) => await AddGameAsync();
+    private void AddGame_Click(object sender, RoutedEventArgs e) => Navigate("AddGame");
 
     private async Task AddGameAsync()
     {
@@ -283,6 +356,9 @@ public sealed partial class MainWindow : Window
 
         _busy = true;
         AddGameButton.IsEnabled = false;
+        var addGamePage = ContentFrame.Content as Pages.AddGamePage;
+        addGamePage?.ClearImportError();
+        addGamePage?.SetImporting(true);
         SetStatus("Importing ISO · validating the disc and boot ELF…");
         try
         {
@@ -292,9 +368,11 @@ public sealed partial class MainWindow : Window
                     _settings.DeveloperDiagnostics, _paths.Logs));
             if (result.ExitCode != 0)
             {
-                await ShowDialogAsync("Import failed", result.CombinedOutput.Length == 0
+                var error = result.CombinedOutput.Length == 0
                     ? $"The REPS2 frontend exited with code {result.ExitCode}."
-                    : result.CombinedOutput);
+                    : result.CombinedOutput;
+                addGamePage?.SetImportError(error);
+                await ShowDialogAsync("Import failed", error);
                 SetStatus($"Import failed · exit code {result.ExitCode}");
                 return;
             }
@@ -313,11 +391,16 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            addGamePage?.SetImportError(
+                ex.Message,
+                "Import could not be completed",
+                "Review the error details and configured paths before retrying.");
             await ShowDialogAsync("Import could not complete", ex.Message);
             SetStatus("Import failed · see the diagnostics directory");
         }
         finally
         {
+            addGamePage?.SetImporting(false);
             _busy = false;
             AddGameButton.IsEnabled = true;
         }
@@ -425,29 +508,65 @@ public sealed partial class MainWindow : Window
 
     private void ToggleTheme_Click(object sender, RoutedEventArgs e)
     {
+        _ = ToggleThemeAsync();
+    }
+
+    private async Task ToggleThemeAsync()
+    {
         var useLightTheme = RootLayout.RequestedTheme == ElementTheme.Dark;
-        RootLayout.RequestedTheme = useLightTheme ? ElementTheme.Light : ElementTheme.Dark;
-        ThemeIcon.Glyph = useLightTheme ? "\uE708" : "\uE706";
-        ToolTipService.SetToolTip(ThemeButton, useLightTheme ? "Switch to dark theme" : "Switch to light theme");
+        var updated = _settings with { Theme = useLightTheme ? "Light" : "Dark" };
+        try
+        {
+            await _settingsStore.SaveAsync(updated);
+            AppServices.Current.Settings = updated;
+            ApplySettings(updated);
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("Theme could not be saved", ex.Message);
+        }
     }
 
     private void BigPicture_Click(object sender, RoutedEventArgs e)
     {
         if (!_isBigPicture)
         {
-            Navigate("Home");
+            _bigPictureGameId = ContentFrame.Content switch
+            {
+                Pages.HomePage home => home.ViewModel.SelectedGame?.GameId,
+                Pages.GameDetailPage detail => detail.ViewModel.Game?.GameId,
+                _ => null
+            };
+            ContentFrame.Navigate(typeof(Pages.BigPicturePage), _bigPictureGameId);
             AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
             BigPictureLabel.Text = "Exit Big Picture";
             ToolTipService.SetToolTip(BigPictureButton, "Exit Big Picture mode");
+            ShellHeader.Visibility = Visibility.Collapsed;
+            ShellStatusBar.Visibility = Visibility.Collapsed;
+            HeaderRow.Height = new GridLength(0);
+            StatusRow.Height = new GridLength(0);
+            _isBigPicture = true;
         }
         else
         {
-            AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-            BigPictureLabel.Text = "Big Picture";
-            ToolTipService.SetToolTip(BigPictureButton, "Enter Big Picture mode");
+            ReturnToDesktop();
         }
+    }
 
-        _isBigPicture = !_isBigPicture;
+    private void ReturnToDesktop()
+    {
+        if (!_isBigPicture)
+            return;
+
+        AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
+        ContentFrame.Navigate(typeof(Pages.HomePage), _bigPictureGameId);
+        BigPictureLabel.Text = "Big Picture";
+        ToolTipService.SetToolTip(BigPictureButton, "Enter Big Picture mode");
+        ShellHeader.Visibility = Visibility.Visible;
+        ShellStatusBar.Visibility = Visibility.Visible;
+        HeaderRow.Height = new GridLength(76);
+        StatusRow.Height = new GridLength(48);
+        _isBigPicture = false;
     }
 
     private void RootLayout_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
@@ -553,7 +672,33 @@ public sealed partial class MainWindow : Window
             await queue.RefreshAsync();
     }
 
-    private void SetStatus(string message) => StatusText.Text = message;
+    private void SetStatus(string message)
+    {
+        StatusMessage.Text = message;
+        StatusText.Text = "DESKTOP ALPHA";
+    }
+
+    private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (!_settings.ConfirmBeforeExit || _allowWindowClose)
+            return;
+
+        args.Cancel = true;
+        var dialog = new ContentDialog
+        {
+            Title = "Exit REPS2 Desktop?",
+            Content = "Your imported library and original ISO files will remain unchanged.",
+            PrimaryButtonText = "Exit",
+            CloseButtonText = "Stay",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = ContentFrame.XamlRoot
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            _allowWindowClose = true;
+            Application.Current.Exit();
+        }
+    }
 
     private async Task ShowDialogAsync(string title, string message)
     {

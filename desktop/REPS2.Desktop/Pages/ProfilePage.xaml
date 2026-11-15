@@ -1,0 +1,88 @@
+<Page
+    x:Class="REPS2.Desktop.Pages.ProfilePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{ThemeResource AppBackgroundBrush}">
+    <Grid Padding="48,32" RowSpacing="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <StackPanel Spacing="6">
+            <TextBlock Text="PLAYER / PROFIL" FontSize="12" FontWeight="SemiBold"
+                       CharacterSpacing="45" Foreground="{ThemeResource MutedTextBrush}"/>
+            <TextBlock Text="A space of your own." Style="{StaticResource PageTitleStyle}"/>
+            <TextBlock Text="Your local collection and activity. No account is required."
+                       Style="{StaticResource PageSubtitleStyle}"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1*"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource CardStyle}" Padding="28">
+                <StackPanel Spacing="18">
+                    <TextBlock Text="LOCAL" FontSize="12" FontWeight="SemiBold"
+                               CharacterSpacing="35" Foreground="{ThemeResource MutedTextBrush}"/>
+                    <TextBlock Text="PLAYER" FontSize="32" FontWeight="Bold"/>
+                    <Border Width="42" Height="3" HorizontalAlignment="Left"
+                            Background="{ThemeResource NavigationAccentBrush}"/>
+                    <TextBlock Text="Local player" FontSize="21" FontWeight="SemiBold"
+                               Margin="0,8,0,0"/>
+                    <TextBlock Text="This device only" Style="{StaticResource PageSubtitleStyle}"/>
+                    <TextBlock Text="Your collection is personal. Your original games stay yours."
+                               Style="{StaticResource PageSubtitleStyle}" Margin="0,12,0,0"/>
+                </StackPanel>
+            </Border>
+            <StackPanel Grid.Column="1" Spacing="20">
+                <Border Style="{StaticResource CardStyle}" Padding="24">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Your collection" FontSize="19" FontWeight="SemiBold"/>
+                        <TextBlock Text="{x:Bind ViewModel.CollectionCount, Mode=OneWay}"
+                                   FontSize="25" FontWeight="SemiBold"/>
+                        <TextBlock Text="PS2 library · No playability implied"
+                                   Style="{StaticResource PageSubtitleStyle}"/>
+                        <TextBlock Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+                                   Foreground="{ThemeResource DangerBrush}" TextWrapping="Wrap"/>
+                        <Button Click="OpenLibrary_Click" Style="{StaticResource AccentButtonStyle}"
+                                HorizontalAlignment="Left" Margin="0,4,0,0">
+                            <TextBlock Text="Open library" Style="{StaticResource AccentButtonTextStyle}"/>
+                        </Button>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardStyle}" Padding="24">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Width="52" Height="52" CornerRadius="26"
+                                Background="{ThemeResource BrandSubtleBrush}"
+                                VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE734;" FontSize="22"
+                                      Foreground="{ThemeResource BrandBrush}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock Text="Achievement badges" FontSize="19" FontWeight="SemiBold"/>
+                            <TextBlock Text="No verified badges yet. Earned badges will appear here when trophy data is supported."
+                                       Style="{StaticResource PageSubtitleStyle}"/>
+                        </StackPanel>
+                        <Button Grid.Column="2" Click="OpenTrophy_Click" VerticalAlignment="Center"
+                                Content="View trophy collection"/>
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource CardStyle}" Padding="24">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Recent activity" FontSize="19" FontWeight="SemiBold"/>
+                        <TextBlock Text="No verified gameplay sessions yet." FontSize="16"/>
+                        <TextBlock Text="Imported assets and diagnostic jobs are not gameplay activity."
+                                   Style="{StaticResource PageSubtitleStyle}"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Page>

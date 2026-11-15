@@ -3,6 +3,7 @@ namespace REPS2.Desktop.Api.Contracts;
 /// <summary>Persisted desktop settings. Values are local, offline-first, and user-scoped.</summary>
 public sealed record DesktopSettings
 {
+    public string Theme { get; init; } = "Dark";
     public string LibraryRoot { get; init; } = string.Empty;
     public string FrontendPath { get; init; } = string.Empty;
     public string EngineRunnerPath { get; init; } = string.Empty;
@@ -10,6 +11,8 @@ public sealed record DesktopSettings
     public string CMakePath { get; init; } = string.Empty;
     public bool DeveloperDiagnostics { get; init; } = true;
     public bool AutoCheckUpdates { get; init; } = true;
+    public bool ReduceMotion { get; init; }
+    public bool ConfirmBeforeExit { get; init; } = true;
     public int DefaultProbeBudget { get; init; } = 5_000_000;
     public int TranslationUnitCount { get; init; } = 4;
 }
