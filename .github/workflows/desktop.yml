@@ -97,6 +97,37 @@ jobs:
           if (-not (Test-Path -LiteralPath (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\REPS2\REPS2 Desktop.lnk"))) {
               throw "The Start Menu shortcut was not created."
           }
+          $desktopExe = Join-Path $root "REPS2.Desktop.exe"
+          $desktop = Start-Process -FilePath $desktopExe -WorkingDirectory $root -PassThru
+          try {
+              $deadline = (Get-Date).AddSeconds(45)
+              $windowOpened = $false
+              do {
+                  Start-Sleep -Milliseconds 500
+                  $desktop.Refresh()
+                  if ($desktop.HasExited) {
+                      throw "REPS2 Desktop exited during startup with code $($desktop.ExitCode)."
+                  }
+                  if ($desktop.MainWindowHandle -ne [IntPtr]::Zero -and
+                      $desktop.MainWindowTitle -eq "REPS2 Desktop Alpha") {
+                      $windowOpened = $true
+                      break
+                  }
+              } while ((Get-Date) -lt $deadline)
+              if (-not $windowOpened) {
+                  throw "REPS2 Desktop did not open its main window within 45 seconds."
+              }
+              Write-Host "REPS2 Desktop opened its main window."
+          }
+          finally {
+              $desktop.Refresh()
+              if (-not $desktop.HasExited) {
+                  Stop-Process -Id $desktop.Id -Force -ErrorAction SilentlyContinue
+                  if (-not $desktop.WaitForExit(10000)) {
+                      throw "REPS2 Desktop did not exit after the launch smoke test."
+                  }
+              }
+          }
           Start-Process -FilePath (Join-Path $root "Uninstall.exe") -ArgumentList "/S" -Wait
           Start-Sleep -Seconds 2
           if (Test-Path -LiteralPath $root) {
