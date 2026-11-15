@@ -80,6 +80,7 @@ pub enum DiagnosticCode {
     MachineNotMips,
     UnsupportedOsAbi,
     UnsupportedFileType,
+    UnsupportedMipsAbi2,
     UnsupportedAbiFlagsVersion,
     UnsupportedRegInfoSize,
     UnsupportedRegInfoOrder,
@@ -151,6 +152,7 @@ impl fmt::Display for DiagnosticCode {
             DiagnosticCode::MachineNotMips => "MACHINE-NOT-MIPS",
             DiagnosticCode::UnsupportedOsAbi => "UNSUPPORTED-OS-ABI",
             DiagnosticCode::UnsupportedFileType => "UNSUPPORTED-FILE-TYPE",
+            DiagnosticCode::UnsupportedMipsAbi2 => "UNSUPPORTED-MIPS-ABI2",
             DiagnosticCode::UnsupportedAbiFlagsVersion => "UNSUPPORTED-ABI-FLAGS-VERSION",
             DiagnosticCode::UnsupportedRegInfoSize => "UNSUPPORTED-REGINFO-SIZE",
             DiagnosticCode::UnsupportedRegInfoOrder => "UNSUPPORTED-REGINFO-ORDER",
@@ -524,8 +526,28 @@ fn analyze_mips_compatibility(image: &Image, report: &mut CompatibilityReport) {
             }
         }
 
+        if flags.uses_abi2() {
+            report.diagnostics.push(Diagnostic {
+                code: DiagnosticCode::UnsupportedMipsAbi2,
+                severity: Severity::Incompatible,
+                message: "e_flags sets EF_MIPS_ABI2 (the MIPS n32 ABI)".to_string(),
+                field: "e_flags (features)".to_string(),
+                raw_value: "0x00000020".to_string(),
+                expected: Some("EF_MIPS_ABI2 clear for the PS2 EE EABI64 profile".to_string()),
+                explanation: "EF_MIPS_ABI2 identifies the alternate MIPS n32 ABI. REPS2's PS2 EE \
+                    compatibility profile is EABI64; the alternate calling convention is not \
+                    established as compatible."
+                    .to_string(),
+                evidence: "MIPS ELF ABI supplement EF_MIPS_ABI2 definition; ADR 0039".to_string(),
+                blocks_stage: Some(BlockedStage::CompatibilityConfidence),
+            });
+        }
+
         // Feature bits
         for name in flags.feature_names() {
+            if name == "abi2" {
+                continue;
+            }
             report.diagnostics.push(Diagnostic {
                 code: DiagnosticCode::UnknownFeatureBits,
                 severity: Severity::Advisory,
@@ -1522,6 +1544,37 @@ mod tests {
             .find(|d| d.code == DiagnosticCode::UnknownCpuCode);
         assert!(cpu_diag.is_some());
         assert_eq!(cpu_diag.unwrap().severity, Severity::Unknown);
+    }
+
+    #[test]
+    fn abi2_flag_is_incompatible_with_the_ps2_ee_profile() {
+        let mut image = minimal_mips_elf();
+        image.flags = (image.flags & !0x0000_F000) | 0x0000_0020;
+
+        let report = analyze_compatibility(&image);
+
+        assert!(report.has_incompatible());
+        assert!(report.format_valid);
+        assert!(!report.has_errors());
+        assert!(!report.ps2_compatible);
+        let abi2_diag = report
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == DiagnosticCode::UnsupportedMipsAbi2)
+            .expect("EF_MIPS_ABI2 must be classified explicitly");
+        assert_eq!(abi2_diag.severity, Severity::Incompatible);
+        assert_eq!(
+            abi2_diag.blocks_stage,
+            Some(BlockedStage::CompatibilityConfidence)
+        );
+        assert_eq!(abi2_diag.raw_value, "0x00000020");
+        assert!(
+            report.diagnostics.iter().all(|diagnostic| {
+                !(diagnostic.code == DiagnosticCode::UnknownFeatureBits
+                    && diagnostic.raw_value == "abi2")
+            }),
+            "ABI2 must not also be reported as a generic advisory feature"
+        );
     }
 
     #[test]

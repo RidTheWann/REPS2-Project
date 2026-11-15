@@ -623,6 +623,11 @@ pub struct MipsElfFlags {
 
 impl MipsElfFlags {
     #[must_use]
+    pub const fn uses_abi2(self) -> bool {
+        self.features & EF_MIPS_ABI2 != 0
+    }
+
+    #[must_use]
     pub const fn cpu_name(self) -> &'static str {
         match self.cpu_code {
             0x00 => "generic MIPS",

@@ -406,13 +406,15 @@ References:
 - ELF e_machine = EM_MIPS identifies the MIPS family but does not by itself distinguish a PlayStation 2 Emotion Engine executable from other MIPS objects.
 - MIPS-specific e_flags divides information into feature bits, ABI bits (mask 0x0000F000), CPU subtype bits (mask 0x00FF0000) and architecture-level bits (mask 0xF0000000). The CPU code 0x92 within the CPU field is the R5900 marker used for PS2 EE boot executables.
 - A commonly cited illustrative header value is 0x20924001: R5900 CPU marker, MIPS III architecture field, EABI64 ABI field and NOREORDER feature bit. The EABI64 subfield is a processor ABI tag; it does not change the ELF class from ELF32 to ELF64.
-- REPS2 reports these fields as diagnostics only. Unknown CPU/ABI/ISA values and unclassified bits are preserved; no CPU-flag combination is currently treated as an automatic accept/reject decision or a playable-title signal.
+- REPS2 reports these fields as diagnostics only. Unknown CPU/ABI/ISA values and unclassified bits are preserved; no R5900 marker or ordinary feature flag alone proves compatibility or playability. The separately defined `EF_MIPS_ABI2` marker is classified as incompatible with the PS2 EE profile (ADR 0146).
 - The PS2SDK EE ELF loader's documented header checks verify ELF identity, ELF32/little-endian, ET_EXEC, EM_MIPS and header sizes, but the inspected function does not validate e_flags. Therefore the R5900 marker is useful for classification and investigation, not a sufficient loader-compatibility proof.
+- The MIPS ELF ABI supplement defines `EF_MIPS_ABI2` (`0x00000020`) as the alternate n32 ABI. REPS2 reports this flag as incompatible with its PS2 EE EABI64 compatibility profile because the calling convention is not established as compatible. This is a compatibility diagnostic only: it does not change ELF parser admission or claim that the PS2SDK loader rejects the flag (ADR 0146).
 
 References:
 - ReverseEngineering.wiki, PS2 EE executable format: R5900 field mask/code and the example 0x20924001: https://reverseengineering.wiki/index.php/Format:PS2_EE_executable_(ELF)
 - PCSX2 Elfheader.h, the illustrative e_flags = 0x20924001 comment: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/Elfheader.h
 - spimdisasm ELF32 constants, processor/ABI/ISA flag field definitions: https://github.com/Decompollaborate/spimdisasm/blob/master/spimdisasm/elf32/Elf32Constants.py
+- GNU Binutils MIPS ELF definitions, including `EF_MIPS_ABI2`: https://github.com/RTEMS/sourceware-mirror-binutils-gdb/blob/master/include/elf/mips.h
 - PS2SDK EE ELF loader, header validation: https://github.com/ps2dev/ps2sdk/blob/master/ee/elf-loader2/src/elf.c
 
 ## ELF load-image policy

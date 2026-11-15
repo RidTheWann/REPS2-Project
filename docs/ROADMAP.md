@@ -91,6 +91,7 @@ This is a cross-cutting architecture track, not a replacement milestone and not 
 - [x] Preserve and diagnose EI_OSABI/EI_ABIVERSION bytes, classify standard ELF object types and OS-/processor-specific e_type ranges, and retain unknown metadata without changing parser admission.
 - [x] Parse MIPS SHT_MIPS_REGINFO and PT_MIPS_REGINFO register masks and signed gp values, and decode PT_MIPS_ABIFLAGS plus version-zero SHT_MIPS_ABIFLAGS using the shared decoder (including AFL_EXT_5900); enforce uniqueness for metadata program headers and retain unknown ABI-flags versions. Continue bounded SHT_MIPS_OPTIONS descriptor decoding including ELF32 ODK_REGINFO payloads.
 - [ ] Complete PS2-specific ABI enforcement, the broader MIPS processor-specific section set, and title-specific ELF compatibility diagnostics.
+  - Partial: `EF_MIPS_ABI2` is identified as the alternate n32 ABI and reported incompatible with the PS2 EE EABI64 profile (ADR 0146); broader ABI enforcement remains open.
 - [x] Default EE main-RAM physical mapping for supported direct, uncached, accelerated and KSEG PT_LOAD aliases.
 - [x] PT_LOAD-to-32 MiB initial RAM image construction with BSS zeroing and physical alias overlap checks.
 - [x] Coalesce pure BSS PT_LOAD program headers and skip empty segments for SN Systems ProDG linker compatibility; reject range growth that overlaps other PT_LOADs independent of program-header order (ADR 0024).
