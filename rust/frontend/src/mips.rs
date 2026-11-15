@@ -48,6 +48,17 @@ pub enum Opcode {
     MultiplyAccumulateUnsigned,
     Div,
     Divu,
+    /// MULT1 is the MMI MDU1 signed multiply: the same `sext32(rs) *
+    /// sext32(rt)` product as MULT, but written to the HI1:LO1 pair and the
+    /// low 64 bits to rd.
+    MultiplyDualSigned,
+    /// MULTU1 is the unsigned sibling of MULT1.
+    MultiplyDualUnsigned,
+    /// DIV1 is the MDU1 signed divide: LO1 = quotient, HI1 = remainder.
+    /// rd and sa are reserved zero.
+    DivideDualSigned,
+    /// DIVU1 is the unsigned sibling of DIV1.
+    DivideDualUnsigned,
     Add,
     Addu,
     Sub,
@@ -358,6 +369,10 @@ impl Opcode {
             Self::MultiplyAccumulateUnsigned => "maddu",
             Self::Div => "div",
             Self::Divu => "divu",
+            Self::MultiplyDualSigned => "mult1",
+            Self::MultiplyDualUnsigned => "multu1",
+            Self::DivideDualSigned => "div1",
+            Self::DivideDualUnsigned => "divu1",
             Self::Add => "add",
             Self::Addu => "addu",
             Self::Sub => "sub",
@@ -876,6 +891,17 @@ impl Instruction {
                 effects.gpr_read_mask = rs | rt;
                 effects.writes_hi = true;
                 effects.writes_lo = true;
+            }
+            Opcode::MultiplyDualSigned | Opcode::MultiplyDualUnsigned => {
+                effects.gpr_read_mask = rs | rt;
+                effects.gpr_write_mask = rd;
+                effects.writes_hi1 = true;
+                effects.writes_lo1 = true;
+            }
+            Opcode::DivideDualSigned | Opcode::DivideDualUnsigned => {
+                effects.gpr_read_mask = rs | rt;
+                effects.writes_hi1 = true;
+                effects.writes_lo1 = true;
             }
 
             Opcode::J => {
@@ -1531,6 +1557,12 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x11 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mthi1,
                 0x12 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mflo1,
                 0x13 if rt == 0 && rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mtlo1,
+                // MDU1 multiplies mirror MULT/MULTU but target HI1:LO1; sa is
+                // reserved zero. DIV1/DIVU1 also reserve rd.
+                0x18 if ((word >> 6) & 0x1F) == 0 => Opcode::MultiplyDualSigned,
+                0x19 if ((word >> 6) & 0x1F) == 0 => Opcode::MultiplyDualUnsigned,
+                0x1A if rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::DivideDualSigned,
+                0x1B if rd == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::DivideDualUnsigned,
                 // MADD/MADDU live at the bottom of the SPECIAL2 space with
                 // the rd and sa fields ignored.
                 0x00 => Opcode::MultiplyAccumulateSigned,
@@ -2652,6 +2684,84 @@ mod tests {
             decode((8 << 21) | (9 << 16) | (10 << 11) | 0x18 | (1 << 6), 0x6024).opcode,
             Opcode::Unknown
         );
+    }
+
+    #[test]
+    fn decodes_r5900_mdu1_multiply_and_divide() {
+        // Observed Downhill Domination frontier word: mult1 $19, $3 (rd = 3).
+        let observed = decode(0x7263_1818, 0x6200);
+        assert_eq!(observed.opcode, Opcode::MultiplyDualSigned);
+        assert_eq!((observed.rs, observed.rt, observed.rd), (19, 3, 3));
+        assert_eq!(observed.opcode.mnemonic(), "mult1");
+
+        let multu1 = decode(
+            (0x1C << 26) | (8 << 21) | (9 << 16) | (10 << 11) | 0x19,
+            0x6204,
+        );
+        assert_eq!(multu1.opcode, Opcode::MultiplyDualUnsigned);
+        assert_eq!((multu1.rs, multu1.rt, multu1.rd), (8, 9, 10));
+        let div1 = decode((0x1C << 26) | (8 << 21) | (9 << 16) | 0x1A, 0x6208);
+        assert_eq!(div1.opcode, Opcode::DivideDualSigned);
+        assert_eq!((div1.rs, div1.rt), (8, 9));
+        let divu1 = decode((0x1C << 26) | (8 << 21) | (9 << 16) | 0x1B, 0x620C);
+        assert_eq!(divu1.opcode, Opcode::DivideDualUnsigned);
+        // The MDU1 operands are otherwise reserved-zero where the encoding
+        // says so, so those words keep failing closed.
+        assert_eq!(
+            decode(
+                (0x1C << 26) | (8 << 21) | (9 << 16) | (10 << 11) | 0x1A,
+                0x6210
+            )
+            .opcode,
+            Opcode::Unknown
+        );
+        assert_eq!(
+            decode(
+                (0x1C << 26) | (8 << 21) | (9 << 16) | (10 << 11) | 0x1B,
+                0x6214
+            )
+            .opcode,
+            Opcode::Unknown
+        );
+        assert_eq!(
+            decode(
+                (0x1C << 26) | (8 << 21) | (9 << 16) | (10 << 11) | 0x18 | (1 << 6),
+                0x6218
+            )
+            .opcode,
+            Opcode::Unknown
+        );
+        assert_eq!(
+            decode(
+                (0x1C << 26) | (8 << 21) | (9 << 16) | 0x18 | (1 << 6),
+                0x621C
+            )
+            .opcode,
+            Opcode::Unknown
+        );
+    }
+
+    #[test]
+    fn effects_model_r5900_mdu1_multiply_and_divide() {
+        let mult1 = decode(
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | 0x18,
+            0x6300,
+        )
+        .effects();
+        assert_eq!(mult1.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(mult1.gpr_write_mask, 1 << 6);
+        assert!(mult1.writes_hi1 && mult1.writes_lo1);
+        assert!(!mult1.writes_hi && !mult1.writes_lo);
+        let mult1_to_zero = decode((0x1C << 26) | (4 << 21) | (5 << 16) | 0x19, 0x6304).effects();
+        assert_eq!(mult1_to_zero.gpr_write_mask, 0);
+        assert!(mult1_to_zero.writes_hi1 && mult1_to_zero.writes_lo1);
+        let div1 = decode((0x1C << 26) | (4 << 21) | (5 << 16) | 0x1A, 0x6308).effects();
+        assert_eq!(div1.gpr_read_mask, (1 << 4) | (1 << 5));
+        assert_eq!(div1.gpr_write_mask, 0);
+        assert!(div1.writes_hi1 && div1.writes_lo1);
+        assert!(!div1.writes_hi && !div1.writes_lo);
+        let divu1 = decode((0x1C << 26) | (4 << 21) | (5 << 16) | 0x1B, 0x630C).effects();
+        assert!(divu1.writes_hi1 && divu1.writes_lo1);
     }
 
     #[test]

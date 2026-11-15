@@ -327,6 +327,28 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// MULT1: signed 32x32 -> 64 product into HI1:LO1, low 64 bits into `dst`.
+    MultiplyDualWordSigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// MULTU1: unsigned sibling of MULT1.
+    MultiplyDualWordUnsigned {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// DIV1: signed 32-bit division into HI1/LO1.
+    DivideDualWordSigned {
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// DIVU1: unsigned sibling of DIV1.
+    DivideDualWordUnsigned {
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     /// MOVN: GPR[rd] = GPR[rs] if GPR[rt] != 0.
     MoveConditionalNotZero {
         dst: Gpr,
@@ -949,6 +971,24 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::Divu => Operation::DivideWordUnsigned {
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::MultiplyDualSigned => Operation::MultiplyDualWordSigned {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::MultiplyDualUnsigned => Operation::MultiplyDualWordUnsigned {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::DivideDualSigned => Operation::DivideDualWordSigned {
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::DivideDualUnsigned => Operation::DivideDualWordUnsigned {
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
             },
@@ -2444,6 +2484,41 @@ mod tests {
             Operation::ParallelAddUnsignedByte { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PADDUB verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mdu1_multiply_and_divide() {
+        let words = [
+            0x7263_1818,                                             // mult1 $19, $3
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | 0x19, // multu1 $4, $5 -> $6
+            (0x1C << 26) | (7 << 21) | (8 << 16) | 0x1A,             // div1 $7, $8
+            (0x1C << 26) | (9 << 21) | (10 << 16) | 0x1B,            // divu1 $9, $10
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0x7600 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("MDU1 lifts into typed IR");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::MultiplyDualWordSigned { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 19 && rhs.index() == 3
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::MultiplyDualWordUnsigned { dst, lhs, rhs }
+                if dst.index() == 6 && lhs.index() == 4 && rhs.index() == 5
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::DivideDualWordSigned { lhs, rhs } if lhs.index() == 7 && rhs.index() == 8
+        ));
+        assert!(matches!(
+            program.instructions()[3].operation,
+            Operation::DivideDualWordUnsigned { lhs, rhs } if lhs.index() == 9 && rhs.index() == 10
+        ));
+        program.verify().expect("MDU1 verifies");
     }
 
     #[test]

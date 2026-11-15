@@ -151,3 +151,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0148](0148-pad-rpc-servers.md) | Serve the pad RPC servers (0x80000100/0x80000101): GET_MODVER with the retail PADMAN word 0x0422, INIT/OPEN with padman's success result 1 | Proposed |
 | [0149](0149-mcserv-init-server.md) | Register the memory-card server (0x80000400) and serve XMCSERV INIT (fno 0xFE) with `{0, 0x20A, 0x20E}` | Proposed |
 | [0150](0150-ee-mmi3-pcpyh.md) | Decode, lift and AOT-lower R5900 MMI3 PCPYH (the word previously mislabelled BSHFL); the frontier moves to the MDU1 multiply word `0x72631818` | Proposed |
+| [0151](0151-ee-mdu1-multiply.md) | Decode, lift and AOT-lower the R5900 MDU1 family (`mult1`/`multu1`/`div1`/`divu1`) against HI1:LO1; the frontier becomes a SIF RPC bind retry for sid `0x00123456` | Proposed |

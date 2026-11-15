@@ -372,10 +372,10 @@ pub(crate) fn emit_instruction(
             emit_conditional_trap(output, lhs, rhs, comparison, in_branch_delay);
         }
         Operation::MultiplyWordSigned { dst, lhs, rhs } => {
-            emit_multiply_word(output, index, dst, lhs, rhs, true)
+            emit_multiply_word(output, index, dst, lhs, rhs, true, false)
         }
         Operation::MultiplyWordUnsigned { dst, lhs, rhs } => {
-            emit_multiply_word(output, index, dst, lhs, rhs, false)
+            emit_multiply_word(output, index, dst, lhs, rhs, false, false)
         }
         Operation::MultiplyAccumulateSigned { lhs, rhs } => {
             emit_multiply_accumulate(output, index, lhs, rhs, true)
@@ -383,9 +383,23 @@ pub(crate) fn emit_instruction(
         Operation::MultiplyAccumulateUnsigned { lhs, rhs } => {
             emit_multiply_accumulate(output, index, lhs, rhs, false)
         }
-        Operation::DivideWordSigned { lhs, rhs } => emit_divide_word(output, index, lhs, rhs, true),
+        Operation::DivideWordSigned { lhs, rhs } => {
+            emit_divide_word(output, index, lhs, rhs, true, false)
+        }
         Operation::DivideWordUnsigned { lhs, rhs } => {
-            emit_divide_word(output, index, lhs, rhs, false)
+            emit_divide_word(output, index, lhs, rhs, false, false)
+        }
+        Operation::MultiplyDualWordSigned { dst, lhs, rhs } => {
+            emit_multiply_word(output, index, dst, lhs, rhs, true, true)
+        }
+        Operation::MultiplyDualWordUnsigned { dst, lhs, rhs } => {
+            emit_multiply_word(output, index, dst, lhs, rhs, false, true)
+        }
+        Operation::DivideDualWordSigned { lhs, rhs } => {
+            emit_divide_word(output, index, lhs, rhs, true, true)
+        }
+        Operation::DivideDualWordUnsigned { lhs, rhs } => {
+            emit_divide_word(output, index, lhs, rhs, false, true)
         }
         Operation::MoveConditionalNotZero { dst, src, test } => {
             emit_move_conditional(output, dst, src, test, false)
@@ -1194,11 +1208,17 @@ fn emit_multiply_word(
     lhs: Gpr,
     rhs: Gpr,
     signed: bool,
+    dual: bool,
 ) {
     let tag = format!("{index:04}");
     let d = dst.index();
     let a = lhs.index();
     let b = rhs.index();
+    let (lo, hi) = if dual {
+        ("state.lo1", "state.hi1")
+    } else {
+        ("state.lo", "state.hi")
+    };
 
     if signed {
         output.push_str(&format!(
@@ -1220,9 +1240,9 @@ fn emit_multiply_word(
     }
 
     output.push_str(&format!(
-        "    state.lo = sign_extend_word(multiply_low_{tag});\n\
-         \x20   state.hi = sign_extend_word(multiply_high_{tag});\n\
-         \x20   if ({d} != 0) state.gpr[{d}].low = state.lo;\n"
+        "    {lo} = sign_extend_word(multiply_low_{tag});\n\
+         \x20   {hi} = sign_extend_word(multiply_high_{tag});\n\
+         \x20   if ({d} != 0) state.gpr[{d}].low = {lo};\n"
     ));
 }
 
@@ -1236,10 +1256,22 @@ fn emit_multiply_word(
 /// The EE does *not* leave the results undefined for these edge cases; PCSX2
 /// implements the same table. The generated code must handle them without
 /// invoking C++ signed-overflow or division-by-zero UB.
-fn emit_divide_word(output: &mut String, index: usize, lhs: Gpr, rhs: Gpr, signed: bool) {
+fn emit_divide_word(
+    output: &mut String,
+    index: usize,
+    lhs: Gpr,
+    rhs: Gpr,
+    signed: bool,
+    dual: bool,
+) {
     let tag = format!("{index:04}");
     let a = lhs.index();
     let b = rhs.index();
+    let (lo, hi) = if dual {
+        ("state.lo1", "state.hi1")
+    } else {
+        ("state.lo", "state.hi")
+    };
 
     if signed {
         // Signed division: extract low 32-bit words, sign-extend to int32_t.
@@ -1248,14 +1280,14 @@ fn emit_divide_word(output: &mut String, index: usize, lhs: Gpr, rhs: Gpr, signe
              \x20       const std::int32_t div_lhs_{tag} = static_cast<std::int32_t>(static_cast<std::uint32_t>(state.gpr[{a}].low));\n\
              \x20       const std::int32_t div_rhs_{tag} = static_cast<std::int32_t>(static_cast<std::uint32_t>(state.gpr[{b}].low));\n\
              \x20       if (div_rhs_{tag} == 0) {{\n\
-             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} >= 0 ? -1 : 1));\n\
-             \x20           state.hi = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag}));\n\
+             \x20           {lo} = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} >= 0 ? -1 : 1));\n\
+             \x20           {hi} = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag}));\n\
              \x20       }} else if (div_lhs_{tag} == std::numeric_limits<std::int32_t>::min() && div_rhs_{tag} == -1) {{\n\
-             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::min()));\n\
-             \x20           state.hi = sign_extend_word(0U);\n\
+             \x20           {lo} = sign_extend_word(static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::min()));\n\
+             \x20           {hi} = sign_extend_word(0U);\n\
              \x20       }} else {{\n\
-             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} / div_rhs_{tag}));\n\
-             \x20           state.hi = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} % div_rhs_{tag}));\n\
+             \x20           {lo} = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} / div_rhs_{tag}));\n\
+             \x20           {hi} = sign_extend_word(static_cast<std::uint32_t>(div_lhs_{tag} % div_rhs_{tag}));\n\
              \x20       }}\n\
              \x20   }}\n"
         ));
@@ -1266,11 +1298,11 @@ fn emit_divide_word(output: &mut String, index: usize, lhs: Gpr, rhs: Gpr, signe
              \x20       const std::uint32_t div_lhs_{tag} = static_cast<std::uint32_t>(state.gpr[{a}].low);\n\
              \x20       const std::uint32_t div_rhs_{tag} = static_cast<std::uint32_t>(state.gpr[{b}].low);\n\
              \x20       if (div_rhs_{tag} == 0U) {{\n\
-             \x20           state.lo = sign_extend_word(static_cast<std::uint32_t>(UINT32_MAX));\n\
-             \x20           state.hi = sign_extend_word(div_lhs_{tag});\n\
+             \x20           {lo} = sign_extend_word(static_cast<std::uint32_t>(UINT32_MAX));\n\
+             \x20           {hi} = sign_extend_word(div_lhs_{tag});\n\
              \x20       }} else {{\n\
-             \x20           state.lo = sign_extend_word(div_lhs_{tag} / div_rhs_{tag});\n\
-             \x20           state.hi = sign_extend_word(div_lhs_{tag} % div_rhs_{tag});\n\
+             \x20           {lo} = sign_extend_word(div_lhs_{tag} / div_rhs_{tag});\n\
+             \x20           {hi} = sign_extend_word(div_lhs_{tag} % div_rhs_{tag});\n\
              \x20       }}\n\
              \x20   }}\n"
         ));
@@ -1706,6 +1738,40 @@ mod tests {
         assert!(cpp.contains("multiply_product_bits_0007 = multiply_lhs_0007 * multiply_rhs_0007"));
         assert!(cpp.contains("state.gpr[23].low = state.lo"));
         assert!(cpp.contains("state.hi = sign_extend_word(multiply_high_0007)"));
+    }
+
+    #[test]
+    fn emits_r5900_mdu1_multiply_and_divide_against_hilo1() {
+        let words = [
+            0x7263_1818,                                                // mult1 $19, $3 (rd = 3)
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | 0x19,    // multu1 $4, $5 -> $6
+            (0x1C << 26) | (7 << 21) | (8 << 16) | 0x1A,                // div1 $7, $8
+            (0x1C << 26) | (9 << 21) | (10 << 16) | 0x1B,               // divu1 $9, $10
+            (0x1C << 26) | (11 << 21) | (12 << 16) | (13 << 11) | 0x18, // mult1 $11, $12 -> $13
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x9800 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("MDU1 IR");
+        let cpp = emit_cpp(&program).expect("MDU1 C++");
+
+        assert!(cpp.contains("state.gpr[3].low = state.lo1"));
+        assert!(cpp.contains("state.lo1 = sign_extend_word(multiply_low_0000)"));
+        assert!(cpp.contains("state.hi1 = sign_extend_word(multiply_high_0000)"));
+        assert!(cpp.contains("state.gpr[6].low = state.lo1"));
+        assert!(cpp.contains("multiply_product_bits_0001 = multiply_lhs_0001 * multiply_rhs_0001"));
+        assert!(cpp.contains(
+            "state.lo1 = sign_extend_word(static_cast<std::uint32_t>(div_lhs_0002 / div_rhs_0002))"
+        ));
+        assert!(cpp.contains(
+            "state.hi1 = sign_extend_word(static_cast<std::uint32_t>(div_lhs_0002 % div_rhs_0002))"
+        ));
+        assert!(cpp.contains("state.gpr[13].low = state.lo1"));
+        // The base pipeline must stay untouched by the dual-pipeline ops.
+        assert!(!cpp.contains("state.lo = sign_extend_word"));
+        assert!(!cpp.contains("state.hi = sign_extend_word"));
     }
 
     #[test]
