@@ -482,6 +482,12 @@ pub enum Operation {
         dst: Gpr,
         src: Gpr,
     },
+    /// PCPYH: replicate the lowest halfword of each 64-bit half across that
+    /// half's four halfword lanes.
+    ParallelCopyHalfword {
+        dst: Gpr,
+        src: Gpr,
+    },
     /// PEXT5 converts each word's low 1-5-5-5 halfword into 8-8-8-8 lanes.
     ParallelExtend5 {
         dst: Gpr,
@@ -1078,6 +1084,10 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: gpr(instruction.rt),
             },
             Opcode::ParallelRotate3Words => Operation::ParallelRotate3Words {
+                dst: gpr(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            Opcode::ParallelCopyHalfword => Operation::ParallelCopyHalfword {
                 dst: gpr(instruction.rd),
                 src: gpr(instruction.rt),
             },
@@ -2379,6 +2389,37 @@ mod tests {
             Operation::ParallelRotate3Words { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PROT3W verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi3_pcpyh() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1B << 6) | 0x29,
+            (0x1C << 26) | (5 << 16) | (5 << 11) | (0x1B << 6) | 0x29,
+            (0x1C << 26) | (1 << 16) | (0x1B << 6) | 0x29,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xD200 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PCPYH lifts into typed IR");
+
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelCopyHalfword { dst, src }
+                if dst.index() == 3 && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelCopyHalfword { dst, src }
+                if dst.index() == 5 && src.index() == 5
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::ParallelCopyHalfword { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PCPYH verifies");
     }
 
     #[test]

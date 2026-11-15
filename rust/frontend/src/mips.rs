@@ -161,6 +161,9 @@ pub enum Opcode {
     ParallelPackWord,
     ParallelExchangeEvenWord,
     ParallelRotate3Words,
+    /// PCPYH replicates the lowest 16-bit lane of each 64-bit half across the
+    /// four halfword lanes of that half.
+    ParallelCopyHalfword,
     /// PEXT5 converts four 1-5-5-5 halfwords into 8-8-8-8 byte lanes.
     ParallelExtend5,
     /// PPAC5 truncates four 8-8-8-8 words into 1-5-5-5 halfwords.
@@ -449,6 +452,7 @@ impl Opcode {
             Self::ParallelPackWord => "ppacw",
             Self::ParallelExchangeEvenWord => "pexew",
             Self::ParallelRotate3Words => "prot3w",
+            Self::ParallelCopyHalfword => "pcpyh",
             Self::ParallelExtend5 => "pext5",
             Self::ParallelPack5 => "ppac5",
             Self::FunnelShiftRightVec => "qfsrv",
@@ -949,17 +953,18 @@ impl Instruction {
             | Opcode::ParallelExtendLowWord
             | Opcode::ParallelExtendLowByte
             | Opcode::ParallelPackWord => {
-                // Every MMI operation lifted so far reads both source GPRs and
-                // writes only the destination GPR. PEXTLW, PCPYLD and PCPYUD
-                // touch only a subset of the 128 bits, but the effect mask is
-                // per-GPR, so they share this arm. The single-source forms
-                // (PROT3W, PEXEW, PCPYH, PEXT5, PPAC5) read `rt` only and stay
-                // unknown until they are decoded.
+                // Every two-source MMI operation lifted so far reads both
+                // source GPRs and writes only the destination GPR. PEXTLW,
+                // PCPYLD and PCPYUD touch only a subset of the 128 bits, but
+                // the effect mask is per-GPR, so they share this arm. The
+                // single-source forms (PROT3W, PEXEW, PCPYH, PEXT5, PPAC5)
+                // read `rt` only; PCPYH joined them when it was decoded.
                 effects.gpr_read_mask = rs | rt;
                 effects.gpr_write_mask = rd;
             }
             Opcode::ParallelExchangeEvenWord
             | Opcode::ParallelRotate3Words
+            | Opcode::ParallelCopyHalfword
             | Opcode::ParallelExtend5
             | Opcode::ParallelPack5 => {
                 // Single-source MMI operations read only rt and write only rd.
@@ -1517,6 +1522,9 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x28 if ((word >> 6) & 0x1F) == 0x18 => Opcode::ParallelAddUnsignedByte,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x29 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyUpperDoubleword,
+                // PCPYH is the MMI3 single-source halfword splat; `rs` stays
+                // reserved-zero.
+                0x29 if ((word >> 6) & 0x1F) == 0x1B && rs == 0 => Opcode::ParallelCopyHalfword,
                 0x29 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelOr,
                 0x29 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelNor,
                 0x10 if rs == 0 && rt == 0 && ((word >> 6) & 0x1F) == 0 => Opcode::Mfhi1,
@@ -3498,5 +3506,32 @@ mod tests {
 
         let bad_prot3w = prot3w_word | (1 << 21);
         assert_eq!(decode(bad_prot3w, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi3_pcpyh_with_reserved_rs() {
+        let pcpyh_word = (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1B << 6) | 0x29;
+        assert_eq!(pcpyh_word, 0x7002_1EE9);
+        let decoded = decode(pcpyh_word, 0x9000);
+        assert_eq!(decoded.opcode, Opcode::ParallelCopyHalfword);
+        assert_eq!(decoded.opcode.mnemonic(), "pcpyh");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (0, 2, 3));
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, 1 << 2);
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.unknown);
+
+        // The word the Downhill Domination probe stopped on is PCPYH $3, $8.
+        let observed = 0x7008_1EE9;
+        let decoded = decode(observed, 0x0025_4230);
+        assert_eq!(decoded.opcode, Opcode::ParallelCopyHalfword);
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (0, 8, 3));
+
+        let bad_pcpyh = pcpyh_word | (1 << 21);
+        assert_eq!(decode(bad_pcpyh, 0).opcode, Opcode::Unknown);
+
+        // PEXCH shares the MMI3 group but has its own selector and stays unknown.
+        let pexch_word = (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1A << 6) | 0x29;
+        assert_eq!(decode(pexch_word, 0).opcode, Opcode::Unknown);
     }
 }

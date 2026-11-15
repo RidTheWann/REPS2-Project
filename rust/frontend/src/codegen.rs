@@ -42,6 +42,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_copy_upper_doubleword;\n\
              using reps2::runtime::parallel_exchange_even_word;\n\
              using reps2::runtime::parallel_rotate_3_words;\n\
+              using reps2::runtime::parallel_copy_halfword;\n\
              using reps2::runtime::parallel_extend_5;\n\
              using reps2::runtime::parallel_pack_5;\n\
 \n\
@@ -489,6 +490,9 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelRotate3Words { dst, src } => {
             emit_parallel_single_word(output, dst, src, "parallel_rotate_3_words");
+        }
+        Operation::ParallelCopyHalfword { dst, src } => {
+            emit_parallel_single_word(output, dst, src, "parallel_copy_halfword");
         }
         Operation::ParallelExtend5 { dst, src } => {
             emit_parallel_single_word(output, dst, src, "parallel_extend_5");
@@ -2275,6 +2279,29 @@ mod tests {
         assert!(cpp.contains("if (0 != 0) state.gpr[0] = parallel_rotate_3_words(state.gpr[2]);"));
         assert!(cpp.contains("if (4 != 0) state.gpr[4] = parallel_rotate_3_words(state.gpr[5]);"));
         assert!(cpp.contains("if (6 != 0) state.gpr[6] = parallel_rotate_3_words(state.gpr[6]);"));
+    }
+
+    #[test]
+    fn emits_mmi3_pcpyh_as_a_single_source_runtime_call() {
+        let words = [
+            (0x1C << 26) | (2 << 16) | (3 << 11) | (0x1B << 6) | 0x29,
+            (0x1C << 26) | (2 << 16) | (0x1B << 6) | 0x29,
+            (0x1C << 26) | (5 << 16) | (4 << 11) | (0x1B << 6) | 0x29,
+            (0x1C << 26) | (6 << 16) | (6 << 11) | (0x1B << 6) | 0x29,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xCA00 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PCPYH IR");
+        let cpp = emit_cpp(&program).expect("PCPYH C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_copy_halfword;"));
+        assert!(cpp.contains("if (3 != 0) state.gpr[3] = parallel_copy_halfword(state.gpr[2]);"));
+        assert!(cpp.contains("if (0 != 0) state.gpr[0] = parallel_copy_halfword(state.gpr[2]);"));
+        assert!(cpp.contains("if (4 != 0) state.gpr[4] = parallel_copy_halfword(state.gpr[5]);"));
+        assert!(cpp.contains("if (6 != 0) state.gpr[6] = parallel_copy_halfword(state.gpr[6]);"));
     }
 
     #[test]

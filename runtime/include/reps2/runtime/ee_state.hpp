@@ -2346,6 +2346,19 @@ inline void disable_interrupts(EeState& state) noexcept {
     };
 }
 
+// PCPYH replicates the lowest 16-bit lane of each 64-bit half across that
+// half's four halfword lanes: result halfwords 0..3 take lane 0 of the low
+// doubleword and halfwords 4..7 take lane 4 (lane 0 of the high doubleword).
+// The complete value is formed before assignment, so a destination that
+// aliases the source observes the original operand.
+[[nodiscard]] constexpr Gpr128 parallel_copy_halfword(const Gpr128& src) noexcept {
+    const auto splat = [](std::uint64_t half) noexcept -> std::uint64_t {
+        const auto lane = half & 0x000000000000FFFFULL;
+        return lane | (lane << 16U) | (lane << 32U) | (lane << 48U);
+    };
+    return Gpr128{splat(src.low), splat(src.high)};
+}
+
 // PEXT5 expands the low 1-5-5-5 halfword of each 32-bit word into
 // 8-8-8-8 positions. The three five-bit channels move into bits 3..7,
 // 11..15 and 19..23; the alpha bit moves to bit 31. The four words are
