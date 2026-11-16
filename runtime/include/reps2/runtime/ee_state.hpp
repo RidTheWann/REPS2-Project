@@ -916,6 +916,14 @@ struct EeSifCmdState {
     std::uint32_t last_searchfile_size{};
     bool last_searchfile_found{};
     bool last_searchfile_replied{};
+    // The requested path of the last SearchFile call, truncated to 63 chars,
+    // recorded even when the call is refused so the probe report shows what
+    // the title searched for (ADR 0156).
+    char last_searchfile_name[64]{};
+    // The first 64 payload bytes of the last SearchFile call, recorded even
+    // when the call is refused, so a non-ps2sdk packet layout can be decoded
+    // from the run report (ADR 0156).
+    std::uint32_t last_searchfile_head[16]{};
     // SIF loadfile server (0x80000006, PS2SDK `ee/kernel/src/loadfile.c`). The
     // title binds it and retries until a server answers; registered so the bind
     // succeeds like on the resident IOP (ADR 0138). Only `LF_F_GET_VERSION`
@@ -1116,6 +1124,16 @@ struct EeHleState {
     std::uint32_t setup_heap_start{};
     std::uint32_t setup_heap_size{};
     std::uint32_t setup_heap_end{};
+    // EndOfHeap (0x3E) observation (ADR 0156). The kernel-side heap end starts
+    // at the SetupHeap start; each served call moves it by the requested
+    // increment and returns the new end. No allocator exists behind it: this
+    // is a host-side counter over the recorded range, not guest memory that
+    // is handed out.
+    std::uint64_t end_of_heap_calls{};
+    std::uint32_t heap_current_end{};
+    std::int32_t last_end_of_heap_increment{};
+    std::uint32_t last_end_of_heap_result{};
+    bool last_end_of_heap_ok{};
     // CreateThread (0x20) observation. `thread_count` counts records, not ids
     // handed out; nothing deletes threads yet.
     std::uint64_t create_thread_calls{};

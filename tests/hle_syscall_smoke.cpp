@@ -34,6 +34,7 @@ using reps2::runtime::Status;
 constexpr std::uint32_t kUnreachableReturnPc = 0xDEAD0000U;
 constexpr std::uint32_t kSetupThread = reps2::runtime::kEeSyscallSetupThread;
 constexpr std::uint32_t kSetupHeap = reps2::runtime::kEeSyscallSetupHeap;
+constexpr std::uint32_t kEndOfHeap = reps2::runtime::kEeSyscallEndOfHeap;
 constexpr std::uint32_t kCreateSema = reps2::runtime::kEeSyscallCreateSema;
 constexpr std::uint32_t kDeleteSema = reps2::runtime::kEeSyscallDeleteSema;
 constexpr std::uint32_t kSignalSema = reps2::runtime::kEeSyscallSignalSema;
@@ -1174,6 +1175,131 @@ int test_setup_heap_size_sentinel_uses_setup_thread_stack() {
     }
     if (state.hle.setup_heap_end != 0x01FF0000U || state.gpr[2].low != 1U) {
         return 99;
+    }
+    return 0;
+}
+
+int test_end_of_heap_serves_the_retail_sbrk_call() {
+    EeState state{};
+    state.pc = 0xE300U;
+    state.hle.syscall_enabled = true;
+    state.hle.setup_thread_called = true;
+    state.hle.setup_thread_stack_pointer = 0x01FF0000U;
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    // The retail shape: SetupHeap(0x008A0400, -1) -> range [0x008A0400, sp).
+    state.gpr[3].low = kSetupHeap;
+    state.gpr[4].low = 0x008A0400U;
+    state.gpr[5].low = 0xFFFFFFFFU;
+    if (reps2::generated::execute_cfg(state, 16U) != Status::external_control_flow) {
+        return 120;
+    }
+    if (state.hle.setup_heap_end != 0x01FF0000U
+        || state.hle.heap_current_end != 0x008A0400U) {
+        return 121;
+    }
+
+    // EndOfHeap(0xE4D0), the first _sbrk call the real-title probe stops on:
+    // the new end 0x008AE8D0 is returned in $v0 and becomes the current end.
+    state.pc = 0xE400U; // the fixture keeps the service result in $v0
+    state.gpr[3].low = kEndOfHeap;
+    state.gpr[4].low = 0xE4D0U;
+    if (reps2::generated::execute_cfg(state, 16U) != Status::external_control_flow) {
+        return 122;
+    }
+    if (state.gpr[2].low != 0x008AE8D0U) return 123;
+    if (state.hle.heap_current_end != 0x008AE8D0U || !state.hle.last_end_of_heap_ok
+        || state.hle.last_end_of_heap_result != 0x008AE8D0U
+        || state.hle.last_end_of_heap_increment != 0xE4D0
+        || state.hle.end_of_heap_calls != 1U) {
+        return 124;
+    }
+
+    // A second call accumulates on the current end: 0x008AE8D0 + 0x800.
+    state.gpr[4].low = 0x800U;
+    if (reps2::runtime::hle_end_of_heap(state) != Status::ok
+        || state.gpr[2].low != 0x008AF0D0U
+        || state.hle.heap_current_end != 0x008AF0D0U
+        || state.hle.end_of_heap_calls != 2U) {
+        return 125;
+    }
+    return 0;
+}
+
+int test_end_of_heap_fails_closed_past_the_range() {
+    EeState state{};
+    state.pc = 0xE300U;
+    state.hle.syscall_enabled = true;
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    state.gpr[3].low = kSetupHeap;
+    state.gpr[4].low = 0x00100000U;
+    state.gpr[5].low = 0x00001000U;
+    if (reps2::generated::execute_cfg(state, 16U) != Status::external_control_flow) {
+        return 126;
+    }
+
+    // Past the limit: $v0 = 0 and the current end is not mutated.
+    state.pc = 0xE400U;
+    state.gpr[3].low = kEndOfHeap;
+    state.gpr[4].low = 0x2000U;
+    if (reps2::generated::execute_cfg(state, 16U) != Status::external_control_flow) {
+        return 127;
+    }
+    if (state.gpr[2].low != 0U || state.hle.last_end_of_heap_ok
+        || state.hle.last_end_of_heap_result != 0U
+        || state.hle.last_end_of_heap_increment != 0x2000
+        || state.hle.heap_current_end != 0x00100000U
+        || state.hle.end_of_heap_calls != 1U) {
+        return 128;
+    }
+
+    // A negative increment inside the range shrinks the end and succeeds.
+    state.hle.heap_current_end = 0x00100800U;
+    state.gpr[4].low = 0xFFFFF800U; // -0x800
+    if (reps2::runtime::hle_end_of_heap(state) != Status::ok
+        || state.gpr[2].low != 0x00100000U
+        || state.hle.heap_current_end != 0x00100000U
+        || !state.hle.last_end_of_heap_ok) {
+        return 129;
+    }
+    // Below the range start fails closed.
+    state.gpr[4].low = 0xFFFFF000U; // -0x1000
+    if (reps2::runtime::hle_end_of_heap(state) != Status::ok
+        || state.gpr[2].low != 0U || state.hle.heap_current_end != 0x00100000U
+        || state.hle.last_end_of_heap_ok) {
+        return 130;
+    }
+    return 0;
+}
+
+int test_end_of_heap_without_setup_heap_and_on_wrap_fails_closed() {
+    EeState state{};
+    state.pc = 0xE400U;
+    state.hle.syscall_enabled = true;
+    state.gpr[31].low = kUnreachableReturnPc;
+
+    // No SetupHeap: fail closed with $v0 = 0 and no state change.
+    state.gpr[3].low = kEndOfHeap;
+    state.gpr[4].low = 0x10U;
+    if (reps2::generated::execute_cfg(state, 16U) != Status::external_control_flow) {
+        return 131;
+    }
+    if (state.gpr[2].low != 0U || state.hle.last_end_of_heap_ok
+        || state.hle.heap_current_end != 0U || state.hle.end_of_heap_calls != 1U) {
+        return 132;
+    }
+
+    // A 32-bit wrap fails closed: 0xFFFFFFF0 + 0x20 wraps to 0x10.
+    state.hle.setup_heap_called = true;
+    state.hle.setup_heap_start = 0xFFFFFFF0U;
+    state.hle.setup_heap_end = 0xFFFFFFFFU;
+    state.hle.heap_current_end = 0xFFFFFFF0U;
+    state.gpr[4].low = 0x20U;
+    if (reps2::runtime::hle_end_of_heap(state) != Status::ok
+        || state.gpr[2].low != 0U || state.hle.heap_current_end != 0xFFFFFFF0U
+        || state.hle.last_end_of_heap_ok) {
+        return 133;
     }
     return 0;
 }
@@ -2784,6 +2910,9 @@ int test_service_table_reports_names() {
     }
     if (reps2::runtime::find_ee_syscall_service(kSetupHeap) == nullptr) {
         return 102;
+    }
+    if (reps2::runtime::find_ee_syscall_service(kEndOfHeap) == nullptr) {
+        return 103;
     }
     if (reps2::runtime::find_ee_syscall_service(kCreateSema) == nullptr) {
         return 104;
@@ -5662,6 +5791,10 @@ int main() {
          &test_delay_slot_syscall_without_the_layer_raises_the_exception},
         {"setup heap explicit range", &test_setup_heap_with_explicit_range},
         {"setup heap size sentinel", &test_setup_heap_size_sentinel_uses_setup_thread_stack},
+        {"end of heap serves the retail sbrk call", &test_end_of_heap_serves_the_retail_sbrk_call},
+        {"end of heap fails closed past the range", &test_end_of_heap_fails_closed_past_the_range},
+        {"end of heap without setup heap and on wrap fails closed",
+         &test_end_of_heap_without_setup_heap_and_on_wrap_fails_closed},
         {"create sema unique id", &test_create_sema_returns_a_unique_id},
         {"create sema negated service number",
          &test_create_sema_consumes_only_the_documented_result},

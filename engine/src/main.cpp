@@ -12,6 +12,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <exception>
@@ -506,6 +507,15 @@ void print_error(
               << ",\"media_present\":" << (state.media.present() ? "true" : "false")
               << ",\"syscalls_seen\":" << state.hle.syscall_count
               << ",\"syscalls_handled\":" << state.hle.syscall_handled_count
+              << ",\"heap\":{\"setup_called\":" << (state.hle.setup_heap_called ? 1U : 0U)
+              << ",\"start\":" << state.hle.setup_heap_start
+              << ",\"limit\":" << state.hle.setup_heap_end
+              << ",\"current_end\":" << state.hle.heap_current_end
+              << ",\"end_of_heap_calls\":" << state.hle.end_of_heap_calls
+              << ",\"last_increment\":" << state.hle.last_end_of_heap_increment
+              << ",\"last_result\":" << state.hle.last_end_of_heap_result
+              << ",\"last_ok\":" << (state.hle.last_end_of_heap_ok ? 1U : 0U)
+              << "}"
               << ",\"gprs\":[";
     for (std::size_t gpr = 0; gpr < 32; ++gpr) {
         if (gpr != 0U) std::cout << ',';
@@ -557,7 +567,17 @@ void print_error(
               << ",\"searchfile_lsn\":" << state.hle.sif_cmd.last_searchfile_lsn
               << ",\"searchfile_size\":" << state.hle.sif_cmd.last_searchfile_size
               << ",\"searchfile_replied\":" << (state.hle.sif_cmd.last_searchfile_replied ? 1U : 0U)
-              << ",\"loadfile_calls\":" << state.hle.sif_cmd.loadfile_call_count
+              << ",\"searchfile_name\":";
+    json_string(std::cout,
+        std::string_view(state.hle.sif_cmd.last_searchfile_name,
+            strnlen(state.hle.sif_cmd.last_searchfile_name,
+                sizeof(state.hle.sif_cmd.last_searchfile_name))));
+    std::cout << ",\"searchfile_head\":[";
+    for (std::size_t index = 0U; index < 16U; ++index) {
+        if (index != 0U) std::cout << ',';
+        std::cout << state.hle.sif_cmd.last_searchfile_head[index];
+    }
+    std::cout << "],\"loadfile_calls\":" << state.hle.sif_cmd.loadfile_call_count
               << ",\"loadfile_replies\":" << state.hle.sif_cmd.loadfile_replies
               << ",\"loadfile_number\":" << state.hle.sif_cmd.last_loadfile_number
               << ",\"loadfile_send\":" << state.hle.sif_cmd.last_loadfile_send_size

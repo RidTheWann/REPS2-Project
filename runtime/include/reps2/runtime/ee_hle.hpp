@@ -47,6 +47,7 @@ inline constexpr std::uint32_t kEeSyscallSetOsdConfigParam = 0x4AU;
 inline constexpr std::uint32_t kEeSyscallGetOsdConfigParam = 0x4BU;
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
+inline constexpr std::uint32_t kEeSyscallEndOfHeap = 0x3EU; // __NR_EndOfHeap (ps2sdk syscallnr.h)
 inline constexpr std::uint32_t kEeSyscallCreateSema = 0x40U;
 inline constexpr std::uint32_t kEeSyscallDeleteSema = 0x41U;
 inline constexpr std::uint32_t kEeSyscallSignalSema = 0x42U;
@@ -931,10 +932,62 @@ struct EeSyscallRegistrationView {
     state.hle.setup_heap_start = heap_start;
     state.hle.setup_heap_size = heap_size;
     state.hle.setup_heap_end = heap_end;
+    // The kernel-side heap end starts at the range start; EndOfHeap (0x3E)
+    // moves it from there (ADR 0156).
+    state.hle.heap_current_end = heap_start;
     // ps2tek describes the machine-level result as the end of the current
     // thread's heap, although ps2sdk declares SetupHeap(void) and callers often
     // discard it. Preserve that documented result for code that reads $v0.
     state.gpr[kEeSyscallResultRegister].low = sign_extend_word(heap_end);
+    return Status::ok;
+}
+
+// EndOfHeap (0x3E): EndOfHeap(incr) extends the current thread's heap by `incr`
+// and returns the new end in $v0, or 0 when the heap cannot grow that far.
+//
+// Observed (target disassembly of the owner's boot ELF `adfda7b7...f0cf0c`,
+// runtime VAs): the title's newlib `_sbrk` (routine at `0x0025AD30`) loads its
+// cached heap end from the global at `0x0028214C` into `$v0` (`0x0025AD7C`),
+// then `jal 0x0025A6C0` (the `0x3E` syscall stub) with the delay slot
+// `addu $s0, $v0, $a0` (`0x0025AD84`), so the proposed new end is
+// `cached + $a0`. After the trap it computes `sltu $v0, $v0, $s0`
+// (`0x0025AD88`): a returned value >= `cached + $a0` takes the success path
+// (the cached global is stored `proposed`, `0x0025ADBC`, and the old end is
+// returned in `$v0`), while anything smaller goes through `__errno`
+// (`0x0025AD94` -> `0x00254040`) with errno 12 (ENOMEM) and returns -1. The
+// kernel therefore consumes the increment in `$a0` and answers with the new
+// end; ps2tek's no-argument `void* EndOfHeap()` signature and its heap-base
+// note do not match this use. ps2sdk assigns service 0x3E (`__NR_EndOfHeap`).
+//
+// Model: the heap range is the one SetupHeap recorded, [setup_heap_start,
+// setup_heap_end]; the current end starts at the range start and each served
+// call moves it by `$a0` (32-bit modular). The call fails closed -- `$v0 = 0`,
+// no state change -- when no heap was set up, when the addition wraps, or when
+// the new end leaves the recorded range. 0 is the failure answer because the
+// observed `_sbrk` treats any result below `cached + incr` as ENOMEM; the real
+// kernel's failure value is not established (Unknown). No allocator exists
+// behind this counter and no guest memory is handed out. ADR 0156.
+[[nodiscard]] inline Status hle_end_of_heap(EeState& state) noexcept {
+    const auto increment = static_cast<std::int32_t>(ee_syscall_argument(state, 0));
+    ++state.hle.end_of_heap_calls;
+    state.hle.last_end_of_heap_increment = increment;
+
+    const std::uint32_t current = state.hle.heap_current_end;
+    const std::uint32_t proposed = current + static_cast<std::uint32_t>(increment);
+    const bool wraps = increment >= 0 ? proposed < current : proposed > current;
+    const bool in_range = state.hle.setup_heap_called
+        && proposed >= state.hle.setup_heap_start
+        && proposed <= state.hle.setup_heap_end;
+    if (wraps || !in_range) {
+        state.hle.last_end_of_heap_ok = false;
+        state.hle.last_end_of_heap_result = 0U;
+        state.gpr[kEeSyscallResultRegister].low = 0;
+        return Status::ok;
+    }
+    state.hle.heap_current_end = proposed;
+    state.hle.last_end_of_heap_ok = true;
+    state.hle.last_end_of_heap_result = proposed;
+    state.gpr[kEeSyscallResultRegister].low = sign_extend_word(proposed);
     return Status::ok;
 }
 
@@ -2318,13 +2371,25 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     if (call.rpc_number != 0U) {
         return false; // cdvdfsv's fscall serves function 0
     }
-    // The name is a 256-byte NUL-terminated field at packet offset 32; the
-    // caller's `sceCdlFILE` pointer follows the 256-byte name, so it sits at 288
-    // for the 292-byte request and at 292 for the 296-byte one.
+    // The name is a 256-byte NUL-terminated field at packet offset 32 in
+    // ps2sdk's 292-byte SearchFilePkt; the observed retail title sends a
+    // 300-byte packet whose name field starts at offset 36 (bytes 0..35 are
+    // zero, then "\SKAT\..."), so the offset is derived from the observed
+    // send size. The caller's `sceCdlFILE` pointer follows the name.
     if (call.send_size < 292U || call.send_addr == 0U) {
         return false; // request not transferred
     }
-    const std::uint32_t name_address = call.send_addr + 32U;
+    // Record the first 64 payload bytes even when the call is later refused:
+    // the title sends 300 bytes, not ps2sdk's 292, so the run report must show
+    // the raw packet head (ADR 0156).
+    for (std::size_t word = 0U; word < 16U; ++word) {
+        std::uint32_t value{};
+        if (load_u32(state.memory, call.send_addr + word * 4U, value) == Status::ok) {
+            sif.last_searchfile_head[word] = value;
+        }
+    }
+    const std::uint32_t name_offset = call.send_size >= 300U ? 36U : 32U;
+    const std::uint32_t name_address = call.send_addr + name_offset;
     char name[256]{};
     for (std::size_t index = 0U; index + 1U < sizeof(name); ++index) {
         std::uint8_t byte{};
@@ -2335,6 +2400,12 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
         if (byte == 0U) {
             break;
         }
+    }
+    // Record the requested path (truncated) even when the call is later
+    // refused, so the run report shows what the title searched for.
+    for (std::size_t index = 0U; index + 1U < sizeof(sif.last_searchfile_name)
+        && index < sizeof(name) && name[index] != '\0'; ++index) {
+        sif.last_searchfile_name[index] = name[index];
     }
     if (name[0] == '\0') {
         return false; // no path to resolve
@@ -3352,6 +3423,7 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallReferThreadStatus, "ReferThreadStatus", &hle_refer_thread_status},
     {kEeSyscallSetupThread, "SetupThread", &hle_setup_thread},
     {kEeSyscallSetupHeap, "SetupHeap", &hle_setup_heap},
+    {kEeSyscallEndOfHeap, "EndOfHeap", &hle_end_of_heap},
     {kEeSyscallCreateSema, "CreateSema", &hle_create_sema},
     {kEeSyscallDeleteSema, "DeleteSema", &hle_delete_sema},
     {kEeSyscallSignalSema, "SignalSema", &hle_signal_sema},
