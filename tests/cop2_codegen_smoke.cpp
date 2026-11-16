@@ -16,7 +16,7 @@ using reps2::runtime::Gpr128;
 using reps2::runtime::Status;
 
 constexpr std::uint64_t kScratchAddress = 0x40U;
-constexpr Gpr128 kVf0Constant{0x0000'0000'0000'0000ULL, 0x0000'0000'3F80'0000ULL};
+constexpr Gpr128 kVf0Constant{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000ULL};
 
 std::array<std::uint8_t, 256> main_memory{};
 
@@ -41,8 +41,15 @@ void preset(EeState& state) {
     state.gpr[0] = Gpr128{0xDEAD'BEEFULL, 0xBAD0BAD0'BAD0BAD0ULL};
     // GPR[4] = base address for loads/stores.
     state.gpr[4] = Gpr128{kScratchAddress, 0x1111'2222'3333'4444ULL};
+    // GPR[2] holds a known quadword for the QMTC2 $2, $vf12 transfer.
+    state.gpr[2] = Gpr128{0x0123'4567'89AB'CDEFULL, 0xFEDC'BA98'7654'3210ULL};
     // Fill VF file with garbage to prove LQC2/SQC2 really replace contents.
     state.vu0.vf.fill(Gpr128{0xFFFF'FFFF'FFFF'FFFFULL, 0xFFFF'FFFF'FFFF'FFFFULL});
+    // Pre-fill the QMTC2/QMFC2 scratch quadwords so that every store, including
+    // the mostly-zero VF0 constant, is an observable write.
+    for (std::size_t i = 0x60; i < 0x90; ++i) {
+        main_memory[kScratchAddress + i] = 0x5A;
+    }
 }
 
 } // namespace
@@ -114,6 +121,75 @@ int main() {
 
     // GPR[0] must still be zero (prologue reset, and LQC2 $vf0 does not write GPR).
     if (state.gpr[0].low != 0ULL || state.gpr[0].high != 0ULL) return 50;
+
+    // QMTC2 $2, $vf12 then SQC2 $vf12, 0x60($a0): the whole GPR2 quadword
+    // reaches memory little-endian (low lane first, then high lane).
+    if (main_memory[kScratchAddress + 0x60] != 0xEF) return 51;
+    if (main_memory[kScratchAddress + 0x61] != 0xCD) return 52;
+    if (main_memory[kScratchAddress + 0x62] != 0xAB) return 53;
+    if (main_memory[kScratchAddress + 0x63] != 0x89) return 54;
+    if (main_memory[kScratchAddress + 0x64] != 0x67) return 55;
+    if (main_memory[kScratchAddress + 0x65] != 0x45) return 56;
+    if (main_memory[kScratchAddress + 0x66] != 0x23) return 57;
+    if (main_memory[kScratchAddress + 0x67] != 0x01) return 58;
+    if (main_memory[kScratchAddress + 0x68] != 0x10) return 59;
+    if (main_memory[kScratchAddress + 0x69] != 0x32) return 60;
+    if (main_memory[kScratchAddress + 0x6A] != 0x54) return 61;
+    if (main_memory[kScratchAddress + 0x6B] != 0x76) return 62;
+    if (main_memory[kScratchAddress + 0x6C] != 0x98) return 63;
+    if (main_memory[kScratchAddress + 0x6D] != 0xBA) return 64;
+    if (main_memory[kScratchAddress + 0x6E] != 0xDC) return 65;
+    if (main_memory[kScratchAddress + 0x6F] != 0xFE) return 66;
+
+    // QMTC2 $0, $vf12 must NOT overwrite VF0. SQC2 $vf0, 0x70($a0) then stores
+    // the hardwired constant over the 0x5A pre-fill, so every byte is observed.
+    if (main_memory[kScratchAddress + 0x70] != 0x00) return 67;
+    if (main_memory[kScratchAddress + 0x71] != 0x00) return 68;
+    if (main_memory[kScratchAddress + 0x72] != 0x00) return 69;
+    if (main_memory[kScratchAddress + 0x73] != 0x00) return 70;
+    if (main_memory[kScratchAddress + 0x74] != 0x00) return 71;
+    if (main_memory[kScratchAddress + 0x75] != 0x00) return 72;
+    if (main_memory[kScratchAddress + 0x76] != 0x00) return 73;
+    if (main_memory[kScratchAddress + 0x77] != 0x00) return 74;
+    if (main_memory[kScratchAddress + 0x78] != 0x00) return 75;
+    if (main_memory[kScratchAddress + 0x79] != 0x00) return 76;
+    if (main_memory[kScratchAddress + 0x7A] != 0x00) return 77;
+    if (main_memory[kScratchAddress + 0x7B] != 0x00) return 78;
+    if (main_memory[kScratchAddress + 0x7C] != 0x00) return 79;
+    if (main_memory[kScratchAddress + 0x7D] != 0x00) return 80;
+    if (main_memory[kScratchAddress + 0x7E] != 0x80) return 81;
+    if (main_memory[kScratchAddress + 0x7F] != 0x3F) return 82;
+
+    // QMFC2 $2, $vf0 set GPR2 to the hardwired VF0 constant; QMTC2 $2, $vf4
+    // then writes it into VF4 (VF4 was garbage) and SQC2 $vf4, 0x80($a0)
+    // stores it, so the VF0 read path is observable through a GPR round-trip.
+    if (main_memory[kScratchAddress + 0x80] != 0x00) return 83;
+    if (main_memory[kScratchAddress + 0x81] != 0x00) return 84;
+    if (main_memory[kScratchAddress + 0x82] != 0x00) return 85;
+    if (main_memory[kScratchAddress + 0x83] != 0x00) return 86;
+    if (main_memory[kScratchAddress + 0x84] != 0x00) return 87;
+    if (main_memory[kScratchAddress + 0x85] != 0x00) return 88;
+    if (main_memory[kScratchAddress + 0x86] != 0x00) return 89;
+    if (main_memory[kScratchAddress + 0x87] != 0x00) return 90;
+    if (main_memory[kScratchAddress + 0x88] != 0x00) return 91;
+    if (main_memory[kScratchAddress + 0x89] != 0x00) return 92;
+    if (main_memory[kScratchAddress + 0x8A] != 0x00) return 93;
+    if (main_memory[kScratchAddress + 0x8B] != 0x00) return 94;
+    if (main_memory[kScratchAddress + 0x8C] != 0x00) return 95;
+    if (main_memory[kScratchAddress + 0x8D] != 0x00) return 96;
+    if (main_memory[kScratchAddress + 0x8E] != 0x80) return 97;
+    if (main_memory[kScratchAddress + 0x8F] != 0x3F) return 98;
+
+    // QMFC2 $3, $vf12: GPR3 receives the VF12 quadword.
+    if (state.gpr[3].low != 0x0123'4567'89AB'CDEFULL) return 99;
+    if (state.gpr[3].high != 0xFEDC'BA98'7654'3210ULL) return 100;
+
+    // QMFC2 $2, $vf0: GPR2 receives the hardwired VF0 constant.
+    if (state.gpr[2].low != kVf0Constant.low) return 101;
+    if (state.gpr[2].high != kVf0Constant.high) return 102;
+
+    // QMFC2 $0, $vf12: the GPR0 write must be discarded.
+    if (state.gpr[0].low != 0ULL || state.gpr[0].high != 0ULL) return 103;
 
     return 0;
 }

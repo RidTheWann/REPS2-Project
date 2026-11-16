@@ -136,6 +136,13 @@ pub enum Opcode {
     Sq,
     Lqc2,
     Sqc2,
+    /// COP2 (VU0 macro mode) quadword transfer from a GPR to a VF register:
+    /// `VF[rd] = GPR[rt]`. Bits 10..0 are reserved-zero.
+    Qmtc2,
+    /// COP2 (VU0 macro mode) quadword transfer from a VF register to a GPR,
+    /// `GPR[rt] = VF[rd]`. Bits 10..0 are reserved-zero. A write to GPR[0] is
+    /// discarded.
+    Qmfc2,
     ParallelAddWord,
     ParallelSubWord,
     ParallelAddHalfword,
@@ -450,6 +457,8 @@ impl Opcode {
             Self::Sq => "sq",
             Self::Lqc2 => "lqc2",
             Self::Sqc2 => "sqc2",
+            Self::Qmtc2 => "qmtc2",
+            Self::Qmfc2 => "qmfc2",
             Self::ParallelAddWord => "paddw",
             Self::ParallelSubWord => "psubw",
             Self::ParallelAddHalfword => "paddh",
@@ -1161,6 +1170,18 @@ impl Instruction {
                 effects.memory = MemoryEffect::Write;
                 effects.may_raise_exception = true;
             }
+            // COP2 macro-mode quadword register transfers. Neither touches
+            // memory or raises a data-address exception. QMTC2 moves a GPR
+            // quadword into VF[rd]; QMFC2 moves VF[rd] out to GPR[rt] (a write
+            // to GPR[0] is discarded).
+            Opcode::Qmtc2 => {
+                effects.gpr_read_mask = rt;
+                effects.vf_write_mask = vf_write_bit(self.rd);
+            }
+            Opcode::Qmfc2 => {
+                effects.vf_read_mask = vf_read_bit(self.rd);
+                effects.gpr_write_mask = rt;
+            }
 
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1340,6 +1361,22 @@ fn decode_cop1(word: u32) -> Opcode {
             3 => Opcode::Bc1tl,
             _ => Opcode::Unknown,
         },
+        _ => Opcode::Unknown,
+    }
+}
+
+/// COP2 decoding covers the VU0 macro-mode boundary only: the quadword
+/// register transfers `QMFC2` (format 1) and `QMTC2` (format 5). The VU
+/// arithmetic (Special1/Special2), the control-register transfers (CFC2/CTC2)
+/// and the BC2 branches need a VU numeric/COND model and stay unsupported.
+/// Both implemented forms reserve bits 10..0, so a non-zero reserved field is
+/// not decoded as the instruction it would otherwise name.
+fn decode_cop2(word: u32) -> Opcode {
+    let format = ((word >> 21) & 0x1F) as u8;
+    let reserved_low = word & 0x7FF; // bits 10..0
+    match format {
+        0x01 if reserved_low == 0 => Opcode::Qmfc2,
+        0x05 if reserved_low == 0 => Opcode::Qmtc2,
         _ => Opcode::Unknown,
     }
 }
@@ -1576,6 +1613,8 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             // format selector, which is why the register transfers and the
             // arithmetic share one arm.
             0x11 => decode_cop1(word),
+            // COP2 (VU0 macro mode): primary 0x12, format in bits 25..21.
+            0x12 => decode_cop2(word),
             0x20 => Opcode::Lb,
             0x21 => Opcode::Lh,
             0x22 => Opcode::Lwl,
@@ -3382,6 +3421,29 @@ mod tests {
     }
 
     #[test]
+    fn decodes_cop2_quadword_register_transfers_and_reserved_fields() {
+        // QMTC2 $2, $vf12 (format 5): VF[rd=12] <- GPR[rt=2].
+        assert_eq!(decode(0x48A2_6000, 0).opcode, Opcode::Qmtc2);
+        assert_eq!(decode(0x48A2_6000, 0).rt, 2);
+        assert_eq!(decode(0x48A2_6000, 0).rd, 12);
+        // QMFC2 $3, $vf12 (format 1): GPR[rt=3] <- VF[rd=12].
+        assert_eq!(decode(0x4823_6000, 0).opcode, Opcode::Qmfc2);
+        assert_eq!(decode(0x4823_6000, 0).rt, 3);
+        assert_eq!(decode(0x4823_6000, 0).rd, 12);
+
+        // Bits 10..0 are reserved; a non-zero reserved field is rejected
+        // rather than decoded as the transfer it would approximate. This is an
+        // observed malformed QMFC2-shaped word (format 1, reserved bit 0 set).
+        assert_eq!(decode(0x4822_0001, 0).opcode, Opcode::Unknown);
+
+        // Formats with no implemented model stay unsupported: CFC2 (2),
+        // CTC2 (6), and the VU Special1 arithmetic rows (>= 0x10).
+        assert_eq!(decode(0x4842_0002, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(0x48C2_0006, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
     fn effects_track_cop2_vf_dependencies() {
         // VF0 reads the hardwired constant, so bit 0 is a read dependency.
         // Writes to VF0 are ignored, so write mask excludes bit 0.
@@ -3411,6 +3473,34 @@ mod tests {
         assert_eq!(sqc2_vf0_const.gpr_read_mask, 1 << 4);
         assert_eq!(sqc2_vf0_const.vf_read_mask, 1 << 0);
         assert!(sqc2_vf0_const.may_raise_exception);
+
+        // QMTC2 $2, $vf12 = 0x48A26000: reads GPR2, writes VF12, no memory.
+        let qmtc2 = decode(0x48A2_6000, 0).effects();
+        assert_eq!(qmtc2.gpr_read_mask, 1 << 2);
+        assert_eq!(qmtc2.gpr_write_mask, 0);
+        assert_eq!(qmtc2.vf_write_mask, 1 << 12);
+        assert_eq!(qmtc2.vf_read_mask, 0);
+        assert_eq!(qmtc2.memory, MemoryEffect::None);
+        assert!(!qmtc2.may_raise_exception);
+
+        // QMTC2 $2, $vf0 = 0x48A20000: write to VF0 is discarded.
+        let qmtc2_vf0 = decode(0x48A2_0000, 0).effects();
+        assert_eq!(qmtc2_vf0.gpr_read_mask, 1 << 2);
+        assert_eq!(qmtc2_vf0.vf_write_mask, 0);
+
+        // QMFC2 $3, $vf12 = 0x48236000: reads VF12, writes GPR3.
+        let qmfc2 = decode(0x4823_6000, 0).effects();
+        assert_eq!(qmfc2.vf_read_mask, 1 << 12);
+        assert_eq!(qmfc2.vf_write_mask, 0);
+        assert_eq!(qmfc2.gpr_write_mask, 1 << 3);
+        assert_eq!(qmfc2.gpr_read_mask, 0);
+        assert_eq!(qmfc2.memory, MemoryEffect::None);
+        assert!(!qmfc2.may_raise_exception);
+
+        // QMFC2 $0, $vf0 = 0x48200000: reads VF0, drops the GPR0 write.
+        let qmfc2_gpr0 = decode(0x4820_0000, 0).effects();
+        assert_eq!(qmfc2_gpr0.vf_read_mask, 1 << 0);
+        assert_eq!(qmfc2_gpr0.gpr_write_mask, 0);
     }
 
     #[test]

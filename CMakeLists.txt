@@ -1112,6 +1112,26 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
             0xD8800040
             # SQC2 $vf0, 0x50($a0) -> stores constant again at +0x50
             0xF8800050
+            # --- COP2 QMTC2/QMFC2 quadword register transfers ---
+            # QMTC2 $2, $vf12 -> VF12 <- GPR2 preset quadword
+            0x48A26000
+            # SQC2 $vf12, 0x60($a0) -> proves the GPR->VF transfer landed
+            0xF88C0060
+            # QMFC2 $3, $vf12 -> GPR3 <- VF12
+            0x48236000
+            # QMFC2 $2, $vf0 -> GPR2 <- hardwired VF0 constant
+            0x48220000
+            # QMFC2 $0, $vf12 -> GPR0 write must be discarded
+            0x48206000
+            # QMTC2 $0, $vf12 -> VF0 write must be discarded
+            0x48A06000
+            # SQC2 $vf0, 0x70($a0) -> VF0 still holds the hardwired constant
+            0xF8800070
+            # QMTC2 $2, $vf4 -> VF4 <- GPR2 (which QMFC2 $2, $vf0 just set to
+            # the hardwired VF0 constant)
+            0x48A22000
+            # SQC2 $vf4, 0x80($a0) -> proves the VF0 read path through a GPR
+            0xF8840080
             0x00000000  # nop    delay-slot padding
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 COP2 data-movement block"

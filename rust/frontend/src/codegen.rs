@@ -269,6 +269,23 @@ pub(crate) fn emit_instruction(
                 src.index()
             ));
         }
+        // COP2 QMTC2 moves the whole 128-bit GPR value into VF[rd]; the write
+        // to VF0 is discarded by vu0_write_vf. QMFC2 moves VF[rd] out to
+        // GPR[rt] and a write to GPR[0] is dropped.
+        Operation::MoveToVu0Quadword { dst, src } => {
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {}, state.gpr[{}]);\n",
+                dst.index(),
+                src.index()
+            ));
+        }
+        Operation::MoveFromVu0Quadword { dst, src } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    if ({d} != 0) state.gpr[{d}] = reps2::runtime::vu0_read_vf(state.vu0, {});\n",
+                src.index()
+            ));
+        }
         Operation::MoveFromCop0 { dst, cop0_reg } => {
             let d = dst.index();
             output.push_str(&format!(

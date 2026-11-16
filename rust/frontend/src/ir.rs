@@ -193,6 +193,17 @@ pub enum Operation {
         base: Gpr,
         offset: u16,
     },
+    /// COP2 QMTC2: copy a whole 128-bit GPR value into a VF register.
+    MoveToVu0Quadword {
+        dst: Vf,
+        src: Gpr,
+    },
+    /// COP2 QMFC2: copy a VF register out into a GPR. A write to GPR[0] is
+    /// discarded.
+    MoveFromVu0Quadword {
+        dst: Gpr,
+        src: Vf,
+    },
     // Single-precision COP1 arithmetic. Every form updates the FCR31 flag
     // summary; the accumulate forms write ACC, a separate 32-bit register with
     // no COP1 address, and the two MADD forms additionally read it.
@@ -1650,6 +1661,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 base: gpr(instruction.rs),
                 offset: instruction.immediate,
             },
+            Opcode::Qmtc2 => Operation::MoveToVu0Quadword {
+                dst: vf(instruction.rd),
+                src: gpr(instruction.rt),
+            },
+            Opcode::Qmfc2 => Operation::MoveFromVu0Quadword {
+                dst: gpr(instruction.rt),
+                src: vf(instruction.rd),
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1715,6 +1734,8 @@ mod tests {
             (0x1F << 26) | (4 << 21) | (12 << 16) | 12,
             (0x36 << 26) | (4 << 21) | (13 << 16) | 0x0010,
             (0x3E << 26) | (4 << 21) | (14 << 16) | 0x0020,
+            (0x12 << 26) | (5 << 21) | (2 << 16) | (12 << 11),
+            (0x12 << 26) | (1 << 21) | (3 << 16) | (12 << 11),
         ];
         let stream = words
             .iter()
@@ -1761,6 +1782,16 @@ mod tests {
             program.instructions()[12].operation,
             Operation::StoreVu0Quadword { src, base, offset: 0x20 }
                 if src.index() == 14 && base.index() == 4
+        ));
+        assert!(matches!(
+            program.instructions()[13].operation,
+            Operation::MoveToVu0Quadword { dst, src }
+                if dst.index() == 12 && src.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[14].operation,
+            Operation::MoveFromVu0Quadword { dst, src }
+                if dst.index() == 3 && src.index() == 12
         ));
     }
 
