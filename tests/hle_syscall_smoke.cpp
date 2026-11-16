@@ -4305,6 +4305,68 @@ int test_sif_loadfile_get_version_answers_the_reference_word() {
     return 0;
 }
 
+int test_boot_environment_registers_the_989snd_servers() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerSnd989) == nullptr) return 1048;
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerSnd989Alt) == nullptr) return 1049;
+    return 0;
+}
+
+int test_bind_to_the_989snd_server_reaches_a_registered_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // The title's sound initialisation binds 0x00123456 then 0x00123457 through
+    // the 989snd library's own helper; both now resolve to a registered server
+    // so the retry-and-recheck loop sees a non-zero `clientdata + 0x24`.
+    store_rpc_bind_request(ram, reps2::runtime::kEeSifServerSnd989);
+    if (reps2::runtime::process_sif_command(state, kRpcBindPacket) != Status::ok) return 1050;
+    if (!state.hle.sif_cmd.last_rpc_bind_had_server) return 1051;
+    if (state.hle.sif_cmd.last_rpc_bind_server_sid
+        != reps2::runtime::kEeSifServerSnd989) return 1052;
+    if (load_word(ram, kRpcClient + 0x24U) != reps2::runtime::kEeSifServerSnd989) return 1053;
+    return 0;
+}
+
+int test_989snd_calls_are_recorded_and_refused() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // No 989snd command is modelled, so the call is recorded by the shared SIF
+    // dispatch and refused: no reply, no RPC_END, semaphore untouched.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerSnd989Alt, 0x11U, 8U, 8U);
+    store_word(ram, kRpcPayload, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 8U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1054;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.rpc_call_count != 1U || sif.last_rpc_call_number != 0x11U) return 1055;
+    if (sif.last_rpc_call_server_sid != reps2::runtime::kEeSifServerSnd989Alt) return 1056;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 1057;
+    if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 1058;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 1059;
+    if (state.hle.semaphores[3].count != 0) return 1060;
+    return 0;
+}
+
 int test_boot_environment_registers_the_mtap_port_open_server() {
     SifWindow ram{};
     EeState state{};
@@ -5423,6 +5485,12 @@ int main() {
          &test_sif_loadfile_get_version_answers_the_reference_word},
         {"sif loadfile get version refuses without a reply buffer",
          &test_sif_loadfile_get_version_refuses_without_a_reply_buffer},
+        {"boot environment registers the 989snd servers",
+         &test_boot_environment_registers_the_989snd_servers},
+        {"bind to the 989snd server reaches a registered server",
+         &test_bind_to_the_989snd_server_reaches_a_registered_server},
+        {"989snd calls are recorded and refused",
+         &test_989snd_calls_are_recorded_and_refused},
         {"boot environment registers the mtap port-open server",
          &test_boot_environment_registers_the_mtap_port_open_server},
         {"bind to the mtap server reaches a registered server",

@@ -760,11 +760,12 @@ struct EeState;
 using EeSifRpcServerHandler = bool (*)(EeState& state, const EeSifRpcCall& call) noexcept;
 
 // Bound on the modelled IOP SIFRPC server table. It holds every server the HLE
-// boot environment installs (CdInit, CdSCmd, both DiskReady sids, NCmd,
-// SearchFile, loadfile, the multitap port-open server) plus any the session
-// registers later (tests, further title-observed serves). ADR 0140 raised it
-// from 8 to 16 because the observed title surface exhausted the old bound.
-inline constexpr std::size_t kEeMaxSifRpcServers = 16U;
+// boot environment installs plus any the session registers later (tests,
+// further title-observed serves). ADR 0140 raised it from 8 to 16 because the
+// observed title surface exhausted the old bound; ADR 0152 raised it to 18 for
+// the title's two 989snd sound servers, which filled the 16-entry table and
+// left no room for the servers a session registers on top of the boot set.
+inline constexpr std::size_t kEeMaxSifRpcServers = 18U;
 
 // One server in the modelled IOP SIFRPC server table (`SifRpcServerData_t`).
 // The EE never dereferences the handle a bind reply returns; it only zero-tests

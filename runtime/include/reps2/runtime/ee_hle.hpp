@@ -1920,6 +1920,20 @@ inline constexpr std::uint32_t kEeMcCmdInit = 0xFEU;
 // retail module strings stay unknown. ADR 0149.
 inline constexpr std::uint32_t kEeMcServVersionWord = 0x020AU;
 inline constexpr std::uint32_t kEeMcManVersionWord = 0x020EU;
+// The title's sound driver registers two SIF RPC servers. Its IOP module list
+// names `MOD\989SND.IRX` (and the companion `MOD\989ERR.IRX`), and the
+// sound-initialisation routine at `0x00201180` binds `0x00123456` and then
+// `0x00123457` through the library's own bind helper (`0x0025CDB8`), whose
+// failure diagnostics name `989snd.c` (strings at `0x002977A0`/`0x002977C8`
+// with lines 178/199). The bind helper's delay-and-recheck loop (`0x002012B0`
+// .. `0x002012D0`, testing `clientdata + 0x24`) never sees a server today, so
+// both are registered here so the binds succeed exactly as they do once the
+// title's own `sceSifIopReset` has loaded the module. No command is modelled:
+// every call is recorded through the shared `last_rpc_call_*` fields and
+// refused. The per-id roles (which module owns which sid) are not established.
+// ADR 0152.
+inline constexpr std::uint32_t kEeSifServerSnd989 = 0x0012'3456U;
+inline constexpr std::uint32_t kEeSifServerSnd989Alt = 0x0012'3457U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2292,6 +2306,20 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     ++sif.loadfile_replies;
     sif.last_loadfile_replied = true;
     return true;
+}
+
+// The title's 989snd sound driver (sids 0x00123456 / 0x00123457). The binds are
+// registered so they succeed exactly as they do once the title's own
+// `sceSifIopReset` has loaded `MOD\989SND.IRX`, but no command is modelled:
+// every call is recorded by the shared SIF dispatch (`last_rpc_call_number`,
+// `last_rpc_call_server_sid`, `rpc_call_count`, ...) and refused, so a caller
+// that waits for a sound command stays blocked instead of receiving a
+// fabricated reply. REPS2 executes no IOP module. ADR 0152.
+[[nodiscard]] inline bool serve_ee_snd_call(
+    EeState&,
+    const EeSifRpcCall&
+) noexcept {
+    return false;
 }
 
 // Multitap port-open server (0x80000901, PS2SDK `MTAPSERV_PORT_OPEN`). The bind
@@ -2922,6 +2950,15 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     // title's checks accept); every other function is recorded and refused.
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerMcServ, 0U, &serve_ee_mcserv_call);
+    // The title's 989snd sound driver (ADR 0152): registered so the two binds in
+    // the sound initialisation routine at 0x00201180 (sids 0x00123456 then
+    // 0x00123457) succeed like they do once the title's own `sceSifIopReset`
+    // has loaded `MOD\989SND.IRX`. No command is modelled: every call is
+    // recorded through the shared RPC fields and refused.
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerSnd989, 0U, &serve_ee_snd_call);
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerSnd989Alt, 0U, &serve_ee_snd_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation
