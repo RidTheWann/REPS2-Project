@@ -1279,14 +1279,18 @@ interrupt path.
   `D_CTRL.DMAE` and by `DMAC_ENABLER` not holding the controller. `INTC_SBUS` is
   raised only on the IOP side (`IopHwWrite.cpp`, register `0x1D000450`).
 - **Inferred:** the EE DMAC interrupt is a separate COP0 line from the INTC, so
-  SIF0 completion must not be modelled as an INTC source. Delivering it requires
-  a COP0 IP3 exception path plus the `AddDmacHandler` chain, neither of which
-  exists yet.
+  SIF0 completion must not be modelled as an INTC source.
 - **Implemented:** the RPC bind reply path with no modelled IOP server
   (ADR 0104), and the SDK register names plus the documented interrupt condition
-  as a pure predicate (ADR 0105). No EE interrupt is delivered: the COP0 IP3
-  path, `D_CTRL`/hold device state, and the `AddDmacHandler` chain remain
-  unimplemented and are not claimed.
+  as a pure predicate (ADR 0105). ADR 0153 then delivers the line: a fail-closed
+  device predicate, the `Status.EIE`/`EXL`/`ERL` gate, and a dispatcher-level
+  delivery that acknowledges the channel's `D_STAT` bit and runs the registered
+  `AddDmacHandler` handler as guest code in interrupt context on the COP0 IP3
+  line (never the INTC's IP2). REPS2 is the EE kernel, so it invokes the
+  registered handler directly instead of jumping to the kernel's own
+  `0x80000200` vector. Not modelled and not claimed: `Status.IE` (bit 0), the
+  `Cause.IM`/`IM2` masks, the kernel's `D_CTRL`/hold device state, and the
+  semaphore-producer half (no scheduler).
 - **Observed (target disassembly, `mips64r5900el-ps2-elf-objdump`, owner-supplied
   boot ELF; local evidence only):** the post-bind stop at `0x002478F0` is a
   delay-count instruction (`addiu v0,v0,-1` after `lui v0,0x10`, ~65,536
@@ -1495,6 +1499,7 @@ Update (ADR 0134, 2026-11-14): `T3_COUNT` (`0x10001800`) is now modelled as a 16
 - **Derived:** sids `0x00123456` and `0x00123457` are the two SIF RPC servers the title's 989snd sound driver binds; the title's own `sceSifIopReset` loads `MOD\989SND.IRX`, which registers them, so on real hardware both binds succeed. REPS2 executes no IOP module, so before ADR 0152 both were answered with the documented no-server reply and the bind loop never exited. Serving the binds requires only two registered servers; the 989snd RPC protocol itself (function numbers and request/reply encoding) is not established and is not claimed.
 - **Observed (fresh probe, 2026-11-16, runtime ABI 15, native module rebuilt from the ADR 0152 branch, `PostADR152/run-report-989snd.json`):** both binds now succeed — the last recorded bind is `rpc_bind_sid=1193047=0x00123457` with `rpc_bind_server=0x00123457` and `rpc_bind_had=1` (previously `rpc_bind_sid=0x00123456`, `had=0`) — and the driver issues its first 989snd call: `rpc_call_server=1193046=0x00123456`, `rpc_call_number=0`, `rpc_call_replied=0` (recorded and refused; no reply, no `SIF_CMD_RPC_END`). The run ends `budget_limit_reached` after 79,999,984 instructions over 16 batches at `pc=0x00201FC0` (`syscalls_seen=1841052 handled=1841035`, callbacks 78/78, mcserv INIT still served `mc_calls=1 mc_result=0`, 78 `CD_NCMD_READ` served with last LBN 337). ADR 0152.
 - **Observed + derived (the new stop):** `0x00201FC0` is `jal 0x00201640` and `0x00201FD4` is `beq $2, $0, -6`, looping back while the callee returns zero. `0x00201640` calls `jal 0x0025D178` at `0x0020166C` with `$4 = 0x004D8940`; `0x0025D178` reads `*(clientdata)`, compares `*(clientdata + 4)` against `*(server + 0x18)`, and tests bit 0 of `*(server + 0x10)`. This is the driver's own predicate over the RPC client's return state, which a served reply would advance; because the call is refused the predicate never becomes ready and the loop consumes the budget. This is a caller-blocked-on-a-refused-command boundary (budget exhaustion on a poll loop), not an unsupported instruction and not a boot stage. The exact C semantics of the predicate and the 989snd function `0` are not claimed.
+- **Observed + derived (ADR 0153, the DMAC interrupt path):** the EE DMAC interrupt is the CPU's own COP0 line (`Cause` IP3, `0x800`), separate from the INTC (`Cause` IP2, `0x400`); SIF0 completion is never an INTC source (ADR 0105). REPS2 now delivers it: `EeDmacState::interrupt_pending()` applies the documented condition `((D_STAT[15:0] & D_STAT[31:16]) != 0) || BEIS`, gated by `D_CTRL.DMAE`, to the modelled registers and is fail-closed (an unseeded device never reports a line). When `Status.EIE` (the bit `EI`/`DI` toggle, ADR 0025) is set, `EXL`/`ERL` are clear, and the asserting channel has a live `AddDmacHandler` record (ADR 0095), the generated dispatcher acknowledges that channel's `D_STAT` status bit (W1C) and enters the handler as translated guest code in an interrupt frame: `EPC` latches the resume PC, `EXL` is set, `Cause` reports IP3, the channel is passed in `$a0`, and the interrupted context (the COP0 image included) is restored whole on the handler's `jr $ra` through the dispatcher sentinel. REPS2 is the kernel, so it invokes the registered handler directly instead of fetching the kernel's untranslated `0x80000200` vector. Not modelled and not claimed: `Status.IE` (bit 0), the `Cause.IM`/`IM2` masks, the kernel's `D_CTRL`/hold state, and the semaphore-producer half (no scheduler; a handler that signals a semaphore only raises its count). Fresh probe (2026-11-16, runtime ABI 16, `PostADR153/run-report-dmac-interrupt.json`): the run report's new `dmac` object shows `handlers=1 add_handler_calls=2 interrupts_delivered=0 interrupts_completed=0` — the title registers a live DMAC handler but fires none, because the HLE boot leaves `D_CTRL.DMAE` clear — and the trace is otherwise identical to ADR 0152 (`budget_limit_reached` at `pc=0x00201FC0` after 79,999,984 instructions / 16 batches, `syscalls_seen=1841052 handled=1841035`, callbacks 78/78). ADR 0153.
 - **Unknown:** the retail `MTAPMAN.IRX` version string (served `0x0300` is `libmtap`'s), the exact retail BOOTROM XPADMAN version string (served `0x0422` is the retail SDK PADMAN version per the ps2sdk `freepad.c` comment), the retail MCSERV/MCMAN module version strings (served `0x20A`/`0x20E` are the title's own minimum thresholds), and the identity of mcserv fno `0x15` (the title's get-info poll; not pinned in ps2sdk).
 
 Public references:

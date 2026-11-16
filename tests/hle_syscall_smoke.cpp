@@ -5325,6 +5325,164 @@ int test_iop_reset_with_a_short_packet_changes_nothing() {
     return 0;
 }
 
+// The DMAC interrupt line is a delivery predicate, not a device register
+// observation: it fires only when the modelled device asserts the line, the
+// master interrupt enable is set with no exception in progress, and the guest
+// registered a handler for the asserting channel. See ADR 0153.
+int test_dmac_interrupt_needs_enable_and_handler() {
+    EeState state{};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.memory.dmac.seed_d_stat(
+        reps2::runtime::kEeDmacDStatSif0StatusBit | (1U << 21U));
+    state.memory.dmac.seed_ctrl(reps2::runtime::kEeDmacCtrlDmaeMask);
+    state.hle.dmac_handlers[5U].in_use = true;
+    state.hle.dmac_handlers[5U].handler = 0xE800U;
+    state.cop0[reps2::runtime::kCop0Status] = 0U;
+
+    // The device asserts the line, but with the master enable clear the EE takes
+    // nothing.
+    if (!state.memory.dmac.interrupt_pending()) return 700;
+    if (reps2::runtime::ee_dmac_line_asserted(state)) return 701;
+
+    // With the enable set and a handler registered it is deliverable.
+    state.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusEieMask;
+    if (!reps2::runtime::ee_dmac_line_asserted(state)) return 702;
+
+    // EXL or ERL blocks an asynchronous interrupt even with the enable set.
+    state.cop0[reps2::runtime::kCop0Status] =
+        reps2::runtime::kCop0StatusEieMask | reps2::runtime::kCop0StatusExlMask;
+    if (reps2::runtime::ee_dmac_line_asserted(state)) return 703;
+    state.cop0[reps2::runtime::kCop0Status] =
+        reps2::runtime::kCop0StatusEieMask | reps2::runtime::kCop0StatusErlMask;
+    if (reps2::runtime::ee_dmac_line_asserted(state)) return 704;
+    state.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusEieMask;
+
+    // The asserting channel is selected only when it has a handler.
+    if (reps2::runtime::select_ee_dmac_interrupt_channel(state) != 5U) return 705;
+    state.hle.dmac_handlers[5U].in_use = false;
+    if (reps2::runtime::ee_dmac_line_asserted(state)) return 706;
+    if (reps2::runtime::select_ee_dmac_interrupt_channel(state)
+        != reps2::runtime::kEeMaxDmacChannels) return 707;
+
+    // A status bit whose mask is clear does not assert, even with a handler.
+    state.hle.dmac_handlers[5U].in_use = true;
+    state.memory.dmac.seed_d_stat(reps2::runtime::kEeDmacDStatSif0StatusBit);
+    if (reps2::runtime::ee_dmac_line_asserted(state)) return 709;
+
+    // An unseeded device reports nothing even with the enable set and a handler.
+    EeState unseeded{};
+    unseeded.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusEieMask;
+    unseeded.hle.dmac_handlers[5U].in_use = true;
+    unseeded.hle.dmac_handlers[5U].handler = 0xE800U;
+    if (reps2::runtime::ee_dmac_line_asserted(unseeded)) return 710;
+    return 0;
+}
+
+// A SIF0 completion asserts the DMAC line; with interrupts enabled the
+// dispatcher acknowledges the channel and runs the guest's AddDmacHandler handler
+// in interrupt context (0xE800 signals semaphore 0 from $a0, the channel), then
+// restores the interrupted context. See ADR 0153.
+int test_dmac_interrupt_dispatch_runs_the_registered_handler() {
+    SyscallTableWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.syscall_enabled = true;
+    state.hle.semaphores[0].in_use = true;
+    state.hle.semaphores[0].count = 0;
+    state.hle.semaphores[0].max_count = 1;
+    ++state.hle.semaphore_count;
+    state.hle.semaphores[1].in_use = true;
+    state.hle.semaphores[1].count = 0;
+    state.hle.semaphores[1].max_count = 1;
+    ++state.hle.semaphore_count;
+    state.hle.dmac_handlers[0].in_use = true;
+    state.hle.dmac_handlers[0].handler = 0xE800U;
+    state.memory.dmac.seed_d_stat((1U << 0U) | (1U << 16U));
+    state.memory.dmac.seed_ctrl(reps2::runtime::kEeDmacCtrlDmaeMask);
+    state.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusEieMask;
+
+    state.pc = kUnreachableReturnPc;
+    state.gpr[4].low = 0x77U; // the handler sees $a0 = channel; the caller value returns
+    const Status status = reps2::generated::execute_cfg(state, 64U);
+    if (status != Status::external_control_flow) return 720;
+    if (state.pc != kUnreachableReturnPc) return 721;
+    if (state.hle.dmac_interrupts_delivered != 1U) return 722;
+    if (state.hle.dmac_interrupts_completed != 1U) return 723;
+    if (state.hle.last_dmac_interrupt_channel != 0U) return 724;
+    if (state.hle.last_dmac_interrupt_handler != 0xE800U) return 725;
+    // The handler ran: the guest's SignalSema raised semaphore 0.
+    if (state.hle.semaphores[0].count != 1) return 726;
+    // The kernel acknowledged the channel, so the line deasserts; the mask is
+    // untouched by the acknowledge.
+    std::uint32_t d_stat = 0U;
+    if (reps2::runtime::load_u32(
+            state.memory, reps2::runtime::kEeDmacDStatAddress, d_stat) != Status::ok) {
+        return 727;
+    }
+    if ((d_stat & (1U << 0U)) != 0U) return 728;
+    if ((d_stat & (1U << 16U)) == 0U) return 729;
+    // The interrupt state was saved and restored with the interrupted context.
+    if (state.cop0[reps2::runtime::kCop0Cause] != 0U) return 730;
+    if ((state.cop0[reps2::runtime::kCop0Status] & reps2::runtime::kCop0StatusExlMask) != 0U) {
+        return 731;
+    }
+    if (state.cop0[reps2::runtime::kCop0Epc] != 0U) return 732;
+    if (state.gpr[4].low != 0x77U) return 733;
+
+    // A later invocation reuses the same frame depth; a queued guest callback must
+    // be classified as a callback, not inherit the interrupt kind (ADR 0153).
+    if (state.hle.guest_callbacks_completed != 0U) return 734;
+    if (!reps2::runtime::request_ee_guest_callback(state, 0xE800U, 1U)) return 735;
+    if (reps2::generated::execute_cfg(state, 64U) != Status::external_control_flow) {
+        return 736;
+    }
+    if (state.hle.guest_callbacks_started != 1U
+        || state.hle.guest_callbacks_completed != 1U) {
+        return 737;
+    }
+    if (state.hle.dmac_interrupts_completed != 1U) return 738;
+    if (state.hle.semaphores[1].count != 1) return 739;
+    return 0;
+}
+
+// The DMAC line is IP3, not the INTC's IP2: a pending, enabled INTC source never
+// looks like a deliverable DMAC interrupt, and the delivery path touches no INTC
+// register. See ADR 0105, ADR 0153.
+int test_dmac_interrupt_is_not_an_intc_source() {
+    EeState state{};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.memory.dmac.seed_ctrl(reps2::runtime::kEeDmacCtrlDmaeMask);
+    state.hle.dmac_handlers[5U].in_use = true;
+    state.hle.dmac_handlers[5U].handler = 0xE800U;
+    state.cop0[reps2::runtime::kCop0Status] = reps2::runtime::kCop0StatusEieMask;
+
+    state.memory.intc.seed_stat(0U);
+    state.memory.intc.seed_mask(0U);
+    if (!state.memory.intc.raise_source(reps2::runtime::kEeIntcSourceSbus)) return 740;
+    if (!state.memory.intc.write_mask(reps2::runtime::kEeIntcMaskToggleMask)) return 741;
+    if (!state.memory.intc.line_asserted()) return 742;
+    // The INTC line is asserted, but no DMAC delivery is pending.
+    if (reps2::runtime::ee_dmac_line_asserted(state)) return 743;
+
+    const std::uint32_t i_stat_before = state.memory.intc.i_stat;
+    const std::uint32_t i_mask_before = state.memory.intc.i_mask;
+    // A deliverable DMAC interrupt leaves the INTC register pair untouched.
+    state.memory.dmac.seed_d_stat((1U << 5U) | (1U << 21U));
+    if (!reps2::runtime::ee_dmac_line_asserted(state)) return 744;
+    const Status status = reps2::runtime::enter_ee_dmac_interrupt(state);
+    if (status != Status::ok) return 745;
+    if (state.memory.intc.i_stat != i_stat_before) return 746;
+    if (state.memory.intc.i_mask != i_mask_before) return 747;
+    if (state.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseIp2Mask) {
+        return 748;
+    }
+    if ((state.cop0[reps2::runtime::kCop0Cause] & reps2::runtime::kCop0CauseIp3Mask) == 0U) {
+        return 749;
+    }
+    return 0;
+}
+
 int main() {
     const struct {
         const char* what;
@@ -5554,6 +5712,12 @@ int main() {
          &test_ncmd_read_serves_sectors_from_host_media},
         {"sif rpc call end function runs the guest callback",
          &test_rpc_call_end_function_runs_guest_callback},
+        {"dmac interrupt needs the master enable and a handler",
+         &test_dmac_interrupt_needs_enable_and_handler},
+        {"dmac interrupt dispatches the registered handler",
+         &test_dmac_interrupt_dispatch_runs_the_registered_handler},
+        {"dmac interrupt is not an intc source",
+         &test_dmac_interrupt_is_not_an_intc_source},
         {"sif rpc call end function refuses an unusable address",
          &test_rpc_call_end_function_refuses_an_unusable_address},
         {"boot environment registers the cdvd init server",

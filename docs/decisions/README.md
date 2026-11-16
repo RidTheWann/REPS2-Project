@@ -153,3 +153,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0150](0150-ee-mmi3-pcpyh.md) | Decode, lift and AOT-lower R5900 MMI3 PCPYH (the word previously mislabelled BSHFL); the frontier moves to the MDU1 multiply word `0x72631818` | Proposed |
 | [0151](0151-ee-mdu1-multiply.md) | Decode, lift and AOT-lower the R5900 MDU1 family (`mult1`/`multu1`/`div1`/`divu1`) against HI1:LO1; the frontier becomes a SIF RPC bind retry for sid `0x00123456` | Proposed |
 | [0152](0152-ee-989snd-rpc-servers.md) | Register the title's 989snd sound-driver RPC servers (0x00123456/0x00123457) so their binds succeed; calls recorded and refused | Proposed |
+| [0153](0153-ee-dmac-interrupt-delivery.md) | Deliver the DMAC interrupt on the EE's own COP0 line (IP3) and run the registered `AddDmacHandler` handler in interrupt context | Proposed |

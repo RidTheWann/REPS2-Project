@@ -39,9 +39,10 @@ inline constexpr std::uint32_t kEeIntcSourceVu0Watchdog{14};
 // I_STAT holds pending interrupt sources (write-one-to-clear); I_MASK holds the
 // per-source enable bits (write-one-to-toggle over the low 16 bits). This model
 // keeps the documented guest-visible register contract only. It does NOT deliver
-// a CPU exception and does not decide which CP0 interrupt pin (IP2/IP3) a source
-// drives; `line_asserted()` reports the INTC pending-and-enabled condition a
-// future exception-delivery path would consume.
+// a CPU exception; `line_asserted()` reports the INTC pending-and-enabled
+// condition (the EE's IP2 line) a future delivery path would consume. The DMAC's
+// own interrupt line (IP3) is separate and is delivered by its own path; the two
+// lines are never interchanged. See ADR 0103, ADR 0153.
 //
 // Every access fails closed until the register state is established: the HLE
 // boot environment seeds the kernel-initialized idle state, and production code

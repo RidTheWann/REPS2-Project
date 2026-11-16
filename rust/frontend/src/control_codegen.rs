@@ -98,6 +98,8 @@ using reps2::runtime::ee_syscall_handler_return_pending;
 using reps2::runtime::return_from_ee_syscall_handler;
 using reps2::runtime::ee_guest_callback_pending;
 using reps2::runtime::enter_ee_guest_callback;
+using reps2::runtime::ee_dmac_line_asserted;
+using reps2::runtime::enter_ee_dmac_interrupt;
 
 ";
 
@@ -149,6 +151,18 @@ const EXECUTE_CFG_TAIL: &str = "\
             const Status callback_status = enter_ee_guest_callback(state);
             if (callback_status != Status::ok) {
                 return callback_status;
+            }
+            continue;
+        }
+        // The EE DMAC asserts its own COP0 line (Cause IP3, never the INTC). When
+        // interrupts are enabled and a handler is registered, REPS2 (the kernel)
+        // acknowledges the channel and enters the AddDmacHandler handler as guest
+        // code in interrupt context before the interrupted guest continues
+        // (ADR 0153).
+        if (ee_dmac_line_asserted(state)) {
+            const Status interrupt_status = enter_ee_dmac_interrupt(state);
+            if (interrupt_status != Status::ok) {
+                return interrupt_status;
             }
             continue;
         }

@@ -28,6 +28,36 @@ inline constexpr std::uint32_t kEeDmacDStatReadableMask{0x63FF'E3FFU};
 inline constexpr std::uint32_t kEeDmacDStatSif0StatusBit{0x0000'0020U};
 inline constexpr std::uint32_t kEeDmacDStatBusErrorStatusBit{0x0000'8000U};
 
+// The documented DMAC interrupt condition, independent of device state.
+//
+// PCSX2 `tDMAC_STAT::TestForInterrupt()` is
+// `((_u16[0] & _u16[1]) != 0) || BEIS`: a status bit asserts only when its
+// matching mask bit in the upper half is set, and the bus-error status bit
+// notifies unconditionally. PS2SDK's
+// `DMA_SET_STAT(CIS,SIS,MEIS,BEIS,CIM,SIM,MEIM)` places the same masks at the
+// same bit positions, so the half-word AND is the documented comparison.
+// PCSX2 `dmacInterrupt()` reports nothing while `D_CTRL.DMAE` is clear or while
+// the hold register suspends the controller, and delivers the result on the EE's
+// own DMAC interrupt line (COP0 `Cause` bit 11, IP3) — not the INTC's IP2.
+//
+// The caller supplies the inputs, so no reset value is assumed. This answers
+// "would the line assert for these register values"; it delivers no exception.
+// Defined before the device struct so EeDmacState::interrupt_pending() can call
+// it. See ADR 0105, ADR 0153.
+[[nodiscard]] constexpr bool ee_dmac_interrupt_pending(
+    std::uint32_t d_stat,
+    bool dmae,
+    bool controller_held
+) noexcept {
+    if (!dmae || controller_held) {
+        return false;
+    }
+    const std::uint32_t status = d_stat & 0x0000'FFFFU;
+    const std::uint32_t mask = (d_stat >> 16U) & 0x0000'FFFFU;
+    return (status & mask) != 0U
+        || (d_stat & kEeDmacDStatBusErrorStatusBit) != 0U;
+}
+
 // CHCR bit masks (per PS2Tek / PS2SDK).
 inline constexpr std::uint32_t kEeDmacChcrStrMask{0x0000'0100U};     // bit 8: start/trigger
 inline constexpr std::uint32_t kEeDmacChcrDirMask{0x0000'0001U};     // bit 0: direction
@@ -170,6 +200,24 @@ struct EeDmacState {
         return true;
     }
 
+    // Would this device assert the EE's own DMAC interrupt line (COP0 Cause IP3)
+    // right now? The answer is the documented condition (ADR 0105) applied to the
+    // modelled registers: a channel status bit whose matching mask bit is set, or
+    // the bus-error status bit, and only while D_CTRL.DMAE is set.
+    //
+    // The EE DMAC's D_CTRL has a single documented bit, DMAE (PS2SDK
+    // `dma_registers.h`, PCSX2 `HwWrite.cpp`); the EE register map has no hold
+    // register, so the condition's `controller_held` input is always false for
+    // this device and is retained only as the ADR 0105 fail-closed seam.
+    //
+    // Fail-closed: false unless both D_CTRL and D_STAT were seeded, so an
+    // unseeded device never reports an interrupt. See ADR 0153.
+    [[nodiscard]] bool interrupt_pending() const noexcept {
+        if (!ctrl_known || !d_stat_known) return false;
+        return ee_dmac_interrupt_pending(
+            d_stat, (ctrl & kEeDmacCtrlDmaeMask) != 0U, false);
+    }
+
     // Publish the SIF0 (channel 5) completion event for an inbound IOP->EE
     // transfer. The EE SIF interface raises the channel-5 status bit when a
     // receive-direction transfer finishes; this is the same D_STAT bit an
@@ -256,33 +304,5 @@ struct EeDmacState {
         return true;
     }
 };
-
-// The documented DMAC interrupt condition, independent of device state.
-//
-// PCSX2 `tDMAC_STAT::TestForInterrupt()` is
-// `((_u16[0] & _u16[1]) != 0) || BEIS`: a status bit asserts only when its
-// matching mask bit in the upper half is set, and the bus-error status bit
-// notifies unconditionally. PS2SDK's
-// `DMA_SET_STAT(CIS,SIS,MEIS,BEIS,CIM,SIM,MEIM)` places the same masks at the
-// same bit positions, so the half-word AND is the documented comparison.
-// PCSX2 `dmacInterrupt()` reports nothing while `D_CTRL.DMAE` is clear or while
-// the hold register suspends the controller, and delivers the result on the EE's
-// own DMAC interrupt line (COP0 `Cause` bit 11, IP3) — not the INTC's IP2.
-//
-// The caller supplies the inputs, so no reset value is assumed. This answers
-// "would the line assert for these register values"; it delivers no exception.
-[[nodiscard]] constexpr bool ee_dmac_interrupt_pending(
-    std::uint32_t d_stat,
-    bool dmae,
-    bool controller_held
-) noexcept {
-    if (!dmae || controller_held) {
-        return false;
-    }
-    const std::uint32_t status = d_stat & 0x0000'FFFFU;
-    const std::uint32_t mask = (d_stat >> 16U) & 0x0000'FFFFU;
-    return (status & mask) != 0U
-        || (d_stat & kEeDmacDStatBusErrorStatusBit) != 0U;
-}
 
 } // namespace reps2::runtime

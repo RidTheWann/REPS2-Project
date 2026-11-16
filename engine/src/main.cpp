@@ -601,7 +601,13 @@ void print_error(
               << ",\"mc_serv_version\":" << state.hle.sif_cmd.last_mc_serv_version
               << ",\"mc_man_version\":" << state.hle.sif_cmd.last_mc_man_version
               << ",\"mc_init_replied\":" << (state.hle.sif_cmd.last_mc_init_replied ? 1U : 0U)
-              << "}},\"runs\":[";
+              << "}},\"dmac\":{\"handlers\":" << state.hle.dmac_handler_count
+              << ",\"add_handler_calls\":" << state.hle.add_dmac_handler_calls
+              << ",\"interrupts_delivered\":" << state.hle.dmac_interrupts_delivered
+              << ",\"interrupts_completed\":" << state.hle.dmac_interrupts_completed
+              << ",\"last_interrupt_channel\":" << state.hle.last_dmac_interrupt_channel
+              << ",\"last_interrupt_handler\":" << state.hle.last_dmac_interrupt_handler
+              << "},\"runs\":[";
     for (std::size_t index = 0; index < runs.size(); ++index) {
         if (index != 0U) std::cout << ',';
         const auto& result = runs[index];

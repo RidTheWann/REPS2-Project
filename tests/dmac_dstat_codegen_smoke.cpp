@@ -261,6 +261,42 @@ int test_dmac_interrupt_condition() {
     return 0;
 }
 
+// The device-level predicate a delivery path consumes: the modelled DMAC asserts
+// its own interrupt line only from seeded registers, and only when D_CTRL.DMAE
+// allows it. See ADR 0153.
+int test_dmac_device_interrupt_pending() {
+    EeState state{};
+    // Neither register seeded: nothing is asserted.
+    if (state.memory.dmac.interrupt_pending()) return 1;
+
+    // Seeded but idle: D_CTRL.DMAE is clear, so the line stays low even with a
+    // matched status/mask pair.
+    state.memory.dmac.seed_ctrl(0U);
+    state.memory.dmac.seed_d_stat((1U << 5U) | (1U << 21U));
+    if (state.memory.dmac.interrupt_pending()) return 2;
+
+    // D_CTRL.DMAE set: the SIF0 status/mask pair asserts the line.
+    state.memory.dmac.seed_ctrl(reps2::runtime::kEeDmacCtrlDmaeMask);
+    if (!state.memory.dmac.interrupt_pending()) return 3;
+
+    // The bus-error status bit asserts without a matching mask.
+    state.memory.dmac.seed_d_stat(reps2::runtime::kEeDmacDStatBusErrorStatusBit);
+    if (!state.memory.dmac.interrupt_pending()) return 4;
+
+    // An idle seeded D_STAT asserts nothing, and neither does a status bit whose
+    // mask is clear.
+    state.memory.dmac.seed_d_stat(0U);
+    if (state.memory.dmac.interrupt_pending()) return 5;
+    state.memory.dmac.seed_d_stat(1U << 5U);
+    if (state.memory.dmac.interrupt_pending()) return 6;
+
+    // An unseeded D_CTRL still reports nothing even with an asserting D_STAT.
+    EeState half{};
+    half.memory.dmac.seed_d_stat((1U << 5U) | (1U << 21U));
+    if (half.memory.dmac.interrupt_pending()) return 7;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -291,6 +327,10 @@ int main() {
     if (const auto result = test_dmac_interrupt_condition(); result != 0) {
         std::fprintf(stderr, "DMAC interrupt condition test failed at check %d\n", result);
         return 90 + result;
+    }
+    if (const auto result = test_dmac_device_interrupt_pending(); result != 0) {
+        std::fprintf(stderr, "DMAC device interrupt-pending test failed at check %d\n", result);
+        return 100 + result;
     }
     return 0;
 }

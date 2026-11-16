@@ -170,9 +170,10 @@ struct EeSyscallRegistrationView {
 // values are not observable from the target and reproducing them would be a
 // guess (the same reasoning as the thread and semaphore ids in ADRs 0075/0066).
 //
-// No DMAC interrupt is delivered, so a registered handler never runs and no
-// interrupt mask is touched; this creates guest-visible records only. See
-// ADR 0095.
+// A registered handler now runs when the channel's completion both asserts the
+// DMAC line and the guest has enabled interrupts; see `enter_ee_dmac_interrupt`
+// below. Registration itself only records guest-visible state and touches no
+// mask. See ADR 0095, ADR 0153.
 [[nodiscard]] inline Status hle_add_dmac_handler(EeState& state) noexcept {
     const std::uint32_t channel = ee_syscall_argument(state, 0);
     const std::uint32_t handler = ee_syscall_argument(state, 1);
@@ -211,6 +212,108 @@ struct EeSyscallRegistrationView {
     const auto id = static_cast<std::uint32_t>(channel);
     state.hle.last_dmac_handler_id = static_cast<std::int32_t>(id);
     state.gpr[kEeSyscallResultRegister].low = sign_extend_word(id);
+    return Status::ok;
+}
+
+// DMAC interrupt delivery (ADR 0153).
+//
+// SIF0 completion is a DMAC interrupt on the EE's own COP0 line (Cause IP3, bit
+// 11), never an INTC source (Cause IP2); ADR 0105 established that. REPS2 is the
+// EE kernel, so instead of jumping to the kernel's own interrupt vector at
+// 0x80000200 -- kernel code that is not part of the recompiled title -- it
+// acknowledges the asserting channel and invokes the handler the guest
+// registered with AddDmacHandler (0x12) as guest code, which is what the kernel's
+// own DMAC handler does once it has found the source.
+
+// The channel whose completion both asserts the DMAC line and has a registered
+// handler, or kEeMaxDmacChannels when none does. The delivery predicate and the
+// entry share this so the dispatcher only enters an interrupt that makes
+// progress (the entry acknowledges exactly this channel's status bit).
+[[nodiscard]] inline std::uint32_t select_ee_dmac_interrupt_channel(
+    const EeState& state
+) noexcept {
+    const std::uint32_t d_stat = state.memory.dmac.d_stat;
+    for (std::uint32_t channel = 0;
+         channel < static_cast<std::uint32_t>(kEeMaxDmacChannels);
+         ++channel) {
+        const std::uint32_t status_bit = std::uint32_t{1} << channel;
+        const std::uint32_t mask_bit = status_bit << 16U;
+        if ((d_stat & status_bit) != 0U && (d_stat & mask_bit) != 0U
+            && state.hle.dmac_handlers[channel].in_use) {
+            return channel;
+        }
+    }
+    return static_cast<std::uint32_t>(kEeMaxDmacChannels);
+}
+
+// Would the EE take the DMAC interrupt at the next instruction boundary? True
+// only when the modelled device asserts the line, the master interrupt enable is
+// set with no exception in progress, and a handler is registered for the
+// asserting channel. Fail-closed: an unseeded D_CTRL/D_STAT, disabled
+// interrupts, or a channel with no handler reports nothing, so no interrupt is
+// fabricated.
+[[nodiscard]] inline bool ee_dmac_line_asserted(const EeState& state) noexcept {
+    if (!ee_interrupts_enabled(state)) return false;
+    if (!state.memory.dmac.interrupt_pending()) return false;
+    return select_ee_dmac_interrupt_channel(state)
+        < static_cast<std::uint32_t>(kEeMaxDmacChannels);
+}
+
+// Enter the DMAC interrupt. The interrupted context is saved whole, exactly like
+// the SIF end-function callback, and the interrupt state is applied on top of it:
+// EPC latches the restart PC, EXL marks the exception level so no nested
+// interrupt is taken while the handler runs, and Cause reports IP3 while the line
+// is serviced. EPC/EXL/Cause live in the saved COP0 image and revert when the
+// handler returns. The channel's D_STAT status bit is acknowledged first, so the
+// line deasserts. The handler is `s32 handler(s32 channel)`, so it receives the
+// channel in $a0. See ADR 0153.
+[[nodiscard]] inline Status enter_ee_dmac_interrupt(EeState& state) noexcept {
+    auto& hle = state.hle;
+    const std::uint32_t channel = select_ee_dmac_interrupt_channel(state);
+    if (channel >= static_cast<std::uint32_t>(kEeMaxDmacChannels)) {
+        return Status::ok;
+    }
+    if (hle.syscall_handler_depth >= kEeMaxSyscallHandlerDepth) {
+        ++hle.guest_callbacks_refused;
+        return Status::syscall_handler_overflow;
+    }
+    const std::uint32_t handler = hle.dmac_handlers[channel].handler;
+
+    // The kernel acknowledges the channel before running its handler.
+    if (!state.memory.dmac.write_d_stat(std::uint32_t{1} << channel)) {
+        return Status::unsupported_memory_access;
+    }
+
+    EeSyscallHandlerFrame& frame = hle.syscall_handler_frames[hle.syscall_handler_depth];
+    frame.saved_gpr = state.gpr;
+    frame.saved_hi = state.hi;
+    frame.saved_lo = state.lo;
+    frame.saved_hi1 = state.hi1;
+    frame.saved_lo1 = state.lo1;
+    frame.saved_fpr = state.fpr;
+    frame.saved_acc = state.acc;
+    frame.saved_fcsr = state.fcsr;
+    frame.saved_sa = state.sa;
+    frame.saved_vu0 = state.vu0;
+    frame.saved_cop0 = state.cop0;
+    frame.handler_address = handler;
+    frame.resume_pc = state.pc;
+    frame.slot = 0U;
+    frame.is_guest_callback = false;
+    frame.is_dmac_interrupt = true;
+
+    ++hle.syscall_handler_depth;
+    ++hle.dmac_interrupts_delivered;
+    hle.last_dmac_interrupt_channel = channel;
+    hle.last_dmac_interrupt_handler = handler;
+
+    state.cop0[kCop0Epc] = state.pc;
+    state.cop0[kCop0Status] |= kCop0StatusExlMask;
+    state.cop0[kCop0Cause] |= kCop0CauseIp3Mask;
+
+    state.gpr[4].low = sign_extend_word(channel);
+    state.gpr[31].low = sign_extend_word(kEeSyscallHandlerReturnPc);
+    state.pc = handler;
     return Status::ok;
 }
 
@@ -1574,6 +1677,7 @@ struct SifCmdHeader {
     frame.resume_pc = state.pc;
     frame.slot = 0U;
     frame.is_guest_callback = true;
+    frame.is_dmac_interrupt = false;
 
     ++hle.syscall_handler_depth;
     ++hle.guest_callbacks_started;
@@ -3084,6 +3188,10 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     frame.handler_address = handler_address;
     frame.resume_pc = resume_pc;
     frame.slot = slot;
+    // Frames are reused at the same depth, so both context kinds are cleared
+    // explicitly (ADR 0153).
+    frame.is_guest_callback = false;
+    frame.is_dmac_interrupt = false;
 
     ++state.hle.syscall_handler_depth;
     ++state.hle.guest_handler_dispatches;
@@ -3106,12 +3214,13 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     const EeSyscallHandlerFrame& frame =
         state.hle.syscall_handler_frames[state.hle.syscall_handler_depth - 1U];
     const bool guest_callback = frame.is_guest_callback;
+    const bool dmac_interrupt = frame.is_dmac_interrupt;
     const Gpr128 result = state.gpr[kEeSyscallResultRegister];
     const std::uint32_t resume_pc = frame.resume_pc;
 
     state.gpr = frame.saved_gpr;
     state.gpr[0] = {};
-    if (!guest_callback) {
+    if (!guest_callback && !dmac_interrupt) {
         state.gpr[kEeSyscallResultRegister] = result;
     }
     state.hi = frame.saved_hi;
@@ -3126,7 +3235,12 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     state.cop0 = frame.saved_cop0;
 
     --state.hle.syscall_handler_depth;
-    if (guest_callback) {
+    if (dmac_interrupt) {
+        // The kernel dispatched the registered AddDmacHandler handler in
+        // interrupt context: its result and register changes are not the
+        // interrupted guest's. See ADR 0153.
+        ++state.hle.dmac_interrupts_completed;
+    } else if (guest_callback) {
         // _request_end runs in interrupt context: the callback's result and
         // register changes are not the interrupted caller's.
         ++state.hle.guest_callbacks_completed;

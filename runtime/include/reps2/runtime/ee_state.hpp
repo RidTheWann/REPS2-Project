@@ -244,6 +244,13 @@ inline constexpr std::uint32_t kCop0StatusBevMask{0x0040'0000U};
 // COP0 Cause fields and EE vector addresses for synchronous exceptions.
 inline constexpr std::uint32_t kCop0CauseExcCodeMask{0x0000'007CU};
 inline constexpr std::uint32_t kCop0CauseBranchDelayMask{0x8000'0000U};
+// The EE's external interrupt lines report on distinct Cause bits: the INTC is
+// IP2 (bit 10) and the DMAC is IP3 (bit 11). SIF0 completion is a DMAC
+// interrupt, so it is never routed through the INTC. Evidence: PCSX2
+// `dmacInterrupt()` reports 0x800 (IP3) while the INTC reports 0x400 (IP2);
+// ADR 0105. See ADR 0153.
+inline constexpr std::uint32_t kCop0CauseIp2Mask{0x0000'0400U};
+inline constexpr std::uint32_t kCop0CauseIp3Mask{0x0000'0800U};
 // V_COMMON handles synchronous general exceptions (including SYSCALL, BREAK
 // and OVERFLOW); V_INTERRUPT is a distinct vector and is not used here.
 inline constexpr std::uint32_t kEeCommonExceptionVector{0x8000'0180U};
@@ -474,6 +481,12 @@ struct EeSyscallHandlerFrame {
     // no service result, so returning restores the whole saved context instead
     // of keeping the callee's $v0.
     bool is_guest_callback{};
+    // A DMAC interrupt handler. REPS2 is the EE kernel, so it dispatches the
+    // registered AddDmacHandler chain directly instead of jumping to the kernel's
+    // own interrupt vector; like a callback the handler has no service result and
+    // its context (including the EPC/EXL/Cause state set for the interrupt)
+    // restores whole. See ADR 0153.
+    bool is_dmac_interrupt{};
 };
 
 // Handlers can themselves issue syscalls, so dispatch keeps a small stack of
@@ -1185,7 +1198,8 @@ struct EeHleState {
     bool last_sema_poll_acquired{};
     // AddDmacHandler (0x12) observation. One handler per channel; ids are
     // HLE-local handles equal to the channel index, not the kernel's own values,
-    // which are not observable from the target. No interrupt is ever delivered.
+    // which are not observable from the target. The registered handler is
+    // invoked by the DMAC interrupt path below (ADR 0153).
     std::uint64_t add_dmac_handler_calls{};
     std::uint32_t dmac_handler_count{};
     std::uint32_t last_dmac_channel{};
@@ -1195,6 +1209,15 @@ struct EeHleState {
     std::int32_t last_dmac_handler_id{-1};
     EeDmacHandlerRejection last_dmac_handler_rejection{};
     std::array<EeDmacHandler, kEeMaxDmacChannels> dmac_handlers{};
+    // DMAC interrupt delivery (ADR 0153). The DMAC asserts its own COP0 line
+    // (Cause IP3, bit 11) and is never routed through the INTC (Cause IP2). When
+    // the master interrupt enable is set and a handler is registered for the
+    // asserting channel, the dispatcher acknowledges that channel's D_STAT
+    // status bit and invokes the handler as guest code in interrupt context.
+    std::uint64_t dmac_interrupts_delivered{};
+    std::uint64_t dmac_interrupts_completed{};
+    std::uint32_t last_dmac_interrupt_channel{};
+    std::uint32_t last_dmac_interrupt_handler{};
     // RemoveDmacHandler (0x13) observation: the SDK's `sceSifExitCmd` teardown
     // calls it after DisableDmac, and the observed post-CdInit path does the
     // same. Removal matches the HLE-local id (the channel index) and clears the
@@ -1711,6 +1734,17 @@ inline void enable_interrupts(EeState& state) noexcept {
 
 inline void disable_interrupts(EeState& state) noexcept {
     state.cop0[kCop0Status] &= ~kCop0StatusEieMask;
+}
+
+// True when the EE would take an asynchronous interrupt at an instruction
+// boundary: the master enable (Status.EIE, bit 16, the bit EI/DI toggle per
+// ADR 0025) is set and no exception is already in progress (EXL/ERL clear). The
+// INTC and DMAC interrupt lines each gate on this before any delivery. See
+// ADR 0153.
+[[nodiscard]] inline bool ee_interrupts_enabled(const EeState& state) noexcept {
+    const std::uint32_t status = state.cop0[kCop0Status];
+    return (status & kCop0StatusEieMask) != 0U
+        && (status & (kCop0StatusExlMask | kCop0StatusErlMask)) == 0U;
 }
 
 [[nodiscard]] inline Status resolve_ee_memory_access(
