@@ -31,7 +31,7 @@ runtime server, not a decoder gap.
   `"error: sceSifBindRpc in %s, at line %d\n"` and the argument at `0x002977C8`
   is `"989snd.c"`, printed with line 178 at `0x0020127C..0x00201280`. The
   success path then binds a **second** server at `0x00201308..0x00201310` with
-  `$4 = 0x004DD3C0` and `$5 = 0x00123457` (`ori $5,$5,0x3457` at `0x0020130C`),
+  `$4 = 0x004CD3C0` and `$5 = 0x00123457` (`ori $5,$5,0x3457` at `0x0020130C`),
   printing the same `"989snd.c"` file with line 199 on failure. The two `ori`
   immediates are the only `0x3456`/`0x3457` words in the image, and the only
   `0x00120000`-based sid construction.
@@ -102,7 +102,7 @@ runtime server, not a decoder gap.
   after 79,999,984 instructions over 16 batches at `pc=0x00201FC0`. That PC is
   `jal 0x00201640` with `beq $2, $0, -6` at `0x00201FD4` looping while the
   callee returns zero; `0x00201640` polls the 989snd RPC client state through
-  `jal 0x0025D178` with `$4 = 0x004D8940` (`0x0025D178` reads
+  `jal 0x0025D178` with `$4 = 0x004C8940` (`0x0025D178` reads
   `*(clientdata)`, `*(clientdata + 4)` against `*(server + 0x18)` and bit 0 of
   `*(server + 0x10)`), so the loop is the driver's own wait for IOP returns
   that a served reply would satisfy. This is a caller-blocked-on-a-refused-

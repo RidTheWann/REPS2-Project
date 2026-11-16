@@ -155,3 +155,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0152](0152-ee-989snd-rpc-servers.md) | Register the title's 989snd sound-driver RPC servers (0x00123456/0x00123457) so their binds succeed; calls recorded and refused | Proposed |
 | [0153](0153-ee-dmac-interrupt-delivery.md) | Deliver the DMAC interrupt on the EE's own COP0 line (IP3) and run the registered `AddDmacHandler` handler in interrupt context | Proposed |
 | [0154](0154-vu0-quadword-transfers.md) | Decode, lift and AOT-lower the COP2 VU0 macro quadword transfers `qmfc2`/`qmtc2`; the frontier stays a 989snd poll loop, so this is a coverage advance | Proposed |
+| [0155](0155-ee-989snd-sl-init.md) | Serve the 989snd main server's SL_INIT RPC (fno 0) and refuse the loader server; deliver `SIF_CMD_RPC_END` for every served call, superseding ADR 0135's NOWAIT/no-end-function short-circuit | Proposed |

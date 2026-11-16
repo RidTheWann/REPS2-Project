@@ -991,6 +991,20 @@ struct EeSifCmdState {
     std::uint32_t last_mc_serv_version{};
     std::uint32_t last_mc_man_version{};
     bool last_mc_init_replied{};
+    // The title's 989snd sound driver (main server sid 0x00123456, loader server
+    // 0x00123457; ADR 0152). Only the main server's SL_INIT (function 0) is
+    // modelled (ADR 0155): the 8-byte request carries the EE address of the
+    // client's status block and the init flags, and the reply is the return
+    // buffer's completion handshake `{-1, 0, -1}`. Every other main-server
+    // function and every loader call is recorded and refused, so the caller
+    // stays blocked rather than receiving an invented sound/driver result.
+    std::uint32_t snd_call_count{};
+    std::uint32_t snd_replies{};
+    std::uint32_t last_snd_number{};
+    std::uint32_t last_snd_send_size{};
+    std::uint32_t last_snd_status_addr{};
+    std::uint32_t last_snd_flags{};
+    bool last_snd_replied{};
 
     // SIF_CMD_RESET_CMD (0x80000003): the EE asked the IOP to reboot. The
     // resident HLE IOP re-arms its RPCINIT handshake and records the request;

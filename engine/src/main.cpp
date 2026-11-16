@@ -601,6 +601,13 @@ void print_error(
               << ",\"mc_serv_version\":" << state.hle.sif_cmd.last_mc_serv_version
               << ",\"mc_man_version\":" << state.hle.sif_cmd.last_mc_man_version
               << ",\"mc_init_replied\":" << (state.hle.sif_cmd.last_mc_init_replied ? 1U : 0U)
+              << ",\"snd_calls\":" << state.hle.sif_cmd.snd_call_count
+              << ",\"snd_replies\":" << state.hle.sif_cmd.snd_replies
+              << ",\"snd_number\":" << state.hle.sif_cmd.last_snd_number
+              << ",\"snd_send\":" << state.hle.sif_cmd.last_snd_send_size
+              << ",\"snd_status_addr\":" << state.hle.sif_cmd.last_snd_status_addr
+              << ",\"snd_flags\":" << state.hle.sif_cmd.last_snd_flags
+              << ",\"snd_replied\":" << (state.hle.sif_cmd.last_snd_replied ? 1U : 0U)
               << "}},\"dmac\":{\"handlers\":" << state.hle.dmac_handler_count
               << ",\"add_handler_calls\":" << state.hle.add_dmac_handler_calls
               << ",\"interrupts_delivered\":" << state.hle.dmac_interrupts_delivered

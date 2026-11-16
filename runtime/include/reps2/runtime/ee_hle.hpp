@@ -2032,12 +2032,40 @@ inline constexpr std::uint32_t kEeMcManVersionWord = 0x020EU;
 // with lines 178/199). The bind helper's delay-and-recheck loop (`0x002012B0`
 // .. `0x002012D0`, testing `clientdata + 0x24`) never sees a server today, so
 // both are registered here so the binds succeed exactly as they do once the
-// title's own `sceSifIopReset` has loaded the module. No command is modelled:
-// every call is recorded through the shared `last_rpc_call_*` fields and
-// refused. The per-id roles (which module owns which sid) are not established.
-// ADR 0152.
+// title's own `sceSifIopReset` has loaded the module. The per-id roles are now
+// established from the retail driver's public decompilation (`Ziemas/989snd`,
+// a behavioral cross-check only; no implementation code is copied):
+// `ee/989snd.c` binds `CMD_RPC_ID 0x123456` and
+// `LOADER_RPC_ID 0x123457` in `snd_StartSoundSystemEx`, so 0x00123456 is the
+// main EE-message server and 0x00123457 the bank/MMD loader server. ADR 0152.
 inline constexpr std::uint32_t kEeSifServerSnd989 = 0x0012'3456U;
 inline constexpr std::uint32_t kEeSifServerSnd989Alt = 0x0012'3457U;
+// The main server's RPC function number indexes the driver's `gCommandFunc[]`
+// table (same decompilation, `iop/989snd.c`), whose slot 0 is `snd_CMD_SL_INIT`.
+// `snd_StartSoundSystemEx` sends `{&gStats, flags}` — the EE address of the
+// client's status block and the init flags — via
+// `snd_SendIOPCommandAndWait(SL_INIT, 8, data)`; the matching IOP handler stores
+// the address in `gEEStatusAddr` and starts the sound system, producing no
+// return value of its own. Observed in the title at `0x00201394`: the
+// sound-initialisation routine at `0x00201180` calls the sender with
+// `a0 = 0` (the command), `a1 = 8` and `a2 = sp` after storing
+// `sp[0] = 0x4CD380 (&gStats)`, `sp[4] = flags`. ADR 0155.
+inline constexpr std::uint32_t kEeSndCmdSlInit = 0U;
+// The return-buffer handshake (same decompilation). The IOP's
+// `snd_EEMessageParser` sets `gWriteBackdataOffset = &buffer[1]`, runs the
+// handler, then writes `buffer[2] = -1`; `snd_StartEEMessaging` writes
+// `buffer[0] = -1` once when the message thread starts. The EE client's own
+// completion check requires exactly those two words to be `-1` before it
+// accepts the call as returned: the title's `snd_GotReturns` (`0x00201640`)
+// compares `gCommBusy[0]` and `gCommBusy[gAwaitingInts + 1]` against 0xFFFFFFFF
+// at `0x00201688`/`0x002016A8`, and `snd_SendIOPCommandAndWait` prepares those
+// slots as 0 through `snd_PrepareReturnBuffer` (`0x002016E8`). So a served
+// SL_INIT replies `{-1, 0, -1}`: the done word, the (unconsumed, since
+// `snd_StartSoundSystemEx` discards the result) return slot, and the
+// terminator. ADR 0155.
+inline constexpr std::uint32_t kEeSndReturnDoneWord = 0xFFFF'FFFFU;
+inline constexpr std::uint32_t kEeSndSlInitRequestBytes = 8U;
+inline constexpr std::uint32_t kEeSndReturnBufferBytes = 12U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2412,14 +2440,60 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     return true;
 }
 
-// The title's 989snd sound driver (sids 0x00123456 / 0x00123457). The binds are
-// registered so they succeed exactly as they do once the title's own
-// `sceSifIopReset` has loaded `MOD\989SND.IRX`, but no command is modelled:
-// every call is recorded by the shared SIF dispatch (`last_rpc_call_number`,
-// `last_rpc_call_server_sid`, `rpc_call_count`, ...) and refused, so a caller
-// that waits for a sound command stays blocked instead of receiving a
-// fabricated reply. REPS2 executes no IOP module. ADR 0152.
+// The title's 989snd main EE-message server (sid 0x00123456).
+//
+// Only the driver-initialisation command SL_INIT (function 0) is modelled. The
+// 8-byte request is `{EEStatusAddr, flags}`: the EE address of the client's
+// status block and the init flags. The IOP handler stores the address in
+// `gEEStatusAddr` and starts the sound system; it produces no own return value,
+// so only the return-buffer completion handshake is written back,
+// `{-1, 0, -1}`, which is what the EE client's `snd_GotReturns` waits for (see
+// the constants above). REPS2 executes no IOP module and models no SPU/sound
+// hardware, so no audio is claimed: this only completes the synchronous RPC the
+// title blocks on and records the two request words.
+//
+// Every other function number is recorded and refused, so a caller that waits
+// for an unmodelled sound command stays blocked instead of receiving a
+// fabricated reply. A malformed SL_INIT (not the 8-byte request, unreadable
+// request words, or no 12-byte reply buffer) is likewise refused with no
+// mutation. ADR 0155.
 [[nodiscard]] inline bool serve_ee_snd_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.snd_call_count;
+    sif.last_snd_number = call.rpc_number;
+    sif.last_snd_send_size = call.send_size;
+    sif.last_snd_replied = false;
+
+    if (call.rpc_number != kEeSndCmdSlInit
+        || call.send_size < kEeSndSlInitRequestBytes || call.send_addr == 0U
+        || call.recv_addr == 0U || call.recv_size < kEeSndReturnBufferBytes) {
+        return false; // unmodelled command or malformed request: no RPC_END
+    }
+    std::uint32_t status_addr{}, flags{};
+    if (load_u32(state.memory, call.send_addr, status_addr) != Status::ok
+        || load_u32(state.memory, call.send_addr + 4U, flags) != Status::ok) {
+        return false; // the request words were not transferred
+    }
+    if (store_u32(state.memory, call.recv_addr, kEeSndReturnDoneWord) != Status::ok
+        || store_u32(state.memory, call.recv_addr + 4U, 0U) != Status::ok
+        || store_u32(state.memory, call.recv_addr + 8U, kEeSndReturnDoneWord) != Status::ok) {
+        return false; // reply buffer not writable: no reply, no RPC_END
+    }
+    sif.last_snd_status_addr = status_addr;
+    sif.last_snd_flags = flags;
+    sif.last_snd_replied = true;
+    ++sif.snd_replies;
+    return true;
+}
+
+// The 989snd loader server (sid 0x00123457). Its functions are the bank and MMD
+// loads (`SL_LOADBANK`, ...), which need a real IOP filesystem and sound memory
+// allocator. None is modelled, so every call is recorded by the shared SIF
+// dispatch and refused and the loader caller stays blocked. ADR 0155.
+[[nodiscard]] inline bool serve_ee_snd_loader_call(
     EeState&,
     const EeSifRpcCall&
 ) noexcept {
@@ -2733,9 +2807,20 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
 // REPS2 has no IOP memory: the handler writes its reply payload straight into
 // the caller's EE buffer, and the reply packet is written into the published EE
 // receive buffer with the SIF0 completion event published. An unregistered
-// token, a handler that refuses the function number, a zero `rmode`, or an
-// unreachable receive buffer produces no reply at all, so the caller stays
-// blocked instead of receiving an invented status.
+// token, a handler that refuses the function number, or an unreachable receive
+// buffer produces no reply at all, so the caller stays blocked instead of
+// receiving an invented status.
+//
+// The reply packet is delivered for a served call whatever its `rmode`: the IOP
+// sends SIF_CMD_RPC_END for every completed call, and the EE-side handler
+// (`_request_end`) completes the client either way — it clears `pkt_addr`, so a
+// caller that never installed an end function and does not wait on the client
+// semaphore can still observe completion by polling the client itself. ADR 0155
+// needs exactly that: the title's 989snd `snd_GotReturns` (`0x00201640`) calls
+// the SDK's `_sceSifCheckRpc` (`0x0025D178`) on the client object and returns
+// ready only once `pkt_addr` is zero, which `process_ee_sif_rpc_end` performs as
+// `rpc_packet_free`. A NOWAIT call with no end function therefore still
+// completes through RPC_END; only a refused call leaves the caller blocked.
 [[nodiscard]] inline Status deliver_iop_rpc_call_reply(
     EeState& state,
     std::uint32_t packet_addr,
@@ -2799,14 +2884,12 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     if (!server->handler(state, call)) {
         return Status::ok; // the server refused: the IOP sends no RPC_END
     }
-    if (rmode == 0U && end_function == 0U) {
-        // M_NOWAIT without an end function: nothing on the EE consumes a reply
-        // packet, so no RPC_END is modelled. A NOWAIT call that does publish an
-        // end function still completes through RPC_END (ps2sdk `_request_end`
-        // raises the client semaphore and invokes the callback), which is what
-        // unblocks e.g. sceCdRead's WaitSema. ADR 0135.
-        return Status::ok;
-    }
+    // A served call always completes through RPC_END, whatever its `rmode`: the
+    // IOP sends it for every completed call and `_request_end` clears the
+    // client's `pkt_addr` either way, so a NOWAIT caller with no end function
+    // sees completion by polling the client. The loaded `rmode` is kept in the
+    // packet-readability chain above but is otherwise unused. ADR 0155.
+    (void)rmode;
 
     const std::uint32_t reply[kEeSifRpcRendPacketSize / 4U] = {
         kEeSifRpcRendPacketSize, // psize
@@ -3054,15 +3137,16 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     // title's checks accept); every other function is recorded and refused.
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerMcServ, 0U, &serve_ee_mcserv_call);
-    // The title's 989snd sound driver (ADR 0152): registered so the two binds in
-    // the sound initialisation routine at 0x00201180 (sids 0x00123456 then
-    // 0x00123457) succeed like they do once the title's own `sceSifIopReset`
-    // has loaded `MOD\989SND.IRX`. No command is modelled: every call is
-    // recorded through the shared RPC fields and refused.
+    // The title's 989snd sound driver (ADR 0152, commands ADR 0155): registered
+    // so the two binds in the sound initialisation routine at 0x00201180 (sids
+    // 0x00123456 then 0x00123457) succeed like they do once the title's own
+    // `sceSifIopReset` has loaded `MOD\989SND.IRX`. The main server (0x00123456)
+    // serves SL_INIT (function 0) and refuses every other function; the loader
+    // server (0x00123457) records and refuses every call.
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerSnd989, 0U, &serve_ee_snd_call);
     (void)register_ee_sif_rpc_server(
-        state, kEeSifServerSnd989Alt, 0U, &serve_ee_snd_call);
+        state, kEeSifServerSnd989Alt, 0U, &serve_ee_snd_loader_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation

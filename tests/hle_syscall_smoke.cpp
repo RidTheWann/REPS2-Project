@@ -4348,8 +4348,9 @@ int test_989snd_calls_are_recorded_and_refused() {
     state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
     make_rpc_call_semaphore(state);
 
-    // No 989snd command is modelled, so the call is recorded by the shared SIF
-    // dispatch and refused: no reply, no RPC_END, semaphore untouched.
+    // The loader server (0x00123457) models no command, so its calls are
+    // recorded by the shared SIF dispatch and refused: no reply, no RPC_END,
+    // semaphore untouched.
     store_rpc_call_request(ram, reps2::runtime::kEeSifServerSnd989Alt, 0x11U, 8U, 8U);
     store_word(ram, kRpcPayload, 0xA5A5'A5A5U);
     store_word(ram, kRpcReply, 0xA5A5'A5A5U);
@@ -4364,6 +4365,114 @@ int test_989snd_calls_are_recorded_and_refused() {
     if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 1058;
     if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 1059;
     if (state.hle.semaphores[3].count != 0) return 1060;
+    return 0;
+}
+
+int test_989snd_sl_init_is_served() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // SL_INIT (function 0) on the main server: the 8-byte request carries the EE
+    // status-block address and the init flags (the title's 0x00201394 stores
+    // `sp[0] = &gStats`, `sp[4] = flags`). The reply is the return-buffer
+    // completion handshake {-1, 0, -1} the client's snd_GotReturns waits for.
+    constexpr std::uint32_t kStatusAddr = 0x004C'D380U;
+    constexpr std::uint32_t kFlags = 0x2U;
+    store_rpc_call_request(
+        ram, reps2::runtime::kEeSifServerSnd989,
+        reps2::runtime::kEeSndCmdSlInit, 8U, 12U);
+    store_word(ram, kRpcPayload + 0U, kStatusAddr);
+    store_word(ram, kRpcPayload + 4U, kFlags);
+    store_word(ram, kRpcReply + 0U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 8U, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 8U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1061;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.snd_call_count != 1U) return 1062;
+    if (sif.snd_replies != 1U || !sif.last_snd_replied) return 1063;
+    if (sif.last_snd_number != reps2::runtime::kEeSndCmdSlInit) return 1064;
+    if (sif.last_snd_send_size != 8U) return 1065;
+    if (sif.last_snd_status_addr != kStatusAddr) return 1066;
+    if (sif.last_snd_flags != kFlags) return 1067;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 1068;
+    // The reply handshake and the RPC_END that unblocks the caller.
+    if (load_word(ram, kRpcReply + 0U) != reps2::runtime::kEeSndReturnDoneWord) return 1069;
+    if (load_word(ram, kRpcReply + 4U) != 0U) return 1070;
+    if (load_word(ram, kRpcReply + 8U) != reps2::runtime::kEeSndReturnDoneWord) return 1071;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) != reps2::runtime::kEeSifCmdRpcEnd) return 1072;
+    if (state.hle.semaphores[3].count != 1) return 1073;
+    return 0;
+}
+
+int test_989snd_sl_init_refuses_a_malformed_request() {
+    // A request that is not the documented 8 bytes is refused: no reply buffer
+    // word is touched and no RPC_END is delivered.
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(
+        ram, reps2::runtime::kEeSifServerSnd989,
+        reps2::runtime::kEeSndCmdSlInit, 4U, 12U);
+    store_word(ram, kRpcPayload, 0x004C'D380U);
+    store_word(ram, kRpcReply + 0U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 8U, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 4U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1074;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.snd_call_count != 1U || sif.snd_replies != 0U) return 1075;
+    if (sif.last_snd_replied || sif.last_rpc_call_replied) return 1076;
+    if (load_word(ram, kRpcReply + 0U) != 0xA5A5'A5A5U) return 1077;
+    if (load_word(ram, kRpcReply + 4U) != 0xA5A5'A5A5U) return 1078;
+    if (load_word(ram, kRpcReply + 8U) != 0xA5A5'A5A5U) return 1079;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 1080;
+    if (state.hle.semaphores[3].count != 0) return 1081;
+    return 0;
+}
+
+int test_989snd_main_server_refuses_other_functions() {
+    // Any function other than SL_INIT on the main server is recorded and
+    // refused: the reply buffer is untouched and no RPC_END is delivered.
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(
+        ram, reps2::runtime::kEeSifServerSnd989, 1U, 8U, 12U);
+    store_word(ram, kRpcPayload + 0U, 0x004C'D380U);
+    store_word(ram, kRpcPayload + 4U, 0U);
+    store_word(ram, kRpcReply + 0U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 8U, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 8U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1082;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.snd_call_count != 1U || sif.snd_replies != 0U) return 1083;
+    if (sif.last_snd_number != 1U || sif.last_snd_replied) return 1084;
+    if (load_word(ram, kRpcReply + 0U) != 0xA5A5'A5A5U) return 1085;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 1086;
+    if (state.hle.semaphores[3].count != 0) return 1087;
     return 0;
 }
 
@@ -5164,9 +5273,9 @@ int test_ncmd_read_serves_sectors_from_host_media() {
     if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &oob) != Status::ok) return 1071;
     if (sif.last_ncmd_read_replied || ram[kReadBuf] != 0xA5U || sif.rpc_call_replies != 1U) return 1072;
 
-    // NOWAIT without an end function keeps the no-RPC_END behaviour even when
-    // the read itself succeeds: the data is served, but no reply packet is
-    // modelled because nothing consumes it.
+    // NOWAIT without an end function still completes through RPC_END: the IOP
+    // sends it for every served call and the EE handler clears the client's
+    // pkt_addr. The data is served and the reply packet is delivered (ADR 0155).
     store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdNCmd, 1U, 24U, 0U);
     store_word(ram, kRpcCallPacket + 0x30U, 0U);
     store_word(ram, kRpcClient + 0x1CU, 0U); // end_function = 0
@@ -5176,12 +5285,13 @@ int test_ncmd_read_serves_sectors_from_host_media() {
     store_word(ram, kRpcPayload + 12U, 0U);
     store_word(ram, kRpcPayload + 16U, 0U);
     store_word(ram, kRpcPayload + 20U, kCurPos);
+    state.hle.semaphores[3].count = 0; // so the raise is observable against max_count 1
     const reps2::runtime::SifDmaTransfer quiet{kRpcPayload, 0U, 24, 0U};
     if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &quiet) != Status::ok) return 1073;
     if (sif.ncmd_read_call_count != 4U || !sif.last_ncmd_read_replied
         || sif.last_ncmd_read_bytes != 2048U) return 1074;
     if (ram[kReadBuf] != static_cast<std::uint8_t>(16U * 131U)) return 1075;
-    if (sif.rpc_call_replies != 1U || state.hle.semaphores[3].count != 1U) return 1076;
+    if (sif.rpc_call_replies != 2U || state.hle.semaphores[3].count != 1U) return 1076;
     return 0;
 }
 
@@ -5649,6 +5759,12 @@ int main() {
          &test_bind_to_the_989snd_server_reaches_a_registered_server},
         {"989snd calls are recorded and refused",
          &test_989snd_calls_are_recorded_and_refused},
+        {"989snd main server serves SL_INIT",
+         &test_989snd_sl_init_is_served},
+        {"989snd SL_INIT refuses a malformed request",
+         &test_989snd_sl_init_refuses_a_malformed_request},
+        {"989snd main server refuses other functions",
+         &test_989snd_main_server_refuses_other_functions},
         {"boot environment registers the mtap port-open server",
          &test_boot_environment_registers_the_mtap_port_open_server},
         {"bind to the mtap server reaches a registered server",
