@@ -3936,6 +3936,73 @@ int test_cdvd_scmd_mmode_refuses_a_malformed_request() {
     return 0;
 }
 
+// FILEIO (sid 0x80000001) refuses every function. `sceFileioInit` binds the
+// server and then issues an unmodelled initialisation call (fno 255) whose
+// 8-byte request carries two pointers; refusing it without an RPC_END leaves the
+// caller blocked at `WaitSema`. The bounded observation fields must record the
+// request even when refused, and resolve a pathname only when one is actually
+// present (the retail call passes zeroed work buffers, so no name there). ADR
+// 0163.
+int test_fileio_init_call_is_observed_and_refused() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    constexpr std::uint32_t kNameBuf = 0x3000U;
+    constexpr std::uint32_t kSecondBuf = 0x3400U;
+    constexpr std::string_view kPath = "cdrom0:\\DATA\\FILE.BIN;1";
+    for (std::size_t index = 0U; index < kPath.size(); ++index) {
+        ram[kNameBuf + index] = static_cast<std::uint8_t>(kPath[index]);
+    }
+
+    // Function 255 with an 8-byte request {name pointer, second pointer}.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 255U, 8U, 8U);
+    store_word(ram, kRpcPayload + 0x00U, kNameBuf);
+    store_word(ram, kRpcPayload + 0x04U, kSecondBuf);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 8, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 991;
+    }
+
+    auto& sif = state.hle.sif_cmd;
+    // Refused: no reply payload, no RPC_END, the caller's semaphore stays 0.
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 992;
+    if (state.hle.semaphores[3].count != 0) return 993;
+    // Bounded observation records the request head and the resolved pathname.
+    if (sif.fileio_call_count != 1U || sif.fileio_last_number != 255U) return 994;
+    if (sif.fileio_last_send_size != 8U || sif.fileio_last_recv_size != 8U) return 995;
+    if (sif.fileio_last_send_addr != kRpcPayload || sif.fileio_last_recv_addr != kRpcReply) {
+        return 996;
+    }
+    if (sif.fileio_last_request_head[0] != kNameBuf
+        || sif.fileio_last_request_head[1] != kSecondBuf) {
+        return 997;
+    }
+    if (!sif.fileio_last_name_present
+        || std::string_view(sif.fileio_last_name) != kPath) {
+        return 998;
+    }
+
+    // The retail call carries two zeroed work buffers: the head is still
+    // recorded but no name is invented, and the name from the prior call is
+    // cleared rather than left stale.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 255U, 8U, 8U);
+    store_word(ram, kRpcPayload + 0x00U, 0U);
+    store_word(ram, kRpcPayload + 0x04U, 0U);
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 999;
+    }
+    if (sif.fileio_call_count != 2U) return 1000;
+    if (sif.fileio_last_request_head[0] != 0U || sif.fileio_last_request_head[1] != 0U) {
+        return 1001;
+    }
+    if (sif.fileio_last_name_present || sif.fileio_last_name[0] != '\0') return 1002;
+    return 0;
+}
+
 bool dummy_media_read(void*, std::uint32_t, std::uint32_t, std::span<std::uint8_t>) noexcept {
     return true;
 }
@@ -5904,6 +5971,8 @@ int main() {
          &test_cdvd_scmd_mmode_records_the_media_mode_and_replies_one},
         {"cdvd scmd mmode refuses a malformed request",
          &test_cdvd_scmd_mmode_refuses_a_malformed_request},
+        {"fileio init call is observed and refused",
+         &test_fileio_init_call_is_observed_and_refused},
         {"boot environment registers the diskready servers",
          &test_boot_environment_registers_the_diskready_servers},
         {"cdvd diskready answers complete with media",

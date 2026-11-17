@@ -2601,12 +2601,99 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
 
 // IOP FILEIO server (sid 0x80000001). The bind is registered so sceFileioInit
 // bind loop exits immediately. Individual file functions are unmodelled and
-// refused.
+// refused. `sceFileioInit` itself then issues an initialisation call (fno 255)
+// whose 8-byte request carries two pointers to zeroed BSS work buffers; the
+// handler records a bounded request head and any ASCII path reachable through
+// those pointers so an unmodelled function is diagnosable, without inventing
+// file semantics. ADR 0163.
 [[nodiscard]] inline bool serve_ee_fileio_call(
-    EeState&,
-    const EeSifRpcCall&
+    EeState& state,
+    const EeSifRpcCall& call
 ) noexcept {
-    return false;
+    auto& sif = state.hle.sif_cmd;
+    ++sif.fileio_call_count;
+    sif.fileio_last_number = call.rpc_number;
+    sif.fileio_last_send_size = call.send_size;
+    sif.fileio_last_recv_size = call.recv_size;
+    sif.fileio_last_send_addr = call.send_addr;
+    sif.fileio_last_recv_addr = call.recv_addr;
+    sif.fileio_last_request_words = 0U;
+    for (std::size_t index = 0U; index < 4U; ++index) {
+        sif.fileio_last_request_head[index] = 0U;
+    }
+    sif.fileio_last_name_present = false;
+    for (std::size_t index = 0U; index < sizeof(sif.fileio_last_name); ++index) {
+        sif.fileio_last_name[index] = '\0';
+    }
+
+    // Read a bounded ASCII string at `address`; true only for a NUL-terminated
+    // printable run of >= 2 characters.
+    const auto read_ascii = [&state](std::uint32_t address, char* out, std::size_t capacity) -> bool {
+        if (address == 0U || capacity < 2U) {
+            return false;
+        }
+        bool terminated = false;
+        std::size_t used = 0U;
+        for (; used + 1U < capacity; ++used) {
+            std::uint8_t byte{};
+            if (load_u8(state.memory, address + static_cast<std::uint32_t>(used), byte) != Status::ok) {
+                return false;
+            }
+            if (byte == 0U) {
+                terminated = true;
+                break;
+            }
+            if (byte < 0x20U || byte > 0x7EU) {
+                return false;
+            }
+            out[used] = static_cast<char>(byte);
+        }
+        if (!terminated || used < 2U) {
+            return false;
+        }
+        out[used] = '\0';
+        return true;
+    };
+
+    if (call.send_addr != 0U) {
+        for (std::size_t word = 0U; word < 4U; ++word) {
+            std::uint32_t value{};
+            if (load_u32(state.memory, call.send_addr + word * 4U, value) != Status::ok) {
+                break;
+            }
+            sif.fileio_last_request_head[word] = value;
+            ++sif.fileio_last_request_words;
+        }
+        // Try each request word as a string pointer directly, then its first
+        // word as a second hop. The first printable path wins.
+        char scratch[64]{};
+        for (std::uint32_t hop = 0U; hop < 2U && !sif.fileio_last_name_present; ++hop) {
+            for (std::size_t which = 0U; which < 2U; ++which) {
+                std::uint32_t base = sif.fileio_last_request_head[which];
+                if (base == 0U) {
+                    continue;
+                }
+                if (hop == 1U) {
+                    std::uint32_t next{};
+                    if (load_u32(state.memory, base, next) != Status::ok) {
+                        continue;
+                    }
+                    base = next;
+                }
+                for (std::size_t index = 0U; index < sizeof(scratch); ++index) {
+                    scratch[index] = '\0';
+                }
+                if (read_ascii(base, scratch, sizeof(scratch))) {
+                    for (std::size_t index = 0U; index < sizeof(sif.fileio_last_name); ++index) {
+                        sif.fileio_last_name[index] = scratch[index];
+                    }
+                    sif.fileio_last_name_present = true;
+                    break;
+                }
+            }
+        }
+    }
+    return false; // unmodelled: no RPC_END, caller stays blocked
 }
 
 // Multitap port-open server (0x80000901, PS2SDK `MTAPSERV_PORT_OPEN`). The bind

@@ -541,6 +541,34 @@ void print_error(
               << ",\"rpc_call_server\":" << state.hle.sif_cmd.last_rpc_call_server_sid
               << ",\"rpc_call_number\":" << state.hle.sif_cmd.last_rpc_call_number
               << ",\"rpc_call_replied\":" << (state.hle.sif_cmd.last_rpc_call_replied ? 1U : 0U)
+              << ",\"rpc_call_send_size\":" << state.hle.sif_cmd.last_rpc_call_send_size
+              << ",\"rpc_call_recv_size\":" << state.hle.sif_cmd.last_rpc_call_recv_size
+              << ",\"rpc_call_end_function\":" << state.hle.sif_cmd.last_rpc_call_end_function
+              << ",\"rpc_call_request_word\":" << state.hle.sif_cmd.last_rpc_call_request_word
+              << ",\"fileio_calls\":" << state.hle.sif_cmd.fileio_call_count
+              << ",\"fileio_number\":" << state.hle.sif_cmd.fileio_last_number
+              << ",\"fileio_send_size\":" << state.hle.sif_cmd.fileio_last_send_size
+              << ",\"fileio_recv_size\":" << state.hle.sif_cmd.fileio_last_recv_size
+              << ",\"fileio_send_addr\":" << state.hle.sif_cmd.fileio_last_send_addr
+              << ",\"fileio_recv_addr\":" << state.hle.sif_cmd.fileio_last_recv_addr
+              << ",\"fileio_request_words\":" << state.hle.sif_cmd.fileio_last_request_words
+              << ",\"fileio_request_head\":["
+              << state.hle.sif_cmd.fileio_last_request_head[0] << ','
+              << state.hle.sif_cmd.fileio_last_request_head[1] << ','
+              << state.hle.sif_cmd.fileio_last_request_head[2] << ','
+              << state.hle.sif_cmd.fileio_last_request_head[3] << ']'
+              << ",\"fileio_name_present\":" << (state.hle.sif_cmd.fileio_last_name_present ? 1U : 0U)
+              << ",\"fileio_name\":\"";
+    for (const char ch : state.hle.sif_cmd.fileio_last_name) {
+        if (ch == '\0') {
+            break;
+        }
+        if (ch == '"' || ch == '\\') {
+            std::cout << '\\';
+        }
+        std::cout << ch;
+    }
+    std::cout << '"'
               << ",\"scmd_calls\":" << state.hle.sif_cmd.scmd_call_count
               << ",\"scmd_replies\":" << state.hle.sif_cmd.scmd_replies
               << ",\"scmd_number\":" << state.hle.sif_cmd.last_scmd_number

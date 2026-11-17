@@ -864,6 +864,25 @@ struct EeSifCmdState {
     std::uint32_t last_rpc_call_request_word{};
     bool last_rpc_call_replied{};
 
+    // IOP FILEIO (sid 0x80000001) observation. `sceFileioInit` binds the server
+    // and then issues an unmodelled initialisation call (fno 255) whose 8-byte
+    // request carries two pointers to zeroed BSS work buffers; refusing it
+    // without an RPC_END leaves the caller blocked at `WaitSema`. These fields
+    // record a bounded request head and any ASCII path reachable through those
+    // pointers, even for a refused call, so a future FILEIO function that does
+    // carry a path is diagnosable from the run report. Report-only; no
+    // guest-visible effect. ADR 0163.
+    std::uint32_t fileio_call_count{};
+    std::uint32_t fileio_last_number{};
+    std::uint32_t fileio_last_send_size{};
+    std::uint32_t fileio_last_recv_size{};
+    std::uint32_t fileio_last_send_addr{};
+    std::uint32_t fileio_last_recv_addr{};
+    std::uint32_t fileio_last_request_head[4]{}; // first 16 payload bytes, if transferred
+    std::uint32_t fileio_last_request_words{};   // how many of the above were readable
+    bool fileio_last_name_present{};
+    char fileio_last_name[64]{}; // NUL-terminated ASCII resolved through the request, bounded
+
     // CdSCmd (sid 0x80000593) S-command service. Only CD_SCMD_MMODE (0x22) is
     // modelled: the IOP stores the requested media mode and answers m_retres = 1
     // (ps2sdk iop/cdvd/cdvdman sceCdMmode). Every other S-command is refused, so
