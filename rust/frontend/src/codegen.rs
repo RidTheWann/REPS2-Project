@@ -28,7 +28,9 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::sign_extend_word_signed;\n\
              using reps2::runtime::parallel_add_u32;             using reps2::runtime::parallel_add_word;\n\
              using reps2::runtime::parallel_add_u8;\n\
+             using reps2::runtime::parallel_compare_equal_word;\n\
              using reps2::runtime::parallel_sub_word;\n\
+             using reps2::runtime::parallel_compare_greater_word;\n\
              using reps2::runtime::parallel_add_halfword;\n\
              using reps2::runtime::parallel_sub_halfword;\n\
              using reps2::runtime::parallel_sub_byte;\n\
@@ -478,6 +480,9 @@ pub(crate) fn emit_instruction(
         Operation::ParallelSubWord { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_sub_word");
         }
+        Operation::ParallelCompareGreaterWord { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_compare_greater_word");
+        }
         Operation::ParallelAddHalfword { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_add_halfword");
         }
@@ -489,6 +494,9 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelAddUnsignedWord { dst, lhs, rhs } => {
             emit_parallel_add_u32(output, dst, lhs, rhs);
+        }
+        Operation::ParallelCompareEqualWord { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_compare_equal_word");
         }
         Operation::ParallelAddUnsignedByte { dst, lhs, rhs } => {
             emit_parallel_add_u8(output, dst, lhs, rhs);
@@ -2728,5 +2736,51 @@ mod tests {
         assert!(
             cpp.contains("if (0 != 0) state.gpr[0] = parallel_add_u8(state.gpr[4], state.gpr[5]);")
         );
+    }
+
+    #[test]
+    fn emits_mmi1_pceqw_as_a_parallel_word_compare_call() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x12 << 6) | 0x28,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x12 << 6) | 0x28,
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xD000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("PCEQW IR");
+        let cpp = emit_cpp(&program).expect("PCEQW C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_compare_equal_word;"));
+        assert!(cpp.contains(
+            "if (3 != 0) state.gpr[3] = parallel_compare_equal_word(state.gpr[1], state.gpr[2]);"
+        ));
+        assert!(cpp.contains(
+            "if (0 != 0) state.gpr[0] = parallel_compare_equal_word(state.gpr[4], state.gpr[5]);"
+        ));
+    }
+
+    #[test]
+    fn emits_mmi0_pcgtw_as_a_parallel_signed_word_compare_call() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x02 << 6) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x02 << 6) | 0x08,
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x6F20 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("PCGTW IR");
+        let cpp = emit_cpp(&program).expect("PCGTW C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_compare_greater_word;"));
+        assert!(cpp.contains(
+            "if (3 != 0) state.gpr[3] = parallel_compare_greater_word(state.gpr[1], state.gpr[2]);"
+        ));
+        assert!(cpp.contains(
+            "if (0 != 0) state.gpr[0] = parallel_compare_greater_word(state.gpr[4], state.gpr[5]);"
+        ));
     }
 }

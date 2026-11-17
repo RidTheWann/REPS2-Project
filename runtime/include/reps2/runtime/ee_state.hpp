@@ -2192,6 +2192,62 @@ inline void disable_interrupts(EeState& state) noexcept {
     };
 }
 
+// PCEQW compares four corresponding 32-bit lanes and returns all ones for
+// equal lanes, otherwise zero. Each lane is independent.
+[[nodiscard]] constexpr Gpr128 parallel_compare_equal_word(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    const auto lane0 = static_cast<std::uint32_t>(lhs.low) == static_cast<std::uint32_t>(rhs.low)
+        ? 0xFFFF'FFFFU
+        : 0U;
+    const auto lane1 = static_cast<std::uint32_t>(lhs.low >> 32U)
+            == static_cast<std::uint32_t>(rhs.low >> 32U)
+        ? 0xFFFF'FFFFU
+        : 0U;
+    const auto lane2 = static_cast<std::uint32_t>(lhs.high) == static_cast<std::uint32_t>(rhs.high)
+        ? 0xFFFF'FFFFU
+        : 0U;
+    const auto lane3 = static_cast<std::uint32_t>(lhs.high >> 32U)
+            == static_cast<std::uint32_t>(rhs.high >> 32U)
+        ? 0xFFFF'FFFFU
+        : 0U;
+    return Gpr128{
+        static_cast<std::uint64_t>(lane0) | (static_cast<std::uint64_t>(lane1) << 32U),
+        static_cast<std::uint64_t>(lane2) | (static_cast<std::uint64_t>(lane3) << 32U),
+    };
+}
+
+// PCGTW compares four corresponding signed 32-bit lanes. Each greater-than
+// result is all ones; each false result is zero.
+[[nodiscard]] constexpr Gpr128 parallel_compare_greater_word(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    const auto compare = [](std::uint32_t left, std::uint32_t right) noexcept {
+        return std::bit_cast<std::int32_t>(left) > std::bit_cast<std::int32_t>(right)
+            ? 0xFFFF'FFFFU
+            : 0U;
+    };
+    const auto lane0 = compare(static_cast<std::uint32_t>(lhs.low), static_cast<std::uint32_t>(rhs.low));
+    const auto lane1 = compare(
+        static_cast<std::uint32_t>(lhs.low >> 32U),
+        static_cast<std::uint32_t>(rhs.low >> 32U)
+    );
+    const auto lane2 = compare(
+        static_cast<std::uint32_t>(lhs.high),
+        static_cast<std::uint32_t>(rhs.high)
+    );
+    const auto lane3 = compare(
+        static_cast<std::uint32_t>(lhs.high >> 32U),
+        static_cast<std::uint32_t>(rhs.high >> 32U)
+    );
+    return Gpr128{
+        static_cast<std::uint64_t>(lane0) | (static_cast<std::uint64_t>(lane1) << 32U),
+        static_cast<std::uint64_t>(lane2) | (static_cast<std::uint64_t>(lane3) << 32U),
+    };
+}
+
 // PADDH adds eight corresponding 16-bit lanes modulo 2^16. Arithmetic is
 // performed on unsigned lane values so wraparound is defined C++ behavior.
 // No carry crosses a halfword boundary.

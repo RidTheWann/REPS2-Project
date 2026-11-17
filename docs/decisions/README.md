@@ -161,3 +161,5 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0158](0158-ee-mmi0-psubb.md) | Decode, lift and AOT-lower R5900 MMI0 PSUBB; the frontier moves from an unsupported instruction to a status-poll retry loop at `0x0025D820` | Proposed |
 | [0159](0159-ee-989snd-sl-command-batch.md) | Serve 989snd SL_COMMAND_BATCH (fno 77) | Accepted |
 | [0160](0160-iop-fileio-server-registration.md) | Register IOP FILEIO server (0x80000001) | Accepted |
+| [0161](0161-ee-mmi1-pceqw.md) | Decode, lift and AOT-lower MMI1 PCEQW as four independent 32-bit equality comparisons | Proposed |
+| [0162](0162-ee-mmi0-pcgtw.md) | Decode, lift and AOT-lower MMI0 PCGTW as four signed 32-bit lane comparisons | Proposed |

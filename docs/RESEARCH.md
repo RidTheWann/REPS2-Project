@@ -148,12 +148,25 @@ References:
 - REPS2 stores only base EE HI/LO in the current runtime ABI. `MFHI/MFLO` write GPR[63:0] while preserving GPR[127:64]; `MTHI/MTLO` read GPR[63:0]. Signed and unsigned multiplication use the low 32 bits of the input GPRs; the 32-bit high/low product lanes are sign-extended into their 64-bit destinations as cross-checked above.
 - This increment does not model multiply pipeline latency, HI1/LO1, MMI pipeline-1 operations, MADD/MADDU, MULT1/MULTU1, DIV/DIVU semantics, or exception timing. The public implementation references note disagreements over DIVU sign-extension and special division cases; those operations stay out of the executable IR until separately researched and differential-tested.
 
+## R5900 MMI0 PCGTW cross-checks
+
+- PCGTW is listed in PS2TeK's MMI0 table at selector bits 10:6 = `0x02` within the `0x08` function group. PCSX2's `PCGTW` implementation at revision `79929f01750fdc8185810968c934bd3923d099a7` compares four signed 32-bit source lanes and writes `0xFFFFFFFF` for each true lane and zero otherwise. These are an encoding reference and a non-normative behavioral cross-check, not a hardware trace.
+- The synthetic word `0x70221888` decodes as `pcgtw r3, r1, r2`. REPS2 interprets the 32-bit lane bit patterns as signed values via C++20 `std::bit_cast`, avoiding implementation-defined out-of-range unsigned-to-signed casts. The native fixture checks signed boundary ordering (`INT32_MIN` vs `INT32_MAX`), mixed true/false lanes, self-comparison, source/destination aliasing, GPR[0], and an untouched bystander; no game artifact or title census is involved.
+- Reference URLs: https://psi-rockin.github.io/ps2tek/ and https://github.com/PCSX2/pcsx2/blob/79929f01750fdc8185810968c934bd3923d099a7/pcsx2/MMI.cpp.
+
 ## R5900 MMI PADDUW cross-checks
 
 - PADDUW is encoded under primary opcode `0x1C` in the MMI1 group: the low six function bits are `0x28` and the group selector bits 10:6 are `0x10`. REPS2 additionally verifies both fields so another MMI group with the same low function bits is not mistaken for PADDUW.
 - QEMU's R5900 instruction overview names PADDUW as "Parallel Add with Unsigned saturation Word": https://lists.nongnu.org/archive/html/qemu-devel/2018-10/msg04741.html. PCSX2's MMI interpreter performs four independent unsigned 32-bit additions and clamps each overflowing lane to `0xFFFFFFFF`: https://github.com/PCSX2/pcsx2/blob/master/pcsx2/MMI.cpp. These are non-normative behavioural references, not a hardware specification.
 - REPS2 therefore updates all four 32-bit lanes of the destination GPR and does not let carry or saturation cross a lane boundary. The native fixture cross-checks a lane-0 overflow that saturates while the upper lanes retain ordinary sums, plus the hard-wired zero destination.
 - Only PADDUW from the MMI families is implemented in this increment. Other MMI0–MMI3 operations, MMI pipeline-1 HI1/LO1 state, and MMI latency remain unsupported and are counted by the coverage profiler.
+
+## R5900 MMI1 PCEQW cross-checks
+
+- PCEQW is encoded under primary opcode `0x1C`, function `0x28`, and MMI1 selector bits 10:6 = `0x12`. The synthetic word `0x70221CA8` decodes as `pceqw r3, r1, r2`; the decoder verifies all three fields so the shared function value in other MMI groups and neighboring MMI1 selectors remain unsupported.
+- PS2TeK lists PCEQW in its MMI1 instruction table (https://psi-rockin.github.io/ps2tek/). PCSX2's MMI implementation at revision `79929f01750fdc8185810968c934bd3923d099a7` compares each of four corresponding unsigned 32-bit lanes and writes `0xFFFFFFFF` when equal, otherwise zero (https://github.com/PCSX2/pcsx2/blob/79929f01750fdc8185810968c934bd3923d099a7/pcsx2/MMI.cpp). These are encoding and behavioral cross-checks, not a hardware trace or normative specification.
+- REPS2 computes the full 128-bit result before the destination assignment, preserving `rd == rs` and `rd == rt`; writes to GPR[0] are suppressed. The dedicated synthetic generated-code fixture checks mixed equal/unequal lanes, all-equal inputs, both source aliases, all-three-register aliasing, GPR[0], source preservation and an untouched bystander.
+- No real-title census or boot probe is claimed for this operation. This coverage increment does not establish that a title executes PCEQW or advance any title compatibility state.
 
 ## R5900 MMI SA register and QFSRV cross-checks
 

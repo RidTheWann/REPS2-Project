@@ -145,6 +145,7 @@ pub enum Opcode {
     Qmfc2,
     ParallelAddWord,
     ParallelSubWord,
+    ParallelCompareGreaterWord,
     ParallelAddHalfword,
     ParallelSubHalfword,
     /// PSUBB subtracts sixteen corresponding 8-bit lanes modulo 2^8 with no
@@ -153,6 +154,7 @@ pub enum Opcode {
     ParallelSubByte,
     ParallelAddUnsignedWord,
     ParallelAddUnsignedByte,
+    ParallelCompareEqualWord,
     ParallelAnd,
     /// PXOR applies a plain bitwise exclusive-or to the whole 128-bit GPR:
     /// every bit of GPR[rd] is `rs XOR rt`. It is the MMI2 sibling of PAND.
@@ -465,11 +467,13 @@ impl Opcode {
             Self::Qmfc2 => "qmfc2",
             Self::ParallelAddWord => "paddw",
             Self::ParallelSubWord => "psubw",
+            Self::ParallelCompareGreaterWord => "pcgtw",
             Self::ParallelAddHalfword => "paddh",
             Self::ParallelSubHalfword => "psubh",
             Self::ParallelSubByte => "psubb",
             Self::ParallelAddUnsignedWord => "padduw",
             Self::ParallelAddUnsignedByte => "paddub",
+            Self::ParallelCompareEqualWord => "pceqw",
             Self::ParallelAnd => "pand",
             Self::ParallelXor => "pxor",
             Self::ParallelCopyLowDoubleword => "pcpyld",
@@ -980,11 +984,13 @@ impl Instruction {
             }
             Opcode::ParallelAddWord
             | Opcode::ParallelSubWord
+            | Opcode::ParallelCompareGreaterWord
             | Opcode::ParallelAddHalfword
             | Opcode::ParallelSubHalfword
             | Opcode::ParallelSubByte
             | Opcode::ParallelAddUnsignedWord
             | Opcode::ParallelAddUnsignedByte
+            | Opcode::ParallelCompareEqualWord
             | Opcode::ParallelAnd
             | Opcode::ParallelXor
             | Opcode::ParallelCopyLowDoubleword
@@ -1574,6 +1580,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
             0x1C => match (word & 0x3F) as u8 {
                 0x08 if ((word >> 6) & 0x1F) == 0x00 => Opcode::ParallelAddWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x01 => Opcode::ParallelSubWord,
+                0x08 if ((word >> 6) & 0x1F) == 0x02 => Opcode::ParallelCompareGreaterWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x04 => Opcode::ParallelAddHalfword,
                 0x08 if ((word >> 6) & 0x1F) == 0x05 => Opcode::ParallelSubHalfword,
                 0x08 if ((word >> 6) & 0x1F) == 0x09 => Opcode::ParallelSubByte,
@@ -1589,6 +1596,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x09 if ((word >> 6) & 0x1F) == 0x1E && rs == 0 => Opcode::ParallelExchangeEvenWord,
                 0x09 if ((word >> 6) & 0x1F) == 0x1F && rs == 0 => Opcode::ParallelRotate3Words,
                 0x28 if ((word >> 6) & 0x1F) == 0x10 => Opcode::ParallelAddUnsignedWord,
+                0x28 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelCompareEqualWord,
                 0x28 if ((word >> 6) & 0x1F) == 0x18 => Opcode::ParallelAddUnsignedByte,
                 0x28 if ((word >> 6) & 0x1F) == 0x1B => Opcode::FunnelShiftRightVec,
                 0x29 if ((word >> 6) & 0x1F) == 0x0E => Opcode::ParallelCopyUpperDoubleword,
@@ -1889,6 +1897,7 @@ mod tests {
         for (selector, expected, mnemonic) in [
             (0x00, Opcode::ParallelAddWord, "paddw"),
             (0x01, Opcode::ParallelSubWord, "psubw"),
+            (0x02, Opcode::ParallelCompareGreaterWord, "pcgtw"),
             (0x04, Opcode::ParallelAddHalfword, "paddh"),
             (0x05, Opcode::ParallelSubHalfword, "psubh"),
             (0x09, Opcode::ParallelSubByte, "psubb"),
@@ -1908,9 +1917,18 @@ mod tests {
             assert!(!effects.unknown);
         }
 
+        let pcgtw = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x02 << 6) | 0x08;
+        let zero_destination = decode(pcgtw & !(0x1F << 11), 0x6F00);
+        assert_eq!(zero_destination.opcode, Opcode::ParallelCompareGreaterWord);
+        assert_eq!(
+            zero_destination.effects().gpr_read_mask,
+            (1 << 1) | (1 << 2)
+        );
+        assert_eq!(zero_destination.effects().gpr_write_mask, 0);
+
         let base = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11);
-        assert_eq!(decode(base | (2 << 6) | 0x08, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(base | (0x0A << 6) | 0x08, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(base | 0x09, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(base | 0x28, 0).opcode, Opcode::Unknown);
     }
 
@@ -1976,6 +1994,33 @@ mod tests {
         assert_eq!(decode(mmi0, 0).opcode, Opcode::Unknown);
         let other_mmi1 = (word & !(0x1F << 6)) | (0x11 << 6);
         assert_eq!(decode(other_mmi1, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_r5900_mmi1_parallel_compare_equal_word() {
+        let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x12 << 6) | 0x28;
+        let decoded = decode(word, 0x7000);
+        assert_eq!(decoded.opcode, Opcode::ParallelCompareEqualWord);
+        assert_eq!(decoded.opcode.mnemonic(), "pceqw");
+        assert_eq!((decoded.rs, decoded.rt, decoded.rd), (1, 2, 3));
+        assert_eq!(encoding_family(word), EncodingFamily::Mmi1);
+        assert!(!decoded.has_delay_slot);
+
+        let effects = decoded.effects();
+        assert_eq!(effects.gpr_read_mask, (1 << 1) | (1 << 2));
+        assert_eq!(effects.gpr_write_mask, 1 << 3);
+        assert!(!effects.unknown);
+
+        assert_eq!(
+            decode((word & !0x3F) | 0x08, 0).opcode,
+            Opcode::ParallelExtendLowWord
+        );
+        assert_eq!(decode((word & !0x3F) | 0x09, 0).opcode, Opcode::ParallelAnd);
+        assert_eq!(decode((word & !0x3F) | 0x29, 0).opcode, Opcode::ParallelOr);
+        assert_eq!(
+            decode((word & !(0x1F << 6)) | (0x11 << 6), 0).opcode,
+            Opcode::Unknown
+        );
     }
 
     #[test]
@@ -2067,9 +2112,9 @@ mod tests {
         assert_eq!(zero_destination.effects().gpr_write_mask, 0);
 
         // Selector 0x12 also names MMI0 PEXTLW and MMI2 PAND, so the group
-        // selector must stay part of the match. MMI3 selector 0x13 is PNOR and
-        // is decoded separately; the neighboring MMI3 selectors 0x11 and 0x1A
-        // and the reserved-layout 0x1E must stay unknown in this increment.
+        // selector must stay part of the match. MMI1 selector 0x12 is PCEQW,
+        // and MMI3 selector 0x13 is PNOR; neighboring MMI3 selectors 0x11 and
+        // 0x1A and the reserved-layout 0x1E stay unknown in this increment.
         let pextlw_group = (word & !0x3F) | 0x08;
         assert_eq!(
             decode(pextlw_group, 0).opcode,
@@ -2080,7 +2125,11 @@ mod tests {
         let pnor_group = (word & !(0x1F << 6)) | (0x13 << 6);
         assert_eq!(decode(pnor_group, 0).opcode, Opcode::ParallelNor);
         let mmi1_group = (word & !0x3F) | 0x28;
-        assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown, "funct 0x28");
+        assert_eq!(
+            decode(mmi1_group, 0).opcode,
+            Opcode::ParallelCompareEqualWord,
+            "funct 0x28"
+        );
         for other_mmi3 in [0x11, 0x1A, 0x1E] {
             let word = (word & !(0x1F << 6)) | (other_mmi3 << 6);
             assert_eq!(
@@ -2136,7 +2185,7 @@ mod tests {
         );
         assert_eq!(zero_destination.effects().gpr_write_mask, 0);
 
-        // Selector 0x12 also names MMI0 PEXTLW and MMI3 POR, so the group
+        // Selector 0x12 also names MMI0 PEXTLW, MMI1 PCEQW and MMI3 POR, so the group
         // selector must stay part of the match. MMI2 selector 0x13 is PXOR and
         // is decoded separately; the neighboring MMI2 selectors 0x10 (PMADDH)
         // and 0x11 (PHMADH) stay unknown in this increment, and MMI3 selector
@@ -2151,7 +2200,11 @@ mod tests {
         let pxor_group = (word & !(0x1F << 6)) | (0x13 << 6);
         assert_eq!(decode(pxor_group, 0).opcode, Opcode::ParallelXor);
         let mmi1_group = (word & !0x3F) | 0x28;
-        assert_eq!(decode(mmi1_group, 0).opcode, Opcode::Unknown, "funct 0x28");
+        assert_eq!(
+            decode(mmi1_group, 0).opcode,
+            Opcode::ParallelCompareEqualWord,
+            "funct 0x28"
+        );
         for other_mmi2 in [0x10, 0x11] {
             let word = (word & !(0x1F << 6)) | (other_mmi2 << 6);
             assert_eq!(

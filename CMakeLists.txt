@@ -543,6 +543,41 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME reps2_mmi0_word_codegen_smoke COMMAND reps2_mmi0_word_codegen_smoke)
 
+    set(REPS2_MMI0_PCGTW_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi0_pcgtw_program.cpp")
+    add_custom_command(
+        OUTPUT "${REPS2_MMI0_PCGTW_GENERATED_CPP}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+        COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+            "${REPS2_MMI0_PCGTW_GENERATED_CPP}"
+            0x00006F20
+            0x70221888  # pcgtw r3, r1, r2
+            0x70222088  # pcgtw r4, r1, r2
+            0x70220888  # pcgtw r1, r1, r2 (destination aliases lhs)
+            0x70A63088  # pcgtw r6, r5, r6 (destination aliases rhs)
+            0x70E73888  # pcgtw r7, r7, r7
+            0x70220088  # pcgtw r0, r1, r2 (zero destination)
+        DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+        COMMENT "AOT-compiling R5900 MMI0 PCGTW signed word comparisons"
+        VERBATIM
+    )
+    set_source_files_properties("${REPS2_MMI0_PCGTW_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+    add_custom_target(reps2_mmi0_pcgtw_codegen_fixture DEPENDS "${REPS2_MMI0_PCGTW_GENERATED_CPP}")
+    add_executable(reps2_mmi0_pcgtw_codegen_smoke
+        "${REPS2_MMI0_PCGTW_GENERATED_CPP}"
+        tests/mmi0_pcgtw_smoke.cpp
+    )
+    add_dependencies(reps2_mmi0_pcgtw_codegen_smoke reps2_mmi0_pcgtw_codegen_fixture)
+    target_link_libraries(reps2_mmi0_pcgtw_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_mmi0_pcgtw_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_mmi0_pcgtw_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_mmi0_pcgtw_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_mmi0_pcgtw_codegen_smoke COMMAND reps2_mmi0_pcgtw_codegen_smoke)
+
     set(REPS2_MMI2_PCPYLD_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi2_pcpyld_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_MMI2_PCPYLD_GENERATED_CPP}"
@@ -1053,6 +1088,41 @@ target_compile_options(reps2_mmi1_paddub_codegen_smoke PRIVATE
 )
 endif()
 add_test(NAME reps2_mmi1_paddub_codegen_smoke COMMAND reps2_mmi1_paddub_codegen_smoke)
+
+set(REPS2_MMI1_PCEQW_GENERATED_CPP "${REPS2_GENERATED_DIR}/mmi1_pceqw_program.cpp")
+add_custom_command(
+    OUTPUT "${REPS2_MMI1_PCEQW_GENERATED_CPP}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${REPS2_GENERATED_DIR}"
+    COMMAND "${REPS2_FRONTEND_EXECUTABLE}" compile-words
+        "${REPS2_MMI1_PCEQW_GENERATED_CPP}"
+        0x00006000
+        0x70221CA8 # pceqw r3, r1, r2
+        0x702224A8 # pceqw r4, r1, r2
+        0x70220CA8 # pceqw r1, r1, r2 (destination aliases lhs)
+        0x70A634A8 # pceqw r6, r5, r6 (destination aliases rhs)
+        0x70E73CA8 # pceqw r7, r7, r7
+        0x702204A8 # pceqw r0, r1, r2 (zero destination)
+    DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
+    COMMENT "AOT-compiling R5900 MMI1 PCEQW word comparisons"
+    VERBATIM
+)
+set_source_files_properties("${REPS2_MMI1_PCEQW_GENERATED_CPP}" PROPERTIES GENERATED TRUE)
+add_custom_target(reps2_mmi1_pceqw_codegen_fixture DEPENDS "${REPS2_MMI1_PCEQW_GENERATED_CPP}")
+add_executable(reps2_mmi1_pceqw_codegen_smoke
+    "${REPS2_MMI1_PCEQW_GENERATED_CPP}"
+    tests/mmi1_pceqw_smoke.cpp
+)
+add_dependencies(reps2_mmi1_pceqw_codegen_smoke reps2_mmi1_pceqw_codegen_fixture)
+target_link_libraries(reps2_mmi1_pceqw_codegen_smoke PRIVATE REPS2::Runtime)
+target_compile_features(reps2_mmi1_pceqw_codegen_smoke PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(reps2_mmi1_pceqw_codegen_smoke PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(reps2_mmi1_pceqw_codegen_smoke PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion
+    )
+endif()
+add_test(NAME reps2_mmi1_pceqw_codegen_smoke COMMAND reps2_mmi1_pceqw_codegen_smoke)
 
 set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     add_custom_command(

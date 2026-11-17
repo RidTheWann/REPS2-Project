@@ -429,6 +429,13 @@ pub enum Operation {
         lhs: Gpr,
         rhs: Gpr,
     },
+    /// PCGTW: four independent signed 32-bit comparisons, producing all ones
+    /// for a greater-than lane and zero otherwise.
+    ParallelCompareGreaterWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
     /// PADDH: eight independent modulo-2^16 additions over GPR[127:0].
     ParallelAddHalfword {
         dst: Gpr,
@@ -448,6 +455,13 @@ pub enum Operation {
         rhs: Gpr,
     },
     ParallelAddUnsignedWord {
+        dst: Gpr,
+        lhs: Gpr,
+        rhs: Gpr,
+    },
+    /// PCEQW: compare four corresponding 32-bit lanes for equality, producing
+    /// all ones for equal lanes and zero for unequal lanes.
+    ParallelCompareEqualWord {
         dst: Gpr,
         lhs: Gpr,
         rhs: Gpr,
@@ -1076,6 +1090,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
             },
+            Opcode::ParallelCompareGreaterWord => Operation::ParallelCompareGreaterWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
             Opcode::ParallelAddHalfword => Operation::ParallelAddHalfword {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
@@ -1092,6 +1111,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 rhs: gpr(instruction.rt),
             },
             Opcode::ParallelAddUnsignedWord => Operation::ParallelAddUnsignedWord {
+                dst: gpr(instruction.rd),
+                lhs: gpr(instruction.rs),
+                rhs: gpr(instruction.rt),
+            },
+            Opcode::ParallelCompareEqualWord => Operation::ParallelCompareEqualWord {
                 dst: gpr(instruction.rd),
                 lhs: gpr(instruction.rs),
                 rhs: gpr(instruction.rt),
@@ -2075,6 +2099,30 @@ mod tests {
     }
 
     #[test]
+    fn lifts_r5900_mmi0_pcgtw_and_suppresses_zero_destination() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x02 << 6) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x02 << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0x6F20 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PCGTW lifts into typed IR");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelCompareGreaterWord { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelCompareGreaterWord { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PCGTW verifies");
+    }
+
+    #[test]
     fn lifts_r5900_mmi_pipeline_one_hilo_moves() {
         let words = [
             (0x1C << 26) | (4 << 21) | 0x11,
@@ -2532,6 +2580,30 @@ mod tests {
             Operation::ParallelAddUnsignedByte { dst, .. } if dst.is_zero()
         ));
         program.verify().expect("PADDUB verifies");
+    }
+
+    #[test]
+    fn lifts_r5900_mmi1_pceqw_and_suppresses_zero_destination() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x12 << 6) | 0x28,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (0x12 << 6) | 0x28,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| decoded(*word, 0xD000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = lift(&decoded_stream).expect("PCEQW lifts into typed IR");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::ParallelCompareEqualWord { dst, lhs, rhs }
+                if dst.index() == 3 && lhs.index() == 1 && rhs.index() == 2
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::ParallelCompareEqualWord { dst, .. } if dst.is_zero()
+        ));
+        program.verify().expect("PCEQW verifies");
     }
 
     #[test]
