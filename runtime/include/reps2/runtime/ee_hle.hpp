@@ -2093,6 +2093,11 @@ inline constexpr std::uint32_t kEeMcManVersionWord = 0x020EU;
 // main EE-message server and 0x00123457 the bank/MMD loader server. ADR 0152.
 inline constexpr std::uint32_t kEeSifServerSnd989 = 0x0012'3456U;
 inline constexpr std::uint32_t kEeSifServerSnd989Alt = 0x0012'3457U;
+// IOP FILEIO server (sid 0x80000001).
+// `sceFileioInit` in the title binds 0x80000001 (FILEIO) and registers SIF
+// command handlers for 0x80000011 and 0x80000013. Binds succeed as resident
+// IOP fileio server.
+inline constexpr std::uint32_t kEeSifServerFileIo = 0x8000'0001U;
 // The main server's RPC function number indexes the driver's `gCommandFunc[]`
 // table (same decompilation, `iop/989snd.c`), whose slot 0 is `snd_CMD_SL_INIT`.
 // `snd_StartSoundSystemEx` sends `{&gStats, flags}` — the EE address of the
@@ -2119,6 +2124,9 @@ inline constexpr std::uint32_t kEeSndCmdSlInit = 0U;
 inline constexpr std::uint32_t kEeSndReturnDoneWord = 0xFFFF'FFFFU;
 inline constexpr std::uint32_t kEeSndSlInitRequestBytes = 8U;
 inline constexpr std::uint32_t kEeSndReturnBufferBytes = 12U;
+// Function 77 (SL_COMMAND_BATCH) flushes buffered sound commands.
+inline constexpr std::uint32_t kEeSndCmdSlCommandBatch = 77U;
+inline constexpr std::uint32_t kEeSndBatchRequestBytes = 12U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -2538,26 +2546,46 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     sif.last_snd_send_size = call.send_size;
     sif.last_snd_replied = false;
 
-    if (call.rpc_number != kEeSndCmdSlInit
-        || call.send_size < kEeSndSlInitRequestBytes || call.send_addr == 0U
-        || call.recv_addr == 0U || call.recv_size < kEeSndReturnBufferBytes) {
-        return false; // unmodelled command or malformed request: no RPC_END
+    if (call.recv_addr == 0U || call.recv_size < kEeSndReturnBufferBytes || call.send_addr == 0U) {
+        return false;
     }
-    std::uint32_t status_addr{}, flags{};
-    if (load_u32(state.memory, call.send_addr, status_addr) != Status::ok
-        || load_u32(state.memory, call.send_addr + 4U, flags) != Status::ok) {
-        return false; // the request words were not transferred
+
+    if (call.rpc_number == kEeSndCmdSlInit) {
+        if (call.send_size < kEeSndSlInitRequestBytes) {
+            return false;
+        }
+        std::uint32_t status_addr{}, flags{};
+        if (load_u32(state.memory, call.send_addr, status_addr) != Status::ok
+            || load_u32(state.memory, call.send_addr + 4U, flags) != Status::ok) {
+            return false;
+        }
+        if (store_u32(state.memory, call.recv_addr, kEeSndReturnDoneWord) != Status::ok
+            || store_u32(state.memory, call.recv_addr + 4U, 0U) != Status::ok
+            || store_u32(state.memory, call.recv_addr + 8U, kEeSndReturnDoneWord) != Status::ok) {
+            return false;
+        }
+        sif.last_snd_status_addr = status_addr;
+        sif.last_snd_flags = flags;
+        sif.last_snd_replied = true;
+        ++sif.snd_replies;
+        return true;
     }
-    if (store_u32(state.memory, call.recv_addr, kEeSndReturnDoneWord) != Status::ok
-        || store_u32(state.memory, call.recv_addr + 4U, 0U) != Status::ok
-        || store_u32(state.memory, call.recv_addr + 8U, kEeSndReturnDoneWord) != Status::ok) {
-        return false; // reply buffer not writable: no reply, no RPC_END
+
+    if (call.rpc_number == kEeSndCmdSlCommandBatch) {
+        if (call.send_size < kEeSndBatchRequestBytes) {
+            return false;
+        }
+        if (store_u32(state.memory, call.recv_addr, kEeSndReturnDoneWord) != Status::ok
+            || store_u32(state.memory, call.recv_addr + 4U, 0U) != Status::ok
+            || store_u32(state.memory, call.recv_addr + 8U, kEeSndReturnDoneWord) != Status::ok) {
+            return false;
+        }
+        sif.last_snd_replied = true;
+        ++sif.snd_replies;
+        return true;
     }
-    sif.last_snd_status_addr = status_addr;
-    sif.last_snd_flags = flags;
-    sif.last_snd_replied = true;
-    ++sif.snd_replies;
-    return true;
+
+    return false; // unmodelled command: no reply, no RPC_END
 }
 
 // The 989snd loader server (sid 0x00123457). Its functions are the bank and MMD
@@ -2565,6 +2593,16 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
 // allocator. None is modelled, so every call is recorded by the shared SIF
 // dispatch and refused and the loader caller stays blocked. ADR 0155.
 [[nodiscard]] inline bool serve_ee_snd_loader_call(
+    EeState&,
+    const EeSifRpcCall&
+) noexcept {
+    return false;
+}
+
+// IOP FILEIO server (sid 0x80000001). The bind is registered so sceFileioInit
+// bind loop exits immediately. Individual file functions are unmodelled and
+// refused.
+[[nodiscard]] inline bool serve_ee_fileio_call(
     EeState&,
     const EeSifRpcCall&
 ) noexcept {
@@ -3218,6 +3256,10 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
         state, kEeSifServerSnd989, 0U, &serve_ee_snd_call);
     (void)register_ee_sif_rpc_server(
         state, kEeSifServerSnd989Alt, 0U, &serve_ee_snd_loader_call);
+    // IOP FILEIO server (ADR 0159): registered so `sceFileioInit` bind succeeds
+    // without stalling in a retry loop.
+    (void)register_ee_sif_rpc_server(
+        state, kEeSifServerFileIo, 0U, &serve_ee_fileio_call);
 }
 
 // outside the kernel window are returned unchanged. Mirrors the translation

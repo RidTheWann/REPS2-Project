@@ -4605,6 +4605,48 @@ int test_989snd_main_server_refuses_other_functions() {
     return 0;
 }
 
+int test_served_sound_call_accepts_command_batch() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(
+        ram, reps2::runtime::kEeSifServerSnd989,
+        reps2::runtime::kEeSndCmdSlCommandBatch, 12U, 12U);
+    store_word(ram, kRpcPayload + 0U, 1U);
+    store_word(ram, kRpcPayload + 4U, 2U);
+    store_word(ram, kRpcPayload + 8U, 3U);
+    store_word(ram, kRpcReply + 0U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 4U, 0xA5A5'A5A5U);
+    store_word(ram, kRpcReply + 8U, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 12U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1088;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.snd_call_count != 1U || sif.snd_replies != 1U) return 1089;
+    if (sif.last_snd_number != reps2::runtime::kEeSndCmdSlCommandBatch || !sif.last_snd_replied) return 1090;
+    if (load_word(ram, kRpcReply + 0U) != reps2::runtime::kEeSndReturnDoneWord) return 1091;
+    if (load_word(ram, kRpcReply + 4U) != 0U) return 1092;
+    if (load_word(ram, kRpcReply + 8U) != reps2::runtime::kEeSndReturnDoneWord) return 1093;
+    if (load_word(ram, kRpcEePktbuf + 0x08U) != reps2::runtime::kEeSifCmdRpcEnd) return 1094;
+    return 0;
+}
+
+int test_boot_environment_registers_the_fileio_server() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    if (reps2::runtime::find_ee_sif_rpc_server(
+            state, reps2::runtime::kEeSifServerFileIo) == nullptr) return 1095;
+    return 0;
+}
+
 int test_boot_environment_registers_the_mtap_port_open_server() {
     SifWindow ram{};
     EeState state{};
@@ -5898,6 +5940,10 @@ int main() {
          &test_989snd_sl_init_refuses_a_malformed_request},
         {"989snd main server refuses other functions",
          &test_989snd_main_server_refuses_other_functions},
+        {"989snd main server serves SL_COMMAND_BATCH",
+         &test_served_sound_call_accepts_command_batch},
+        {"boot environment registers the fileio server",
+         &test_boot_environment_registers_the_fileio_server},
         {"boot environment registers the mtap port-open server",
          &test_boot_environment_registers_the_mtap_port_open_server},
         {"bind to the mtap server reaches a registered server",

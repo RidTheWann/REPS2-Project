@@ -778,7 +778,8 @@ using EeSifRpcServerHandler = bool (*)(EeState& state, const EeSifRpcCall& call)
 // observed title surface exhausted the old bound; ADR 0152 raised it to 18 for
 // the title's two 989snd sound servers, which filled the 16-entry table and
 // left no room for the servers a session registers on top of the boot set.
-inline constexpr std::size_t kEeMaxSifRpcServers = 18U;
+// Bumped to 24 to support IOP FILEIO and future servers.
+inline constexpr std::size_t kEeMaxSifRpcServers = 24U;
 
 // One server in the modelled IOP SIFRPC server table (`SifRpcServerData_t`).
 // The EE never dereferences the handle a bind reply returns; it only zero-tests
