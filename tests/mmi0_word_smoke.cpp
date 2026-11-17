@@ -40,6 +40,11 @@ constexpr Gpr128 kHalfSubExpected{
     0x8000'0000'8001'0001ULL,
 };
 
+constexpr Gpr128 kByteSubExpected{
+    0x8000'0000'FFFF'FFFEULL,
+    0x8000'0000'8101'0101ULL,
+};
+
 static_assert(reps2::runtime::parallel_add_word(kLhs, kRhs).low == kAddExpected.low);
 static_assert(reps2::runtime::parallel_add_word(kLhs, kRhs).high == kAddExpected.high);
 static_assert(reps2::runtime::parallel_sub_word(kLhs, kRhs).low == kSubExpected.low);
@@ -48,6 +53,12 @@ static_assert(reps2::runtime::parallel_add_halfword(kLhs, kRhs).low == kHalfAddE
 static_assert(reps2::runtime::parallel_add_halfword(kLhs, kRhs).high == kHalfAddExpected.high);
 static_assert(reps2::runtime::parallel_sub_halfword(kLhs, kRhs).low == kHalfSubExpected.low);
 static_assert(reps2::runtime::parallel_sub_halfword(kLhs, kRhs).high == kHalfSubExpected.high);
+static_assert(reps2::runtime::parallel_sub_byte(kLhs, kRhs).low == kByteSubExpected.low);
+static_assert(reps2::runtime::parallel_sub_byte(kLhs, kRhs).high == kByteSubExpected.high);
+static_assert(
+    reps2::runtime::parallel_sub_byte(kLhs, kLhs).low == 0U
+    && reps2::runtime::parallel_sub_byte(kLhs, kLhs).high == 0U
+);
 
 } // namespace
 
@@ -64,6 +75,11 @@ int main() {
     state.gpr[12] = kRhs;
     state.gpr[14] = kLhs;
     state.gpr[13] = kRhs;
+    state.gpr[18] = kLhs;
+    state.gpr[19] = kRhs;
+    state.gpr[21] = kLhs;
+    state.gpr[20] = kRhs;
+    state.gpr[22] = kLhs;
 
     if (reps2::generated::execute(state) != Status::ok) return 1;
 
@@ -93,6 +109,17 @@ int main() {
     if (state.gpr[11].high != kHalfAddExpected.high) return 16;
     if (state.gpr[13].low != kHalfSubExpected.low) return 17;
     if (state.gpr[13].high != kHalfSubExpected.high) return 18;
+
+    // PSUBB wraps each of the sixteen 8-bit lanes independently.
+    if (state.gpr[17].low != kByteSubExpected.low) return 19;
+    if (state.gpr[17].high != kByteSubExpected.high) return 20;
+    if (state.gpr[18].low != kByteSubExpected.low) return 21;
+    if (state.gpr[18].high != kByteSubExpected.high) return 22;
+    if (state.gpr[20].low != kByteSubExpected.low) return 23;
+    if (state.gpr[20].high != kByteSubExpected.high) return 24;
+
+    // A byte destination aliasing both sources must still read the operands once.
+    if (state.gpr[22].low != 0U || state.gpr[22].high != 0U) return 25;
 
     return 0;
 }

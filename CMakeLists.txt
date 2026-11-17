@@ -516,8 +516,13 @@ if(BUILD_TESTING)
             0x70220108  # paddh r0, r1, r2 (zero-register write is suppressed)
             0x716C5908  # paddh r11, r11, r12 (rd aliases rs)
             0x71CD6948  # psubh r13, r14, r13 (rd aliases rt)
+            0x70228A48  # psubb r17, r1, r2
+            0x72539248  # psubb r18, r18, r19 (rd aliases rs)
+            0x72B4A248  # psubb r20, r21, r20 (rd aliases rt)
+            0x72D6B248  # psubb r22, r22, r22 (rd aliases both sources)
+            0x70220248  # psubb r0, r1, r2 (zero-register write is suppressed)
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
-        COMMENT "AOT-compiling R5900 MMI0 PADDW/PSUBW/PADDH/PSUBH lane arithmetic"
+        COMMENT "AOT-compiling R5900 MMI0 PADDW/PSUBW/PADDH/PSUBH/PSUBB lane arithmetic"
         VERBATIM
     )
     set_source_files_properties("${REPS2_MMI0_WORD_GENERATED_CPP}" PROPERTIES GENERATED TRUE)

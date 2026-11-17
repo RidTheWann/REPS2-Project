@@ -31,6 +31,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::parallel_sub_word;\n\
              using reps2::runtime::parallel_add_halfword;\n\
              using reps2::runtime::parallel_sub_halfword;\n\
+             using reps2::runtime::parallel_sub_byte;\n\
              using reps2::runtime::parallel_copy_low_doubleword;\n\
              using reps2::runtime::parallel_and;\n\
              using reps2::runtime::parallel_xor;\n\
@@ -482,6 +483,9 @@ pub(crate) fn emit_instruction(
         }
         Operation::ParallelSubHalfword { dst, lhs, rhs } => {
             emit_parallel_word(output, dst, lhs, rhs, "parallel_sub_halfword");
+        }
+        Operation::ParallelSubByte { dst, lhs, rhs } => {
+            emit_parallel_word(output, dst, lhs, rhs, "parallel_sub_byte");
         }
         Operation::ParallelAddUnsignedWord { dst, lhs, rhs } => {
             emit_parallel_add_u32(output, dst, lhs, rhs);
@@ -1932,6 +1936,39 @@ mod tests {
         assert!(cpp.contains(
             "if (0 != 0) state.gpr[0] = parallel_add_halfword(state.gpr[1], state.gpr[2]);"
         ));
+    }
+
+    #[test]
+    fn emits_mmi0_parallel_byte_subtract_runtime_call() {
+        let words = [
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (0x09 << 6) | 0x08,
+            (0x1C << 26) | (4 << 21) | (5 << 16) | (6 << 11) | (0x09 << 6) | 0x08,
+            (0x1C << 26) | (1 << 21) | (2 << 16) | (0x09 << 6) | 0x08,
+        ];
+        let decoded_stream = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x6F00 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded_stream).expect("PSUBB IR");
+        let cpp = emit_cpp(&program).expect("PSUBB C++");
+
+        assert!(cpp.contains("using reps2::runtime::parallel_sub_byte;"));
+        assert!(
+            cpp.contains(
+                "if (3 != 0) state.gpr[3] = parallel_sub_byte(state.gpr[1], state.gpr[2]);"
+            )
+        );
+        assert!(
+            cpp.contains(
+                "if (6 != 0) state.gpr[6] = parallel_sub_byte(state.gpr[4], state.gpr[5]);"
+            )
+        );
+        assert!(
+            cpp.contains(
+                "if (0 != 0) state.gpr[0] = parallel_sub_byte(state.gpr[1], state.gpr[2]);"
+            )
+        );
     }
 
     #[test]

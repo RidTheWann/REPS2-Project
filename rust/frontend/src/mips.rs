@@ -147,6 +147,10 @@ pub enum Opcode {
     ParallelSubWord,
     ParallelAddHalfword,
     ParallelSubHalfword,
+    /// PSUBB subtracts sixteen corresponding 8-bit lanes modulo 2^8 with no
+    /// borrowing across byte boundaries. It is the plain MMI0 form; PSUBSB is
+    /// the distinct saturating variant.
+    ParallelSubByte,
     ParallelAddUnsignedWord,
     ParallelAddUnsignedByte,
     ParallelAnd,
@@ -463,6 +467,7 @@ impl Opcode {
             Self::ParallelSubWord => "psubw",
             Self::ParallelAddHalfword => "paddh",
             Self::ParallelSubHalfword => "psubh",
+            Self::ParallelSubByte => "psubb",
             Self::ParallelAddUnsignedWord => "padduw",
             Self::ParallelAddUnsignedByte => "paddub",
             Self::ParallelAnd => "pand",
@@ -977,6 +982,7 @@ impl Instruction {
             | Opcode::ParallelSubWord
             | Opcode::ParallelAddHalfword
             | Opcode::ParallelSubHalfword
+            | Opcode::ParallelSubByte
             | Opcode::ParallelAddUnsignedWord
             | Opcode::ParallelAddUnsignedByte
             | Opcode::ParallelAnd
@@ -1570,6 +1576,7 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
                 0x08 if ((word >> 6) & 0x1F) == 0x01 => Opcode::ParallelSubWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x04 => Opcode::ParallelAddHalfword,
                 0x08 if ((word >> 6) & 0x1F) == 0x05 => Opcode::ParallelSubHalfword,
+                0x08 if ((word >> 6) & 0x1F) == 0x09 => Opcode::ParallelSubByte,
                 0x08 if ((word >> 6) & 0x1F) == 0x12 => Opcode::ParallelExtendLowWord,
                 0x08 if ((word >> 6) & 0x1F) == 0x1A => Opcode::ParallelExtendLowByte,
                 0x08 if ((word >> 6) & 0x1F) == 0x13 => Opcode::ParallelPackWord,
@@ -1878,12 +1885,13 @@ mod tests {
     }
 
     #[test]
-    fn decodes_r5900_mmi0_parallel_word_and_halfword_add_and_subtract() {
+    fn decodes_r5900_mmi0_parallel_word_halfword_and_byte_add_and_subtract() {
         for (selector, expected, mnemonic) in [
             (0x00, Opcode::ParallelAddWord, "paddw"),
             (0x01, Opcode::ParallelSubWord, "psubw"),
             (0x04, Opcode::ParallelAddHalfword, "paddh"),
             (0x05, Opcode::ParallelSubHalfword, "psubh"),
+            (0x09, Opcode::ParallelSubByte, "psubb"),
         ] {
             let word = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (selector << 6) | 0x08;
             let decoded = decode(word, 0x6F00);
@@ -1902,7 +1910,7 @@ mod tests {
 
         let base = (0x1C << 26) | (1 << 21) | (2 << 16) | (3 << 11);
         assert_eq!(decode(base | (2 << 6) | 0x08, 0).opcode, Opcode::Unknown);
-        assert_eq!(decode(base | 0x09, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(base | (0x0A << 6) | 0x08, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(base | 0x28, 0).opcode, Opcode::Unknown);
     }
 

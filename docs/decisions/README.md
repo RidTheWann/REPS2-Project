@@ -158,3 +158,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0155](0155-ee-989snd-sl-init.md) | Serve the 989snd main server's SL_INIT RPC (fno 0) and refuse the loader server; deliver `SIF_CMD_RPC_END` for every served call, superseding ADR 0135's NOWAIT/no-end-function short-circuit | Proposed |
 | [0156](0156-ee-endofheap-syscall.md) | Serve the EE `EndOfHeap` syscall (0x3E): extend the recorded heap range and return the new end | Proposed |
 | [0157](0157-cdvd-searchfile-packet-layout.md) | Parse the retail cdvd SearchFile packet layout (300-byte request, name at offset 36) and record the raw packet head for frontier diagnostics | Proposed |
+| [0158](0158-ee-mmi0-psubb.md) | Decode, lift and AOT-lower R5900 MMI0 PSUBB; the frontier moves from an unsupported instruction to a status-poll retry loop at `0x0025D820` | Proposed |

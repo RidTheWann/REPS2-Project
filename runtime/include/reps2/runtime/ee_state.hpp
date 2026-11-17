@@ -2230,6 +2230,27 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Gpr128{pack(lhs.low, rhs.low), pack(lhs.high, rhs.high)};
 }
 
+// PSUBB subtracts sixteen corresponding 8-bit lanes modulo 2^8. No borrow
+// crosses a byte boundary; unsigned subtraction gives the defined bit result.
+// This is the plain (non-saturating) MMI0 form; the saturating PSUBSB is a
+// distinct opcode not modelled here.
+[[nodiscard]] constexpr Gpr128 parallel_sub_byte(
+    const Gpr128& lhs,
+    const Gpr128& rhs
+) noexcept {
+    auto pack = [](std::uint64_t a, std::uint64_t b) noexcept -> std::uint64_t {
+        std::uint64_t result = 0;
+        for (unsigned shift = 0; shift < 64; shift += 8) {
+            const auto lane = static_cast<std::uint8_t>(
+                static_cast<std::uint8_t>(a >> shift) - static_cast<std::uint8_t>(b >> shift)
+            );
+            result |= static_cast<std::uint64_t>(lane) << shift;
+        }
+        return result;
+    };
+    return Gpr128{pack(lhs.low, rhs.low), pack(lhs.high, rhs.high)};
+}
+
 [[nodiscard]] constexpr std::uint32_t saturating_add_u32(
     std::uint32_t lhs,
     std::uint32_t rhs
