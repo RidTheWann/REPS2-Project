@@ -217,6 +217,11 @@ set_target_properties(reps2_native_module PROPERTIES
 )
 if(MSVC)
     target_compile_options(reps2_native_module PRIVATE /W4 /permissive- /bigobj)
+    # Without /Brepro the link stamps the module with the current time, so two
+    # builds of identical sources differ in four bytes (the COFF TimeDateStamp
+    # and the copy of it in the debug directory). That makes a probe record's
+    # native_module_sha256 differ between runs for no behavioural reason.
+    target_link_options(reps2_native_module PRIVATE /Brepro)
 else()
     target_compile_options(reps2_native_module PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
@@ -1100,6 +1105,11 @@ mod tests {
                 .contains("add_library(reps2_native_module SHARED")
         );
         assert!(project.cmake_lists.contains("REPS2_ENGINE_INCLUDE"));
+        assert!(
+            project
+                .cmake_lists
+                .contains("target_link_options(reps2_native_module PRIVATE /Brepro)")
+        );
         assert!(
             project
                 .cmake_lists

@@ -149,8 +149,15 @@ Consequence: `evidence.reproducible` is `false` for two otherwise identical runs
 until that link is made deterministic. This is the flag working as intended: it
 reports a real difference in the recorded artifact. It is **not** evidence that the
 guest behaviour differed, and it is not a reason to stop comparing
-`source.native_module_sha256`. Passing `/Brepro` to the module link is a separate
-change that makes the flag reachable.
+`source.native_module_sha256`.
+
+Resolved for the MSVC module link: the generated project now passes `/Brepro`
+to `reps2_native_module`, so the link no longer stamps the current time. A
+standalone MSVC experiment (one `SHARED` library built twice three seconds
+apart, `/Brepro` the only difference) reproduced the defect and the fix:
+without the flag the two DLLs differ, with it they are byte-identical. Records
+produced before this change keep `evidence.reproducible: false`; that value
+describes those runs and is not rewritten.
 
 ### Translation units
 
