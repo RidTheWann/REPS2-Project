@@ -58,6 +58,21 @@ Use the exact tool names/schemas advertised by the connected REA MCP server if u
 
 REA's documented Windows Ghidra P0 lane does not admit MIPS. Its generic MIPS Ghidra analysis lane is documented for Linux/macOS. WSL may provide a Linux host for Ghidra where an existing, supported installation is available, but it does **not** remove the MIPS ELF header/profile restrictions. Do not claim WSL solves R5900 admission.
 
+**Observed on this host (2026-11-19), REA `6.9.0`:** the live provider catalog
+reports `ghidra: not_configured` (`GHIDRA_INSTALL_DIR` unset), `ida`, `kuna` and
+`jadx` `not_configured`, and `hopper: unsupported_host` (`win32`). No JDK,
+Ghidra or PCSX2 installation exists here. Installing Ghidra on this host would
+therefore not gain PS2 capability: the Windows Ghidra P0 lane admits native
+x86/x64/ARM PE, DOS MZ and raw 6502 only, so a PS2 MIPS ELF is refused before
+any analysis layer runs. The supported path for a PS2 title on Windows remains
+REPS2-native evidence — raw ELF word decode, REPS2's own decoder, generated C++
+cross-check and bounded native probes — which is what the committed records
+under `docs/evidence/frontier/` are built from. A Linux host with an existing
+Ghidra plus REA's MIPS lane is the only route to provider decompilation, and it
+still carries the generic-MIPS profile restrictions above. Do not re-litigate
+this by installing a provider and re-testing admission without a new
+capability statement from REA.
+
 If REA refuses the ELF:
 1. Preserve the exact refusal and its declared constraint in the evidence notes.
 2. Do not patch `e_flags`, byte order, ELF class, ABI tags, or machine metadata to trick the provider.
