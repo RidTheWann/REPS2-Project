@@ -148,6 +148,44 @@ modelled timer and it raises no interrupt.
   the final instructions (`0x0036DC40..0x0036DC54` plus the thunk), not a stack
   or call graph; nothing here establishes who called `0x0036DC40`.
 
+## Correction (2026-11-19): `0x10001010` is the Timer 2 mode register
+
+The third Unknown bullet above ("what the EE register map names at that
+address") is answered by REPS2's own timer layout, and the answer changes what
+the next slice is:
+
+- **Observed:** `runtime/include/reps2/runtime/ee_state.hpp` models Timer 3 at
+  `0x10001800` (count), `0x10001810` (mode) and `0x10001820` (compare), i.e.
+  stride `0x800`. `0x10001010` is therefore `0x10001810 - 0x800`, the **Timer 2
+  mode** register, and `0x10001000` is the Timer 2 count register.
+- **Observed:** a scan of the whole `.text` range of the Black image
+  (`0x00100000..0x0030E580`, word-aligned, `lui $x,0x1000` followed within four
+  instructions by `ori`/`addiu` on the same register) finds eleven sites that
+  build a Timer 2 or Timer 3 address: `0x0036DA34` → `0x10001810`,
+  `0x0036DC78`, `0x0036DD20`, `0x0036DDCC`, `0x0036DFF4`, `0x0036E050`,
+  `0x0036E1B4` → `0x10001010`, and `0x0036DE94`, `0x0036E048`, `0x0036E1AC`,
+  `0x0036E298` → `0x10001000`. The handler registered by the `0x10` call is one
+  of the eleven (`0x0036DFF4`), and the caller's own continuation is another
+  (`0x0036DC78`).
+- **Observed words** in the caller's continuation, immediately after the
+  registration returns: `0x0036DC78` `3C031000` (`lui $3,0x1000`), `0x0036DC80`
+  `34631010` (`ori $3,$3,0x1010`), `0x0036DC88` `8C700000` (`lw $16,0($3)`),
+  `0x0036DC90` `02021024` (`and $2,$16,$2` with `$2=0xFFFFFFFC` from
+  `0x0036DC84`/`0x0036DC8C`), `0x0036DC94` `00548025` (`or $16,$2,$20`),
+  `0x0036DC98` `36100300` (`ori $16,$16,0x0300`), `0x0036DC9C` `32020080`
+  (`andi $2,$16,0x0080`), `0x0036DCA0` `14400005` (`bne $2,$0,+5`).
+- **Derived:** the sequence is a read-modify-write of the Timer 2 mode word:
+  clear the low two bits, OR in the caller's flag, set bits 8-9, and branch on
+  bit 7. Together with `0x0B` as the first argument, the registration is a
+  Timer 2 interrupt handler registration, not an unrelated handler that merely
+  touches a timer register.
+- **Consequence for the decision:** the handler is not blocked by an unknown
+  register address. It is blocked by the two things the Decision already names:
+  an INTC handler registry and a Timer 2 model. Any future implementation still
+  needs the exact mode-bit semantics the library expects, which this correction
+  does not establish — bits 8-9 and bit 7 are set and tested here, but their
+  hardware meaning is not derived from this evidence.
+
 ## Decision
 
 1. **Do not implement syscall `0x10` or `0x11` in this change.** Returning a
