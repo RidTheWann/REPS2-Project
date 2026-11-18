@@ -68,6 +68,10 @@ a different, unsigned-saturating operation and is not reused.
   60,984 blocks / 317,666 instructions / 623 unsupported stops: the eight
   reachable PSUBB words resolve and their blocks expand, while guest-trap stops
   (258) and unresolved indirect targets (625) are unchanged.
+- **Correction (2026-11-18):** those totals are pre-#39. With the PCEQW/PCGTW
+  decoding added in `e3b7447` the same image records 317,701 instructions and
+  622 unsupported stops; block/root/exception/unresolved counts are unchanged.
+  The observation in `docs/RESEARCH.md` carries the reproduction.
 - No compatibility state is upgraded. The probe is a budget exhaustion, not a
   boot stage, and the title remains Imported/Analyzed/Native-built only.
 

@@ -1545,6 +1545,57 @@ Update (ADR 0134, 2026-11-14): `T3_COUNT` (`0x10001800`) is now modelled as a 16
   contract. **Unknown:** whether earlier version bumps missed similar layout
   drift; no per-version layout digest is recorded.
 
+- **Observed (ABI 19 baseline probe, 2026-11-18, `main` `dc676f8`):** the
+  frontend (`rust/target/release/reps2.exe`) and the native title module were
+  rebuilt from that exact revision in worktree branch `probe/abi19-baseline`,
+  then the same Downhill probe was rerun. Provenance: ISO SHA-256
+  `0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86`
+  (`D:\List Games\Downhill Domination (USA).iso`), boot ELF SHA-256
+  `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`,
+  `boot.ram.bin` SHA-256
+  `36cd0175cea1e19873a215c219878083ccebabadf4526965407e4f40ebf9b29d`,
+  output directory `D:\REPS2-DevTests\DownhillDomination\PostABI19_dc676f8`,
+  report `run-report-abi19.json` (8,922 bytes, UTF-16LE).
+  Frontend command: `reps2 recompile-iso "<iso>" "<out>" --discover
+  --tu-count 8 --probe-budget 5000000 --hle-syscalls
+  --relocated-code 80076000:2829F8:740
+  --relocated-code 80075000:2831A0:330 --extra-root 0x00246CD0`.
+  Engine command: `rg-reps2-engine.exe
+  boot.native/build/Release/reps2_native_module.dll --ram boot.ram.bin
+  --media "<iso>" --budget 5000000 --max-batches 16 --hle-syscalls`.
+  Toolchain: MSVC 19.51.36260.0 (`_MSC_FULL_VER` 195136260), Windows x64,
+  `/std:c++20`; engine 0.2.0, engine ABI 2; runtime ABI 19,
+  `sizeof(EeState)` 24,672, `kEeMaxSifRpcServers` 24,
+  `kToolchainAbiFingerprint` `16f839495b5be291` (a header probe on the same
+  revision reports the same fingerprint, so the bump did not alter it).
+  Result: `guest_stopped` (`semaphore_wait_blocked`) at `pc=0x0025A724` after
+  4,586,235 instructions in 1 batch (`syscalls_seen=1221 handled=1203`,
+  callbacks 78/78, `dmac.interrupts_delivered=0`, `timer3.cycles=4586235`).
+  All 99 `sif` fields, the 32-lane `gprs` snapshot and the `heap` object are
+  identical to the ABI-18 report `PostMerge_e3b7447/run-report6.json`, and the
+  8-byte FILEIO `fno 255` observation is unchanged (`send=8`, `recv=8`,
+  `send_addr=0x00763540`, `recv_addr=0x007641C0`,
+  request head `[0x00764200,0x00764300,0,0]`, `replied=0`).
+  **Derived:** the ABI bump is behaviour-neutral for this title; the frontier
+  is still the refused FILEIO init handshake, not a new stop.
+  **Historical, not ABI-19 evidence:** the ABI-18 run above (4,586,235
+  instructions, same PC) stays the record for revision `09a4b2a`; the two runs
+  agree, but the ABI-18 report is not a test of ABI 19.
+- **Observed + derived (census correction, same probe):** the `dc676f8`
+  manifest is identical to the `e3b7447` one: 60,984 basic blocks, 317,701
+  guest instructions, 7,170 accepted roots, 622 unsupported-instruction block
+  stops, 258 guest exceptions, 625 unresolved indirect targets, 99,352 static
+  edges, the same two relocated regions plus `0x00246CD0`, 9 translation
+  units. Earlier documents labelled a **317,666 / 623** census as an "ADR 0158
+  regeneration on `main` `09a4b2a`"; that pair is pre-#39. Only one frontend
+  commit (`e3b7447`, #39, PCEQW/PCGTW in `codegen.rs`/`ir.rs`/`mips.rs`) sits
+  between the PSUBB measurement and `09a4b2a`, so the +35 instructions and the
+  -1 unsupported stop are attributable to that decoding addition, and the
+  revision label on the older numbers was wrong.
+  **Unknown:** whether the remaining 622 stops and 625 unresolved targets match
+  the per-instruction inventory recorded in ADR 0158; only the totals are
+  reproduced here.
+
 Public references:
 - [PS2TEK EE Timers](https://israpps.github.io/ps2tek/)
 - [PS2SDK EE timer definitions](https://github.com/ps2dev/ps2sdk/blob/master/ee/kernel/include/timer.h)
