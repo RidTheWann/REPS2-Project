@@ -396,6 +396,15 @@ def semantic_diff(left: dict[str, Any], right: dict[str, Any]) -> list[str]:
     return diffs
 
 
+def native_build_command(args: argparse.Namespace, out: Path) -> list[str]:
+    command = ["cmake", "--build", str(out / "boot.native" / "build"), "--config", "Release"]
+    if args.jobs is not None:
+        if args.jobs < 1:
+            raise StageError(2, "--jobs must be at least 1")
+        command += ["--parallel", str(args.jobs)]
+    return command
+
+
 def probe(args: argparse.Namespace) -> int:
     iso = Path(args.iso)
     if not iso.is_file():
@@ -429,8 +438,7 @@ def probe(args: argparse.Namespace) -> int:
                  "-DREPS2_RUNTIME_INCLUDE=" + args.runtime_include,
                  "-DREPS2_ENGINE_INCLUDE=" + args.engine_include]
     run(configure, "native configure", 4)
-    run(["cmake", "--build", str(out / "boot.native" / "build"), "--config", "Release"],
-        "native build", 4)
+    run(native_build_command(args, out), "native build", 4)
 
     module_path_file = out / "boot.native" / "build" / "reps2-native-module-Release.path"
     if not module_path_file.is_file():
@@ -498,6 +506,8 @@ def main(argv: list[str] | None = None) -> int:
     probe_parser.add_argument("--tu-count", type=int, default=8)
     probe_parser.add_argument("--probe-budget", type=int, default=5000000)
     probe_parser.add_argument("--max-batches", type=int, default=16)
+    probe_parser.add_argument("--jobs", type=int, default=None,
+                              help="parallel native build jobs; default is the build tool default")
     probe_parser.add_argument("--relocated-code", action="append", default=[],
                               help="DEST:SOURCE:SIZE in hex, repeatable")
     probe_parser.add_argument("--extra-root", action="append", default=[],

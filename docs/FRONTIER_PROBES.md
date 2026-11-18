@@ -162,6 +162,12 @@ They are different quantities, not a disagreement; a record whose
 `translation_units` is not `tu_count + 1` is worth a look, not automatic proof of a
 defect.
 
+`--jobs N` forwards `--parallel N` to the native `cmake --build`. Without it the
+build is serial, and one part translation unit of a large title can take close to
+an hour. It changes only build wall time: the generated sources, the manifest and
+the recorded result are unaffected, so two runs that differ only in `--jobs` are
+still comparable.
+
 `source.toolchain_headers_sha256` is recorded instead of the engine's
 `kToolchainAbiFingerprint` because the fingerprint is a compile-time constant that
 the current run report does not expose. The module must still pass the engine's

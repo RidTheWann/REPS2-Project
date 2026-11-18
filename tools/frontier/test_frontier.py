@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import sys
@@ -338,6 +339,16 @@ class CliTests(unittest.TestCase):
             first.write_text(json.dumps(record()), encoding="utf-8")
             second.write_text(json.dumps(changed), encoding="utf-8")
             self.assertEqual(frontier.main(["compare", str(first), str(second)]), 7)
+
+    def test_probe_forwards_a_parallel_native_build(self) -> None:
+        out = Path("probe")
+        plain = frontier.native_build_command(argparse.Namespace(jobs=None), out)
+        self.assertNotIn("--parallel", plain)
+        parallel = frontier.native_build_command(argparse.Namespace(jobs=4), out)
+        self.assertEqual(parallel[-2:], ["--parallel", "4"])
+        with self.assertRaises(frontier.StageError) as context:
+            frontier.native_build_command(argparse.Namespace(jobs=0), out)
+        self.assertEqual(context.exception.code, 2)
 
     def test_compare_subcommand_rejects_a_malformed_record(self) -> None:
         broken = record()
