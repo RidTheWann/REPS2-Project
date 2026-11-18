@@ -1,0 +1,70 @@
+{
+  "configuration": {
+    "discovery": true,
+    "extra_roots": [
+      "0x0000000000246CD0"
+    ],
+    "hle_enabled": true,
+    "instruction_budget": 5000000,
+    "max_batches": 16,
+    "relocated_regions": [
+      "0x80076000:0x002829F8:0x740",
+      "0x80075000:0x002831A0:0x330"
+    ],
+    "tu_count": 8
+  },
+  "evidence": {
+    "manifest_census": {
+      "accepted_roots": 7170,
+      "basic_blocks": 60984,
+      "guest_exceptions": 258,
+      "guest_instructions": 317701,
+      "translation_units": 9,
+      "unresolved_indirect_targets": 625,
+      "unsupported_stops": 622
+    },
+    "report_sha256": "70ae72a714da1395d3dd38fe715ea86c4b61e89d119c7128302f701830545012",
+    "reproducible": false
+  },
+  "host": {
+    "architecture": "x64",
+    "compiler": "MSVC",
+    "compiler_version": "19.51.36260.0",
+    "cxx_standard": 20,
+    "os": "windows"
+  },
+  "kind": "reps2.frontier.v2",
+  "result": {
+    "batches": 1,
+    "callbacks_completed": 78,
+    "final_pc": "0x000000000025A724",
+    "guest_status": "semaphore_wait_blocked",
+    "guest_status_code": 16,
+    "instructions_executed": 4586235,
+    "outcome": "guest_stopped",
+    "rpc_call_number": 255,
+    "rpc_call_replied": 0,
+    "stop_reason": "semaphore_wait_blocked",
+    "syscalls_handled": 1203,
+    "syscalls_seen": 1221
+  },
+  "schema_version": 2,
+  "source": {
+    "engine_sha256": "ea8d5117c31d0c94764bad21a3c0bef3c36953c7d824e48f9f385c921be46c30",
+    "frontend_reported_version": "REPS2 0.7.0 (Rust frontend, experimental)",
+    "frontend_sha256": "abe928b2eb14db3752315ea0410b6dfdcc847abd53a36ca73f4b6085a3b24572",
+    "manifest_normalized_sha256": "85b31ae14f0d6105e54fa80375ed955a485c9b3952416acc9a7e5e18eb055639",
+    "manifest_sha256": "0335baf200439d47c0f41a61c12859a4f572e2ad859601a0a0cc9bee1bc8821f",
+    "native_module_sha256": "35086e4989718534ba869b462ffe2378d629bf74b77cc57e206347da6b0b25ee",
+    "ram_image_sha256": "36cd0175cea1e19873a215c219878083ccebabadf4526965407e4f40ebf9b29d",
+    "reps2_commit": "1cf3afdd8919a256b504c2efc5d290bafc644e20",
+    "reps2_version": "0.7.0",
+    "runtime_abi": 19,
+    "toolchain_headers_sha256": "db8f33265e301db7a96f5545d5980caa005817fe88ad3313abfb49d8095a7072"
+  },
+  "title": {
+    "boot_elf_sha256": "adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c",
+    "iso_sha256": "0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86",
+    "serial": "SCUS_971.77"
+  }
+}

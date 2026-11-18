@@ -1605,6 +1605,73 @@ Public references:
 - [PS2SDK freemtap.c (notes on the retail MTAPMAN module version)](https://github.com/ps2dev/ps2sdk/blob/master/iop/sio/mtapman/src/freemtap.c)
 - [Sony `libmtap` decode (Digimon World 4 decomp project) — MTAP_GET_MOD_VERSION sid and `(version >> 8) == 3` check](https://github.com/crashbashash/DW4_Decomp/blob/main/src/sony/libmtap/libmtap.c)
 
+## ABI 19 real-title baselines (committed frontier records)
+
+`tools/frontier/frontier.py` (documented in `docs/FRONTIER_PROBES.md`) writes one
+sanitized `frontier.json` per probe. Records that pass
+`python tools/frontier/frontier.py validate` are committed under
+`docs/evidence/frontier/`. The raw probe directories — `run-report.json`,
+`boot.manifest.json`, `boot.elf`, `boot.ram.bin`, native modules, build trees and
+logs — stay outside Git on the operator's machine. A record is path-free by
+construction and the validator rejects any string that looks like an absolute
+host path.
+
+Only records produced by the v2 tool are committed. The earlier Downhill
+`run-01` record was written by the v1 tool and is rejected by the current
+validator (the v2 comparison and its `reproducible` flag mean something
+stricter), so it is not committed; the numbers it produced are quoted in the
+prose above. One record describes one configuration: a different budget, batch
+limit, root set or relocated region is a different frontier.
+
+### Downhill Domination (USA) — ABI 19, runs 02 and 03
+
+- **Observed (records):**
+  `docs/evidence/frontier/downhill-domination-abi19-run-02.json` and
+  `docs/evidence/frontier/downhill-domination-abi19-run-03.json`.
+- **Identity:** disc serial `SCUS_971.77`, ISO SHA-256
+  `0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86`, boot ELF
+  SHA-256 `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`.
+- **Source:** `reps2_commit` `1cf3afd` (asserted on the command line; neither
+  executable embeds a git hash), frontend reports `0.7.0`, `runtime_abi` 19,
+  frontend SHA-256 `abe928b2...b24572`, engine SHA-256 `ea8d5117...b46c30`,
+  runtime header digest `db8f3326...5a7072`.
+- **Host:** Windows x64, MSVC `19.51.36260.0`, C++20.
+- **Configuration:** `--discover --tu-count 8 --probe-budget 5000000
+  --max-batches 16 --hle-syscalls`, relocated regions
+  `0x80076000:0x002829F8:0x740` and `0x80075000:0x002831A0:0x330`, extra root
+  `0x00246CD0`.
+- **Result, identical in both runs:** `guest_stopped` /
+  `semaphore_wait_blocked` at `pc=0x0025A724` after 4,586,235 instructions in 1
+  batch, `syscalls_seen=1221 handled=1203`, callbacks 78/78, `rpc_call_number`
+  255 not replied.
+- **Census, identical in both runs:** 60,984 basic blocks, 317,701 guest
+  instructions, 622 unsupported stops, 258 guest exceptions, 625 unresolved
+  indirect targets, 7,170 accepted roots, 9 translation units (8 part files plus
+  the `boot.cpp` dispatcher, so `tu_count=8` and `translation_units=9` are
+  different quantities).
+- **Comparison:** `frontier.py compare run-02 run-03` exits `7` with exactly one
+  difference, `source.native_module_sha256` (`35086e49...` vs `7db941db...`).
+  Both records therefore carry `evidence.reproducible: false`.
+- **Derived:** the guest-visible result block, the RAM image digest
+  `36cd0175...`, the runtime header digest, the native-module-independent
+  `manifest_normalized_sha256` `85b31ae1...` and the manifest census are
+  identical, so the two runs agree on behaviour and on every comparable input.
+  The single difference is a real artifact difference, not a comparator
+  artifact: the two 89,748,480-byte modules differ in four bytes only, two
+  copies of the COFF link timestamp (file offset `0x110` and its copy in the
+  debug directory at `0x51B4CE4`), and `rust/frontend/src/native_build.rs`
+  passes no deterministic-link option to the module link.
+- **Not derivable from these records:** bit-reproducibility of the native
+  module, and any claim about a boot stage. `docs/FRONTIER_PROBES.md` records
+  the nondeterminism and the separate `/Brepro` change that would make
+  `evidence.reproducible` reachable.
+- **Provenance note:** the probes ran from a checkout at `1cf3afd`. `git diff
+  1cf3afd 3fd7ec5` touches only `docs/`, `scripts/`, `tools/` and
+  `.github/workflows/ci.yml`, so the compiler, runtime and engine sources are
+  identical to that later `main`. The asserted commit stays caller-asserted;
+  the frontend and engine digests are what bind the claim to the binaries that
+  actually ran.
+
 ## Provenance rules
 
 
