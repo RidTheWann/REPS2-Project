@@ -1675,8 +1675,10 @@ limit, root set or relocated region is a different frontier.
 ### Black (USA) — relocated copied code, ABI 19
 
 - **Observed (records):**
-  `docs/evidence/frontier/black-abi19-run-03.json` (the relocated stop) and
-  `docs/evidence/frontier/black-abi19-run-01.json` (the unrelocated baseline).
+  `docs/evidence/frontier/black-abi19-run-01.json` (the unrelocated baseline),
+  `docs/evidence/frontier/black-abi19-run-03.json` (early relocated run), and
+  `docs/evidence/frontier/black-abi19-run-05.json` plus
+  `docs/evidence/frontier/black-abi19-run-06.json` (the verified reproducible pair).
 - **Identity:** disc serial `SLUS_213.76`, ISO SHA-256
   `65768cade88bfbaf566b67a3ef7a0bda5a9669779833914ffe7cd73a3e45cccd`, boot ELF
   SHA-256 `141b05209570458af9c8e27ab1911f258da6353909d813cd572df026254ffe4c`.
@@ -1686,26 +1688,27 @@ limit, root set or relocated region is a different frontier.
   image address `A` at ELF file offset `A - 0x000FF000`; `--relocated-code`
   sources are **image addresses**. `0x003D7A00` is file offset `0x002D8A00` and
   `0x003D8140` is `0x002D9140`, verified byte-for-byte against the ELF.
-- **Configuration, shared by both runs:** ABI 19, `--discover --tu-count 8
-  --probe-budget 5000000 --max-batches 16 --hle-syscalls`, frontend SHA-256
-  `abe928b2...b24572`, engine SHA-256 `ea8d5117...b46c30`. They differ only in
-  the two declared regions, so they are not a comparison pair; the initial image
-  digest `16c34a61...ba72` is identical in both, which shows the declaration
-  changes analysis only.
+- **Configuration, shared across all relocated runs:** ABI 19, `--discover --tu-count 8
+  --probe-budget 5000000 --max-batches 16 --hle-syscalls`, relocated regions
+  `0x80076000:0x003D7A00:0x740` and `0x00082000:0x003D8140:0x28`.
 - **Unrelocated result (`run-01`):** `guest_stopped` /
   `unresolved_control_flow` at `pc=0x80076000` after 479,362 instructions,
   syscalls 15 seen / 10 handled. `0x80076000` is the handler the guest installs
   for syscall `0x5B` from the table at image `0x003D8168`; the copied code that
   would be the handler body is not a translated block, so the stop is correct.
-- **Relocated result (`run-03`, regions `0x80076000:0x003D7A00:0x740` and
-  `0x00082000:0x003D8140:0x28`):** the same path runs past the copy and stops
-  `guest_stopped` / `unhandled_syscall` at `pc=0x00367554` after 482,824
-  instructions, syscalls 27 seen / 16 handled, `rpc_call_number=0`. A repeat
-  probe of the identical configuration reproduced the result block exactly.
+- **Relocated result (`run-03`, `run-05`, `run-06`):** the same path runs past the
+  copy and stops `guest_stopped` / `unhandled_syscall` at `pc=0x00367554` after
+  482,824 instructions, syscalls 27 seen / 16 handled, `rpc_call_number=0`.
+- **Reproducible pair (`run-05` and `run-06`):** built with the `/Brepro` module
+  link option (`reps2_commit 17991fe`, frontend digest `1b7a4747...b1f8b1`,
+  engine digest `ea8d5117...b46c30`). Both runs produced identical native module
+  digests (`f9a5adc8f353340019dd26289c835cdbda068f3a7dcb439b1bd4310ea5029635`).
+  `frontier.py compare run-05 run-06` exits 0 with zero semantic differences,
+  setting `evidence.reproducible: true` in `run-06.json`.
 - **Census:** 114,488 → 114,567 basic blocks, 564,880 → 565,321 represented
   guest instructions, 259 → 260 guest exceptions, 4,085 → 4,086 unresolved
-  indirect targets, 14,749 → 14,760 accepted roots, 9 translation units in both
-  (`--tu-count 8` parts plus the dispatcher).
+  indirect targets, 14,749 → 14,760 accepted roots, 9 translation units in all
+  runs (`--tu-count 8` parts plus the dispatcher).
 - **Derived (the new frontier):** `0x00367554` is the `syscall` word of the
   thunk at `0x00367550`, which is `addiu $3,$0,0x10`. The caller at
   `0x0036DC50` sets `$4=0xB`, `$5=0x0036DFF0` (the entry point of the handler),
@@ -1720,9 +1723,9 @@ limit, root set or relocated region is a different frontier.
   interrupt that cannot arrive; the fail-closed `unhandled_syscall` is the honest
   result. Implementing the service needs an ABI revision (ADR 0164) plus a
   TIMER2 model with its own evidence.
-- **Not derivable:** that the title would proceed past the registration, what
-  the handler does with `0x10001010`, or which wrapper of the two `0x10` thunks
-  the guest used. See ADR 0166 for the unknown list.
+- **Not derivable:** that the title would proceed past the registration, or
+  which wrapper of the two `0x10` thunks the guest used. See ADR 0166 for the
+  unknown list and the subsequent resolution of `0x10001010` as Timer 2 mode.
 
 ## Provenance rules
 
