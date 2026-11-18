@@ -1,6 +1,8 @@
 # ADR 0163: Observe the IOP FILEIO init handshake (fno 255) and keep it fail-closed
 
 - **Status:** Accepted (validated locally; real-title probe recorded below).
+  Its static-dataflow claim and its quoted request head are **superseded by ADR
+  0165**; the observation and the fail-closed decision still stand.
 - **Date:** 2026-11-18.
 - **Scope:** `serve_ee_fileio_call` in `runtime/include/reps2/runtime/ee_hle.hpp`
   records a bounded request observation and still refuses every function; new
@@ -25,17 +27,21 @@ the `WaitSema` stub (`0x0025A720 addiu $v1,$zero,0x44; syscall`) with
   the call targets server `0x80000001` with `rpc_number=255`, `send=8`,
   `recv=8`, `replied=0`. The bounded request observation gives
   `fileio_send_addr=0x00763540`, `fileio_recv_addr=0x007641C0`, and
-  `fileio_request_head=[0x00764200, 0x00764300, 0, 0]`; `fileio_name_present=0`
-  (`0x00764200`/`0x00764300` are zeroed BSS work buffers at the call, so no path
+  `fileio_request_head=[0x00764200, 0x00764640, 0, 0]`; `fileio_name_present=0`
+  (`0x00764200`/`0x00764640` are zeroed BSS work buffers at the call, so no path
   is present). `fileio_calls=1`. The run stops `guest_stopped`
   (`semaphore_wait_blocked`) after 4,586,235 instructions in 1 batch
   (`syscalls_seen=1221 handled=1203`, callbacks 78/78).
 - **Observed (static disassembly of the same boot ELF, words read from
   `boot.ram.bin` where file offset equals guest virtual address):** after the
   call returns (`bgez $v0` at `0x0025D908`) the success path (`0x0025D91C..
-  0x0025D970`) copies a word out of the static buffer `0x00764CA8`, stores `1`
-  to `0x002821EC`, and derives a second flag by comparing that word against `2`
-  (`xori $v1,$v1,2` / `sltiu $v1,$v1,1`) before storing it to `0x002821F0`.
+  0x0025D970`) stores `1` to `0x002821EC` and derives a flag by comparing a
+  reply word against `2` (`xori $v1,$v1,2` / `sltiu $v1,$v1,1`) before storing
+  it to `0x002821F0`.
+  *Corrected by ADR 0165:* the compared operand is reply **word 1** at
+  `0x007641C4` (uncached alias `0x207641C4`), and `0x00764CA8` is the
+  destination of the `swl`/`swr` pair that copies reply **word 0** out of
+  `0x007641C0`. The original wording of this bullet had the direction reversed.
   The failure path (`0x0025D910..0x0025D918`) returns `0xFFFEFFFF` (`-2`).
 - **Derived:** `ps2sdk` `fileio.c` uses function numbers `0..16` (`FIO_F_OPEN`
   = 0), so `255` is **not** a `ps2sdk` FILEIO request. It is the title's own
@@ -85,7 +91,7 @@ the `WaitSema` stub (`0x0025A720 addiu $v1,$zero,0x44; syscall`) with
   `adfda7b7...f0cf0c`, Windows x64/MSVC, runtime ABI 18, frontend and native
   module rebuilt from this branch — `PostMerge_e3b7447/run-report5.json`):
   `fileio_calls=1, fno=255, send=8, recv=8, send_addr=0x00763540,
-  recv_addr=0x007641C0, head=[0x00764200,0x00764300,0,0], name_present=0,
+  recv_addr=0x007641C0, head=[0x00764200,0x00764640,0,0], name_present=0,
   replied=0`; outcome `guest_stopped` (`semaphore_wait_blocked`) at
   `pc=0x0025A724` after 4,586,235 instructions.
 - CMake Release build and `ctest -C Release`; Rust `fmt`/`clippy`/`test`.

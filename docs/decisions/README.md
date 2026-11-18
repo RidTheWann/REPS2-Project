@@ -162,4 +162,6 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0159](0159-ee-989snd-sl-command-batch.md) | Serve 989snd SL_COMMAND_BATCH (fno 77) | Accepted |
 | [0160](0160-iop-fileio-server-registration.md) | Register IOP FILEIO server (0x80000001) | Accepted |
 | [0161](0161-ee-mmi1-pceqw.md) | Decode, lift and AOT-lower MMI1 PCEQW as four independent 32-bit equality comparisons | Proposed |
-| [0162](0162-ee-mmi0-pcgtw.md) | Decode, lift and AOT-lower MMI0 PCGTW as four signed 32-bit lane comparisons | Proposed |
+| [0163](0163-iop-fileio-init-handshake-observation.md) | Observe the IOP FILEIO init handshake (fno 255) and keep it fail-closed | Accepted |
+| [0164](0164-runtime-abi-19-layout-contract.md) | Make the `EeState` layout a versioned ABI contract (ABI 19) | Accepted |
+| [0165](0165-iop-fileio-init-reply-contract-correction.md) | Correct the FILEIO init dataflow: reply word 1 is the compared operand and `0x00764CA8` is a write destination | Accepted |
