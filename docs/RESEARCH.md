@@ -1532,6 +1532,19 @@ Update (ADR 0134, 2026-11-14): `T3_COUNT` (`0x10001800`) is now modelled as a 16
 - **Observed + derived (ADR 0163, the FILEIO init handshake `fno 255`):** with the FILEIO bind satisfied (ADR 0160) the frontier moves to `semaphore_wait_blocked` at `pc=0x0025A724` — the `WaitSema` stub `0x0025A720` (`$v1=0x44`) with `$a0=11`, `$ra=0x0025D138`. The caller is the title's own `sceSifCallRpc` helper (`0x0025CF88..0x0025D178`), reached from `0x0025D900` (`jal 0x0025CF88`) inside `sceFileioInit`, right after the bind helper call at `0x0025D84C`, so `WaitSema(11)` waits for the `RPC_END` of the call issued at `0x0025D900`. The bounded request observation (fresh probe, 2026-11-18, runtime ABI 18, `PostMerge_e3b7447/run-report5.json`) records `fileio_calls=1, fno=255, send=8, recv=8, send_addr=0x00763540, recv_addr=0x007641C0, request_head=[0x00764200,0x00764300,0,0], name_present=0, replied=0`; the run stops `guest_stopped` (`semaphore_wait_blocked`) after 4,586,235 instructions (`syscalls_seen=1221 handled=1203`, callbacks 78/78). `ps2sdk` `fileio.c` uses function numbers `0..16` (`FIO_F_OPEN=0`), so `255` is not a `ps2sdk` FILEIO request: it is the title's own (Sony `libfileio`) initialisation/handshake command `sceFileioInit` issues after the bind, whose 8-byte request carries two pointers to the library's zeroed BSS work buffers (not a pathname). The static post-call code (`0x0025D908` `bgez $v0`; success path `0x0025D91C..0x0025D970`) copies a word out of the static buffer `0x00764CA8`, stores `1` to `0x002821EC`, compares that word against `2` (`xori`/`sltiu`) and stores the result to `0x002821F0`; the failure path returns `0xFFFEFFFF` (`-2`).
 - **Unknown:** the reply format of the FILEIO init handshake (the word compared to `2`, the meaning of the two work buffers, whether the resident IOP module returns a version or a status); therefore any reply would be fabricated and the handler stays fail-closed, leaving the caller blocked at `WaitSema(11)`. ADR 0163.
 
+- **Observed (ADR 0164, runtime ABI contract):** a probe compiled against
+  `c0af09c` (pre-#38) and against `09a4b2a`/`f72fbbb` with the same MSVC x64
+  `/std:c++20` settings reports `sizeof(EeState)` 24,464 vs 24,672,
+  `sizeof(EeSifCmdState)` 1,048 vs 1,256, `kEeMaxSifRpcServers` 18 vs 24, and
+  `kToolchainAbiFingerprint` `76abeed739d2f474` vs `16f839495b5be291`, while
+  both declare `REPS2_RUNTIME_ABI_VERSION` 18.
+  **Derived:** the pre-#38 module passes the runtime-version check in
+  `Engine::prepare` and is rejected afterwards by the fingerprint as
+  `toolchain_abi_mismatch`, so the layout drift is caught but misdiagnosed.
+  **Decision:** ABI 19 restates that the `EeState` layout is part of the
+  contract. **Unknown:** whether earlier version bumps missed similar layout
+  drift; no per-version layout digest is recorded.
+
 Public references:
 - [PS2TEK EE Timers](https://israpps.github.io/ps2tek/)
 - [PS2SDK EE timer definitions](https://github.com/ps2dev/ps2sdk/blob/master/ee/kernel/include/timer.h)

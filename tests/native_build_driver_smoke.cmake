@@ -97,8 +97,16 @@ else()
         message(FATAL_ERROR "native toolchain report has invalid parent_iso_sha256")
     endif()
 endif()
-if(NOT runtime_abi_version EQUAL 18 OR manifest_schema_version LESS 1 OR control_ir_schema_version LESS 1)
-    message(FATAL_ERROR "native toolchain report omitted runtime/frontend schema versions")
+file(STRINGS "${REPS2_RUNTIME_INCLUDE}/reps2/runtime/abi_version.hpp" runtime_abi_header
+    REGEX "^#define REPS2_RUNTIME_ABI_VERSION [0-9]+$")
+if(NOT runtime_abi_header MATCHES "REPS2_RUNTIME_ABI_VERSION ([0-9]+)")
+    message(FATAL_ERROR "cannot read REPS2_RUNTIME_ABI_VERSION from runtime/include/reps2/runtime/abi_version.hpp")
+endif()
+set(expected_runtime_abi_version "${CMAKE_MATCH_1}")
+if(NOT runtime_abi_version EQUAL expected_runtime_abi_version
+    OR manifest_schema_version LESS 1 OR control_ir_schema_version LESS 1)
+    message(FATAL_ERROR
+        "native toolchain report runtime ABI ${runtime_abi_version} does not match abi_version.hpp (${expected_runtime_abi_version})")
 endif()
 if(NOT input_kind STREQUAL "synthetic_fixture")
     message(FATAL_ERROR "synthetic smoke input kind mismatch: ${input_kind}")
