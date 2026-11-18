@@ -1,0 +1,68 @@
+{
+  "configuration": {
+    "discovery": true,
+    "extra_roots": [],
+    "hle_enabled": true,
+    "instruction_budget": 5000000,
+    "max_batches": 16,
+    "relocated_regions": [
+      "0x80076000:0x003D7A00:0x740",
+      "0x00082000:0x003D8140:0x28"
+    ],
+    "tu_count": 8
+  },
+  "evidence": {
+    "manifest_census": {
+      "accepted_roots": 14760,
+      "basic_blocks": 114567,
+      "guest_exceptions": 260,
+      "guest_instructions": 565321,
+      "translation_units": 9,
+      "unresolved_indirect_targets": 4086,
+      "unsupported_stops": 1092
+    },
+    "report_sha256": "b0a73082e3cf5dc5914f6da4b45838b2e523270d89ad34990bd826011b8af696",
+    "reproducible": false
+  },
+  "host": {
+    "architecture": "x64",
+    "compiler": "MSVC",
+    "compiler_version": "19.51.36260.0",
+    "cxx_standard": 20,
+    "os": "windows"
+  },
+  "kind": "reps2.frontier.v2",
+  "result": {
+    "batches": 1,
+    "callbacks_completed": 0,
+    "final_pc": "0x0000000000367554",
+    "guest_status": "unhandled_syscall",
+    "guest_status_code": 14,
+    "instructions_executed": 482824,
+    "outcome": "guest_stopped",
+    "rpc_call_number": 0,
+    "rpc_call_replied": 0,
+    "stop_reason": "unhandled_syscall",
+    "syscalls_handled": 16,
+    "syscalls_seen": 27
+  },
+  "schema_version": 2,
+  "source": {
+    "engine_sha256": "ea8d5117c31d0c94764bad21a3c0bef3c36953c7d824e48f9f385c921be46c30",
+    "frontend_reported_version": "REPS2 0.7.0 (Rust frontend, experimental)",
+    "frontend_sha256": "abe928b2eb14db3752315ea0410b6dfdcc847abd53a36ca73f4b6085a3b24572",
+    "manifest_normalized_sha256": "e05b4473d93c821ff69f10e9e22d3277f2154f62db83b61923444b27f7ad8fb5",
+    "manifest_sha256": "361d6309b801820088a013b8bf7a577b9d9eecdc6cfebbe9337e8c2b683663c0",
+    "native_module_sha256": "825be7f5ce00b072c766c64bbddfeda140ece91d42160286aab8c9afffc1eccf",
+    "ram_image_sha256": "16c34a61ec0ad0ad3b85f66d27f5622e49d6f771e3c9307ddbb8c378fb01ba72",
+    "reps2_commit": "3fd7ec58c70fd9dd2b7eb1c38939aff13da7dc19",
+    "reps2_version": "0.7.0",
+    "runtime_abi": 19,
+    "toolchain_headers_sha256": "db8f33265e301db7a96f5545d5980caa005817fe88ad3313abfb49d8095a7072"
+  },
+  "title": {
+    "boot_elf_sha256": "141b05209570458af9c8e27ab1911f258da6353909d813cd572df026254ffe4c",
+    "iso_sha256": "65768cade88bfbaf566b67a3ef7a0bda5a9669779833914ffe7cd73a3e45cccd",
+    "serial": "SLUS_213.76"
+  }
+}
