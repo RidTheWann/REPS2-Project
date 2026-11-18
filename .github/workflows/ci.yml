@@ -48,6 +48,9 @@ jobs:
       - name: CTest
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Frontier probe schema tests
+        run: python -m unittest discover -s tools/frontier -p "test_*.py"
+
       - name: CLI smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

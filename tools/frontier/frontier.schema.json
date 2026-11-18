@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reps2.invalid/schemas/frontier.v2.schema.json",
+  "title": "REPS2 frontier record v2",
+  "description": "Sanitized result of one local recompile-iso -> native-build -> run probe. Contains no disc path, no user directory and no guest data. tools/frontier/frontier.py validate is the executable checker for this schema.",
+  "type": "object",
+  "required": ["schema_version", "kind", "title", "source", "host", "configuration", "result", "evidence"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 2 },
+    "kind": { "const": "reps2.frontier.v2" },
+    "title": {
+      "type": "object",
+      "required": ["serial", "iso_sha256", "boot_elf_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "serial": { "type": "string", "minLength": 1 },
+        "iso_sha256": { "$ref": "#/$defs/sha256" },
+        "boot_elf_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["reps2_commit", "reps2_version", "frontend_reported_version", "frontend_sha256", "engine_sha256", "runtime_abi", "toolchain_headers_sha256", "manifest_sha256", "manifest_normalized_sha256", "native_module_sha256", "ram_image_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "reps2_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "Asserted by the caller; frontend_sha256 and engine_sha256 bind it to the executables that actually ran." },
+        "reps2_version": { "type": "string" },
+        "frontend_reported_version": { "type": "string", "minLength": 1, "description": "First line of `reps2 version` from the invoked frontend; must agree with reps2_version." },
+        "frontend_sha256": { "$ref": "#/$defs/sha256" },
+        "engine_sha256": { "$ref": "#/$defs/sha256" },
+        "runtime_abi": { "type": "integer", "minimum": 1 },
+        "toolchain_headers_sha256": { "$ref": "#/$defs/sha256" },
+        "manifest_sha256": { "$ref": "#/$defs/sha256", "description": "Raw digest of boot.manifest.json; varies with the probe output directory because the manifest embeds the absolute boot.elf path." },
+        "manifest_normalized_sha256": { "$ref": "#/$defs/sha256", "description": "Digest of the manifest with the output-directory path canonicalized; this is the comparable identity." },
+        "native_module_sha256": { "$ref": "#/$defs/sha256" },
+        "ram_image_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "host": {
+      "type": "object",
+      "required": ["os", "architecture", "compiler", "compiler_version", "cxx_standard"],
+      "additionalProperties": false,
+      "properties": {
+        "os": { "type": "string" },
+        "architecture": { "type": "string" },
+        "compiler": { "type": "string" },
+        "compiler_version": { "type": "string" },
+        "cxx_standard": { "type": "integer" }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "required": ["discovery", "tu_count", "hle_enabled", "instruction_budget", "max_batches", "extra_roots", "relocated_regions"],
+      "additionalProperties": false,
+      "properties": {
+        "discovery": { "type": "boolean" },
+        "tu_count": { "type": "integer", "minimum": 1 },
+        "hle_enabled": { "type": "boolean" },
+        "instruction_budget": { "type": "integer", "minimum": 1 },
+        "max_batches": { "type": "integer", "minimum": 1 },
+        "extra_roots": { "type": "array", "items": { "$ref": "#/$defs/guestAddress" } },
+        "relocated_regions": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^0x[0-9A-F]{8}:0x[0-9A-F]{8}:0x[0-9A-F]+$" }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["outcome", "guest_status", "guest_status_code", "stop_reason", "final_pc", "instructions_executed", "batches", "syscalls_seen", "syscalls_handled", "callbacks_completed", "rpc_call_number", "rpc_call_replied"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": { "enum": ["guest_stopped", "budget_limit_reached", "guest_completed"] },
+        "guest_status": {
+          "enum": ["running", "guest_completed", "instruction_budget_exhausted", "budget_exhausted", "unsupported_instruction", "unresolved_control_flow", "guest_exception", "unhandled_syscall", "semaphore_wait_blocked", "thread_wait_blocked"]
+        },
+        "guest_status_code": { "type": "integer" },
+        "stop_reason": { "type": "string" },
+        "final_pc": { "$ref": "#/$defs/guestAddress" },
+        "instructions_executed": { "type": "integer", "minimum": 0 },
+        "batches": { "type": "integer", "minimum": 1 },
+        "syscalls_seen": { "type": "integer", "minimum": 0 },
+        "syscalls_handled": { "type": "integer", "minimum": 0 },
+        "callbacks_completed": { "type": "integer", "minimum": 0 },
+        "rpc_call_number": { "type": "integer", "minimum": 0 },
+        "rpc_call_replied": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["report_sha256", "manifest_census", "reproducible"],
+      "additionalProperties": false,
+      "properties": {
+        "report_sha256": { "$ref": "#/$defs/sha256" },
+        "reproducible": { "type": "boolean" },
+        "manifest_census": {
+          "type": "object",
+          "required": ["basic_blocks", "guest_instructions", "unsupported_stops", "guest_exceptions", "unresolved_indirect_targets", "translation_units", "accepted_roots"],
+          "additionalProperties": false,
+          "properties": {
+            "basic_blocks": { "type": "integer", "minimum": 0 },
+            "guest_instructions": { "type": "integer", "minimum": 0 },
+            "unsupported_stops": { "type": "integer", "minimum": 0 },
+            "guest_exceptions": { "type": "integer", "minimum": 0 },
+            "unresolved_indirect_targets": { "type": "integer", "minimum": 0 },
+            "translation_units": { "type": "integer", "minimum": 0 },
+            "accepted_roots": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "guestAddress": { "type": "string", "pattern": "^0x[0-9A-F]{16}$" }
+  }
+}
