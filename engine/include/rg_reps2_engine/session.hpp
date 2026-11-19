@@ -39,6 +39,9 @@ struct SessionConfig {
     std::span<const std::uint8_t> initial_main_ram{};
     bool enable_ee_syscall_hle{};
     bool enable_instruction_trace{};
+    // Retain this many syscall boundaries in the bounded trace ring (ADR 0170).
+    // Zero keeps tracing off; the census counters are always maintained.
+    std::uint32_t syscall_trace_capacity{};
     ::reps2::runtime::HostMediaSource media{};
 };
 
@@ -161,6 +164,10 @@ public:
             ::reps2::runtime::initialize_hle_boot_environment(state_);
         }
         state_.instruction_trace_enabled = config.enable_instruction_trace;
+        state_.hle.syscall_trace_capacity =
+            config.syscall_trace_capacity < ::reps2::runtime::EeHleState::kSyscallTraceCapacity
+                ? config.syscall_trace_capacity
+                : ::reps2::runtime::EeHleState::kSyscallTraceCapacity;
 
         engine_ = engine;
         module_ = module;

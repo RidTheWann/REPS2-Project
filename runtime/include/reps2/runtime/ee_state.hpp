@@ -1105,6 +1105,50 @@ struct EeSyscallObservation {
     EeSyscallPath path{};
 };
 
+// Host-side name of a dispatch path, for run reports and tests.
+[[nodiscard]] constexpr const char* ee_syscall_path_name(EeSyscallPath path) noexcept {
+    switch (path) {
+    case EeSyscallPath::guest_handler: return "guest_handler";
+    case EeSyscallPath::host_service: return "host_service";
+    case EeSyscallPath::unhandled: return "unhandled";
+    }
+    return "unknown";
+}
+
+// Bounded syscall census (ADR 0170). Not guest-architectural state: it only
+// counts what the HLE boundary observed, so a probe can name the dominant
+// service and its hottest call sites instead of inferring them from a total.
+//
+// Per-service counters are indexed by the normalized service number 0..255;
+// numbers outside that range share one overflow record so nothing is dropped
+// silently. `seen == handled + refused` holds after every completed dispatch.
+struct EeSyscallCensusEntry {
+    std::uint64_t seen{};
+    std::uint64_t handled{};
+    std::uint64_t refused{};
+};
+
+// A hot call site: the guest PC of the SYSCALL instruction plus the service it
+// named. The table is a bounded Space-Saving estimate (ADR 0170): a site's
+// count is exact while it stays resident and a lower bound after churn.
+struct EeSyscallHotSite {
+    std::uint32_t pc{};
+    std::uint32_t number{};
+    std::uint64_t count{};
+};
+
+// One retained syscall boundary. Only written when the host enables the trace
+// ring; the default retains nothing.
+struct EeSyscallTraceEvent {
+    std::uint32_t pc{};
+    std::uint32_t number{};
+    std::array<std::uint32_t, 4> arguments{};
+    std::uint32_t v0_before{};
+    std::uint32_t v0_after{};
+    EeSyscallPath path{};
+    bool refused{};
+};
+
 struct EeHleState {
     // When false, a generated SYSCALL delivers the architectural Level-1
     // exception exactly as it did before this layer existed.
@@ -1134,6 +1178,36 @@ struct EeHleState {
             ? std::size_t{0}
             : syscall_sequence_next;
         return syscall_sequence[(oldest + index) % kSyscallSequenceCapacity];
+    }
+
+    // Bounded syscall census (ADR 0170). Counters are updated on every
+    // dispatched boundary and never retained per event.
+    static constexpr std::size_t kSyscallCensusNumbers = 256U;
+    static constexpr std::size_t kSyscallHotSiteCount = 8U;
+    static constexpr std::size_t kSyscallTraceCapacity = 64U;
+    std::array<EeSyscallCensusEntry, kSyscallCensusNumbers> syscall_census{};
+    EeSyscallCensusEntry syscall_census_overflow{};
+    std::array<EeSyscallHotSite, kSyscallHotSiteCount> syscall_hot_sites{};
+    // Optional bounded trace ring. Capacity 0 keeps it disabled; `capacity`
+    // may exceed kSyscallTraceCapacity, in which case only that many are kept.
+    std::size_t syscall_trace_capacity{};
+    std::array<EeSyscallTraceEvent, kSyscallTraceCapacity> syscall_trace{};
+    std::size_t syscall_trace_next{};
+    std::size_t syscall_trace_count{};
+    std::uint64_t syscall_trace_dropped{};
+
+    /// Retained trace event at `index`, counting from the oldest retained one.
+    [[nodiscard]] const EeSyscallTraceEvent& syscall_trace_event(std::size_t index) const noexcept {
+        const std::size_t capacity = syscall_trace_capacity < kSyscallTraceCapacity
+            ? syscall_trace_capacity
+            : kSyscallTraceCapacity;
+        if (capacity == 0U) {
+            return syscall_trace[0];
+        }
+        const std::size_t oldest = syscall_trace_count < capacity
+            ? std::size_t{0}
+            : syscall_trace_next;
+        return syscall_trace[(oldest + index) % capacity];
     }
     // Optional syscall-boundary memory window. The pre-call snapshot records
     // observable reads; the post-call comparison records guest writes.

@@ -17,4 +17,9 @@
 // observation fields to EeSifCmdState; both changed sizeof(EeState) while this
 // value stayed 18, so those modules were rejected by the fingerprint with a
 // misleading diagnosis. ABI 19 restates the contract (ADR 0164).
-#define REPS2_RUNTIME_ABI_VERSION 19
+//
+// ABI 20 covers ADR 0168, which added the FILEIO virtual descriptor table to
+// EeSifCmdState without a bump (the same violation ABI 19 exists to prevent),
+// and ADR 0170, which adds the bounded syscall census and optional trace ring
+// to EeHleState. Those modules must be rebuilt; no ABI 19 module is admitted.
+#define REPS2_RUNTIME_ABI_VERSION 20

@@ -3936,6 +3936,81 @@ static_assert(
     return service == nullptr ? nullptr : service->name;
 }
 
+// Bounded census accounting for one dispatched boundary (ADR 0170). `refused`
+// means the guest never observed a serviced call, so `seen == handled + refused`
+// holds after every dispatch.
+inline void record_ee_syscall_hot_site(
+    EeState& state,
+    std::uint32_t pc,
+    std::uint32_t number
+) noexcept {
+    std::array<EeSyscallHotSite, EeHleState::kSyscallHotSiteCount>& sites =
+        state.hle.syscall_hot_sites;
+    std::size_t free_index = sites.size();
+    std::size_t min_index = 0U;
+    for (std::size_t index = 0U; index < sites.size(); ++index) {
+        if (sites[index].count != 0U && sites[index].pc == pc
+            && sites[index].number == number) {
+            ++sites[index].count;
+            return;
+        }
+        if (sites[index].count == 0U && free_index == sites.size()) {
+            free_index = index;
+        }
+        if (sites[index].count < sites[min_index].count) {
+            min_index = index;
+        }
+    }
+    if (free_index != sites.size()) {
+        sites[free_index] = EeSyscallHotSite{pc, number, 1U};
+        return;
+    }
+    // Space-Saving: replace the least frequent resident site and keep its count
+    // plus one as a lower bound for the new one.
+    sites[min_index].pc = pc;
+    sites[min_index].number = number;
+    ++sites[min_index].count;
+}
+
+inline void record_ee_syscall_census(
+    EeState& state,
+    std::uint32_t number,
+    std::uint32_t pc,
+    bool refused
+) noexcept {
+    EeSyscallCensusEntry& entry = number < EeHleState::kSyscallCensusNumbers
+        ? state.hle.syscall_census[number]
+        : state.hle.syscall_census_overflow;
+    ++entry.seen;
+    if (refused) {
+        ++entry.refused;
+    } else {
+        ++entry.handled;
+    }
+    record_ee_syscall_hot_site(state, pc, number);
+}
+
+inline void record_ee_syscall_trace(
+    EeState& state,
+    const EeSyscallTraceEvent& event
+) noexcept {
+    const std::size_t capacity =
+        state.hle.syscall_trace_capacity < EeHleState::kSyscallTraceCapacity
+            ? state.hle.syscall_trace_capacity
+            : EeHleState::kSyscallTraceCapacity;
+    if (capacity == 0U) {
+        return;
+    }
+    state.hle.syscall_trace[state.hle.syscall_trace_next % capacity] = event;
+    state.hle.syscall_trace_next =
+        (state.hle.syscall_trace_next + 1U) % capacity;
+    if (state.hle.syscall_trace_count < capacity) {
+        ++state.hle.syscall_trace_count;
+    } else {
+        ++state.hle.syscall_trace_dropped;
+    }
+}
+
 // Dispatch a SYSCALL trap at the generated-code boundary.
 //
 // `resume_pc` is where guest execution continues after a serviced call: the
@@ -4006,16 +4081,18 @@ static_assert(
 
     // Record the boundary before dispatch so the ring reflects the guest's
     // registers rather than any handler's side effects.
+    const EeSyscallPath path = guest_handler
+        ? EeSyscallPath::guest_handler
+        : (service != nullptr ? EeSyscallPath::host_service : EeSyscallPath::unhandled);
+    const std::uint32_t boundary_pc = state.pc;
     EeSyscallObservation& observation =
         state.hle.syscall_sequence[state.hle.syscall_sequence_next];
     observation = EeSyscallObservation{
-        .pc = state.pc,
+        .pc = boundary_pc,
         .number = number,
         .arguments = state.hle.last_syscall_arguments,
         .v0_before = state.hle.last_syscall_v0_before,
-        .path = guest_handler
-            ? EeSyscallPath::guest_handler
-            : (service != nullptr ? EeSyscallPath::host_service : EeSyscallPath::unhandled),
+        .path = path,
     };
     state.hle.syscall_sequence_next =
         (state.hle.syscall_sequence_next + 1U) % EeHleState::kSyscallSequenceCapacity;
@@ -4023,28 +4100,39 @@ static_assert(
         ++state.hle.syscall_sequence_count;
     }
 
+    Status result = Status::ok;
     if (guest_handler) {
-        return enter_ee_syscall_handler(
+        result = enter_ee_syscall_handler(
             state,
             number,
             registration.handler_address,
             resume_pc);
+    } else if (service == nullptr) {
+        result = Status::unhandled_syscall;
+    } else {
+        result = service->handler(state);
+        if (result == Status::ok) {
+            finish_ee_syscall_memory_trace(state);
+            ++state.hle.syscall_handled_count;
+            state.pc = resume_pc;
+            state.hle.last_syscall_v0_after =
+                static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
+            state.hle.last_syscall_resume_pc = resume_pc;
+        }
     }
 
-    if (service == nullptr) {
-        return Status::unhandled_syscall;
-    }
-    const Status handler_status = service->handler(state);
-    if (handler_status != Status::ok) {
-        return handler_status;
-    }
-    finish_ee_syscall_memory_trace(state);
-    ++state.hle.syscall_handled_count;
-    state.pc = resume_pc;
-    state.hle.last_syscall_v0_after =
-        static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
-    state.hle.last_syscall_resume_pc = resume_pc;
-    return Status::ok;
+    const bool refused = result != Status::ok;
+    record_ee_syscall_census(state, number, boundary_pc, refused);
+    record_ee_syscall_trace(state, EeSyscallTraceEvent{
+        .pc = boundary_pc,
+        .number = number,
+        .arguments = state.hle.last_syscall_arguments,
+        .v0_before = state.hle.last_syscall_v0_before,
+        .v0_after = static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low),
+        .path = path,
+        .refused = refused,
+    });
+    return result;
 }
 
 } // namespace reps2::runtime

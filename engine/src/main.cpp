@@ -53,6 +53,7 @@ struct Options {
     std::uint32_t max_batches{kDefaultMaxBatches};
     bool enable_hle{};
     bool enable_trace{};
+    std::uint32_t syscall_trace_capacity{};
 };
 
 struct MediaImage {
@@ -173,7 +174,8 @@ struct MediaImage {
         } else if (argument == "--instruction-trace") {
             options.enable_trace = true;
         } else if (argument == "--ram" || argument == "--media"
-                   || argument == "--budget" || argument == "--max-batches") {
+                   || argument == "--budget" || argument == "--max-batches"
+                   || argument == "--syscall-trace") {
             if (index + 1 >= argc) return false;
             const std::string_view value{argv[++index]};
             if (value.empty()) return false;
@@ -184,6 +186,12 @@ struct MediaImage {
             } else if (argument == "--budget") {
                 if (!parse_u64(value, options.instruction_budget)
                     || options.instruction_budget == 0U) return false;
+            } else if (argument == "--syscall-trace") {
+                std::uint64_t capacity{};
+                if (!parse_u64(value, capacity) || capacity == 0U
+                    || capacity > reps2::runtime::EeHleState::kSyscallTraceCapacity)
+                    return false;
+                options.syscall_trace_capacity = static_cast<std::uint32_t>(capacity);
             } else {
                 std::uint64_t batches{};
                 if (!parse_u64(value, batches) || batches == 0U
@@ -209,6 +217,7 @@ void print_help() {
         << "  --budget <instructions> Guest instruction budget per run batch\n"
         << "  --max-batches <count>  Maximum resumable run batches (1..10000)\n"
         << "  --hle-syscalls          Enable only the implemented EE syscall HLE services\n"
+        << "  --syscall-trace <n>     Retain the last n syscall boundaries (1..64)\n"
         << "  --instruction-trace     Include the bounded EE instruction-PC trace\n"
         << "  --version               Print engine version\n"
         << "  --help                  Print this help\n\n"
@@ -405,6 +414,7 @@ void print_error(
     config.initial_main_ram = std::span<const std::uint8_t>(ram_image);
     config.enable_ee_syscall_hle = options.enable_hle;
     config.enable_instruction_trace = options.enable_trace;
+    config.syscall_trace_capacity = options.syscall_trace_capacity;
     if (media.stream.is_open()) {
         config.media = HostMediaSource{&media, &read_media_sectors};
     }
@@ -662,7 +672,81 @@ void print_error(
               << ",\"interrupts_completed\":" << state.hle.dmac_interrupts_completed
               << ",\"last_interrupt_channel\":" << state.hle.last_dmac_interrupt_channel
               << ",\"last_interrupt_handler\":" << state.hle.last_dmac_interrupt_handler
-              << "},\"runs\":[";
+              << "},\"syscall_census\":{\"version\":1"
+              << ",\"attribution\":\"space_saving_hot_sites\""
+              << ",\"tracked_numbers\":" << reps2::runtime::EeHleState::kSyscallCensusNumbers
+              << ",\"total_seen\":" << state.hle.syscall_count
+              << ",\"total_handled\":" << state.hle.syscall_handled_count
+              << ",\"overflow_seen\":" << state.hle.syscall_census_overflow.seen
+              << ",\"overflow_handled\":" << state.hle.syscall_census_overflow.handled
+              << ",\"overflow_refused\":" << state.hle.syscall_census_overflow.refused
+              << ",\"services\":[";
+    {
+        const auto& census = state.hle.syscall_census;
+        bool first = true;
+        for (std::size_t number = 0U; number < census.size(); ++number) {
+            const auto& entry = census[number];
+            if (entry.seen == 0U) {
+                continue;
+            }
+            if (!first) std::cout << ',';
+            first = false;
+            std::cout << "{\"number\":" << number << ",\"name\":";
+            const reps2::runtime::EeSyscallService* const service =
+                reps2::runtime::find_ee_syscall_service(static_cast<std::uint32_t>(number));
+            json_string(std::cout, service != nullptr ? std::string_view(service->name)
+                                                      : std::string_view("unknown"));
+            std::cout << ",\"seen\":" << entry.seen
+                      << ",\"handled\":" << entry.handled
+                      << ",\"refused\":" << entry.refused << '}';
+        }
+    }
+    std::cout << "],\"hot_sites\":[";
+    {
+        bool first = true;
+        for (const auto& site : state.hle.syscall_hot_sites) {
+            if (site.count == 0U) {
+                continue;
+            }
+            if (!first) std::cout << ',';
+            first = false;
+            std::cout << "{\"pc\":" << site.pc
+                      << ",\"number\":" << site.number
+                      << ",\"count\":" << site.count << '}';
+        }
+    }
+    std::cout << "],\"last\":{\"pc\":" << state.hle.last_syscall_pc
+              << ",\"code\":" << state.hle.last_syscall_code
+              << ",\"number\":" << state.hle.last_syscall_number
+              << ",\"v0_before\":" << state.hle.last_syscall_v0_before
+              << ",\"v0_after\":" << state.hle.last_syscall_v0_after
+              << ",\"resume_pc\":" << state.hle.last_syscall_resume_pc
+              << "},\"trace\":{\"capacity\":"
+              << (state.hle.syscall_trace_capacity
+                      < reps2::runtime::EeHleState::kSyscallTraceCapacity
+                  ? state.hle.syscall_trace_capacity
+                  : reps2::runtime::EeHleState::kSyscallTraceCapacity)
+              << ",\"retained\":" << state.hle.syscall_trace_count
+              << ",\"dropped\":" << state.hle.syscall_trace_dropped
+              << ",\"events\":[";
+    {
+        const std::size_t retained = state.hle.syscall_trace_count;
+        for (std::size_t index = 0U; index < retained; ++index) {
+            if (index != 0U) std::cout << ',';
+            const auto& event = state.hle.syscall_trace_event(index);
+            std::cout << "{\"pc\":" << event.pc
+                      << ",\"number\":" << event.number
+                      << ",\"arguments\":[" << event.arguments[0] << ','
+                      << event.arguments[1] << ',' << event.arguments[2] << ','
+                      << event.arguments[3] << ']'
+                      << ",\"v0_before\":" << event.v0_before
+                      << ",\"v0_after\":" << event.v0_after
+                      << ",\"path\":";
+            json_string(std::cout, reps2::runtime::ee_syscall_path_name(event.path));
+            std::cout << ",\"refused\":" << (event.refused ? 1U : 0U) << '}';
+        }
+    }
+    std::cout << "]}},\"runs\":[";
     for (std::size_t index = 0; index < runs.size(); ++index) {
         if (index != 0U) std::cout << ',';
         const auto& result = runs[index];

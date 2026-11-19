@@ -164,8 +164,10 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0161](0161-ee-mmi1-pceqw.md) | Decode, lift and AOT-lower MMI1 PCEQW as four independent 32-bit equality comparisons | Accepted |
 | [0162](0162-ee-mmi0-pcgtw.md) | Decode, lift and AOT-lower R5900 MMI0 PCGTW as four independent signed 32-bit greater-than comparisons | Accepted |
 | [0163](0163-iop-fileio-init-handshake-observation.md) | Observe the IOP FILEIO init handshake (fno 255) and keep it fail-closed | Superseded by 0167/0168 |
-| [0164](0164-runtime-abi-19-layout-contract.md) | Make the `EeState` layout a versioned ABI contract (ABI 19) | Accepted |
+| [0164](0164-runtime-abi-19-layout-contract.md) | Make the `EeState` layout a versioned ABI contract (ABI 19) | Superseded by 0169 |
 | [0165](0165-iop-fileio-init-reply-contract-correction.md) | Correct the FILEIO init dataflow: reply word 1 is the compared operand and `0x00764CA8` is a write destination | Accepted |
 | [0166](0166-black-addintchandler-frontier.md) | Stop at the Black `AddIntcHandler` syscall `0x10` instead of inventing a handler id; the next slice is an INTC + TIMER2 device model | Accepted |
 | [0167](0167-iop-fileio-init-reply-contract.md) | Serve the IOP FILEIO initialisation handshake (fno 255) with module revision "2700" and version 2; other fnos stay refused, except `0..3` from ADR 0168 | Accepted |
 | [0168](0168-iop-fileio-open-read-close-contract.md) | Model IOP FILEIO disc and virtual file operations (fnos 0, 1, 2, 3) | Accepted |
+| [0169](0169-runtime-abi-20-layout-contract.md) | Runtime ABI 20 restores the layout contract after ADR 0168 and covers the census state | Accepted |
+| [0170](0170-bounded-syscall-census.md) | Bounded per-syscall census, hot-site attribution and optional trace ring | Accepted |

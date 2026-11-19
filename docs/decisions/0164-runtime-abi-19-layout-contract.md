@@ -1,6 +1,8 @@
 # ADR 0164: Runtime ABI 19 — the state layout is part of the ABI contract
 
-- **Status:** Accepted (validated locally; see Validation).
+- **Status:** Accepted (validated locally; see Validation). Superseded for the
+  current version by ADR 0169 (ABI 20), which restates the same contract and
+  covers the layout changes merged after it.
 - **Date:** 2026-11-18.
 - **Scope:** `runtime/include/reps2/runtime/abi_version.hpp` (ABI 18 -> 19),
   the admission tests in `tests/rg_reps2_engine_smoke.cpp`, and the expected

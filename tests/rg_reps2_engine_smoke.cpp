@@ -155,14 +155,14 @@ int test_module_admission(const Engine& engine, PreparedNativeModule& prepared) 
     }
     // A module built against the previous ABI generation must be rejected as a
     // runtime ABI mismatch, not as a toolchain/compiler fingerprint mismatch:
-    // the layout change behind ABI 19 (ADR 0164) has to surface under its own
+    // every layout change behind an ABI bump has to surface under its own
     // diagnosis even though the stale module's fingerprint also differs.
     static_assert(
-        REPS2_RUNTIME_ABI_VERSION > 18U,
-        "the previous runtime ABI generation constant is stale"
+        REPS2_RUNTIME_ABI_VERSION > 19U,
+        "ABI 20 is the generation that covers ADR 0168 and ADR 0170"
     );
     invalid = descriptor;
-    invalid.runtime_abi_version = 18U;
+    invalid.runtime_abi_version = REPS2_RUNTIME_ABI_VERSION - 1U;
     if (engine.prepare(invalid, prepared) != EngineError::runtime_abi_mismatch) {
         return fail(11, "previous-generation runtime ABI was not rejected as a runtime mismatch");
     }

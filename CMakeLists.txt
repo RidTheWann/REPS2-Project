@@ -1503,6 +1503,46 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
 
     add_test(NAME reps2_hle_syscall_codegen_smoke COMMAND reps2_hle_syscall_codegen_smoke)
 
+    # Bounded syscall census and trace ring (ADR 0170): service attribution,
+    # seen/handled/refused invariants, shared-site attribution, the negated
+    # "i" form, the overflow bucket, ring capacity/order and the disable path.
+    add_executable(reps2_syscall_census_smoke tests/syscall_census_smoke.cpp)
+    target_link_libraries(reps2_syscall_census_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_syscall_census_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_syscall_census_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_syscall_census_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_syscall_census_smoke COMMAND reps2_syscall_census_smoke)
+
+    # The run report must carry a usable census section, not just a shape: the
+    # fixture dispatches two serviced calls at one site and one refused number at
+    # another, so the checks pin attribution and accounting end to end.
+    add_library(rg_reps2_engine_census_fixture MODULE
+        tests/rg_reps2_engine_census_fixture.cpp
+    )
+    target_include_directories(rg_reps2_engine_census_fixture PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/engine/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/runtime/include"
+    )
+    target_link_libraries(rg_reps2_engine_census_fixture PRIVATE REPS2::Runtime)
+    target_compile_features(rg_reps2_engine_census_fixture PRIVATE cxx_std_20)
+    set_target_properties(rg_reps2_engine_census_fixture PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+    )
+    add_test(
+        NAME reps2_engine_runner_census_report
+        COMMAND "${CMAKE_COMMAND}"
+            "-DREPS2_ENGINE_RUNNER=$<TARGET_FILE:rg_reps2_engine_runner>"
+            "-DREPS2_MODULE=$<TARGET_FILE:rg_reps2_engine_census_fixture>"
+            "-DREPS2_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/census-report"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/engine_runner_census_report.cmake"
+    )
+
     # The same synthetic CFG emitted as one dispatcher plus four block parts.
     # This pins the multi-translation-unit path: the dispatcher's sorted block
     # table must link against definitions living in the part files, and the
