@@ -34,8 +34,12 @@ inline constexpr std::uint8_t kEeSyscallResultRegister = 2;
 inline constexpr std::uint8_t kEeSyscallArgumentBase = 4;
 inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 
+inline constexpr std::uint32_t kEeSyscallAddIntcHandler = 0x10U;
+inline constexpr std::uint32_t kEeSyscallRemoveIntcHandler = 0x11U;
 inline constexpr std::uint32_t kEeSyscallAddDmacHandler = 0x12U;
 inline constexpr std::uint32_t kEeSyscallRemoveDmacHandler = 0x13U;
+inline constexpr std::uint32_t kEeSyscallEnableIntc = 0x14U;
+inline constexpr std::uint32_t kEeSyscallDisableIntc = 0x15U;
 inline constexpr std::uint32_t kEeSyscallEnableDmac = 0x16U;
 inline constexpr std::uint32_t kEeSyscallDisableDmac = 0x17U;
 inline constexpr std::uint32_t kEeSyscallCreateThread = 0x20U;
@@ -451,6 +455,257 @@ struct EeSyscallRegistrationView {
         return Status::unsupported_memory_access;
     }
     state.hle.last_disable_dmac_outcome = EeDmacDisableOutcome::disabled;
+    return Status::ok;
+}
+
+// AddIntcHandler (0x10): register a handler for one INTC source.
+//
+// PS2SDK declares `s32 AddIntcHandler(s32 cause, s32 (*handler_func)(s32 cause),
+// s32 next)` and treats a negative result as failure. The observed Black (USA)
+// call site at `0x0036DC40` sets `$a0 = 0xB` (INTC_TIM2), `$a1 = 0x0036DFF0`
+// (the handler itself), `$a2 = 0` (no chained handler) and `$a3 = 0` (no
+// AddIntcHandler2 argument) before the thunk at `0x00367550` issues syscall
+// `0x10` (ADR 0166).
+//
+// The kernel keeps a per-cause handler chain. This layer keeps one record per
+// documented cause (0..15): a non-zero `next` and a non-zero `arg` are refused
+// instead of dropping either silently, and a second registration on an occupied
+// cause is refused too. Ids are HLE-local handles equal to the cause index, the
+// same convention the DMAC registry uses; the kernel's own id values are not
+// observable from the target. `$v0` receives the id, or the layer's documented
+// negative failure value, which is what the observed `bgezl $3` check reads.
+[[nodiscard]] inline Status hle_add_intc_handler(EeState& state) noexcept {
+    const std::uint32_t cause = ee_syscall_argument(state, 0);
+    const std::uint32_t handler = ee_syscall_argument(state, 1);
+    const std::uint32_t next = ee_syscall_argument(state, 2);
+    const std::uint32_t argument = ee_syscall_argument(state, 3);
+    auto& hle = state.hle;
+    ++hle.add_intc_handler_calls;
+    hle.last_intc_cause = cause;
+    hle.last_intc_handler = handler;
+    hle.last_intc_handler_next = next;
+    hle.last_intc_handler_argument = argument;
+    hle.last_intc_handler_id = -1;
+    const auto refuse = [&state](EeIntcHandlerRejection rejection) noexcept {
+        state.hle.last_intc_handler_rejection = rejection;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    };
+    if (cause >= kEeMaxIntcHandlers) {
+        return refuse(EeIntcHandlerRejection::invalid_cause);
+    }
+    std::uint32_t physical_handler{};
+    if (handler == 0U || (handler & 3U) != 0U
+        || !resolve_ee_main_ram_address(handler, physical_handler)) {
+        return refuse(EeIntcHandlerRejection::invalid_handler);
+    }
+    if (next != 0U) {
+        return refuse(EeIntcHandlerRejection::chained_handler_unsupported);
+    }
+    if (argument != 0U) {
+        return refuse(EeIntcHandlerRejection::handler_argument_unsupported);
+    }
+    EeIntcHandler& record = hle.intc_handlers[cause];
+    if (record.in_use) {
+        return refuse(EeIntcHandlerRejection::cause_already_registered);
+    }
+    record.in_use = true;
+    record.handler = handler;
+    record.next = next;
+    record.argument = argument;
+    record.register_pc = state.pc;
+    ++hle.intc_handler_count;
+    hle.last_intc_handler_rejection = EeIntcHandlerRejection::none;
+    hle.last_intc_handler_id = static_cast<std::int32_t>(cause);
+    state.gpr[kEeSyscallResultRegister].low = sign_extend_word(cause);
+    return Status::ok;
+}
+
+// RemoveIntcHandler (0x11): remove the handler registered on one cause.
+//
+// PS2SDK declares `s32 RemoveIntcHandler(s32 cause, s32 handler_id)`. Removal
+// succeeds only when the cause is documented, its record is in use, and the id
+// is the one this layer issued (the cause index); otherwise the record is left
+// untouched and `$v0` receives the documented negative failure value. The
+// kernel's own return value is not established by target or public evidence, so
+// `$v0` is not fabricated on success either.
+[[nodiscard]] inline Status hle_remove_intc_handler(EeState& state) noexcept {
+    const std::uint32_t cause = ee_syscall_argument(state, 0);
+    const std::uint32_t id = ee_syscall_argument(state, 1);
+    auto& hle = state.hle;
+    ++hle.remove_intc_handler_calls;
+    hle.last_remove_intc_cause = cause;
+    hle.last_remove_intc_id = id;
+    hle.last_remove_intc_handler = 0U;
+    if (cause >= kEeMaxIntcHandlers) {
+        hle.last_remove_intc_outcome = EeIntcRemoveOutcome::invalid_cause;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    }
+    EeIntcHandler& record = hle.intc_handlers[cause];
+    if (!record.in_use || id != cause) {
+        hle.last_remove_intc_outcome = EeIntcRemoveOutcome::not_registered;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    }
+    hle.last_remove_intc_handler = record.handler;
+    record = EeIntcHandler{};
+    if (hle.intc_handler_count > 0U) {
+        --hle.intc_handler_count;
+    }
+    hle.last_remove_intc_outcome = EeIntcRemoveOutcome::removed;
+    return Status::ok;
+}
+
+// _EnableIntc (0x14) / _DisableIntc (0x15): set or clear one I_MASK bit.
+//
+// The two services differ only in the requested bit value, and I_MASK is
+// write-one-to-toggle, so each one writes the bit only when the current state
+// disagrees. Enabling or disabling a source cannot invent a pending interrupt:
+// delivery still requires I_STAT to hold the source. The kernel's own return
+// value for either service is not established by evidence, so `$v0` is left
+// untouched on success; an invalid cause uses the documented failure value.
+[[nodiscard]] inline Status hle_set_intc_mask(EeState& state, bool enable) noexcept {
+    const std::uint32_t cause = ee_syscall_argument(state, 0);
+    auto& hle = state.hle;
+    EeIntcMaskOutcome& outcome =
+        enable ? hle.last_enable_intc_outcome : hle.last_disable_intc_outcome;
+    if (enable) {
+        ++hle.enable_intc_calls;
+        hle.last_enable_intc_cause = cause;
+    } else {
+        ++hle.disable_intc_calls;
+        hle.last_disable_intc_cause = cause;
+    }
+    if (cause >= kEeMaxIntcHandlers) {
+        outcome = EeIntcMaskOutcome::invalid_cause;
+        state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
+        return Status::ok;
+    }
+    std::uint32_t mask = 0U;
+    if (!state.memory.intc.read_mask(mask)) {
+        outcome = EeIntcMaskOutcome::unknown_register_state;
+        return Status::unsupported_memory_access;
+    }
+    const std::uint32_t bit = std::uint32_t{1} << cause;
+    const bool already = (mask & bit) != 0U;
+    if (already == enable) {
+        outcome = enable ? EeIntcMaskOutcome::already_enabled
+                         : EeIntcMaskOutcome::already_disabled;
+        return Status::ok;
+    }
+    if (!state.memory.intc.write_mask(bit)) {
+        outcome = EeIntcMaskOutcome::unknown_register_state;
+        return Status::unsupported_memory_access;
+    }
+    outcome = enable ? EeIntcMaskOutcome::enabled : EeIntcMaskOutcome::disabled;
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status hle_enable_intc(EeState& state) noexcept {
+    return hle_set_intc_mask(state, true);
+}
+
+[[nodiscard]] inline Status hle_disable_intc(EeState& state) noexcept {
+    return hle_set_intc_mask(state, false);
+}
+
+// INTC interrupt delivery (ADR 0172).
+//
+// The INTC is the EE's IP2 line (Cause bit 10), separate from the DMAC's IP3.
+// REPS2 is the EE kernel, so instead of jumping to the kernel's own interrupt
+// vector it acknowledges the pending source in I_STAT and invokes the handler
+// the guest registered with AddIntcHandler (0x10) as guest code, which is what
+// the kernel's own dispatcher does once it has found the source.
+
+// The lowest pending, mask-enabled source that also has a registered handler, or
+// kEeMaxIntcHandlers when none qualifies. Delivery and the predicate share this
+// so the dispatcher enters only an interrupt that can make progress. Unseeded
+// controller state qualifies nothing, so no interrupt is fabricated.
+[[nodiscard]] inline std::uint32_t select_ee_intc_interrupt_cause(
+    const EeState& state
+) noexcept {
+    const EeIntcState& intc = state.memory.intc;
+    if (!intc.i_stat_known || !intc.i_mask_known) {
+        return static_cast<std::uint32_t>(kEeMaxIntcHandlers);
+    }
+    const std::uint32_t pending =
+        intc.i_stat & intc.i_mask & kEeIntcMaskToggleMask;
+    for (std::uint32_t cause = 0U; cause < kEeMaxIntcHandlers; ++cause) {
+        if ((pending & (std::uint32_t{1} << cause)) != 0U
+            && state.hle.intc_handlers[cause].in_use) {
+            return cause;
+        }
+    }
+    return static_cast<std::uint32_t>(kEeMaxIntcHandlers);
+}
+
+// Would the EE take the INTC interrupt at the next instruction boundary? True
+// only when the controller reports a pending, enabled source, the master
+// interrupt enable is set with no exception in progress, and a handler is
+// registered for that source.
+[[nodiscard]] inline bool ee_intc_line_asserted(const EeState& state) noexcept {
+    if (!ee_interrupts_enabled(state)) return false;
+    if (!state.memory.intc.line_asserted()) return false;
+    return select_ee_intc_interrupt_cause(state)
+        < static_cast<std::uint32_t>(kEeMaxIntcHandlers);
+}
+
+// Enter the INTC interrupt. The interrupted context is saved whole, exactly like
+// the DMAC path: the source's I_STAT bit is acknowledged first (so the line
+// deasserts), then EPC latches the restart PC, EXL marks the exception level so
+// no nested interrupt is taken while the handler runs, and Cause reports IP2
+// while the line is serviced. EPC/EXL/Cause live in the saved COP0 image and
+// revert when the handler returns, so the handler sees an exception context and
+// the interrupted guest does not. The handler is `s32 handler(s32 cause)`, so it
+// receives the cause in $a0.
+[[nodiscard]] inline Status enter_ee_intc_interrupt(EeState& state) noexcept {
+    auto& hle = state.hle;
+    const std::uint32_t cause = select_ee_intc_interrupt_cause(state);
+    if (cause >= static_cast<std::uint32_t>(kEeMaxIntcHandlers)) {
+        return Status::ok;
+    }
+    if (hle.syscall_handler_depth >= kEeMaxSyscallHandlerDepth) {
+        return Status::syscall_handler_overflow;
+    }
+    const std::uint32_t handler = hle.intc_handlers[cause].handler;
+
+    // The kernel acknowledges the source before running its handler.
+    if (!state.memory.intc.write_stat(std::uint32_t{1} << cause)) {
+        return Status::unsupported_memory_access;
+    }
+
+    EeSyscallHandlerFrame& frame = hle.syscall_handler_frames[hle.syscall_handler_depth];
+    frame.saved_gpr = state.gpr;
+    frame.saved_hi = state.hi;
+    frame.saved_lo = state.lo;
+    frame.saved_hi1 = state.hi1;
+    frame.saved_lo1 = state.lo1;
+    frame.saved_fpr = state.fpr;
+    frame.saved_acc = state.acc;
+    frame.saved_fcsr = state.fcsr;
+    frame.saved_sa = state.sa;
+    frame.saved_vu0 = state.vu0;
+    frame.saved_cop0 = state.cop0;
+    frame.handler_address = handler;
+    frame.resume_pc = state.pc;
+    frame.slot = 0U;
+    frame.is_guest_callback = false;
+    frame.is_dmac_interrupt = false;
+    frame.is_intc_interrupt = true;
+
+    ++hle.syscall_handler_depth;
+    ++hle.intc_interrupts_delivered;
+    hle.last_intc_interrupt_cause = cause;
+    hle.last_intc_interrupt_handler = handler;
+
+    state.cop0[kCop0Epc] = state.pc;
+    state.cop0[kCop0Status] |= kCop0StatusExlMask;
+    state.cop0[kCop0Cause] |= kCop0CauseIp2Mask;
+
+    state.gpr[4].low = sign_extend_word(cause);
+    state.gpr[31].low = sign_extend_word(kEeSyscallHandlerReturnPc);
+    state.pc = handler;
     return Status::ok;
 }
 
@@ -1731,6 +1986,7 @@ struct SifCmdHeader {
     frame.slot = 0U;
     frame.is_guest_callback = true;
     frame.is_dmac_interrupt = false;
+    frame.is_intc_interrupt = false;
 
     ++hle.syscall_handler_depth;
     ++hle.guest_callbacks_started;
@@ -3794,10 +4050,11 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
     frame.handler_address = handler_address;
     frame.resume_pc = resume_pc;
     frame.slot = slot;
-    // Frames are reused at the same depth, so both context kinds are cleared
-    // explicitly (ADR 0153).
+    // Frames are reused at the same depth, so every context kind is cleared
+    // explicitly (ADR 0153, ADR 0172).
     frame.is_guest_callback = false;
     frame.is_dmac_interrupt = false;
+    frame.is_intc_interrupt = false;
 
     ++state.hle.syscall_handler_depth;
     ++state.hle.guest_handler_dispatches;
@@ -3821,12 +4078,13 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
         state.hle.syscall_handler_frames[state.hle.syscall_handler_depth - 1U];
     const bool guest_callback = frame.is_guest_callback;
     const bool dmac_interrupt = frame.is_dmac_interrupt;
+    const bool intc_interrupt = frame.is_intc_interrupt;
     const Gpr128 result = state.gpr[kEeSyscallResultRegister];
     const std::uint32_t resume_pc = frame.resume_pc;
 
     state.gpr = frame.saved_gpr;
     state.gpr[0] = {};
-    if (!guest_callback && !dmac_interrupt) {
+    if (!guest_callback && !dmac_interrupt && !intc_interrupt) {
         state.gpr[kEeSyscallResultRegister] = result;
     }
     state.hi = frame.saved_hi;
@@ -3846,6 +4104,10 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
         // interrupt context: its result and register changes are not the
         // interrupted guest's. See ADR 0153.
         ++state.hle.dmac_interrupts_completed;
+    } else if (intc_interrupt) {
+        // Same contract on the other external line: the registered
+        // AddIntcHandler handler ran in interrupt context (ADR 0172).
+        ++state.hle.intc_interrupts_completed;
     } else if (guest_callback) {
         // _request_end runs in interrupt context: the callback's result and
         // register changes are not the interrupted caller's.
@@ -3863,8 +4125,12 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
 
 // Sorted by service number so a lookup can stop as soon as it passes the key.
 inline constexpr EeSyscallService kEeSyscallServices[] = {
+    {kEeSyscallAddIntcHandler, "AddIntcHandler", &hle_add_intc_handler},
+    {kEeSyscallRemoveIntcHandler, "RemoveIntcHandler", &hle_remove_intc_handler},
     {kEeSyscallAddDmacHandler, "AddDmacHandler", &hle_add_dmac_handler},
     {kEeSyscallRemoveDmacHandler, "RemoveDmacHandler", &hle_remove_dmac_handler},
+    {kEeSyscallEnableIntc, "EnableIntc", &hle_enable_intc},
+    {kEeSyscallDisableIntc, "DisableIntc", &hle_disable_intc},
     {kEeSyscallEnableDmac, "EnableDmac", &hle_enable_dmac},
     {kEeSyscallDisableDmac, "DisableDmac", &hle_disable_dmac},
     {kEeSyscallCreateThread, "CreateThread", &hle_create_thread},

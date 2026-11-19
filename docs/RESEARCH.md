@@ -1819,6 +1819,52 @@ limit, root set or relocated region is a different frontier.
   which wrapper of the two `0x10` thunks the guest used. See ADR 0166 for the
   unknown list and the subsequent resolution of `0x10001010` as Timer 2 mode.
 
+## EE Timer 2 and INTC delivery (ADR 0172, runtime ABI 21)
+
+- **Observed (public reference):** PS2SDK `common/include/ee_regs.h` names
+  `A_EE_T2_COUNT = 0x10001000`, `A_EE_T2_MODE = 0x10001010` and
+  `A_EE_T2_COMP = 0x10001020`; `ee/include/kernel.h` numbers `INTC_TIM2 = 11`,
+  and `INTC_TIM3 = 12` is the kernel's alarm source. PCSX2 `pcsx2/HwWrite.cpp`
+  documents `INTC_STAT` as write-one-to-clear (`&= ~value`) and `INTC_MASK` as
+  write-one-to-toggle over the low 16 bits (`^= (u16)value`). PS2TEK's EE Timer
+  notes group Timer 2 and Timer 3 under one register layout and one clock-select
+  table (`1/16/256/9370` BUSCLK per tick).
+- **Observed (earlier target evidence, retained):** ADR 0166 resolved
+  `0x10001010` as the Timer 2 mode register and `0x10001000` as its count from
+  the Black (USA) `AddIntcHandler` path, whose call site sets `$4 = 0xB`,
+  `$5 = 0x0036DFF0`, `$6 = 0`, `$7 = 0`.
+- **Derived:** `0xB` is `INTC_TIM2`, so the handler the title registers is a
+  Timer 2 handler and the polling loop after it is a Timer 2 consumer. Timer 2
+  and Timer 3 share the register field layout, so one mode mask, one set of
+  write-one-to-clear status bits (EQUF bit 10, OVFF bit 11) and one clock-select
+  function serve both; `ee_timer2_cycles_per_tick` delegates to the Timer 3
+  function rather than duplicating the table.
+- **Inferred, not verified:** that the Black handler at `0x0036DFF0` is a
+  compare-match handler (its body was not analysed for this change). REPS2
+  therefore implements the documented register contract and the CMPE match path
+  only, and claims neither the handler's behaviour nor a subsequent boot stage.
+- **Unknown:** whether the title's Timer 2 code relies on the OVFE overflow
+  interrupt (REPS2 latches OVFF and raises nothing), on a preloaded count value
+  written before the first read, or on Timer 2 being clocked by something other
+  than the modelled BUSCLK source.
+- **Synthetic evidence:** `tests/intc_timer2_smoke.cpp` (register model, match
+  path, ZRET, overflow latching, unseeded-controller refusal, registry and mask
+  services, delivery predicate, entry/return frame) and
+  `tests/intc_timer2_codegen_smoke.cpp` (AOT blocks at `0x6600`/`0x6700`: the
+  compiled guest registers cause 11 with handler `0x6700`, enables the source,
+  the host model raises `INTC_TIM2`, the dispatcher enters the handler with
+  `$a0 = 11`, the handler store lands at `0x00100000`, the interrupted `$v0`
+  survives the return, and a pending source with no handler is neither entered
+  nor acknowledged). The fixture words are authored in
+  `rust/frontend/src/main.rs` and `tests/intc_timer2_codegen_smoke.cpp`; no
+  retail bytes are used.
+- **Measured:** `sizeof(EeState)` 33,408 -> 33,896 bytes, `sizeof(EeHleState)`
+  31,848 -> 32,288, `sizeof(EeMemory)` 128 -> 176, MSVC 14.51, Windows x64,
+  `/std:c++20`; `REPS2_RUNTIME_ABI_VERSION` 20 -> 21 (ADR 0171).
+- **Not claimed:** any real-title consequence. The Black frontier module was
+  built against ABI 19, which ABI 21 refuses, so the recorded frontier is
+  unchanged historical evidence until that module is rebuilt and re-probed.
+
 ## Provenance rules
 
 

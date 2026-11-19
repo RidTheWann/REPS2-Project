@@ -539,7 +539,36 @@ void print_error(
               << ",\"compare\":" << state.memory.timer3_compare
               << ",\"count\":" << state.memory.timer3_count
               << ",\"cycles\":" << state.memory.guest_bus_cycles
-              << "},\"callbacks\":{\"requested\":" << state.hle.guest_callbacks_requested
+              << "},\"timer2\":{\"mode\":" << state.memory.timer2_mode
+              << ",\"compare\":" << state.memory.timer2_compare
+              << ",\"count\":" << state.memory.timer2_count
+              << ",\"matches\":" << state.memory.timer2_matches
+              << ",\"irq_raises\":" << state.memory.timer2_irq_raises
+              << ",\"irq_refusals\":" << state.memory.timer2_irq_refusals
+              << "},\"intc\":{\"stat\":" << state.memory.intc.i_stat
+              << ",\"mask\":" << state.memory.intc.i_mask
+              << ",\"known\":"
+              << ((state.memory.intc.i_stat_known && state.memory.intc.i_mask_known)
+                      ? 1U : 0U)
+              << ",\"line_asserted\":" << (state.memory.intc.line_asserted() ? 1U : 0U)
+              << ",\"handlers\":" << state.hle.intc_handler_count
+              << ",\"interrupts_delivered\":" << state.hle.intc_interrupts_delivered
+              << ",\"interrupts_completed\":" << state.hle.intc_interrupts_completed
+              << ",\"last_interrupt_cause\":" << state.hle.last_intc_interrupt_cause
+              << ",\"last_interrupt_handler\":" << state.hle.last_intc_interrupt_handler
+              << ",\"last_add_rejection\":";
+    json_string(std::cout, reps2::runtime::ee_intc_handler_rejection_name(
+        state.hle.last_intc_handler_rejection));
+    std::cout << ",\"last_remove_outcome\":";
+    json_string(std::cout, reps2::runtime::ee_intc_remove_outcome_name(
+        state.hle.last_remove_intc_outcome));
+    std::cout << ",\"last_enable_outcome\":";
+    json_string(std::cout, reps2::runtime::ee_intc_mask_outcome_name(
+        state.hle.last_enable_intc_outcome));
+    std::cout << ",\"last_disable_outcome\":";
+    json_string(std::cout, reps2::runtime::ee_intc_mask_outcome_name(
+        state.hle.last_disable_intc_outcome));
+    std::cout << "},\"callbacks\":{\"requested\":" << state.hle.guest_callbacks_requested
               << ",\"started\":" << state.hle.guest_callbacks_started
               << ",\"completed\":" << state.hle.guest_callbacks_completed
               << ",\"refused\":" << state.hle.guest_callbacks_refused

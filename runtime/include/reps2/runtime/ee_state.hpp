@@ -80,6 +80,30 @@ inline constexpr std::uint32_t kEeTimer3HblankBusCycles{9370U};
     }
 }
 
+// EE Timer 2 register addresses (PS2SDK `common/include/ee_regs.h`
+// A_EE_T2_COUNT/MODE/COMP). ADR 0166 resolved them on the Black (USA) frontier:
+// 0x10001010 is the Timer 2 mode register and 0x10001000 its count.
+inline constexpr std::uint32_t kEeTimer2CountAddress{0x1000'1000U};
+inline constexpr std::uint32_t kEeTimer2ModeAddress{0x1000'1010U};
+inline constexpr std::uint32_t kEeTimer2CompareAddress{0x1000'1020U};
+// Timers 2 and 3 share one documented register field layout and clock-select
+// table (PS2TEK EE Timers groups them), so T2_MODE uses the same writable mask,
+// write-one-to-clear status bits (EQUF bit 10, OVFF bit 11), ZRET, CUE and CMPE
+// as T3_MODE. T2_COMP and T2_COUNT are 16-bit registers.
+inline constexpr std::uint32_t kEeTimer2ModeWritableMask{0x0000'03DFU};
+inline constexpr std::uint32_t kEeTimer2CounterMask{0x0000'FFFFU};
+inline constexpr std::uint32_t kEeTimer2ZretBit{0x0000'0040U};
+inline constexpr std::uint32_t kEeTimer2CueBit{0x0000'0080U};
+inline constexpr std::uint32_t kEeTimer2CmpeBit{0x0000'0100U};
+inline constexpr std::uint32_t kEeTimer2EqufBit{0x0000'0400U};
+inline constexpr std::uint32_t kEeTimer2OvffBit{0x0000'0800U};
+
+// The clock-select divisor is the Timer 3 table: one function, so a correction
+// to the documented divisors cannot land in one timer and miss the other.
+[[nodiscard]] inline std::uint32_t ee_timer2_cycles_per_tick(std::uint32_t mode) noexcept {
+    return ee_timer3_cycles_per_tick(mode);
+}
+
 enum class Status : std::uint8_t {
     ok,
     undefined_word_operand,
@@ -152,6 +176,15 @@ inline Status mmio_read_intc_stat(const EeMemory&, std::uint32_t, std::uint32_t&
 inline Status mmio_write_intc_stat(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_intc_mask(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_intc_mask(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_timer2_count(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_timer2_count(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_timer2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_timer2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_timer2_compare(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_timer2_compare(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// Timer 2 progression is materialised from the shared guest-time source; it is
+// declared here because `advance_ee_timers` precedes the handler definitions.
+inline void materialize_ee_timer2(EeMemory&) noexcept;
 
 struct EeMemory {
     std::span<std::uint8_t> main_ram{};
@@ -176,6 +209,24 @@ struct EeMemory {
     std::uint64_t guest_bus_cycles{};
     std::uint64_t timer3_cycles_at_base{};
     std::uint32_t timer3_base_count{};
+    // EE Timer 2 (0x10001000 count, 0x10001010 mode, 0x10001020 compare),
+    // modelled on the same deterministic guest-time source as Timer 3 (ADR
+    // 0142/0166). A compare match with CMPE set latches EQUF and raises INTC
+    // source 11 (PS2SDK INTC_TIM2), which the EE INTC model reports as pending
+    // and the dispatcher may deliver to a registered AddIntcHandler handler
+    // (ADR 0172). Overflow interrupts (OVFE) are not modelled.
+    std::uint32_t timer2_mode{};
+    std::uint32_t timer2_compare{};
+    std::uint32_t timer2_count{};
+    std::uint64_t timer2_cycles_at_base{};
+    std::uint32_t timer2_base_count{};
+    // Bounded observation of the match path: how many compare matches latched,
+    // how many raised the INTC source, and how many were refused because the
+    // controller state was never established. A refusal is counted, never
+    // silently dropped into a fabricated interrupt.
+    std::uint64_t timer2_matches{};
+    std::uint64_t timer2_irq_raises{};
+    std::uint64_t timer2_irq_refusals{};
     EeDmacState dmac{};
     EeIntcState intc{};
 
@@ -202,6 +253,9 @@ struct EeMemory {
         { kEeTimer3CountAddress, &mmio_read_timer3_count, &mmio_write_timer3_count },
         { kEeTimer3ModeAddress,  &mmio_read_timer3,  &mmio_write_timer3 },
         { kEeTimer3CompareAddress, &mmio_read_timer3_compare, &mmio_write_timer3_compare },
+        { kEeTimer2CountAddress, &mmio_read_timer2_count, &mmio_write_timer2_count },
+        { kEeTimer2ModeAddress,  &mmio_read_timer2,  &mmio_write_timer2 },
+        { kEeTimer2CompareAddress, &mmio_read_timer2_compare, &mmio_write_timer2_compare },
         { kEeIntcStatAddress,    &mmio_read_intc_stat, &mmio_write_intc_stat },
         { kEeIntcMaskAddress,    &mmio_read_intc_mask, &mmio_write_intc_mask },
     };
@@ -487,6 +541,11 @@ struct EeSyscallHandlerFrame {
     // its context (including the EPC/EXL/Cause state set for the interrupt)
     // restores whole. See ADR 0153.
     bool is_dmac_interrupt{};
+    // An INTC interrupt handler (AddIntcHandler). Same interrupt-context
+    // contract as the DMAC path, on the other external line (Cause IP2). The two
+    // flags are mutually exclusive and must be cleared explicitly on every frame
+    // reuse. See ADR 0172.
+    bool is_intc_interrupt{};
 };
 
 // Handlers can themselves issue syscalls, so dispatch keeps a small stack of
@@ -667,6 +726,106 @@ enum class EeDmacDisableOutcome : std::uint8_t {
     }
     return "unknown";
 }
+
+// The EE INTC has sixteen documented sources (0..15); source 12 (INTC_TIM3) is
+// reserved by the kernel for alarms. Handler records are indexed by cause, so
+// the registry covers every documented slot without a search.
+inline constexpr std::size_t kEeMaxIntcHandlers = 16;
+
+// Why an AddIntcHandler (0x10) call was refused instead of returning an id.
+// Like the DMAC registry, a rejection is a guest-visible failure value: no
+// record is created and no id is invented.
+enum class EeIntcHandlerRejection : std::uint8_t {
+    none,
+    invalid_cause,
+    invalid_handler,
+    chained_handler_unsupported,
+    cause_already_registered,
+    // AddIntcHandler2 shares syscall 0x10 and passes a fourth `arg` the plain
+    // handler signature never receives. The observed Black (USA) call site sets
+    // `$a3 = 0` (ADR 0166), so only that documented form is served: a non-zero
+    // argument is refused rather than delivered to a handler that cannot see it.
+    handler_argument_unsupported,
+};
+
+[[nodiscard]] constexpr const char* ee_intc_handler_rejection_name(
+    EeIntcHandlerRejection rejection
+) noexcept {
+    switch (rejection) {
+    case EeIntcHandlerRejection::none: return "none";
+    case EeIntcHandlerRejection::invalid_cause: return "invalid_cause";
+    case EeIntcHandlerRejection::invalid_handler: return "invalid_handler";
+    case EeIntcHandlerRejection::chained_handler_unsupported:
+        return "chained_handler_unsupported";
+    case EeIntcHandlerRejection::cause_already_registered:
+        return "cause_already_registered";
+    case EeIntcHandlerRejection::handler_argument_unsupported:
+        return "handler_argument_unsupported";
+    }
+    return "unknown";
+}
+
+// Outcome of a RemoveIntcHandler (0x11) call. The HLE-local id is the cause
+// index, mirroring the DMAC registry's id == channel convention.
+enum class EeIntcRemoveOutcome : std::uint8_t {
+    not_called,
+    removed,
+    invalid_cause,
+    not_registered,
+};
+
+[[nodiscard]] constexpr const char* ee_intc_remove_outcome_name(
+    EeIntcRemoveOutcome outcome
+) noexcept {
+    switch (outcome) {
+    case EeIntcRemoveOutcome::not_called: return "not_called";
+    case EeIntcRemoveOutcome::removed: return "removed";
+    case EeIntcRemoveOutcome::invalid_cause: return "invalid_cause";
+    case EeIntcRemoveOutcome::not_registered: return "not_registered";
+    }
+    return "unknown";
+}
+
+// Outcome of _EnableIntc (0x14) and _DisableIntc (0x15): both edit one I_MASK
+// bit, which is write-one-to-toggle, so an already-satisfied request writes
+// nothing instead of flipping the bit back.
+enum class EeIntcMaskOutcome : std::uint8_t {
+    not_called,
+    enabled,
+    already_enabled,
+    disabled,
+    already_disabled,
+    invalid_cause,
+    unknown_register_state,
+};
+
+[[nodiscard]] constexpr const char* ee_intc_mask_outcome_name(
+    EeIntcMaskOutcome outcome
+) noexcept {
+    switch (outcome) {
+    case EeIntcMaskOutcome::not_called: return "not_called";
+    case EeIntcMaskOutcome::enabled: return "enabled";
+    case EeIntcMaskOutcome::already_enabled: return "already_enabled";
+    case EeIntcMaskOutcome::disabled: return "disabled";
+    case EeIntcMaskOutcome::already_disabled: return "already_disabled";
+    case EeIntcMaskOutcome::invalid_cause: return "invalid_cause";
+    case EeIntcMaskOutcome::unknown_register_state: return "unknown_register_state";
+    }
+    return "unknown";
+}
+
+// One registered INTC handler. `s32 handler(s32 cause)` receives the cause in
+// $a0 and returns through $ra; REPS2 saves the interrupted context, acknowledges
+// I_STAT, and enters it as guest code in interrupt context (ADR 0172).
+struct EeIntcHandler {
+    bool in_use{};
+    std::uint32_t handler{};
+    std::uint32_t next{};
+    std::uint32_t argument{};
+    // The guest PC of the registering syscall, so a session can attribute the
+    // record back to the code that asked for it.
+    std::uint32_t register_pc{};
+};
 
 // SIF register numbers, from PS2SDK `ee/include/sifdma.h`. The first four name
 // the hardware SIF registers (EE addresses `0x1000F200`..`0x1000F230`); the rest
@@ -1385,6 +1544,44 @@ struct EeHleState {
     std::uint64_t disable_dmac_calls{};
     std::uint32_t last_disable_dmac_channel{};
     EeDmacDisableOutcome last_disable_dmac_outcome{};
+    // AddIntcHandler (0x10) observation. One record per documented cause;
+    // ids are HLE-local handles equal to the cause index, not the kernel's own
+    // values, which are not observable from the target. The recorded handler is
+    // invoked by the INTC delivery path below (ADR 0172).
+    std::uint64_t add_intc_handler_calls{};
+    std::uint32_t intc_handler_count{};
+    std::uint32_t last_intc_cause{};
+    std::uint32_t last_intc_handler{};
+    std::uint32_t last_intc_handler_next{};
+    std::uint32_t last_intc_handler_argument{};
+    // -1 when the call was refused; otherwise the id written to $v0.
+    std::int32_t last_intc_handler_id{-1};
+    EeIntcHandlerRejection last_intc_handler_rejection{};
+    std::array<EeIntcHandler, kEeMaxIntcHandlers> intc_handlers{};
+    // RemoveIntcHandler (0x11) observation: removal matches the HLE-local id
+    // (the cause index) and clears the one record that cause holds.
+    std::uint64_t remove_intc_handler_calls{};
+    std::uint32_t last_remove_intc_cause{};
+    std::uint32_t last_remove_intc_id{};
+    std::uint32_t last_remove_intc_handler{};
+    EeIntcRemoveOutcome last_remove_intc_outcome{};
+    // _EnableIntc (0x14) / _DisableIntc (0x15) observation. Both only edit the
+    // I_MASK bit the delivery predicate reads; `$v0` is not written on success
+    // because the kernel's return contract is not established by evidence.
+    std::uint64_t enable_intc_calls{};
+    std::uint32_t last_enable_intc_cause{};
+    EeIntcMaskOutcome last_enable_intc_outcome{};
+    std::uint64_t disable_intc_calls{};
+    std::uint32_t last_disable_intc_cause{};
+    EeIntcMaskOutcome last_disable_intc_outcome{};
+    // INTC interrupt delivery (ADR 0172). The INTC is the EE's IP2 line (bit 10).
+    // When the master interrupt enable is set and a handler is registered for a
+    // pending, mask-enabled source, the dispatcher acknowledges that I_STAT bit
+    // and invokes the handler as guest code in interrupt context.
+    std::uint64_t intc_interrupts_delivered{};
+    std::uint64_t intc_interrupts_completed{};
+    std::uint32_t last_intc_interrupt_cause{};
+    std::uint32_t last_intc_interrupt_handler{};
     // SIF registers (sceSifGetReg 0x7a, sceSifSetReg 0x79). Index 0 of the hardware array is unused
     // because PS2SDK numbers the hardware SIF registers from 1. Every value
     // starts at zero: this HLE has no IOP, so the IOP-side SIF command system is
@@ -1574,14 +1771,20 @@ inline void materialize_ee_timer3(EeMemory& self) noexcept {
     self.timer3_base_count = self.timer3_count;
 }
 
-// Advance the modelled guest-time source and materialise Timer 3. The host calls
-// this after each execution step with the guest cycles it executed; REPS2 uses
-// one instruction per modelled BUSCLK cycle, an explicit approximation recorded
-// in ADR 0142 (not a claim of cycle accuracy), so the source stays deterministic
-// and independent of host wall-clock time.
-inline void advance_ee_timer3(EeState& state, std::uint64_t bus_cycles) noexcept {
+// Advance the modelled guest-time source and materialise every timer that
+// derives from it. The host calls this after each execution step with the guest
+// cycles it executed; REPS2 uses one instruction per modelled BUSCLK cycle, an
+// explicit approximation recorded in ADR 0142 (not a claim of cycle accuracy).
+inline void advance_ee_timers(EeState& state, std::uint64_t bus_cycles) noexcept {
     state.memory.guest_bus_cycles += bus_cycles;
     materialize_ee_timer3(state.memory);
+    materialize_ee_timer2(state.memory);
+}
+
+// Keep the pre-Timer-2 entry point as a forwarding alias: one guest-time source
+// advances both counters, so a second name must never add cycles twice.
+inline void advance_ee_timer3(EeState& state, std::uint64_t bus_cycles) noexcept {
+    advance_ee_timers(state, bus_cycles);
 }
 
 inline Status mmio_read_timer3_count(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
@@ -1621,6 +1824,91 @@ inline Status mmio_write_timer3_compare(EeMemory& self, std::uint32_t, std::uint
     self.timer3_compare = value & kEeTimer3CounterMask;
     self.timer3_base_count = self.timer3_count;
     self.timer3_cycles_at_base = self.guest_bus_cycles;
+    return Status::ok;
+}
+
+// Materialise Timer 2 progression from the same modelled BUSCLK source as Timer
+// 3. The match path is the only interrupt source: with CMPE set, a crossing of
+// T2_COMP latches EQUF and raises INTC source 11, exactly once per crossing. ZRET
+// resets the counter at the match, so a ZRET timer that stays enabled re-arms
+// itself; a guest that does not clear I_STAT sees the source re-assert. Overflow
+// still latches OVFF but raises no interrupt (OVFE is not modelled).
+inline void materialize_ee_timer2(EeMemory& self) noexcept {
+    const std::uint32_t mode = self.timer2_mode;
+    if ((mode & kEeTimer2CueBit) == 0U) {
+        self.timer2_cycles_at_base = self.guest_bus_cycles;
+        self.timer2_base_count = self.timer2_count;
+        return;
+    }
+    const std::uint64_t per_tick = ee_timer2_cycles_per_tick(mode);
+    const std::uint64_t ticks =
+        (self.guest_bus_cycles - self.timer2_cycles_at_base) / per_tick;
+    if (ticks == 0U) {
+        return;
+    }
+    self.timer2_cycles_at_base += ticks * per_tick;
+    const std::uint64_t advanced =
+        static_cast<std::uint64_t>(self.timer2_base_count) + ticks;
+    const std::uint32_t compare = self.timer2_compare & kEeTimer2CounterMask;
+    if ((mode & kEeTimer2CmpeBit) != 0U
+        && self.timer2_base_count <= compare
+        && advanced > compare) {
+        self.timer2_mode |= kEeTimer2EqufBit;
+        ++self.timer2_matches;
+        if (self.intc.raise_source(kEeIntcSourceTimer2)) {
+            ++self.timer2_irq_raises;
+        } else {
+            ++self.timer2_irq_refusals;
+        }
+        if ((mode & kEeTimer2ZretBit) != 0U) {
+            self.timer2_count = 0U;
+            self.timer2_base_count = 0U;
+            return;
+        }
+    }
+    if (advanced > static_cast<std::uint64_t>(kEeTimer2CounterMask)) {
+        self.timer2_mode |= kEeTimer2OvffBit;
+    }
+    self.timer2_count = static_cast<std::uint32_t>(advanced) & kEeTimer2CounterMask;
+    self.timer2_base_count = self.timer2_count;
+}
+
+inline Status mmio_read_timer2_count(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.timer2_count;
+    return Status::ok;
+}
+inline Status mmio_write_timer2_count(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    materialize_ee_timer2(self);
+    self.timer2_count = value & kEeTimer2CounterMask;
+    self.timer2_base_count = self.timer2_count;
+    self.timer2_cycles_at_base = self.guest_bus_cycles;
+    return Status::ok;
+}
+inline Status mmio_read_timer2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.timer2_mode;
+    return Status::ok;
+}
+inline Status mmio_write_timer2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    materialize_ee_timer2(self);
+    // EQUF and OVFF are write-one-to-clear exactly as on T3_MODE, so a guest that
+    // clears the match flag does not lose a match that already happened.
+    std::uint32_t flags = self.timer2_mode & (kEeTimer2EqufBit | kEeTimer2OvffBit);
+    if ((value & kEeTimer2EqufBit) != 0U) flags &= ~kEeTimer2EqufBit;
+    if ((value & kEeTimer2OvffBit) != 0U) flags &= ~kEeTimer2OvffBit;
+    self.timer2_mode = (value & kEeTimer2ModeWritableMask) | flags;
+    self.timer2_base_count = self.timer2_count;
+    self.timer2_cycles_at_base = self.guest_bus_cycles;
+    return Status::ok;
+}
+inline Status mmio_read_timer2_compare(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.timer2_compare;
+    return Status::ok;
+}
+inline Status mmio_write_timer2_compare(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    materialize_ee_timer2(self);
+    self.timer2_compare = value & kEeTimer2CounterMask;
+    self.timer2_base_count = self.timer2_count;
+    self.timer2_cycles_at_base = self.guest_bus_cycles;
     return Status::ok;
 }
 inline Status mmio_read_intc_stat(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
@@ -1792,6 +2080,10 @@ inline Status mmio_write_intc_mask(EeMemory& self, std::uint32_t, std::uint32_t 
     }
     state.memory.timer3_mode = 0;
     state.memory.timer3_compare = 0;
+    state.memory.timer3_count = 0;
+    state.memory.timer2_mode = 0;
+    state.memory.timer2_compare = 0;
+    state.memory.timer2_count = 0;
     state.gpr = {};
     state.gpr[0] = {};
     state.hi = 0;

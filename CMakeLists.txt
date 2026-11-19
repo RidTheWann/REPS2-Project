@@ -1300,6 +1300,24 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_intc_codegen_smoke COMMAND reps2_intc_codegen_smoke)
 
+    # EE Timer 2 + INTC handler delivery (ADR 0172). The runtime half drives the
+    # register model and the handler registry directly; the generated half runs
+    # the AOT-compiled 0x9000/0x9200 fixture so the emitted dispatcher hook, the
+    # I_STAT acknowledge and the interrupt frame are exercised as shipped code.
+    add_executable(reps2_intc_timer2_smoke
+        tests/intc_timer2_smoke.cpp
+    )
+    target_link_libraries(reps2_intc_timer2_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_intc_timer2_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_intc_timer2_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_intc_timer2_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_intc_timer2_smoke COMMAND reps2_intc_timer2_smoke)
+
     set(REPS2_COP1_ARITH_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/cop1_arith_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_ARITH_GENERATED_CPP}"
@@ -1502,6 +1520,28 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
 
     add_test(NAME reps2_hle_syscall_codegen_smoke COMMAND reps2_hle_syscall_codegen_smoke)
+
+    # EE Timer 2 + INTC delivery through AOT-compiled blocks (ADR 0172): the
+    # 0x9000 fixture registers a handler and enables the source, the host model
+    # raises INTC_TIM2, and the emitted dispatcher hook must acknowledge I_STAT
+    # and enter 0x9200 with the cause in $a0, then restore the interrupted
+    # context. The second entry pins the fail-closed case: a pending source with
+    # no handler is left pending and never entered.
+    add_executable(reps2_intc_timer2_codegen_smoke
+        "${REPS2_CFG_GENERATED_CPP}"
+        tests/intc_timer2_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_intc_timer2_codegen_smoke reps2_cfg_codegen_fixture)
+    target_link_libraries(reps2_intc_timer2_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_intc_timer2_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_intc_timer2_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_intc_timer2_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_intc_timer2_codegen_smoke COMMAND reps2_intc_timer2_codegen_smoke)
 
     # Bounded syscall census and trace ring (ADR 0170): service attribution,
     # seen/handled/refused invariants, shared-site attribution, the negated

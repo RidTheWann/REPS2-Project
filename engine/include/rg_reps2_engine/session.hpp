@@ -194,11 +194,12 @@ public:
         const std::uint32_t pc_before = state_.pc;
         phase_ = SessionPhase::running;
         const ExecutionResult execution = engine_.execute(module_, state_, budget);
-        // Advance the modelled guest-time source for the executed instructions
-        // so the EE Timer 3 counter materialises deterministically (ADR 0142):
-        // one instruction is treated as one modelled BUSCLK cycle.
+        // Advance the modelled guest-time source for the executed instructions so the
+        // EE Timer 2 and Timer 3 counters materialise deterministically (ADR
+        // 0142, ADR 0172): one instruction is treated as one modelled BUSCLK
+        // cycle.
         if (state_.instructions_executed >= before) {
-            ::reps2::runtime::advance_ee_timer3(
+            ::reps2::runtime::advance_ee_timers(
                 state_, state_.instructions_executed - before);
         }
 

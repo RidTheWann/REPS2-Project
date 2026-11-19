@@ -1,6 +1,9 @@
 # ADR 0166: The Black `AddIntcHandler` frontier — stop at syscall `0x10` instead of registering a handler nothing can deliver
 
-- **Status:** Accepted (observation and fail-closed decision; no code change).
+- **Status:** Accepted (observation and fail-closed decision; no code change at
+  the time). The blocker described here is served since ADR 0172 (EE Timer 2
+  model plus INTC handler registry and delivery); the recorded frontier itself
+  stays historical evidence until the ABI-19 module is rebuilt and re-probed.
 - **Date:** 2026-11-19.
 - **Scope:** `docs/RESEARCH.md`, this ADR, and the committed Black frontier
   record. `runtime/include/reps2/runtime/ee_hle.hpp` is unchanged: syscall `0x10`

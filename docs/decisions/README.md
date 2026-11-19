@@ -171,3 +171,5 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0168](0168-iop-fileio-open-read-close-contract.md) | Model IOP FILEIO disc and virtual file operations (fnos 0, 1, 2, 3) | Accepted |
 | [0169](0169-runtime-abi-20-layout-contract.md) | Runtime ABI 20 restores the layout contract after ADR 0168 and covers the census state | Accepted |
 | [0170](0170-bounded-syscall-census.md) | Bounded per-syscall census, hot-site attribution and optional trace ring | Accepted |
+| [0171](0171-runtime-abi-21-layout-contract.md) | Runtime ABI 21 covers the Timer 2 and INTC handler state | Accepted |
+| [0172](0172-ee-timer2-intc-delivery.md) | Model EE Timer 2 and deliver INTC interrupts to registered `AddIntcHandler` handlers | Accepted |

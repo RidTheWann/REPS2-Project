@@ -2070,6 +2070,37 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x0000_0000, // return delay slot
     ];
 
+    // EE Timer 2 / INTC delivery fixture (ADR 0172). The body registers a
+    // handler for INTC_TIM2 (cause 11) with AddIntcHandler (0x10), enables the
+    // source with _EnableIntc (0x14), then returns. The host seeds the Timer 2
+    // register model and advances guest time; on the next dispatcher boundary
+    // the emitted INTC check enters the handler at 0x6700 as guest code, which
+    // writes a marker into $v0 and returns through $ra.
+    let hle_intc_intc_handler = [
+        0x2404_000B, // addiu a0, zero, 11    cause = INTC_TIM2
+        0x3405_6700, // ori   a1, zero, 0x6700 handler
+        0x2406_0000, // addiu a2, zero, 0     next = 0
+        0x2407_0000, // addiu a3, zero, 0     arg = 0 (plain AddIntcHandler)
+        0x2403_0010, // addiu v1, zero, 0x10  AddIntcHandler
+        0x0000_000C, // syscall
+        0x2403_0014, // addiu v1, zero, 0x14  _EnableIntc
+        0x0000_000C, // syscall
+        0x2408_0005, // addiu t0, zero, 5
+        0x2409_0006, // addiu t1, zero, 6
+        0x03E0_0008, // jr ra
+        0x0000_0000, // return delay slot
+    ];
+    // The registered INTC handler: `s32 handler(s32 cause)`. The cause arrives in
+    // $a0; the body stores it at 0x00100000 so the test can attribute execution
+    // to this handler and check the kernel's own argument contract.
+    let hle_intc_handler_body = [
+        0x3C02_0010, // lui   v0, 0x0010
+        0x3442_0000, // ori   v0, v0, 0x0000   v0 = 0x00100000
+        0xAC44_0000, // sw    a0, 0(v0)        scratch = cause
+        0x03E0_0008, // jr ra: back to the HLE return sentinel
+        0x0000_0000, // return delay slot
+    ];
+
     // Color conversion in a normal block, an annulled/taken likely delay,
     // and a return delay slot. Shared by single- and split-unit native tests.
     let mmi_color = [
@@ -2118,6 +2149,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xE600, &hle_syscall_handler),
         segment(0xE700, &hle_call_registered_handler),
         segment(0xE800, &hle_end_callback),
+        segment(0x6600, &hle_intc_intc_handler),
+        segment(0x6700, &hle_intc_handler_body),
     ];
     // Each conditional trap is an independent one-instruction segment, so a
     // false predicate retires to an untranslated boundary instead of flowing
@@ -2178,6 +2211,10 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         // guard for multi-root analysis; production CFG discovery also reaches
         // them through its lenient SyscallContinuation edges.
         0xE004, 0xE104, 0xE304, 0xE404, 0xE504, 0xE600, 0xE604, 0xE700, 0xE704, 0xE800, 0xE808,
+        // EE Timer 2 / INTC delivery fixture (ADR 0172): the handler body is
+        // reached only through the HLE interrupt path, so it is an explicit
+        // root and never a CFG successor.
+        0x6600, 0x6700,
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);

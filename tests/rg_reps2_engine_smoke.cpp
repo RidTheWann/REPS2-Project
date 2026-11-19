@@ -158,8 +158,8 @@ int test_module_admission(const Engine& engine, PreparedNativeModule& prepared) 
     // every layout change behind an ABI bump has to surface under its own
     // diagnosis even though the stale module's fingerprint also differs.
     static_assert(
-        REPS2_RUNTIME_ABI_VERSION > 19U,
-        "ABI 20 is the generation that covers ADR 0168 and ADR 0170"
+        REPS2_RUNTIME_ABI_VERSION > 20U,
+        "ABI 21 is the generation that covers ADR 0172 (Timer 2 + INTC delivery)"
     );
     invalid = descriptor;
     invalid.runtime_abi_version = REPS2_RUNTIME_ABI_VERSION - 1U;

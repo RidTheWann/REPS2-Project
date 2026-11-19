@@ -22,4 +22,8 @@
 // EeSifCmdState without a bump (the same violation ABI 19 exists to prevent),
 // and ADR 0170, which adds the bounded syscall census and optional trace ring
 // to EeHleState. Those modules must be rebuilt; no ABI 19 module is admitted.
-#define REPS2_RUNTIME_ABI_VERSION 20
+//
+// ABI 21 covers ADR 0172: the EE Timer 2 register model in EeMemory and the
+// EE INTC handler registry plus delivery counters in EeHleState. Both change
+// sizeof(EeState), so modules built against ABI 20 are refused.
+#define REPS2_RUNTIME_ABI_VERSION 21

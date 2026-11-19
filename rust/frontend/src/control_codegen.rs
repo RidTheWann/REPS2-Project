@@ -100,6 +100,8 @@ using reps2::runtime::ee_guest_callback_pending;
 using reps2::runtime::enter_ee_guest_callback;
 using reps2::runtime::ee_dmac_line_asserted;
 using reps2::runtime::enter_ee_dmac_interrupt;
+using reps2::runtime::ee_intc_line_asserted;
+using reps2::runtime::enter_ee_intc_interrupt;
 
 ";
 
@@ -161,6 +163,18 @@ const EXECUTE_CFG_TAIL: &str = "\
         // (ADR 0153).
         if (ee_dmac_line_asserted(state)) {
             const Status interrupt_status = enter_ee_dmac_interrupt(state);
+            if (interrupt_status != Status::ok) {
+                return interrupt_status;
+            }
+            continue;
+        }
+        // The INTC is the other external line (Cause IP2). It is checked after
+        // the DMAC because IP3 has the higher priority; when a pending source is
+        // mask-enabled and has a registered AddIntcHandler handler, REPS2 (the
+        // kernel) acknowledges I_STAT and enters that handler as guest code in
+        // interrupt context (ADR 0172).
+        if (ee_intc_line_asserted(state)) {
+            const Status interrupt_status = enter_ee_intc_interrupt(state);
             if (interrupt_status != Status::ok) {
                 return interrupt_status;
             }
@@ -1038,6 +1052,24 @@ mod tests {
         assert!(
             cpp.contains("state.pc = 0x00004000U;\n    return return_from_ee_exception(state);")
         );
+    }
+
+    #[test]
+    fn dispatcher_checks_the_intc_after_the_dmac() {
+        // Both external lines are checked at every dispatch boundary. The DMAC
+        // (Cause IP3) has priority over the INTC (Cause IP2), so the emitted
+        // order is part of the contract, not an implementation detail. The
+        // behavioural half lives in reps2_intc_timer2_codegen_smoke.
+        let program = program_with_blocks();
+        let cpp = emit_cpp(&program).expect("single unit");
+        let dmac = cpp
+            .find("if (ee_dmac_line_asserted(state))")
+            .expect("DMAC line check emitted");
+        let intc = cpp
+            .find("if (ee_intc_line_asserted(state))")
+            .expect("INTC line check emitted");
+        assert!(dmac < intc, "INTC check must follow the DMAC check");
+        assert!(cpp.contains("enter_ee_intc_interrupt(state)"));
     }
 
     #[test]
