@@ -1,6 +1,6 @@
 # ADR 0152: Register the title's 989snd sound-driver RPC servers (0x00123456/0x00123457); calls recorded and refused
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-16.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`) constants, a refuse handler
   and two registrations for sids 0x00123456/0x00123457; the table bound

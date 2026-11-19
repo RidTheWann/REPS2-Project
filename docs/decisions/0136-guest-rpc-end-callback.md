@@ -1,6 +1,6 @@
 # ADR 0136: Run SIF RPC end functions as guest callbacks
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC reply completion, generated dispatcher, runtime ABI,
   engine run report.

@@ -1595,8 +1595,9 @@ Update (ADR 0134, 2026-11-14): `T3_COUNT` (`0x10001800`) is now modelled as a 16
   8-byte FILEIO `fno 255` observation is unchanged (`send=8`, `recv=8`,
   `send_addr=0x00763540`, `recv_addr=0x007641C0`,
   request head `[0x00764200,0x00764640,0,0]`, `replied=0`).
-  **Derived:** the ABI bump is behaviour-neutral for this title; the frontier
-  is still the refused FILEIO init handshake, not a new stop.
+  **Derived:** the ABI bump is behaviour-neutral for this title; at that revision the frontier
+  was still the refused FILEIO init handshake, not a new stop. *(Superseded
+  by ADR 0167/0168: the handshake and `fno 0..3` are now served.)*
   **Historical, not ABI-19 evidence:** the ABI-18 run above (4,586,235
   instructions, same PC) stays the record for revision `09a4b2a`; the two runs
   agree, but the ABI-18 report is not a test of ABI 19.
@@ -1731,9 +1732,36 @@ limit, root set or relocated region is a different frontier.
   offset 12 and `"cdrom0:\\SKAT\\DHSKAT.SKX;1"` at offset 20. The title allocates
   semaphore 12 (`CreateSema`) and waits on it via `WaitSema(12)` at `0x0025D130`
   (`$a0=12`, `$ra=0x0025D138`).
-- **Fail-closed boundary:** FILEIO `fno 0` (`sceOpen`) was unmodelled and refused,
+- **Fail-closed boundary (superseded):** FILEIO `fno 0` (`sceOpen`) was unmodelled and refused,
   leaving the caller parked at `WaitSema(12)`. ADR 0168 models disc file open,
   read, lseek, and close via `state.media` and `iso_resolve_path`.
+
+#### Post-ADR 0168 observation (2026-11-19, `origin/main` `af51115`)
+
+- **Observed (bounded probe, not a committed frontier record):** the native
+  module was rebuilt in the `probe-run-06` native build from the ADR 0167/0168
+  runtime headers and run through `build/Release/rg-reps2-engine.exe` with
+  `--hle-syscalls` against `Downhill Domination (USA).iso`. Run A
+  (`--budget 5000000 --max-batches 1`) ends `budget_limit_reached` at
+  `pc=0x00201888` after 5,000,000 instructions, `syscalls_seen=37929
+  handled=37912`, heap `setup_called=1`, `start=0x008A0400`, `limit=0x0093C3D0`,
+  `current_end=0x008AF000`, `end_of_heap_calls=2`, `last_increment=1840`,
+  `last_ok=1`. Run B (`--budget 10000000 --max-batches 4`) executes 39,999,993
+  instructions and ends `budget_limit_reached` at `pc=0x00201890` with
+  `syscalls_seen=3219747 handled=3219730` and `media_sectors=1235776`.
+- **Derived:** the `WaitSema(12)` block is gone, so the served `fno 0..3` path
+  lets the `SKAT` asset loader open and read `cdrom0:\SKAT\DHSKAT.SKX;1`. About
+  one syscall per twelve instructions is a tight poll loop, so the stop is the
+  instruction budget, not a modelled boundary.
+- **Unknown:** which syscall dominates that loop, what would make it exit,
+  whether the opened file reaches EOF, and whether the polled service belongs to
+  the thread scheduler. The run report keeps only aggregate counters, so
+  answering this needs a per-syscall census, not a re-read of the same report.
+- **Limitations:** no `frontier.json` record, module digest or reproducibility
+  pair was captured for these runs, so they cannot be compared by
+  `tools/frontier/frontier.py`. `REPS2_RUNTIME_ABI_VERSION` is still 19 even
+  though ADR 0168 changed `sizeof(EeState)`, so these runs are labelled by
+  revision, not by a distinct ABI.
 
 
 ### Black (USA) — relocated copied code, ABI 19

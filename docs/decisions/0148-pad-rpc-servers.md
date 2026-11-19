@@ -1,6 +1,6 @@
 # ADR 0148: Serve the pad RPC servers (0x80000100/0x80000101) — version query with the retail PADMAN word, INIT/OPEN with padman's success result
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`) handlers for sids
   0x80000100/0x80000101; `EeSifCmdState` observation fields (`ee_state.hpp`);

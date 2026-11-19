@@ -1,6 +1,6 @@
 # ADR 0140: Register the multitap port-open RPC server (0x80000901) fail-closed
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`, `ee_state.hpp`), one sid:
   0x80000901. Runtime ABI 7 -> 8 (two counters added to `EeSifCmdState`).

@@ -1,6 +1,6 @@
 # ADR 0147: Serve the multitap port-open/close/connection commands as "no adapter"
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`) handlers for sids
   0x80000901/0x80000902/0x80000903; `EeSifCmdState` observation fields

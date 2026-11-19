@@ -1,6 +1,6 @@
 # ADR 0158: Decode, lift and AOT-lower R5900 MMI0 PSUBB
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-17.
 - **Scope:** R5900 MMI0 decoder (`rust/frontend/src/mips.rs`), typed scalar IR
   (`rust/frontend/src/ir.rs`), C++ AOT lowering (`rust/frontend/src/codegen.rs`),

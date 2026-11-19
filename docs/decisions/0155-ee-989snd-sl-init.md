@@ -1,6 +1,6 @@
 # ADR 0155: Serve the title's 989snd SL_INIT RPC and deliver RPC_END for every served call
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-17.
 - **Scope:** EE SIF RPC server handlers (`ee_hle.hpp`): a `serve_ee_snd_call`
   SL_INIT body for the 989snd main server (0x00123456), a distinct refusing

@@ -1,6 +1,6 @@
 # ADR 0162: Decode, lift and AOT-lower R5900 MMI0 PCGTW
 
-- **Status:** Proposed (validated locally; no real-title probe).
+- **Status:** Accepted (validated locally; no real-title probe).
 - **Date:** 2026-11-17.
 - **Scope:** MMI0 decode, typed IR, generated C++ lowering, one `Gpr128`
   comparison helper, and a synthetic generated-code fixture. No runtime ABI,

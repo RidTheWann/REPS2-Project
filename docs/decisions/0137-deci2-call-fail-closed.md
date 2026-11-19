@@ -1,6 +1,6 @@
 # ADR 0137: Deci2Call reports the documented failure (no DECI2 device)
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE syscall HLE service table (`ee_hle.hpp`), one service: 0x7C.
 

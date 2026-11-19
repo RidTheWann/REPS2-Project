@@ -1,6 +1,6 @@
 # ADR 0151: Decode, lift and AOT-lower the R5900 MDU1 multiply/divide family
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-16.
 - **Scope:** R5900 decoder (`rust/frontend/src/mips.rs`), typed scalar IR
   (`rust/frontend/src/ir.rs`), C++ AOT lowering (`rust/frontend/src/codegen.rs`),

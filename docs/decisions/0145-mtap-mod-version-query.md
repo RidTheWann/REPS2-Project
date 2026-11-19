@@ -1,6 +1,6 @@
 # ADR 0145: Serve the multitap module-version query (0x80000905, function 1)
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`) handler for sid 0x80000905;
   `EeSifCmdState` observation fields (`ee_state.hpp`). Runtime ABI 10 -> 11.

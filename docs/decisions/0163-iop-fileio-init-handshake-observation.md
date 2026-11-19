@@ -1,8 +1,9 @@
 # ADR 0163: Observe the IOP FILEIO init handshake (fno 255) and keep it fail-closed
 
-- **Status:** Accepted (validated locally; real-title probe recorded below).
-  Its static-dataflow claim and its quoted request head are **superseded by ADR
-  0165**; the observation and the fail-closed decision still stand.
+- **Status:** Superseded by ADR 0167 (the fno 255 handshake is now served) and
+  ADR 0168 (the file functions `fno 0..3` are modelled). The observation is kept
+  as history; its static-dataflow claim and its quoted request head are
+  **superseded by ADR 0165**.
 - **Date:** 2026-11-18.
 - **Scope:** `serve_ee_fileio_call` in `runtime/include/reps2/runtime/ee_hle.hpp`
   records a bounded request observation and still refuses every function; new

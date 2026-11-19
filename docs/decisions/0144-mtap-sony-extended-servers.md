@@ -1,6 +1,6 @@
 # ADR 0144: Register the Sony multitap extension servers (0x80000904, 0x80000905)
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`), two sids: 0x80000904 and
   0x80000905. No state layout change, so `REPS2_RUNTIME_ABI_VERSION` stays 10.

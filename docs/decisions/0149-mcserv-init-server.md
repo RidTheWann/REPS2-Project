@@ -1,6 +1,6 @@
 # ADR 0149: Register the memory-card server (0x80000400) and serve XMCSERV INIT with the module-version words
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`) handler for sid
   0x80000400; `EeSifCmdState` observation fields (`ee_state.hpp`); run-report

@@ -12,11 +12,17 @@ platform gate. Cross-references: `../ROADMAP.md` (M0..M7),
 The GUI is a product surface over an engine that is not yet capable of booting a
 title. Two facts dominate sequencing:
 
-1. **M4 is open** (`../ROADMAP.md`). No title reaches Boot-tested; Downhill
-   Domination USA's latest executed probe stops `budget_exhausted` in a
-   `PollSema` (0x45) poll loop on semaphore id 5 at `pc=0x00246DAC` (ADR 0119 /
-   PR #68); the frontier is the IOP/SIF RPC producer behind that semaphore plus
-   a scheduler, and the post-PR-#69 exact-title probe re-run is pending.
+1. **M4 is open** (`../ROADMAP.md`). No title reaches Boot-tested. The
+   oldest frontier quoted here (a `PollSema` (0x45) loop on semaphore id 5 at
+   `pc=0x00246DAC`, ADR 0119 / PR #68) is long superseded. As of
+   `origin/main` `af51115` the Downhill Domination USA probe is past
+   `sceFileioInit`, the FILEIO `fno 255` handshake and the
+   `cdrom0:\SKAT\DHSKAT.SKX;1` open/read (ADRs 0167/0168), and a bounded run now
+   ends on the instruction budget at `pc=0x00201890` inside a tight syscall poll
+   loop. The current blockers are cooperative EE scheduling/thread dispatch, the
+   EE INTC handler registry plus a Timer 2 device model (ADR 0166), and an owed
+   runtime ABI 19 -> 20 bump (ADR 0164/0168). See `../PROJECT_STATE.md` for the
+   exact observed counters; this roadmap does not duplicate them.
 2. **M5/M6 are not started as gates.** No VU/GS/audio/input/media services, no
    multi-title proof, no Playable title.
 

@@ -1,6 +1,6 @@
 # ADR 0153: Deliver the DMAC interrupt on the EE's own COP0 line (IP3) and run the registered AddDmacHandler handler
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-16.
 - **Scope:** runtime EE DMAC delivery: a device predicate
   (`EeDmacState::interrupt_pending()`), the interrupt-enable predicate

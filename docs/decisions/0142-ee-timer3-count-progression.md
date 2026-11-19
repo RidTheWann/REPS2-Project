@@ -1,6 +1,6 @@
 # ADR 0142: EE Timer 3 count progression on a deterministic guest-time source
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE Timer 3 model (`ee_state.hpp`) plus the host step that drives it
   (`engine/include/rg_reps2_engine/session.hpp`). Runtime ABI 9 -> 10

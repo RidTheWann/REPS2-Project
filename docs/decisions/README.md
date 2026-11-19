@@ -136,35 +136,36 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0133](0133-six-layer-product-architecture.md) | Six-layer product architecture and repository restructuring | Accepted |
 | [0134](0134-ee-timer3-count-storage.md) | EE Timer 3 count as a 16-bit storage register | Accepted |
 | [0135](0135-cdvd-ncmd-read-hle.md) | Serve CD_NCMD_READ from the host media source; NOWAIT+end-function RPC_END | Accepted |
-| [0136](0136-guest-rpc-end-callback.md) | Run SIF RPC end functions as guest callbacks through the dispatcher; `--extra-root` | Proposed |
-| [0137](0137-deci2-call-fail-closed.md) | Deci2Call (0x7C) fails closed with DECI2_ERR_INVALID; no DECI2 device modelled | Proposed |
-| [0138](0138-sif-loadfile-server-registration.md) | Register the SIF loadfile RPC server (0x80000006) so its bind succeeds; calls recorded and refused | Proposed |
-| [0139](0139-loadfile-get-version.md) | Serve the loadfile version query (`LF_F_GET_VERSION`, 0xFF) with the PS2SDK reference word; other functions refused | Proposed |
-| [0140](0140-mtap-port-open-server-registration.md) | Register the multitap port-open RPC server (0x80000901) so its bind succeeds; calls recorded and refused | Proposed |
-| [0141](0141-cdvd-searchfile-iso9660.md) | Serve CDVD SearchFile from the host ISO 9660 metadata with a bounded reader | Proposed |
-| [0142](0142-ee-timer3-count-progression.md) | EE Timer 3 count progression on a deterministic guest-time source (one instruction = one modelled BUSCLK cycle) | Proposed |
-| [0143](0143-mtap-remaining-servers-registration.md) | Register the remaining multitap RPC servers (0x80000902, 0x80000903); calls recorded and refused | Proposed |
-| [0144](0144-mtap-sony-extended-servers.md) | Register the Sony multitap extension servers (0x80000904, 0x80000905); the observed version-query call is recorded and refused | Proposed |
-| [0145](0145-mtap-mod-version-query.md) | Serve the multitap module-version query (0x80000905, function 1) with the `libmtap` version word 0x0300 | Proposed |
-| [0146](0146-mips-abi2-compatibility-diagnostic.md) | Classify the alternate MIPS n32 ABI for PS2 compatibility | Proposed |
-| [0147](0147-mtap-port-and-connection-bodies.md) | Serve the multitap port-open/close/connection commands (0x80000901–0x80000903) as "no adapter" (result 0) | Proposed |
-| [0148](0148-pad-rpc-servers.md) | Serve the pad RPC servers (0x80000100/0x80000101): GET_MODVER with the retail PADMAN word 0x0422, INIT/OPEN with padman's success result 1 | Proposed |
-| [0149](0149-mcserv-init-server.md) | Register the memory-card server (0x80000400) and serve XMCSERV INIT (fno 0xFE) with `{0, 0x20A, 0x20E}` | Proposed |
-| [0150](0150-ee-mmi3-pcpyh.md) | Decode, lift and AOT-lower R5900 MMI3 PCPYH (the word previously mislabelled BSHFL); the frontier moves to the MDU1 multiply word `0x72631818` | Proposed |
-| [0151](0151-ee-mdu1-multiply.md) | Decode, lift and AOT-lower the R5900 MDU1 family (`mult1`/`multu1`/`div1`/`divu1`) against HI1:LO1; the frontier becomes a SIF RPC bind retry for sid `0x00123456` | Proposed |
-| [0152](0152-ee-989snd-rpc-servers.md) | Register the title's 989snd sound-driver RPC servers (0x00123456/0x00123457) so their binds succeed; calls recorded and refused | Proposed |
-| [0153](0153-ee-dmac-interrupt-delivery.md) | Deliver the DMAC interrupt on the EE's own COP0 line (IP3) and run the registered `AddDmacHandler` handler in interrupt context | Proposed |
-| [0154](0154-vu0-quadword-transfers.md) | Decode, lift and AOT-lower the COP2 VU0 macro quadword transfers `qmfc2`/`qmtc2`; the frontier stays a 989snd poll loop, so this is a coverage advance | Proposed |
-| [0155](0155-ee-989snd-sl-init.md) | Serve the 989snd main server's SL_INIT RPC (fno 0) and refuse the loader server; deliver `SIF_CMD_RPC_END` for every served call, superseding ADR 0135's NOWAIT/no-end-function short-circuit | Proposed |
-| [0156](0156-ee-endofheap-syscall.md) | Serve the EE `EndOfHeap` syscall (0x3E): extend the recorded heap range and return the new end | Proposed |
-| [0157](0157-cdvd-searchfile-packet-layout.md) | Parse the retail cdvd SearchFile packet layout (300-byte request, name at offset 36) and record the raw packet head for frontier diagnostics | Proposed |
-| [0158](0158-ee-mmi0-psubb.md) | Decode, lift and AOT-lower R5900 MMI0 PSUBB; the frontier moves from an unsupported instruction to a status-poll retry loop at `0x0025D820` | Proposed |
+| [0136](0136-guest-rpc-end-callback.md) | Run SIF RPC end functions as guest callbacks through the dispatcher; `--extra-root` | Accepted |
+| [0137](0137-deci2-call-fail-closed.md) | Deci2Call (0x7C) fails closed with DECI2_ERR_INVALID; no DECI2 device modelled | Accepted |
+| [0138](0138-sif-loadfile-server-registration.md) | Register the SIF loadfile RPC server (0x80000006) so its bind succeeds; calls recorded and refused | Accepted |
+| [0139](0139-loadfile-get-version.md) | Serve the loadfile version query (`LF_F_GET_VERSION`, 0xFF) with the PS2SDK reference word; other functions refused | Accepted |
+| [0140](0140-mtap-port-open-server-registration.md) | Register the multitap port-open RPC server (0x80000901) so its bind succeeds; calls recorded and refused | Accepted |
+| [0141](0141-cdvd-searchfile-iso9660.md) | Serve CDVD SearchFile from the host ISO 9660 metadata with a bounded reader | Accepted |
+| [0142](0142-ee-timer3-count-progression.md) | EE Timer 3 count progression on a deterministic guest-time source (one instruction = one modelled BUSCLK cycle) | Accepted |
+| [0143](0143-mtap-remaining-servers-registration.md) | Register the remaining multitap RPC servers (0x80000902, 0x80000903); calls recorded and refused | Accepted |
+| [0144](0144-mtap-sony-extended-servers.md) | Register the Sony multitap extension servers (0x80000904, 0x80000905); the observed version-query call is recorded and refused | Accepted |
+| [0145](0145-mtap-mod-version-query.md) | Serve the multitap module-version query (0x80000905, function 1) with the `libmtap` version word 0x0300 | Accepted |
+| [0146](0146-mips-abi2-compatibility-diagnostic.md) | Classify the alternate MIPS n32 ABI for PS2 compatibility | Accepted |
+| [0147](0147-mtap-port-and-connection-bodies.md) | Serve the multitap port-open/close/connection commands (0x80000901–0x80000903) as "no adapter" (result 0) | Accepted |
+| [0148](0148-pad-rpc-servers.md) | Serve the pad RPC servers (0x80000100/0x80000101): GET_MODVER with the retail PADMAN word 0x0422, INIT/OPEN with padman's success result 1 | Accepted |
+| [0149](0149-mcserv-init-server.md) | Register the memory-card server (0x80000400) and serve XMCSERV INIT (fno 0xFE) with `{0, 0x20A, 0x20E}` | Accepted |
+| [0150](0150-ee-mmi3-pcpyh.md) | Decode, lift and AOT-lower R5900 MMI3 PCPYH (the word previously mislabelled BSHFL); the frontier moves to the MDU1 multiply word `0x72631818` | Accepted |
+| [0151](0151-ee-mdu1-multiply.md) | Decode, lift and AOT-lower the R5900 MDU1 family (`mult1`/`multu1`/`div1`/`divu1`) against HI1:LO1; the frontier becomes a SIF RPC bind retry for sid `0x00123456` | Accepted |
+| [0152](0152-ee-989snd-rpc-servers.md) | Register the title's 989snd sound-driver RPC servers (0x00123456/0x00123457) so their binds succeed; calls recorded and refused | Accepted |
+| [0153](0153-ee-dmac-interrupt-delivery.md) | Deliver the DMAC interrupt on the EE's own COP0 line (IP3) and run the registered `AddDmacHandler` handler in interrupt context | Accepted |
+| [0154](0154-vu0-quadword-transfers.md) | Decode, lift and AOT-lower the COP2 VU0 macro quadword transfers `qmfc2`/`qmtc2`; the frontier stays a 989snd poll loop, so this is a coverage advance | Accepted |
+| [0155](0155-ee-989snd-sl-init.md) | Serve the 989snd main server's SL_INIT RPC (fno 0) and refuse the loader server; deliver `SIF_CMD_RPC_END` for every served call, superseding ADR 0135's NOWAIT/no-end-function short-circuit | Accepted |
+| [0156](0156-ee-endofheap-syscall.md) | Serve the EE `EndOfHeap` syscall (0x3E): extend the recorded heap range and return the new end | Accepted |
+| [0157](0157-cdvd-searchfile-packet-layout.md) | Parse the retail cdvd SearchFile packet layout (300-byte request, name at offset 36) and record the raw packet head for frontier diagnostics | Accepted |
+| [0158](0158-ee-mmi0-psubb.md) | Decode, lift and AOT-lower R5900 MMI0 PSUBB; the frontier moves from an unsupported instruction to a status-poll retry loop at `0x0025D820` | Accepted |
 | [0159](0159-ee-989snd-sl-command-batch.md) | Serve 989snd SL_COMMAND_BATCH (fno 77) | Accepted |
 | [0160](0160-iop-fileio-server-registration.md) | Register IOP FILEIO server (0x80000001) | Accepted |
-| [0161](0161-ee-mmi1-pceqw.md) | Decode, lift and AOT-lower MMI1 PCEQW as four independent 32-bit equality comparisons | Proposed |
-| [0163](0163-iop-fileio-init-handshake-observation.md) | Observe the IOP FILEIO init handshake (fno 255) and keep it fail-closed | Accepted |
+| [0161](0161-ee-mmi1-pceqw.md) | Decode, lift and AOT-lower MMI1 PCEQW as four independent 32-bit equality comparisons | Accepted |
+| [0162](0162-ee-mmi0-pcgtw.md) | Decode, lift and AOT-lower R5900 MMI0 PCGTW as four independent signed 32-bit greater-than comparisons | Accepted |
+| [0163](0163-iop-fileio-init-handshake-observation.md) | Observe the IOP FILEIO init handshake (fno 255) and keep it fail-closed | Superseded by 0167/0168 |
 | [0164](0164-runtime-abi-19-layout-contract.md) | Make the `EeState` layout a versioned ABI contract (ABI 19) | Accepted |
 | [0165](0165-iop-fileio-init-reply-contract-correction.md) | Correct the FILEIO init dataflow: reply word 1 is the compared operand and `0x00764CA8` is a write destination | Accepted |
 | [0166](0166-black-addintchandler-frontier.md) | Stop at the Black `AddIntcHandler` syscall `0x10` instead of inventing a handler id; the next slice is an INTC + TIMER2 device model | Accepted |
-| [0167](0167-iop-fileio-init-reply-contract.md) | Serve the IOP FILEIO initialisation handshake (fno 255) with module revision "2700" and version 2; other fnos refused | Accepted |
+| [0167](0167-iop-fileio-init-reply-contract.md) | Serve the IOP FILEIO initialisation handshake (fno 255) with module revision "2700" and version 2; other fnos stay refused, except `0..3` from ADR 0168 | Accepted |
 | [0168](0168-iop-fileio-open-read-close-contract.md) | Model IOP FILEIO disc and virtual file operations (fnos 0, 1, 2, 3) | Accepted |

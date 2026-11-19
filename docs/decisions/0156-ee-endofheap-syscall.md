@@ -1,6 +1,6 @@
 # ADR 0156: Serve the EE `EndOfHeap` syscall (0x3E): extend the recorded heap range and return the new end
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-17.
 - **Scope:** a new `hle_end_of_heap` syscall service (`ee_hle.hpp`), the
   `heap_current_end`/`end_of_heap_*` observation fields (`ee_state.hpp`, with

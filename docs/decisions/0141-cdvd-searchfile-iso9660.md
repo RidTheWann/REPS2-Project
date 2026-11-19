@@ -1,6 +1,6 @@
 # ADR 0141: Serve CDVD SearchFile from the host ISO 9660 metadata
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** CDVD HLE SearchFile handler plus a new bounded ISO 9660 reader
   (`runtime/include/reps2/runtime/iso9660.hpp`). Runtime ABI 8 -> 9 (six

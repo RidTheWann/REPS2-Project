@@ -1,6 +1,6 @@
 # ADR 0143: Register the remaining multitap RPC servers (0x80000902, 0x80000903)
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** EE SIF RPC server table (`ee_hle.hpp`), two sids: 0x80000902
   (`MTAPSERV_PORT_CLOSE`) and 0x80000903 (`MTAPSERV_GET_CONNECTION`). No state

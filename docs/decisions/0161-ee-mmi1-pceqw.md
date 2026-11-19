@@ -1,6 +1,6 @@
 # ADR 0161: Decode, lift and AOT-lower R5900 MMI1 PCEQW
 
-- **Status:** Proposed (validated locally; no real-title probe).
+- **Status:** Accepted (validated locally; no real-title probe).
 - **Date:** 2026-11-17.
 - **Scope:** R5900 MMI decoder (`rust/frontend/src/mips.rs`), typed IR
   (`rust/frontend/src/ir.rs`), C++ AOT lowering (`rust/frontend/src/codegen.rs`),

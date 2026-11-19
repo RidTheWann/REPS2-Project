@@ -1,6 +1,6 @@
 # ADR 0139: Serve the loadfile version query (`LF_F_GET_VERSION`, 0xFF)
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-15.
 - **Scope:** SIF loadfile server handler (`ee_hle.hpp`, `ee_state.hpp`), one
   function: 0xFF. Runtime ABI 6 -> 7 (three observation fields added to

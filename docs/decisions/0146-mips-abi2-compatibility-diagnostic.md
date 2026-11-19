@@ -1,6 +1,6 @@
 # ADR 0146: Classify the alternate MIPS n32 ABI for PS2 compatibility
 
-- **Status:** Proposed
+- **Status:** Accepted.
 - **Date:** 2026-11-15
 - **Scope:** MIPS ELF `e_flags` compatibility diagnostics
 

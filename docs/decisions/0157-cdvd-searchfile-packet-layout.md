@@ -1,6 +1,6 @@
 # ADR 0157: Parse the retail cdvd SearchFile packet layout (300-byte request, name at offset 36)
 
-- **Status:** Proposed (validated locally; real-title probe recorded below).
+- **Status:** Accepted (validated locally; real-title probe recorded below).
 - **Date:** 2026-11-17.
 - **Scope:** `serve_ee_cdvd_searchfile_call` in `runtime/include/reps2/runtime/ee_hle.hpp`
   selects the name field offset from the observed send size (>= 300 -> 36, else
