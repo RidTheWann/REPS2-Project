@@ -1725,13 +1725,15 @@ limit, root set or relocated region is a different frontier.
 - **Derived progression:** serving IOP FILEIO handshake `fno 255` with word 0
   `0x30303732` (`"2700"`) and word 1 `2` (ADR 0167) satisfies `sceFileioInit`,
   which verifies the reply and sets initialization flags `0x002821EC = 1` and
-  `0x002821F0 = 1`. Execution progresses into GS display environment setup
-  (`0x0020B9B8` -> `0x002436EC` -> `0x002435D0`), which calls
-  `sceOpen("rom0:ROMVER", SCE_RDONLY)` (`fno 0`, send 1048, recv 4). The title
-  allocates semaphore 12 (`CreateSema`) and waits on it via `WaitSema(12)` at
-  `0x0025D130` (`$a0=12`, `$ra=0x0025D138`).
-- **Fail-closed boundary:** FILEIO `fno 0` (`sceOpen`) is unmodelled and refused,
-  leaving the caller parked at `WaitSema(12)`.
+  `0x002821F0 = 1`. Execution progresses into engine asset loading initialization,
+  which calls `sceOpen("cdrom0:\\SKAT\\DHSKAT.SKX;1", SCE_RDONLY)` (`fno 0`, send 1048, recv 4).
+  Direct inspection of the request buffer at `0x00763580` confirmed `flags = 1` at
+  offset 12 and `"cdrom0:\\SKAT\\DHSKAT.SKX;1"` at offset 20. The title allocates
+  semaphore 12 (`CreateSema`) and waits on it via `WaitSema(12)` at `0x0025D130`
+  (`$a0=12`, `$ra=0x0025D138`).
+- **Fail-closed boundary:** FILEIO `fno 0` (`sceOpen`) was unmodelled and refused,
+  leaving the caller parked at `WaitSema(12)`. ADR 0168 models disc file open,
+  read, lseek, and close via `state.media` and `iso_resolve_path`.
 
 
 ### Black (USA) — relocated copied code, ABI 19

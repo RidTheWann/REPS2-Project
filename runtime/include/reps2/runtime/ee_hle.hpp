@@ -2103,6 +2103,47 @@ inline constexpr std::uint32_t kEeFileioInitRequestBytes = 8U;
 inline constexpr std::uint32_t kEeFileioInitReplyBytes = 8U;
 inline constexpr std::uint32_t kEeFileioVersionWord2700 = 0x3030'3732U; // ASCII "2700" (IOPRP 2.7.0)
 inline constexpr std::uint32_t kEeFileioInterfaceVersion = 2U;
+
+// FILEIO function numbers (ps2sdk `fileio-common.h` _fio_functions enum).
+inline constexpr std::uint32_t kEeFileioFnoOpen = 0U;   // FIO_F_OPEN
+inline constexpr std::uint32_t kEeFileioFnoClose = 1U;  // FIO_F_CLOSE
+inline constexpr std::uint32_t kEeFileioFnoRead = 2U;   // FIO_F_READ
+inline constexpr std::uint32_t kEeFileioFnoLseek = 3U;  // FIO_F_LSEEK
+
+// Sony's `libfileio` open request layout (observed, Downhill Domination USA):
+//   offset  0: s32 sema_id      — the completion semaphore
+//   offset 12: s32 flags        — open flags (SCE_RDONLY = 1)
+//   offset 16: s32 mode         — file creation mode (unused for RDONLY)
+//   offset 20: char name[1028]  — NUL-terminated filename
+// Total: 1048 bytes (send_size observed).
+inline constexpr std::uint32_t kEeFileioOpenNameOffset = 20U;
+inline constexpr std::uint32_t kEeFileioOpenFlagsOffset = 12U;
+
+// Sony's `libfileio` read request layout (inferred from ps2sdk _fio_read_arg
+// and the libfileio pattern):
+//   offset  0: s32 sema_id      — the completion semaphore
+//   offset 12: s32 fd           — file descriptor from sceOpen
+//   offset 16: void* ptr        — EE destination address
+//   offset 20: s32 size         — bytes to read
+//   offset 24: _fio_read_data*  — DMA transfer descriptor
+inline constexpr std::uint32_t kEeFileioReadFdOffset = 12U;
+inline constexpr std::uint32_t kEeFileioReadPtrOffset = 16U;
+inline constexpr std::uint32_t kEeFileioReadSizeOffset = 20U;
+
+// Sony's `libfileio` close request layout:
+//   offset  0: s32 sema_id
+//   offset 12: s32 fd
+inline constexpr std::uint32_t kEeFileioCloseFdOffset = 12U;
+
+// rom0:ROMVER content. Format: VVVVRTYYYYMMDD (14 bytes, ps2dev wiki).
+// V=version, R=region, T=type, YYYYMMDD=date.
+// REPS2 models a plausible US consumer console: v1.60, America, Consumer,
+// 2003/01/10. The title reads this for sceCdBootCertify whose result is
+// typically not checked. The content is 14 bytes; reads return up to that.
+inline constexpr char kEeRomVerContent[] = "0160AC20030110";
+inline constexpr std::size_t kEeRomVerContentSize = 14U; // excludes NUL
+inline constexpr std::uint8_t kEeFileioFileIdRomVer = 0U;
+inline constexpr std::uint8_t kEeFileioFileIdIso = 1U;
 // The main server's RPC function number indexes the driver's `gCommandFunc[]`
 // table (same decompilation, `iop/989snd.c`), whose slot 0 is `snd_CMD_SL_INIT`.
 // `snd_StartSoundSystemEx` sends `{&gStats, flags}` — the EE address of the
@@ -2706,6 +2747,269 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
         }
         if (store_u32(state.memory, call.recv_addr, kEeFileioVersionWord2700) != Status::ok
             || store_u32(state.memory, call.recv_addr + 4U, kEeFileioInterfaceVersion) != Status::ok) {
+            return false;
+        }
+        return true;
+    }
+
+    // ── fno 0: sceOpen ──────────────────────────────────────────────────
+    // Sony's `libfileio` sends 1048 bytes: the filename is at offset 20.
+    // The IOP `fileio_rpc_open` returns a 4-byte fd in the reply buffer.
+    // Models `rom0:ROMVER` and ISO-9660 disc files (`cdrom0:...`).
+    if (call.rpc_number == kEeFileioFnoOpen) {
+        sif.fileio_last_open_replied = false;
+        if (call.send_size < kEeFileioOpenNameOffset + 2U
+            || call.recv_addr == 0U || call.recv_size < 4U) {
+            return false;
+        }
+        // Read the filename from the request buffer at the libfileio offset.
+        char name[256]{};
+        if (!read_ascii(call.send_addr + kEeFileioOpenNameOffset, name, sizeof(name))) {
+            return false; // no readable filename
+        }
+        // Compare against known virtual files and ISO files.
+        bool is_romver = false;
+        {
+            const char* a = name;
+            const char* b = "rom0:ROMVER";
+            while (*a && *b && *a == *b) { ++a; ++b; }
+            is_romver = (*a == '\0' && *b == '\0');
+        }
+        EeIsoFileEntry iso_entry{};
+        bool is_iso = false;
+        if (!is_romver) {
+            is_iso = iso_resolve_path(state.media, name, iso_entry);
+        }
+        if (!is_romver && !is_iso) {
+            return false; // unmodelled file: no reply, caller stays blocked
+        }
+        // Allocate an HLE file descriptor.
+        std::int32_t fd = -1;
+        for (std::size_t i = 0; i < EeSifCmdState::kFileioMaxFds; ++i) {
+            if (!sif.fileio_fds[i].in_use) {
+                sif.fileio_fds[i].in_use = true;
+                sif.fileio_fds[i].read_offset = 0U;
+                if (is_romver) {
+                    sif.fileio_fds[i].file_id = kEeFileioFileIdRomVer;
+                    sif.fileio_fds[i].lsn = 0U;
+                    sif.fileio_fds[i].file_size = static_cast<std::uint32_t>(kEeRomVerContentSize);
+                } else {
+                    sif.fileio_fds[i].file_id = kEeFileioFileIdIso;
+                    sif.fileio_fds[i].lsn = iso_entry.lsn;
+                    sif.fileio_fds[i].file_size = iso_entry.size;
+                }
+                fd = static_cast<std::int32_t>(i);
+                break;
+            }
+        }
+        if (fd < 0) {
+            // No free slot: write -1 (failure) to the reply.
+            if (store_u32(state.memory, call.recv_addr,
+                          static_cast<std::uint32_t>(-1)) != Status::ok) {
+                return false;
+            }
+            sif.fileio_last_fd = static_cast<std::uint32_t>(-1);
+            sif.fileio_last_open_replied = true;
+            ++sif.fileio_open_count;
+            return true;
+        }
+        if (store_u32(state.memory, call.recv_addr,
+                      static_cast<std::uint32_t>(fd)) != Status::ok) {
+            // Undo the allocation.
+            sif.fileio_fds[static_cast<std::size_t>(fd)] = {};
+            return false;
+        }
+        sif.fileio_last_fd = static_cast<std::uint32_t>(fd);
+        sif.fileio_last_open_replied = true;
+        ++sif.fileio_open_count;
+        return true;
+    }
+
+    // ── fno 1: sceClose ─────────────────────────────────────────────────
+    // Sony's `libfileio` close request carries the fd at offset 12.
+    // The IOP `fileio_rpc_close` returns a 4-byte result (0 on success).
+    if (call.rpc_number == kEeFileioFnoClose) {
+        sif.fileio_last_close_replied = false;
+        if (call.send_size < kEeFileioCloseFdOffset + 4U
+            || call.recv_addr == 0U || call.recv_size < 4U) {
+            return false;
+        }
+        std::uint32_t fd_word{};
+        if (load_u32(state.memory, call.send_addr + kEeFileioCloseFdOffset,
+                     fd_word) != Status::ok) {
+            return false;
+        }
+        const auto fd = static_cast<std::int32_t>(fd_word);
+        if (fd < 0 || static_cast<std::size_t>(fd) >= EeSifCmdState::kFileioMaxFds
+            || !sif.fileio_fds[static_cast<std::size_t>(fd)].in_use) {
+            // Invalid fd: write -1 to the reply.
+            if (store_u32(state.memory, call.recv_addr,
+                          static_cast<std::uint32_t>(-1)) != Status::ok) {
+                return false;
+            }
+            sif.fileio_last_fd = fd_word;
+            sif.fileio_last_close_replied = true;
+            ++sif.fileio_close_count;
+            return true;
+        }
+        sif.fileio_fds[static_cast<std::size_t>(fd)] = {};
+        if (store_u32(state.memory, call.recv_addr, 0U) != Status::ok) {
+            return false;
+        }
+        sif.fileio_last_fd = fd_word;
+        sif.fileio_last_close_replied = true;
+        ++sif.fileio_close_count;
+        return true;
+    }
+
+    // ── fno 2: sceRead ──────────────────────────────────────────────────
+    // Sony's `libfileio` read request carries fd at offset 12, destination
+    // pointer at offset 16, and size at offset 20. The IOP reads from the
+    // virtual file and DMA-transfers the data into the EE destination. The
+    // reply is 4 bytes = bytes actually read.
+    if (call.rpc_number == kEeFileioFnoRead) {
+        sif.fileio_last_read_replied = false;
+        if (call.send_size < kEeFileioReadSizeOffset + 4U
+            || call.recv_addr == 0U || call.recv_size < 4U) {
+            return false;
+        }
+        std::uint32_t fd_word{}, ptr{}, size{};
+        if (load_u32(state.memory, call.send_addr + kEeFileioReadFdOffset,
+                     fd_word) != Status::ok
+            || load_u32(state.memory, call.send_addr + kEeFileioReadPtrOffset,
+                        ptr) != Status::ok
+            || load_u32(state.memory, call.send_addr + kEeFileioReadSizeOffset,
+                        size) != Status::ok) {
+            return false;
+        }
+        const auto fd = static_cast<std::int32_t>(fd_word);
+        if (fd < 0 || static_cast<std::size_t>(fd) >= EeSifCmdState::kFileioMaxFds
+            || !sif.fileio_fds[static_cast<std::size_t>(fd)].in_use) {
+            // Invalid fd: write -1 to the reply.
+            if (store_u32(state.memory, call.recv_addr,
+                          static_cast<std::uint32_t>(-1)) != Status::ok) {
+                return false;
+            }
+            sif.fileio_last_fd = fd_word;
+            sif.fileio_last_read_replied = true;
+            ++sif.fileio_read_count;
+            return true;
+        }
+        auto& slot = sif.fileio_fds[static_cast<std::size_t>(fd)];
+        std::uint32_t bytes_transferred = 0U;
+
+        if (slot.file_id == kEeFileioFileIdRomVer) {
+            const char* content = kEeRomVerContent;
+            const std::size_t content_size = kEeRomVerContentSize;
+            std::uint32_t available = 0U;
+            if (slot.read_offset < content_size) {
+                available = static_cast<std::uint32_t>(content_size - slot.read_offset);
+            }
+            const std::uint32_t to_read = size < available ? size : available;
+            if (to_read > 0U && ptr != 0U) {
+                for (std::uint32_t i = 0U; i < to_read; ++i) {
+                    const auto byte = static_cast<std::uint8_t>(content[slot.read_offset + i]);
+                    if (store_u8(state.memory, ptr + i, byte) != Status::ok) {
+                        return false;
+                    }
+                }
+                slot.read_offset += to_read;
+            }
+            bytes_transferred = to_read;
+        } else if (slot.file_id == kEeFileioFileIdIso) {
+            if (!state.media.present()) {
+                return false;
+            }
+            std::uint32_t available = 0U;
+            if (slot.read_offset < slot.file_size) {
+                available = slot.file_size - slot.read_offset;
+            }
+            const std::uint32_t to_read = size < available ? size : available;
+            if (to_read > 0U && ptr != 0U) {
+                std::uint32_t read_done = 0U;
+                while (read_done < to_read) {
+                    const std::uint32_t current_pos = slot.read_offset + read_done;
+                    const std::uint32_t sector_lbn = slot.lsn + (current_pos / kEeIsoSectorSize);
+                    const std::uint32_t sector_offset = current_pos % kEeIsoSectorSize;
+                    const std::uint32_t chunk = std::min(to_read - read_done, kEeIsoSectorSize - sector_offset);
+
+                    std::uint8_t sector_buf[kEeIsoSectorSize]{};
+                    if (!state.media.read(sector_lbn, 1U, sector_buf)) {
+                        return false;
+                    }
+                    for (std::uint32_t i = 0U; i < chunk; ++i) {
+                        if (store_u8(state.memory, ptr + read_done + i, sector_buf[sector_offset + i]) != Status::ok) {
+                            return false;
+                        }
+                    }
+                    read_done += chunk;
+                }
+                slot.read_offset += to_read;
+            }
+            bytes_transferred = to_read;
+        } else {
+            return false;
+        }
+
+        // Write bytes-read to the reply buffer.
+        if (store_u32(state.memory, call.recv_addr, bytes_transferred) != Status::ok) {
+            return false;
+        }
+        sif.fileio_last_fd = fd_word;
+        sif.fileio_last_read_replied = true;
+        ++sif.fileio_read_count;
+        return true;
+    }
+
+    // ── fno 3: sceLseek ─────────────────────────────────────────────────
+    // Sony's `libfileio` lseek request carries fd at offset 12, offset at
+    // offset 16, and whence at offset 20 (0=SET, 1=CUR, 2=END).
+    // The reply is 4 bytes = new file offset.
+    if (call.rpc_number == kEeFileioFnoLseek) {
+        if (call.send_size < 24U || call.recv_addr == 0U || call.recv_size < 4U) {
+            return false;
+        }
+        std::uint32_t fd_word{}, seek_offset_raw{}, whence_raw{};
+        if (load_u32(state.memory, call.send_addr + 12U, fd_word) != Status::ok
+            || load_u32(state.memory, call.send_addr + 16U, seek_offset_raw) != Status::ok
+            || load_u32(state.memory, call.send_addr + 20U, whence_raw) != Status::ok) {
+            return false;
+        }
+        const auto fd = static_cast<std::int32_t>(fd_word);
+        if (fd < 0 || static_cast<std::size_t>(fd) >= EeSifCmdState::kFileioMaxFds
+            || !sif.fileio_fds[static_cast<std::size_t>(fd)].in_use) {
+            if (store_u32(state.memory, call.recv_addr, static_cast<std::uint32_t>(-1)) != Status::ok) {
+                return false;
+            }
+            return true;
+        }
+        auto& slot = sif.fileio_fds[static_cast<std::size_t>(fd)];
+        const auto seek_offset = static_cast<std::int32_t>(seek_offset_raw);
+        std::int64_t new_pos = 0;
+        switch (whence_raw) {
+        case 0: // SEEK_SET
+            new_pos = seek_offset;
+            break;
+        case 1: // SEEK_CUR
+            new_pos = static_cast<std::int64_t>(slot.read_offset) + seek_offset;
+            break;
+        case 2: // SEEK_END
+            new_pos = static_cast<std::int64_t>(slot.file_size) + seek_offset;
+            break;
+        default:
+            if (store_u32(state.memory, call.recv_addr, static_cast<std::uint32_t>(-1)) != Status::ok) {
+                return false;
+            }
+            return true;
+        }
+        if (new_pos < 0 || new_pos > static_cast<std::int64_t>(slot.file_size)) {
+            if (store_u32(state.memory, call.recv_addr, static_cast<std::uint32_t>(-1)) != Status::ok) {
+                return false;
+            }
+            return true;
+        }
+        slot.read_offset = static_cast<std::uint32_t>(new_pos);
+        if (store_u32(state.memory, call.recv_addr, slot.read_offset) != Status::ok) {
             return false;
         }
         return true;

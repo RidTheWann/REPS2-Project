@@ -4040,8 +4040,8 @@ int test_fileio_unmodelled_functions_are_refused() {
     state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
     make_rpc_call_semaphore(state);
 
-    // Function 0 (open) is unmodelled: recorded and refused.
-    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 0U, 8U, 8U);
+    // Function 3 (lseek) is unmodelled: recorded and refused.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 3U, 8U, 8U);
     const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 8, 0U};
     if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
         return 1011;
@@ -4049,7 +4049,255 @@ int test_fileio_unmodelled_functions_are_refused() {
     auto& sif = state.hle.sif_cmd;
     if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 1012;
     if (state.hle.semaphores[3].count != 0) return 1013;
-    if (sif.fileio_call_count != 1U || sif.fileio_last_number != 0U) return 1014;
+    if (sif.fileio_call_count != 1U || sif.fileio_last_number != 3U) return 1014;
+
+    return 0;
+}
+
+// FILEIO sceOpen/sceRead/sceClose lifecycle for rom0:ROMVER (ADR 0168).
+// The Sony `libfileio` sends 1048-byte open requests (name at offset 20) and
+// expects a 4-byte fd reply. Read returns the bytes transferred into the
+// reply and writes content directly to the destination address. Close releases
+// the fd. This exercises the full lifecycle the title performs during
+// sceCdBootCertify.
+int test_fileio_open_read_close_romver() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Large payload buffer placed above kRpcReply (0x1C00) so the 1048-byte
+    // request does not clobber kRpcClient at 0x1000.
+    constexpr std::uint32_t kLargePayload = 0x3000U;
+    constexpr std::uint32_t kOpenPayloadSize = 1048U;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 0U,
+                           kOpenPayloadSize, 4U);
+    // Clear the payload area.
+    for (std::uint32_t i = 0; i < kOpenPayloadSize; ++i) {
+        ram[kLargePayload + i] = 0U;
+    }
+    // Flags (SCE_RDONLY = 1) at offset 12.
+    store_word(ram, kLargePayload + 12U, 1U);
+    // Filename "rom0:ROMVER" at offset 20.
+    constexpr const char* kRomVerName = "rom0:ROMVER";
+    for (std::size_t j = 0; kRomVerName[j] != '\0'; ++j) {
+        ram[kLargePayload + 20U + static_cast<std::uint32_t>(j)] =
+            static_cast<std::uint8_t>(kRomVerName[j]);
+    }
+
+    const reps2::runtime::SifDmaTransfer open_payload{
+        kLargePayload, 0U, static_cast<int>(kOpenPayloadSize), 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &open_payload)
+        != Status::ok) {
+        return 1100;
+    }
+    auto& sif = state.hle.sif_cmd;
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies == 0U) return 1101;
+    if (state.hle.semaphores[3].count != 1) return 1102;
+    if (!sif.fileio_last_open_replied) return 1103;
+    if (sif.fileio_open_count != 1U) return 1104;
+    // The reply buffer should contain the fd (0).
+    const auto fd = load_word(ram, kRpcReply);
+    if (fd != 0U) return 1105;
+    if (sif.fileio_last_fd != 0U) return 1106;
+
+    // ---- sceRead(fd, dest, 16) ----
+    // Reset semaphore for next call.
+    state.hle.semaphores[3].count = 0;
+    constexpr std::uint32_t kReadDest = 0x5000U;
+    constexpr std::uint32_t kReadSize = 16U;
+    constexpr std::uint32_t kReadPayloadSize = 24U;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 2U,
+                           kReadPayloadSize, 4U);
+    store_word(ram, kRpcPayload + 12U, fd);        // fd
+    store_word(ram, kRpcPayload + 16U, kReadDest); // ptr
+    store_word(ram, kRpcPayload + 20U, kReadSize); // size
+
+    const reps2::runtime::SifDmaTransfer read_payload{
+        kRpcPayload, 0U, static_cast<int>(kReadPayloadSize), 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &read_payload)
+        != Status::ok) {
+        return 1110;
+    }
+    if (!sif.last_rpc_call_replied) return 1111;
+    if (state.hle.semaphores[3].count != 1) return 1112;
+    if (!sif.fileio_last_read_replied) return 1113;
+    if (sif.fileio_read_count != 1U) return 1114;
+    // Reply should contain bytes actually read (14, since ROMVER is 14 bytes
+    // and the request asked for 16).
+    const auto bytes_read = load_word(ram, kRpcReply);
+    if (bytes_read != reps2::runtime::kEeRomVerContentSize) return 1115;
+    // The destination should contain the ROMVER content.
+    for (std::size_t k = 0; k < reps2::runtime::kEeRomVerContentSize; ++k) {
+        if (ram[kReadDest + static_cast<std::uint32_t>(k)] !=
+            static_cast<std::uint8_t>(reps2::runtime::kEeRomVerContent[k])) {
+            return 1116;
+        }
+    }
+
+    // ---- sceClose(fd) ----
+    state.hle.semaphores[3].count = 0;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 1U, 16U, 4U);
+    store_word(ram, kRpcPayload + 12U, fd); // fd
+
+    const reps2::runtime::SifDmaTransfer close_payload{
+        kRpcPayload, 0U, 16, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &close_payload)
+        != Status::ok) {
+        return 1120;
+    }
+    if (!sif.last_rpc_call_replied) return 1121;
+    if (state.hle.semaphores[3].count != 1) return 1122;
+    if (!sif.fileio_last_close_replied) return 1123;
+    if (sif.fileio_close_count != 1U) return 1124;
+    // Reply should be 0 (success).
+    if (load_word(ram, kRpcReply) != 0U) return 1125;
+    // The fd slot should be freed.
+    if (sif.fileio_fds[0].in_use) return 1126;
+
+    return 0;
+}
+
+// sceOpen for an unsupported file path is refused (no reply, caller blocked).
+int test_fileio_open_unknown_path_is_refused() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    constexpr std::uint32_t kLargePayload = 0x3000U;
+    constexpr std::uint32_t kOpenPayloadSize = 1048U;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 0U,
+                           kOpenPayloadSize, 4U);
+    for (std::uint32_t i = 0; i < kOpenPayloadSize; ++i) ram[kLargePayload + i] = 0;
+    store_word(ram, kLargePayload + 12U, 1U);
+    constexpr const char* kUnknown = "cdrom0:\\SYSTEM.CNF";
+    for (std::size_t j = 0; kUnknown[j] != '\0'; ++j) {
+        ram[kLargePayload + 20U + static_cast<std::uint32_t>(j)] =
+            static_cast<std::uint8_t>(kUnknown[j]);
+    }
+    const reps2::runtime::SifDmaTransfer payload{
+        kLargePayload, 0U, static_cast<int>(kOpenPayloadSize), 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload)
+        != Status::ok) {
+        return 1130;
+    }
+    auto& sif = state.hle.sif_cmd;
+    // Refused: no reply, no semaphore signal.
+    if (sif.last_rpc_call_replied) return 1131;
+    if (state.hle.semaphores[3].count != 0) return 1132;
+    if (sif.fileio_open_count != 0U) return 1133;
+    return 0;
+}
+
+// sceRead on an invalid fd returns -1.
+int test_fileio_read_invalid_fd_returns_error() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 2U, 24U, 4U);
+    store_word(ram, kRpcPayload + 12U, 99U);     // invalid fd
+    store_word(ram, kRpcPayload + 16U, 0x5000U); // ptr
+    store_word(ram, kRpcPayload + 20U, 16U);     // size
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload)
+        != Status::ok) {
+        return 1140;
+    }
+    auto& sif = state.hle.sif_cmd;
+    if (!sif.last_rpc_call_replied) return 1141;
+    if (sif.fileio_read_count != 1U) return 1142;
+    // Reply = 0xFFFFFFFF (-1).
+    if (load_word(ram, kRpcReply) != 0xFFFFFFFFU) return 1143;
+    return 0;
+}
+
+// sceClose on an invalid fd returns -1.
+int test_fileio_close_invalid_fd_returns_error() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 1U, 16U, 4U);
+    store_word(ram, kRpcPayload + 12U, 99U); // invalid fd
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 16, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload)
+        != Status::ok) {
+        return 1150;
+    }
+    auto& sif = state.hle.sif_cmd;
+    if (!sif.last_rpc_call_replied) return 1151;
+    if (sif.fileio_close_count != 1U) return 1152;
+    if (load_word(ram, kRpcReply) != 0xFFFFFFFFU) return 1153;
+    return 0;
+}
+
+// A second read after the full content has been consumed returns 0 bytes.
+int test_fileio_read_past_eof_returns_zero() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Open rom0:ROMVER using large payload buffer.
+    constexpr std::uint32_t kLargePayload = 0x3000U;
+    constexpr std::uint32_t kOpenPayloadSize = 1048U;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 0U,
+                           kOpenPayloadSize, 4U);
+    for (std::uint32_t i = 0; i < kOpenPayloadSize; ++i) ram[kLargePayload + i] = 0;
+    store_word(ram, kLargePayload + 12U, 1U);
+    constexpr const char* kName = "rom0:ROMVER";
+    for (std::size_t j = 0; kName[j] != '\0'; ++j) {
+        ram[kLargePayload + 20U + static_cast<std::uint32_t>(j)] =
+            static_cast<std::uint8_t>(kName[j]);
+    }
+    const reps2::runtime::SifDmaTransfer open_payload{
+        kLargePayload, 0U, static_cast<int>(kOpenPayloadSize), 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &open_payload)
+        != Status::ok) {
+        return 1160;
+    }
+    if (!state.hle.sif_cmd.last_rpc_call_replied) return 1161;
+    const auto fd = load_word(ram, kRpcReply);
+
+    // First read: consume all 14 bytes.
+    state.hle.semaphores[3].count = 0;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 2U, 24U, 4U);
+    store_word(ram, kRpcPayload + 12U, fd);
+    store_word(ram, kRpcPayload + 16U, 0x5000U);
+    store_word(ram, kRpcPayload + 20U, 64U); // request more than available
+    const reps2::runtime::SifDmaTransfer read1{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &read1)
+        != Status::ok) {
+        return 1162;
+    }
+    if (load_word(ram, kRpcReply) != reps2::runtime::kEeRomVerContentSize) return 1163;
+
+    // Second read: at EOF, should return 0.
+    state.hle.semaphores[3].count = 0;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 2U, 24U, 4U);
+    store_word(ram, kRpcPayload + 12U, fd);
+    store_word(ram, kRpcPayload + 16U, 0x5000U);
+    store_word(ram, kRpcPayload + 20U, 16U);
+    const reps2::runtime::SifDmaTransfer read2{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &read2)
+        != Status::ok) {
+        return 1164;
+    }
+    if (load_word(ram, kRpcReply) != 0U) return 1165;
 
     return 0;
 }
@@ -4289,6 +4537,95 @@ int test_searchfile_reports_a_missing_file() {
     if (load_word(ram, kRpcReply) != 0U) return 8442;                 // result word: not found
     if (load_word(ram, 0x3000U) != 0xA5A5'A5A5U) return 8443;         // no structure written
     if (!sif.last_rpc_call_replied) return 8444;                      // the RPC still completes
+    return 0;
+}
+
+// FILEIO open, read, lseek, close for an ISO-9660 disc file (ADR 0168).
+int test_fileio_open_read_lseek_close_iso_file() {
+    iso_build_test_image();
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.media = reps2::runtime::HostMediaSource{nullptr, &iso_media_read};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // 1. Open "cdrom0:\FILE.EXT;1"
+    constexpr std::uint32_t kLargePayload = 0x3000U;
+    constexpr std::uint32_t kOpenPayloadSize = 1048U;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 0U,
+                           kOpenPayloadSize, 4U);
+    for (std::uint32_t i = 0; i < kOpenPayloadSize; ++i) ram[kLargePayload + i] = 0;
+    store_word(ram, kLargePayload + 12U, 1U); // flags = RDONLY
+    constexpr const char* kPath = "cdrom0:\\FILE.EXT;1";
+    for (std::size_t j = 0; kPath[j] != '\0'; ++j) {
+        ram[kLargePayload + 20U + static_cast<std::uint32_t>(j)] =
+            static_cast<std::uint8_t>(kPath[j]);
+    }
+    const reps2::runtime::SifDmaTransfer open_payload{
+        kLargePayload, 0U, static_cast<int>(kOpenPayloadSize), 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &open_payload) != Status::ok) {
+        return 1170;
+    }
+    if (!state.hle.sif_cmd.last_rpc_call_replied) return 1171;
+    const auto fd = load_word(ram, kRpcReply);
+    if (fd != 0U) return 1172;
+
+    // 2. Read first 16 bytes: sceRead(fd, 0x5000, 16)
+    state.hle.semaphores[3].count = 0;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 2U, 24U, 4U);
+    store_word(ram, kRpcPayload + 12U, fd);
+    store_word(ram, kRpcPayload + 16U, 0x5000U);
+    store_word(ram, kRpcPayload + 20U, 16U);
+    const reps2::runtime::SifDmaTransfer read1{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &read1) != Status::ok) {
+        return 1173;
+    }
+    if (load_word(ram, kRpcReply) != 16U) return 1174;
+    const std::uint8_t* const expected = g_iso_image.data() + kIsoFileLba * 2048U;
+    for (std::uint32_t i = 0; i < 16U; ++i) {
+        if (ram[0x5000U + i] != expected[i]) return 1175;
+    }
+
+    // 3. Lseek to offset 4: sceLseek(fd, 4, SEEK_SET)
+    state.hle.semaphores[3].count = 0;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 3U, 24U, 4U);
+    store_word(ram, kRpcPayload + 12U, fd);
+    store_word(ram, kRpcPayload + 16U, 4U); // offset 4
+    store_word(ram, kRpcPayload + 20U, 0U); // SEEK_SET
+    const reps2::runtime::SifDmaTransfer lseek1{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &lseek1) != Status::ok) {
+        return 1176;
+    }
+    if (load_word(ram, kRpcReply) != 4U) return 1177;
+
+    // 4. Read 8 bytes from offset 4: sceRead(fd, 0x5000, 8)
+    state.hle.semaphores[3].count = 0;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 2U, 24U, 4U);
+    store_word(ram, kRpcPayload + 12U, fd);
+    store_word(ram, kRpcPayload + 16U, 0x5000U);
+    store_word(ram, kRpcPayload + 20U, 8U);
+    const reps2::runtime::SifDmaTransfer read2{kRpcPayload, 0U, 24, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &read2) != Status::ok) {
+        return 1178;
+    }
+    if (load_word(ram, kRpcReply) != 8U) return 1179;
+    for (std::uint32_t i = 0; i < 8U; ++i) {
+        if (ram[0x5000U + i] != expected[4U + i]) return 1180;
+    }
+
+    // 5. Close: sceClose(fd)
+    state.hle.semaphores[3].count = 0;
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 1U, 16U, 4U);
+    store_word(ram, kRpcPayload + 12U, fd);
+    const reps2::runtime::SifDmaTransfer close_payload{kRpcPayload, 0U, 16, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &close_payload) != Status::ok) {
+        return 1181;
+    }
+    if (load_word(ram, kRpcReply) != 0U) return 1182;
+    if (state.hle.sif_cmd.fileio_fds[0].in_use) return 1183;
+
     return 0;
 }
 
@@ -6028,6 +6365,18 @@ int main() {
          &test_fileio_init_refuses_malformed_requests},
         {"fileio unmodelled functions are refused",
          &test_fileio_unmodelled_functions_are_refused},
+        {"fileio open/read/close rom0:ROMVER lifecycle",
+         &test_fileio_open_read_close_romver},
+        {"fileio open unknown path is refused",
+         &test_fileio_open_unknown_path_is_refused},
+        {"fileio read invalid fd returns error",
+         &test_fileio_read_invalid_fd_returns_error},
+        {"fileio close invalid fd returns error",
+         &test_fileio_close_invalid_fd_returns_error},
+        {"fileio read past eof returns zero",
+         &test_fileio_read_past_eof_returns_zero},
+        {"fileio open/read/lseek/close iso file lifecycle",
+         &test_fileio_open_read_lseek_close_iso_file},
         {"boot environment registers the diskready servers",
          &test_boot_environment_registers_the_diskready_servers},
         {"cdvd diskready answers complete with media",

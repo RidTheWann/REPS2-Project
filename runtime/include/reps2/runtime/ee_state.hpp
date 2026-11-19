@@ -883,6 +883,27 @@ struct EeSifCmdState {
     bool fileio_last_name_present{};
     char fileio_last_name[64]{}; // NUL-terminated ASCII resolved through the request, bounded
 
+    // HLE virtual file descriptor table for FILEIO file operations (fno 0..2).
+    // Each entry represents an open virtual file (e.g., rom0:ROMVER). The table
+    // is bounded: the guest sees at most kEeFileioMaxFds open files. The fd
+    // returned to the guest is the table index. ADR 0168.
+    static constexpr std::size_t kFileioMaxFds = 4U;
+    struct FileioFd {
+        bool in_use{};
+        std::uint32_t read_offset{}; // current read position in the file
+        std::uint32_t lsn{};         // LSN on disc (0 for rom0: files)
+        std::uint32_t file_size{};   // file size in bytes
+        std::uint8_t file_id{};      // 0 = rom0:ROMVER, 1 = ISO-9660 disc file
+    };
+    FileioFd fileio_fds[kFileioMaxFds]{};
+    std::uint32_t fileio_open_count{};
+    std::uint32_t fileio_close_count{};
+    std::uint32_t fileio_read_count{};
+    std::uint32_t fileio_last_fd{};
+    bool fileio_last_open_replied{};
+    bool fileio_last_close_replied{};
+    bool fileio_last_read_replied{};
+
     // CdSCmd (sid 0x80000593) S-command service. Only CD_SCMD_MMODE (0x22) is
     // modelled: the IOP stores the requested media mode and answers m_retres = 1
     // (ps2sdk iop/cdvd/cdvdman sceCdMmode). Every other S-command is refused, so
