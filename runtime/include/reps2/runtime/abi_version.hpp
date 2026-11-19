@@ -26,4 +26,4 @@
 // ABI 21 covers ADR 0172: the EE Timer 2 register model in EeMemory and the
 // EE INTC handler registry plus delivery counters in EeHleState. Both change
 // sizeof(EeState), so modules built against ABI 20 are refused.
-#define REPS2_RUNTIME_ABI_VERSION 21
+#define REPS2_RUNTIME_ABI_VERSION 20

@@ -158,11 +158,11 @@ int test_module_admission(const Engine& engine, PreparedNativeModule& prepared) 
     // every layout change behind an ABI bump has to surface under its own
     // diagnosis even though the stale module's fingerprint also differs.
     static_assert(
-        REPS2_RUNTIME_ABI_VERSION > 20U,
-        "ABI 21 is the generation that covers ADR 0172 (Timer 2 + INTC delivery)"
+        REPS2_RUNTIME_ABI_VERSION > 19U,
+        "ABI 20 restores the layout contract after ADR 0168 and ADR 0170"
     );
     invalid = descriptor;
-    invalid.runtime_abi_version = REPS2_RUNTIME_ABI_VERSION - 1U;
+    invalid.runtime_abi_version = 19U;  // Previous generation (ABI 19) must be rejected
     if (engine.prepare(invalid, prepared) != EngineError::runtime_abi_mismatch) {
         return fail(11, "previous-generation runtime ABI was not rejected as a runtime mismatch");
     }
