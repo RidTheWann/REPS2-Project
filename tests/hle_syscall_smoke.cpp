@@ -3936,14 +3936,13 @@ int test_cdvd_scmd_mmode_refuses_a_malformed_request() {
     return 0;
 }
 
-// FILEIO (sid 0x80000001) refuses every function. `sceFileioInit` binds the
-// server and then issues an unmodelled initialisation call (fno 255) whose
-// 8-byte request carries two pointers; refusing it without an RPC_END leaves the
-// caller blocked at `WaitSema`. The bounded observation fields must record the
-// request even when refused, and resolve a pathname only when one is actually
-// present (the retail call passes zeroed work buffers, so no name there). ADR
-// 0163.
-int test_fileio_init_call_is_observed_and_refused() {
+// IOP FILEIO (sid 0x80000001, ADR 0167). `sceFileioInit` binds the server and
+// issues an initialisation call (fno 255) whose 8-byte request carries two work
+// buffer pointers. The served reply delivers 8 bytes: word 0 is the IOP module
+// version ("2700" = 0x30303732 from IOPRP 2.7.0) and word 1 is the interface
+// version (2). Bounded observation fields record the request head and any
+// resolved path. Malformed requests and all other fnos remain fail-closed.
+int test_fileio_init_handshake_is_served_with_version_and_flags() {
     SifWindow ram{};
     EeState state{};
     state.memory.main_ram = ram;
@@ -3968,38 +3967,90 @@ int test_fileio_init_call_is_observed_and_refused() {
     }
 
     auto& sif = state.hle.sif_cmd;
-    // Refused: no reply payload, no RPC_END, the caller's semaphore stays 0.
-    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 992;
-    if (state.hle.semaphores[3].count != 0) return 993;
+    // Served: reply payload written, RPC_END sent, caller's semaphore signaled.
+    if (!sif.last_rpc_call_replied || sif.rpc_call_replies != 1U) return 992;
+    if (state.hle.semaphores[3].count != 1) return 993;
+    if (load_word(ram, kRpcReply) != reps2::runtime::kEeFileioVersionWord2700) return 994;
+    if (load_word(ram, kRpcReply + 4U) != reps2::runtime::kEeFileioInterfaceVersion) return 995;
+
     // Bounded observation records the request head and the resolved pathname.
-    if (sif.fileio_call_count != 1U || sif.fileio_last_number != 255U) return 994;
-    if (sif.fileio_last_send_size != 8U || sif.fileio_last_recv_size != 8U) return 995;
+    if (sif.fileio_call_count != 1U || sif.fileio_last_number != 255U) return 996;
+    if (sif.fileio_last_send_size != 8U || sif.fileio_last_recv_size != 8U) return 997;
     if (sif.fileio_last_send_addr != kRpcPayload || sif.fileio_last_recv_addr != kRpcReply) {
-        return 996;
+        return 998;
     }
     if (sif.fileio_last_request_head[0] != kNameBuf
         || sif.fileio_last_request_head[1] != kSecondBuf) {
-        return 997;
+        return 999;
     }
     if (!sif.fileio_last_name_present
         || std::string_view(sif.fileio_last_name) != kPath) {
-        return 998;
+        return 1000;
     }
 
-    // The retail call carries two zeroed work buffers: the head is still
-    // recorded but no name is invented, and the name from the prior call is
-    // cleared rather than left stale.
+    // Retail call carries two zeroed work buffers: head recorded, name cleared.
     store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 255U, 8U, 8U);
     store_word(ram, kRpcPayload + 0x00U, 0U);
     store_word(ram, kRpcPayload + 0x04U, 0U);
     if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
-        return 999;
-    }
-    if (sif.fileio_call_count != 2U) return 1000;
-    if (sif.fileio_last_request_head[0] != 0U || sif.fileio_last_request_head[1] != 0U) {
         return 1001;
     }
-    if (sif.fileio_last_name_present || sif.fileio_last_name[0] != '\0') return 1002;
+    if (sif.fileio_call_count != 2U) return 1002;
+    if (sif.fileio_last_request_head[0] != 0U || sif.fileio_last_request_head[1] != 0U) {
+        return 1003;
+    }
+    if (sif.fileio_last_name_present || sif.fileio_last_name[0] != '\0') return 1004;
+    return 0;
+}
+
+int test_fileio_init_refuses_malformed_requests() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Short send_size (4 < 8): refused.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 255U, 4U, 8U);
+    const reps2::runtime::SifDmaTransfer short_send{kRpcPayload, 0U, 4, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &short_send) != Status::ok) {
+        return 1005;
+    }
+    if (state.hle.sif_cmd.last_rpc_call_replied || state.hle.sif_cmd.rpc_call_replies != 0U) return 1006;
+    if (state.hle.semaphores[3].count != 0) return 1007;
+
+    // Short recv_size (4 < 8): refused.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 255U, 8U, 4U);
+    const reps2::runtime::SifDmaTransfer short_recv{kRpcPayload, 0U, 8, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &short_recv) != Status::ok) {
+        return 1008;
+    }
+    if (state.hle.sif_cmd.last_rpc_call_replied || state.hle.sif_cmd.rpc_call_replies != 0U) return 1009;
+    if (state.hle.semaphores[3].count != 0) return 1010;
+
+    return 0;
+}
+
+int test_fileio_unmodelled_functions_are_refused() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // Function 0 (open) is unmodelled: recorded and refused.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerFileIo, 0U, 8U, 8U);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 8, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1011;
+    }
+    auto& sif = state.hle.sif_cmd;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 1012;
+    if (state.hle.semaphores[3].count != 0) return 1013;
+    if (sif.fileio_call_count != 1U || sif.fileio_last_number != 0U) return 1014;
+
     return 0;
 }
 
@@ -5971,8 +6022,12 @@ int main() {
          &test_cdvd_scmd_mmode_records_the_media_mode_and_replies_one},
         {"cdvd scmd mmode refuses a malformed request",
          &test_cdvd_scmd_mmode_refuses_a_malformed_request},
-        {"fileio init call is observed and refused",
-         &test_fileio_init_call_is_observed_and_refused},
+        {"fileio init handshake is served with version and flags",
+         &test_fileio_init_handshake_is_served_with_version_and_flags},
+        {"fileio init refuses malformed requests",
+         &test_fileio_init_refuses_malformed_requests},
+        {"fileio unmodelled functions are refused",
+         &test_fileio_unmodelled_functions_are_refused},
         {"boot environment registers the diskready servers",
          &test_boot_environment_registers_the_diskready_servers},
         {"cdvd diskready answers complete with media",

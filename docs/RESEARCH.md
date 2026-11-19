@@ -1530,7 +1530,26 @@ Update (ADR 0134, 2026-11-14): `T3_COUNT` (`0x10001800`) is now modelled as a 16
 - **Observed + derived (ADR 0159, 989snd SL_COMMAND_BATCH):** the batch command flush path at `0x00202478` issues RPC function 77 (`SL_COMMAND_BATCH`) on server `0x00123456` with at least 12 request bytes. Serving this call with completion handshake `{-1, 0, -1}` unblocks the caller without stalling.
 - **Observed + derived (ADR 0160, IOP FILEIO server):** `sceFileioInit` at `0x0025D790` binds to server `0x80000001` and stalls in a 10,000-iteration retry delay loop at `0x0025D820` when the server is absent (`had = 0`). Registering server `0x80000001` allows the bind to succeed immediately.
 - **Observed + derived (ADR 0163, the FILEIO init handshake `fno 255`):** with the FILEIO bind satisfied (ADR 0160) the frontier moves to `semaphore_wait_blocked` at `pc=0x0025A724` — the `WaitSema` stub `0x0025A720` (`$v1=0x44`) with `$a0=11`, `$ra=0x0025D138`. The caller is the title's own `sceSifCallRpc` helper (`0x0025CF88..0x0025D178`), reached from `0x0025D900` (`jal 0x0025CF88`) inside `sceFileioInit`, right after the bind helper call at `0x0025D84C`, so `WaitSema(11)` waits for the `RPC_END` of the call issued at `0x0025D900`. The bounded request observation (fresh probe, 2026-11-18, runtime ABI 18, `PostMerge_e3b7447/run-report5.json`) records `fileio_calls=1, fno=255, send=8, recv=8, send_addr=0x00763540, recv_addr=0x007641C0, request_head=[0x00764200,0x00764640,0,0], name_present=0, replied=0`; the run stops `guest_stopped` (`semaphore_wait_blocked`) after 4,586,235 instructions (`syscalls_seen=1221 handled=1203`, callbacks 78/78). `ps2sdk` `fileio.c` uses function numbers `0..16` (`FIO_F_OPEN=0`), so `255` is not a `ps2sdk` FILEIO request: it is the title's own (Sony `libfileio`) initialisation/handshake command `sceFileioInit` issues after the bind, whose 8-byte request carries two pointers to the library's zeroed BSS work buffers (not a pathname). The static post-call code (`0x0025D908` `bgez $v0`; success path `0x0025D91C..0x0025D970`) copies reply word 0 from `0x007641C0` (uncached alias `0x207641C0`) **into** the static buffer `0x00764CA8` with `swl`/`swr` using `0x00764CA8` as the base, loads reply word 1 from `0x007641C4` (alias `0x207641C4`), stores `1` to `0x002821EC`, compares **that** word against `2` (`xori`/`sltiu`) and stores the result to `0x002821F0`; `0x00764CA8` is a write destination, not the compared operand. The failure path (`0x0025D910..0x0025D918`) returns `0xFFFEFFFF` (`-2`). ADR 0165 corrects the earlier ADR 0163 wording and notes that the call has not returned in this probe, so the post-call code is static evidence only.
-- **Unknown:** the reply format of the FILEIO init handshake (the word compared to `2`, the meaning of the two work buffers, whether the resident IOP module returns a version or a status); therefore any reply would be fabricated and the handler stays fail-closed, leaving the caller blocked at `WaitSema(11)`. ADR 0163.
+- **Observed + derived (ADR 0167, IOP FILEIO init handshake resolved):**
+  Disassembly of `FILEIO.IRX` extracted from both `IOPRP270.IMG` (Downhill Domination,
+  SHA-256 `852343bd504eca5b99148fdc44f23ab35545443cab1953f636853655f03239e7`) and
+  `IOPRP300.IMG` (Black, SHA-256 `270c6408794d7817c5e016dc7f0fba6df4e93db6cb31058dec480fd8270cdb42`)
+  proves the exact reply structure for `fno 255`:
+  - The SIFRPC dispatcher handler (`0x1AA4` in 270, `0x1E68` in 300) accepts `fno == 255`
+    with `size == 8`, writes the two input EE pointers to IOP `.sbss`, and constructs an
+    8-byte reply:
+    - Word 0 (`reply[0]`): 4-byte ASCII module version word (`0x30303732` / `"2700"` for
+      IOPRP 2.7.0; `0x30303033` / `"3000"` for IOPRP 3.0.0).
+    - Word 1 (`reply[1]`): integer `2` (`kEeFileioInterfaceVersion`).
+  - EE client consumption in Downhill Domination (`SCUS_971.77` SHA-256
+    `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`):
+    - `0x0025D930`: stores `reply[0]` into static buffer `0x00764CA8`.
+    - `0x0025D940..0x0025D970`: verifies `reply[1] == 2` and sets init flags `0x002821EC = 1`,
+      `0x002821F0 = 1`.
+    - `0x0025D9C4`: calls `memcmp(0x00764CA8, 0x00282144, 4)` where `0x00282144` holds ASCII `"2700"`.
+    - When `memcmp` returns 0, `sceFileioInit` completes successfully and continues down the boot path.
+  - Serving `[0x30303732, 2]` satisfies the handshake without altering `EeState` layout (ABI 19 preserved).
+    All individual file operations (fnos 0..254) remain unmodelled and fail-closed. ADR 0167.
 
 - **Observed (ADR 0164, runtime ABI contract):** a probe compiled against
   `c0af09c` (pre-#38) and against `09a4b2a`/`f72fbbb` with the same MSVC x64
@@ -1671,6 +1690,49 @@ limit, root set or relocated region is a different frontier.
   identical to that later `main`. The asserted commit stays caller-asserted;
   the frontend and engine digests are what bind the claim to the binaries that
   actually ran.
+
+### Downhill Domination (USA) — ABI 19, runs 04 and 05 (verified reproducible pair)
+
+- **Observed (records):**
+  `docs/evidence/frontier/downhill-domination-abi19-run-04.json` and
+  `docs/evidence/frontier/downhill-domination-abi19-run-05.json`.
+- **Identity:** disc serial `SCUS_971.77`, ISO SHA-256
+  `0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86`, boot ELF
+  SHA-256 `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`.
+- **Source:** `reps2_commit` `6f7ab3e0478468898bfa862db576eaf4773f270d`, frontend
+  reports `0.7.0`, `runtime_abi` 19, frontend SHA-256
+  `012089817ae30d1a4e832a351ca5c6c9220700473c6f535ab8e147a8cb5a65a4`,
+  engine SHA-256 `112011a93799b893d05fd6ebe46ce2566a379bec2100a1d5240620f3360e9798`,
+  runtime header digest `012877ec395bc766836abcdabf9c6e0ff15d068bdcbaf08f787172da5c6067a6`.
+- **Host:** Windows x64, MSVC `19.51.36260.0`, C++20.
+- **Configuration:** `--discover --tu-count 8 --probe-budget 5000000
+  --max-batches 16 --hle-syscalls`, relocated regions
+  `0x80076000:0x002829F8:0x740` and `0x80075000:0x002831A0:0x330`, extra root
+  `0x00246CD0`.
+- **Result, identical in both runs:** `guest_stopped` /
+  `semaphore_wait_blocked` at `pc=0x0025A724` (`WaitSema(12)`) after 4,587,011
+  instructions in 1 batch (+776 instructions over runs 02/03),
+  `syscalls_seen=1228 handled=1210` (+7 syscalls), callbacks 78/78,
+  `rpc_call_number` 0, `rpc_call_replied` 0.
+- **Census, identical in both runs:** 60,984 basic blocks, 317,701 guest
+  instructions, 622 unsupported stops, 258 guest exceptions, 625 unresolved
+  indirect targets, 7,170 accepted roots, 9 translation units.
+- **Bit-identical module reproducibility:** `source.native_module_sha256`
+  matches across both runs at `ebebf996e84a38c1e185e292a0bde01584c484e66df04cad35a532f342fdec44`.
+  The CMake `/Brepro` link flag eliminates the 4-byte link timestamp nondeterminism.
+  `frontier.py compare run-04 run-05` exits `0` with zero differences, and `run-05`
+  carries `evidence.reproducible: true`.
+- **Derived progression:** serving IOP FILEIO handshake `fno 255` with word 0
+  `0x30303732` (`"2700"`) and word 1 `2` (ADR 0167) satisfies `sceFileioInit`,
+  which verifies the reply and sets initialization flags `0x002821EC = 1` and
+  `0x002821F0 = 1`. Execution progresses into GS display environment setup
+  (`0x0020B9B8` -> `0x002436EC` -> `0x002435D0`), which calls
+  `sceOpen("rom0:ROMVER", SCE_RDONLY)` (`fno 0`, send 1048, recv 4). The title
+  allocates semaphore 12 (`CreateSema`) and waits on it via `WaitSema(12)` at
+  `0x0025D130` (`$a0=12`, `$ra=0x0025D138`).
+- **Fail-closed boundary:** FILEIO `fno 0` (`sceOpen`) is unmodelled and refused,
+  leaving the caller parked at `WaitSema(12)`.
+
 
 ### Black (USA) — relocated copied code, ABI 19
 

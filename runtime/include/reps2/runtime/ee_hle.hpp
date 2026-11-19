@@ -2098,6 +2098,11 @@ inline constexpr std::uint32_t kEeSifServerSnd989Alt = 0x0012'3457U;
 // command handlers for 0x80000011 and 0x80000013. Binds succeed as resident
 // IOP fileio server.
 inline constexpr std::uint32_t kEeSifServerFileIo = 0x8000'0001U;
+inline constexpr std::uint32_t kEeFileioInitFno = 255U;
+inline constexpr std::uint32_t kEeFileioInitRequestBytes = 8U;
+inline constexpr std::uint32_t kEeFileioInitReplyBytes = 8U;
+inline constexpr std::uint32_t kEeFileioVersionWord2700 = 0x3030'3732U; // ASCII "2700" (IOPRP 2.7.0)
+inline constexpr std::uint32_t kEeFileioInterfaceVersion = 2U;
 // The main server's RPC function number indexes the driver's `gCommandFunc[]`
 // table (same decompilation, `iop/989snd.c`), whose slot 0 is `snd_CMD_SL_INIT`.
 // `snd_StartSoundSystemEx` sends `{&gStats, flags}` — the EE address of the
@@ -2600,12 +2605,11 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
 }
 
 // IOP FILEIO server (sid 0x80000001). The bind is registered so sceFileioInit
-// bind loop exits immediately. Individual file functions are unmodelled and
-// refused. `sceFileioInit` itself then issues an initialisation call (fno 255)
-// whose 8-byte request carries two pointers to zeroed BSS work buffers; the
-// handler records a bounded request head and any ASCII path reachable through
-// those pointers so an unmodelled function is diagnosable, without inventing
-// file semantics. ADR 0163.
+// bind loop exits immediately. Individual file functions (0..254) are unmodelled
+// and refused. `sceFileioInit` issues an initialisation handshake (fno 255)
+// whose 8-byte request carries two pointers to zeroed BSS work buffers and expects
+// an 8-byte reply: word 0 is the IOP FILEIO module revision ("2700" = 0x30303732),
+// and word 1 is the interface version capability flag (2). ADR 0167.
 [[nodiscard]] inline bool serve_ee_fileio_call(
     EeState& state,
     const EeSifRpcCall& call
@@ -2693,7 +2697,21 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
             }
         }
     }
-    return false; // unmodelled: no RPC_END, caller stays blocked
+    if (call.rpc_number == kEeFileioInitFno) {
+        if (call.send_size < kEeFileioInitRequestBytes
+            || call.recv_size < kEeFileioInitReplyBytes
+            || call.recv_addr == 0U
+            || call.send_addr == 0U) {
+            return false;
+        }
+        if (store_u32(state.memory, call.recv_addr, kEeFileioVersionWord2700) != Status::ok
+            || store_u32(state.memory, call.recv_addr + 4U, kEeFileioInterfaceVersion) != Status::ok) {
+            return false;
+        }
+        return true;
+    }
+
+    return false; // unmodelled file operation: no RPC_END, caller stays blocked
 }
 
 // Multitap port-open server (0x80000901, PS2SDK `MTAPSERV_PORT_OPEN`). The bind

@@ -166,3 +166,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0164](0164-runtime-abi-19-layout-contract.md) | Make the `EeState` layout a versioned ABI contract (ABI 19) | Accepted |
 | [0165](0165-iop-fileio-init-reply-contract-correction.md) | Correct the FILEIO init dataflow: reply word 1 is the compared operand and `0x00764CA8` is a write destination | Accepted |
 | [0166](0166-black-addintchandler-frontier.md) | Stop at the Black `AddIntcHandler` syscall `0x10` instead of inventing a handler id; the next slice is an INTC + TIMER2 device model | Accepted |
+| [0167](0167-iop-fileio-init-reply-contract.md) | Serve the IOP FILEIO initialisation handshake (fno 255) with module revision "2700" and version 2; other fnos refused | Accepted |
