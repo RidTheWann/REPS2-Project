@@ -1941,6 +1941,57 @@ limit, root set or relocated region is a different frontier.
   publish. Until one exists, the loop stays attributed to a producer that is not
   modelled and no compatibility state is promoted.
 
+## Downhill polling loop resolved: 989snd loader bank-load reply (ADR 0174, runtime ABI 23)
+
+- **Observed (ABI-22 probe `abi22-01`, reps2 commit `0f75405`, ISO
+  `0fe2b777…a7eb86`, boot ELF `adfda7b7…f0cf0c`, 5,000,000-instruction budget,
+  16 batches):** `budget_limit_reached` at `pc=0x00201888` after 79,999,980
+  instructions, 6,854,902 `FlushCache` (0x64) calls from hot site `0x0025A964`.
+  The run report's SIF section recorded the last RPC call as
+  `rpc_call_server=0x00123457` (`rpc_call_number=3`, `rpc_call_replied=0`),
+  and the threads section showed thread id 2 (`func=0x0025B0D0`) READY but
+  never dispatched (`ready_queue=[2]`, scheduler counters all zero).
+- **Observed (static disassembly of the ABI-22 boot RAM image, file offset ==
+  guest VA):** the frontier loop at `0x00201888` is
+  `jal 0x0025A960` (FlushCache wrapper) / `lw $v0, -0x2C00($s2)` with
+  `$s2=0x004D0000` (word at `0x004CD400`) / `beq $v0, $s0, 0x00201888` with
+  `$s0=0xFFFFFFFF`. The frontier function `0x00201718` arms
+  `0x004CD400 = 0xFFFFFFFF` at `0x002017BC`, then at `0x00201830` calls
+  `sceSifCallRpc` (`0x0025CF88`) with `$a0=0x004CD3C0` (the 989snd loader
+  client `gSLClientLoaderData`), `$a1=3`, recv buffer `$a3=0x004CD400`,
+  4 bytes. This matches the public 989snd driver's `snd_BankLoadByLoc`:
+  `SifCallRpc(&gSLClientLoaderData, SL_LOADBANKBYLOC /*3*/, SIF_RPC_M_NOWAIT,
+  ...)` followed by `while (gLoadReturnValue[0] == -1) FlushCache(...)` —
+  a NOWAIT busy-wait, not a semaphore block, so the ADR 0173 scheduler never
+  fires (the 134 `WaitSema` calls in the run all had a free count).
+- **Derived:** the missing producer was the loader-server RPC reply. REPS2's
+  `serve_ee_snd_loader_call` refused every call, so `0x004CD400` (the reply
+  buffer's first word) stayed `0xFFFFFFFF` forever and the loop spun on the
+  instruction budget. The two `sw $zero, -0x2C00(...)` clear sites
+  (`0x002012F8` in the sound-init routine `0x00201180`, `0x00201554` in
+  `0x002013F8`) are unrelated earlier paths; the observed wait is answered by
+  the RPC reply, not by those stores.
+- **Implemented (ADR 0174, runtime ABI 23):** the loader server now serves
+  `SL_LOADBANK` (2) and `SL_LOADBANKBYLOC` (3) by writing the documented
+  load-failure word `0` into the reply buffer's first word (the 989snd IOP
+  handler writes `snd_BankLoadEx`'s return value there; it returns 0 when the
+  data source cannot be opened, which is the honest result here since REPS2
+  models no IOP filesystem or SPU memory) and delivering `SIF_CMD_RPC_END`.
+  All other loader functions stay recorded and refused.
+- **Observed (ABI-23 probe `abi23-01`, this branch's headers, rebuilt
+  frontend + native module, same digests/config):** `guest_stopped` at
+  `pc=0x002434B4` after 4,645,561 instructions in 1 batch
+  (`syscalls_seen=1239 handled=1222`). The SIF section records
+  `snd_loader_calls=1 snd_loader_replies=1 snd_loader_number=3
+  snd_loader_replied=1`. **Derived:** the busy-wait exited because
+  `gLoadReturnValue[0]` changed from `-1` to the served `0`; the title then
+  continued on its own failed-bank-load error path and stopped at a new,
+  earlier frontier `0x002434B4`. This is a real frontier advance (different
+  stop PC, different stop class, far fewer instructions), not a boot stage;
+  no compatibility state is promoted.
+- **Unknown:** what `0x002434B4` waits on, and whether the title's
+  failed-bank-load path is fatal or retryable in the real kernel.
+
 ## Provenance rules
 
 

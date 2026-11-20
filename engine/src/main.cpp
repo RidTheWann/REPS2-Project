@@ -568,7 +568,31 @@ void print_error(
     std::cout << ",\"last_disable_outcome\":";
     json_string(std::cout, reps2::runtime::ee_intc_mask_outcome_name(
         state.hle.last_disable_intc_outcome));
-    std::cout << "},\"callbacks\":{\"requested\":" << state.hle.guest_callbacks_requested
+    std::cout << "},\"threads\":{\"thread_count\":" << state.hle.thread_count
+              << ",\"ready_count\":" << state.hle.ready_count
+              << ",\"create_thread_calls\":" << state.hle.create_thread_calls
+              << ",\"start_thread_calls\":" << state.hle.start_thread_calls
+              << ",\"ready_queue\":[";
+    for (std::uint32_t i = 0U; i < state.hle.ready_count; ++i) {
+        if (i != 0U) std::cout << ',';
+        std::cout << state.hle.ready_queue[i];
+    }
+    std::cout << "],\"records\":[";
+    bool first_thread = true;
+    for (std::uint32_t i = 0U; i < ::reps2::runtime::kEeMaxThreads; ++i) {
+        const auto& t = state.hle.threads[i];
+        if (!t.in_use) continue;
+        if (!first_thread) std::cout << ',';
+        first_thread = false;
+        std::cout << "{\"id\":" << (::reps2::runtime::kEeFirstCreatedThreadId + i)
+                  << ",\"status\":" << t.status
+                  << ",\"func\":\"0x" << std::hex << t.function << std::dec << "\""
+                  << ",\"stack\":\"0x" << std::hex << t.stack << std::dec << "\""
+                  << ",\"initial_priority\":" << t.initial_priority
+                  << ",\"current_priority\":" << t.current_priority
+                  << '}';
+    }
+    std::cout << "]},\"callbacks\":{\"requested\":" << state.hle.guest_callbacks_requested
               << ",\"started\":" << state.hle.guest_callbacks_started
               << ",\"completed\":" << state.hle.guest_callbacks_completed
               << ",\"refused\":" << state.hle.guest_callbacks_refused
@@ -695,6 +719,10 @@ void print_error(
               << ",\"snd_status_addr\":" << state.hle.sif_cmd.last_snd_status_addr
               << ",\"snd_flags\":" << state.hle.sif_cmd.last_snd_flags
               << ",\"snd_replied\":" << (state.hle.sif_cmd.last_snd_replied ? 1U : 0U)
+              << ",\"snd_loader_calls\":" << state.hle.sif_cmd.snd_loader_call_count
+              << ",\"snd_loader_replies\":" << state.hle.sif_cmd.snd_loader_replies
+              << ",\"snd_loader_number\":" << state.hle.sif_cmd.last_snd_loader_number
+              << ",\"snd_loader_replied\":" << (state.hle.sif_cmd.last_snd_loader_replied ? 1U : 0U)
               << "}},\"dmac\":{\"handlers\":" << state.hle.dmac_handler_count
               << ",\"add_handler_calls\":" << state.hle.add_dmac_handler_calls
               << ",\"interrupts_delivered\":" << state.hle.dmac_interrupts_delivered
