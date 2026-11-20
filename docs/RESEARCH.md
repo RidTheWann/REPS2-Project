@@ -1865,6 +1865,63 @@ limit, root set or relocated region is a different frontier.
   built against ABI 19, which ABI 21 refuses, so the recorded frontier is
   unchanged historical evidence until that module is rebuilt and re-probed.
 
+## Downhill Domination polling loop attributed to a missing producer (ABI 21)
+
+- **Observed (ABI 21 probe, `D:\REPS2-DevTests\DownhillDomination\abi21-01`):**
+  a 5,000,000-instruction, 16-batch run with the recorded extra root
+  `0x00246CD0` and the two relocated regions stops as `budget_limit_reached`
+  at `pc=0x00201888` after 79,999,980 instructions. The bounded syscall census
+  attributes 6,854,902 of 6,856,109 events to `FlushCache` (0x64) from a single
+  hot site `pc=0x0025A964`; every other service is under 250 calls.
+- **Observed (disassembly of the frontier region):** `0x00201888` is the head of
+  a four-instruction loop:
+
+  ```
+  0x00201888: 0C096A58  jal 0x0025A960     ; FlushCache wrapper (syscall 0x64)
+  0x0020188C: 0000202D  move $a0, $zero    ; (delay slot)
+  0x00201890: 8E42D400  lw  $v0, -11264($s2)   ; $v0 = word at $s2-11264
+  0x00201898: 00000000  nop
+  0x0020189C: 1050FFFA  beq $v0, $s0, 0x00201888  ; loop while $v0 != $s0
+  0x002018A0: 00000000  nop                ; (delay slot)
+  ```
+
+  `$s0` is `0xFFFFFFFF` (`lui $s0, 0xFFFF` / `ori $s0, $s0, 0xFFFF` at
+  `0x0020187C`/`0x00201880`) and `$s2` is `0x004D0000`, so `$s2-11264` is the
+  absolute word at `0x004CD400`. The loop **spins while that word is not
+  `0xFFFFFFFF`**.
+- **Derived:** the loop waits for `0x004CD400` to become `0xFFFFFFFF`. The same
+  word is armed to `0xFFFFFFFF` at `0x002017BC` before the loop, and cleared to
+  zero by two distinct functions: `0x00201180` (store at `0x002012F8`) and
+  `0x002013F8` (store at `0x00201554`). The loop is therefore a
+  completion/acknowledgement wait on a flag whose producer is one of those two
+  paths, not a hardware register read.
+- **Derived:** in this run no interrupt is delivered anywhere — `intc.mask = 0`,
+  `intc.handlers = 0`, `intc.interrupts_delivered = 0`, `timer2.mode = 0`,
+  `dmac.interrupts_delivered = 0` — so the modelled INTC/Timer 2/DMAC producers
+  never fire and cannot set or clear `0x004CD400`. The census also shows
+  `SetSyscall` (0x74) handled 18 times and `AddDmacHandler` (0x12) twice, which
+  is the whole interrupt-adjacent activity observed.
+- **Inferred, not verified:** the flag is a guest-side completion word (the
+  poll function `0x002013F8` reads `lw $r4, 0xD400($r16)` at `0x00201528` and
+  only clears it after a `FlushCache` plus a conditional call through
+  `-27528($r2)`), so the missing producer is most likely a
+  scheduler/RPC-callback transition rather than an INTC source. This is a
+  hypothesis: the two clearing functions were not traced to a live call site in
+  this run.
+- **Unknown:** which of `0x00201180` / `0x002013F8` (or a third writer) the
+  title expects to run, and what event gates it. Neither has an observed caller
+  in the recorded frontier, so the loop cannot be attributed to a producer from
+  the current evidence alone.
+- **Not claimed:** boot progress. The CFG now splits the loop so the dispatcher
+  can sample interrupt lines (PR #2), but the frontier is unchanged because the
+  missing work is a producer, not an uncrossed dispatcher path. The
+  `FlushCache` count is a symptom of the spin, not a defect in `FlushCache`
+  (it is a documented host-coherent no-op with `$v0 = 0`).
+- **Next evidence required:** a trace of the two clearing functions' call sites
+  under a run that reaches them, or an argued model of the completion event they
+  publish. Until one exists, the loop stays attributed to a producer that is not
+  modelled and no compatibility state is promoted.
+
 ## Provenance rules
 
 
