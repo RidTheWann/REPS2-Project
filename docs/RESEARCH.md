@@ -1887,18 +1887,24 @@ limit, root set or relocated region is a different frontier.
 
   `$s0` is `0xFFFFFFFF` (`lui $s0, 0xFFFF` / `ori $s0, $s0, 0xFFFF` at
   `0x0020187C`/`0x00201880`) and `$s2` is `0x004D0000`, so `$s2-11264` is the
-  absolute word at `0x004CD400`. The loop **spins while that word is not
-  `0xFFFFFFFF`**.
-- **Derived:** the loop waits for `0x004CD400` to become `0xFFFFFFFF`. The same
-  word is armed to `0xFFFFFFFF` at `0x002017BC` before the loop, and cleared to
-  zero by two distinct functions: `0x00201180` (store at `0x002012F8`) and
+  absolute word at `0x004CD400`. `beq $v0, $s0` branches back **when the two are
+  equal**, so the loop **spins while that word is still `0xFFFFFFFF`** and exits
+  when the word changes.
+- **Derived:** the loop waits for `0x004CD400` to stop being `0xFFFFFFFF`. The
+  same word is armed to `0xFFFFFFFF` at `0x002017BC` before the loop, and cleared
+  to zero by two distinct functions: `0x00201180` (store at `0x002012F8`) and
   `0x002013F8` (store at `0x00201554`). The loop is therefore a
   completion/acknowledgement wait on a flag whose producer is one of those two
-  paths, not a hardware register read.
+  clear paths, not a hardware register read.
+- **Derived:** the word is armed to `0xFFFFFFFF` by this same function at
+  `0x002017BC` immediately before the wait, and the two clear paths
+  (`0x00201180` store at `0x002012F8`, `0x002013F8` store at `0x00201554`) are
+  the only writers observed in the image. The wait is therefore an arm-then-wait
+  pattern: the guest publishes `0xFFFFFFFF` and blocks until a producer clears it.
 - **Derived:** in this run no interrupt is delivered anywhere — `intc.mask = 0`,
   `intc.handlers = 0`, `intc.interrupts_delivered = 0`, `timer2.mode = 0`,
   `dmac.interrupts_delivered = 0` — so the modelled INTC/Timer 2/DMAC producers
-  never fire and cannot set or clear `0x004CD400`. The census also shows
+  never fire and cannot clear `0x004CD400`. The census also shows
   `SetSyscall` (0x74) handled 18 times and `AddDmacHandler` (0x12) twice, which
   is the whole interrupt-adjacent activity observed.
 - **Inferred, not verified:** the flag is a guest-side completion word (the
