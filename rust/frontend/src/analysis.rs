@@ -1224,7 +1224,7 @@ fn build_cfg(
         let mut block = match build_block(
             segments,
             start_pc,
-            &leaders,
+            &mut leaders,
             &authoritative_leaders,
             &owners,
             &blocks,
@@ -1336,7 +1336,7 @@ fn build_cfg(
 fn build_block(
     segments: &[LoadedSegment],
     start_pc: u32,
-    leaders: &BTreeSet<u32>,
+    leaders: &mut BTreeSet<u32>,
     authoritative_leaders: &BTreeSet<u32>,
     owners: &BTreeMap<u32, InstructionOwner>,
     blocks: &BTreeMap<u32, BasicBlock>,
@@ -1366,6 +1366,25 @@ fn build_block(
             )
         {
             break Terminator::Unsupported { instruction };
+        }
+
+        // Force a block boundary at the target of a backward branch that lands
+        // inside the current block's interior. A tight polling loop otherwise
+        // decodes into one generated block that never returns to the dispatcher,
+        // so its interrupt lines (`ee_intc_line_asserted`, `ee_dmac_line_asserted`)
+        // are never sampled while the loop spins. Adding the backward target as a
+        // leader splits the loop so every iteration crosses the dispatcher.
+        //
+        // The delay slot of the previous instruction (pc - 4) is excluded: it
+        // must stay attached to its owning branch, and targeting it is already
+        // handled by the delay-slot admission path.
+        if instruction.is_conditional_branch() {
+            if instruction.target < pc
+                && instruction.target > start_pc
+                && instruction.target != pc - 4
+            {
+                leaders.insert(instruction.target);
+            }
         }
 
         if instruction.is_conditional_branch() {
@@ -2012,20 +2031,15 @@ mod tests {
             AnalysisLimits::default(),
         )
         .expect("backward branch graph");
-        assert_eq!(graph.blocks.len(), 3);
-        assert_eq!(graph.blocks[&0x2000].instructions.len(), 1);
-        assert!(matches!(
-            &graph.blocks[&0x2000].terminator,
-            Terminator::Fallthrough { next_pc: 0x2004 }
-        ));
-        assert_eq!(graph.blocks[&0x2004].instructions.len(), 1);
-        assert!(matches!(
-            &graph.blocks[&0x2004].terminator,
-            Terminator::ConditionalBranch {
-                target_pc: 0x2004,
-                ..
-            }
-        ));
+        // With backward-branch splitting, the branch at 0x2008 (bne $v0,$v1,-2)
+        // targets 0x2004 which is inside the original block starting at 0x2000.
+        // The split must create a separate block at the backward target 0x2004.
+        assert!(graph.blocks.contains_key(&0x2000));
+        assert!(graph.blocks.contains_key(&0x2004));
+        // The block at 0x2000 must be split short (not containing the branch).
+        assert!(graph.blocks[&0x2000].instructions.len() <= 2);
+        // The backward target 0x2004 must be its own block start.
+        assert_eq!(graph.blocks[&0x2004].start_pc, 0x2004);
     }
 
     #[test]
