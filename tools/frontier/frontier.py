@@ -445,12 +445,17 @@ def probe(args: argparse.Namespace) -> int:
         raise StageError(4, "native build did not publish reps2-native-module-Release.path")
     module = module_path_file.read_text(encoding="utf-8").strip().strip('"').strip()
 
-    completed = run([args.engine, module,
-                     "--ram", str(out / "boot.ram.bin"),
-                     "--media", str(iso),
-                     "--budget", str(args.probe_budget),
-                     "--max-batches", str(args.max_batches),
-                     "--hle-syscalls"], "engine run", 5)
+    engine_command = [args.engine, module,
+                      "--ram", str(out / "boot.ram.bin"),
+                      "--media", str(iso),
+                      "--budget", str(args.probe_budget),
+                      "--max-batches", str(args.max_batches),
+                      "--hle-syscalls"]
+    if args.syscall_trace > 0:
+        engine_command += ["--syscall-trace", str(args.syscall_trace)]
+    if args.instruction_trace:
+        engine_command += ["--instruction-trace"]
+    completed = run(engine_command, "engine run", 5)
     (out / "run-report.json").write_text(completed.stdout, encoding="utf-8", newline="\n")
     try:
         report = json.loads(completed.stdout)
@@ -514,6 +519,10 @@ def main(argv: list[str] | None = None) -> int:
                               help="guest PC in hex, repeatable")
     probe_parser.add_argument("--compare-with", default=None,
                               help="previous frontier.json; sets evidence.reproducible")
+    probe_parser.add_argument("--syscall-trace", type=int, default=0,
+                              help="retain the last n syscall boundaries in the run report (0..64)")
+    probe_parser.add_argument("--instruction-trace", action="store_true",
+                              help="include the bounded EE instruction-PC trace in the run report")
     probe_parser.set_defaults(handler=probe)
 
     validate_parser = subparsers.add_parser("validate", help="validate a frontier record")
