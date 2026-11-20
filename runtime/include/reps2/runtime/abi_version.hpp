@@ -26,4 +26,9 @@
 // ABI 21 covers ADR 0172: the EE Timer 2 register model in EeMemory and the
 // EE INTC handler registry plus delivery counters in EeHleState. Both change
 // sizeof(EeState), so modules built against ABI 20 are refused.
-#define REPS2_RUNTIME_ABI_VERSION 21
+//
+// ABI 22 covers ADR 0173: the cooperative scheduler. `EeThread` gains a saved
+// register context and `waiting_on_sema`, and `EeHleState` gains the
+// `active_thread_id`/`blocked_sema_id`/`main_context` fields plus the
+// scheduler counters. Modules built against ABI 21 are refused.
+#define REPS2_RUNTIME_ABI_VERSION 22
