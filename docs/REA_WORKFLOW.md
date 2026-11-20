@@ -73,6 +73,17 @@ still carries the generic-MIPS profile restrictions above. Do not re-litigate
 this by installing a provider and re-testing admission without a new
 capability statement from REA.
 
+**Re-verified (2026-11-20), REA `6.9.0` via `npx rea-agents@latest`:** `doctor
+--json` still reports `ghidra: not_configured`, `ida`/`jadx`/`kuna`
+`not_configured`, `hopper: missing_analysis_engine`, and `registration:*`
+`config_drift` for every configured client (REA is not registered with this
+Claude Code instance). `capabilities` reports the Ghidra provider itself
+`unavailable / not_configured`, and its Windows P0 lane limitation text lists
+only native x86/x64/ARM PE, DOS MZ and raw 6502 — no MIPS. No provider was
+installed; this is a readiness re-check, which the workflow above requests.
+Readiness is unchanged, so REPS2-native evidence remains the supported path for
+the PS2 target.
+
 If REA refuses the ELF:
 1. Preserve the exact refusal and its declared constraint in the evidence notes.
 2. Do not patch `e_flags`, byte order, ELF class, ABI tags, or machine metadata to trick the provider.
