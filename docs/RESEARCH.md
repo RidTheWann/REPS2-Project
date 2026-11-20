@@ -1914,9 +1914,22 @@ limit, root set or relocated region is a different frontier.
   scheduler/RPC-callback transition rather than an INTC source. This is a
   hypothesis: the two clearing functions were not traced to a live call site in
   this run.
+- **Observed (static call graph of the frontier function):** the function
+  containing the spin starts at `0x00201718` and has one `jal` caller in the
+  image, `0x002089C4`. Before that call the caller does `lw $r4, 112($sp)` and
+  passes `$r5 = 0` (the `move $a1, $zero` delay slot). Inside `0x00201718`, an
+  outer loop at `0x002017D8`:
+  - calls `0x00201xxD8`-region helpers including `0x002013F8` (the clear path),
+  - reaches the inner wait at `0x00201888` only after `0x0025CF88` returns
+    negative and the word is `0xFFFFFFFF` at `0x0020186C`/`0x00201874`
+    (`lui/ori 0xFFFF` compare then `bne`),
+  - and the function's only exit is the `beq $v0, $s0, 0x00201888` backedge.
+  So the frontier function both arms and waits on `0x004CD400`; a producer that
+  runs later in guest time (or from another thread's context) is what clears it.
 - **Unknown:** which of `0x00201180` / `0x002013F8` (or a third writer) the
-  title expects to run, and what event gates it. Neither has an observed caller
-  in the recorded frontier, so the loop cannot be attributed to a producer from
+  title expects to run, and what event gates it. `0x002013F8` *is* called from
+  the outer loop at `0x002017EC`, but in the recorded run control never left the
+  inner wait to re-enter it, so the loop cannot be attributed to a producer from
   the current evidence alone.
 - **Not claimed:** boot progress. The CFG now splits the loop so the dispatcher
   can sample interrupt lines (PR #2), but the frontier is unchanged because the
