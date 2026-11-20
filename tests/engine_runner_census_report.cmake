@@ -128,4 +128,24 @@ if(last_number LESS 0)
     message(FATAL_ERROR "census last boundary has no service number")
 endif()
 
+# The thread section is always present so a frontier can be diagnosed without
+# guessing whether a second context was created but never dispatched.
+string(JSON thread_count GET "${report}" session threads thread_count)
+string(JSON ready_count GET "${report}" session threads ready_count)
+string(JSON create_thread_calls GET "${report}" session threads create_thread_calls)
+string(JSON start_thread_calls GET "${report}" session threads start_thread_calls)
+if(NOT thread_count EQUAL 0
+    OR NOT ready_count EQUAL 0
+    OR NOT create_thread_calls EQUAL 0
+    OR NOT start_thread_calls EQUAL 0)
+    message(FATAL_ERROR
+        "unexpected thread state: count=${thread_count} ready=${ready_count} create=${create_thread_calls} start=${start_thread_calls}")
+endif()
+string(JSON ready_queue_len LENGTH "${report}" session threads ready_queue)
+string(JSON thread_records_len LENGTH "${report}" session threads records)
+if(NOT ready_queue_len EQUAL 0 OR NOT thread_records_len EQUAL 0)
+    message(FATAL_ERROR
+        "expected empty thread arrays for this fixture: queue=${ready_queue_len} records=${thread_records_len}")
+endif()
+
 message(STATUS "RG REPS2 ENGINE runner census report smoke: OK")
