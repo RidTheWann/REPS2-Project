@@ -1,158 +1,143 @@
-# ADR 0170: Bounded syscall census (reporting v1)
+# ADR 0170: Bounded per-syscall census and optional trace ring
 
 - **Status:** Accepted (validated locally; see Validation).
 - **Date:** 2026-11-19.
-- **Scope:** `runtime/include/reps2/runtime/ee_state.hpp` (census fields) and
-  the generation change to `REPS2_RUNTIME_ABI_VERSION` (ABI 20).
+- **Scope:** `runtime/include/reps2/runtime/ee_state.hpp` (census and trace
+  storage), `runtime/include/reps2/runtime/ee_hle.hpp`
+  (`dispatch_ee_syscall` accounting), `engine/include/rg_reps2_engine/session.hpp`
+  (`SessionConfig::syscall_trace_capacity`), `engine/src/main.cpp`
+  (`--syscall-trace`, `syscall_census` run-report section), and the new tests
+  `tests/syscall_census_smoke.cpp` and `tests/engine_runner_census_report.cmake`.
+- **Related:** ADR 0169 (ABI 20 covers this layout change).
 
 ## Context
 
-The runtime currently lacks structured, bounded observability of which
-EE syscalls are being seen, handled, or refused. When investigating the
-Downhill Domination tight polling loop, the whole syscall counter
-aggregate cannot identify the dominant service or hot call sites.
+The recorded Downhill Domination frontier executes 39,999,993 instructions with
+3,219,747 syscall events in four batches, but the run report only carries two
+aggregates: `syscalls_seen` and `syscalls_handled`. Those totals cannot say
+*which* service dominates the tight polling loop or *where* it is called from,
+so the frontier cannot be attributed to a producer. An aggregate counter is not
+an investigation.
 
-A per-syscall census is necessary to answer:
+Two new requirements follow:
 
-- Which syscall(s) dominate guest execution?
-- Where does the loop repeatedly call each of those services?
-- What is the proportion of seen/handled/refused for each syscall?
-- Are any syscalls unsupported by the runtime?
-- Does a bounded trace help identify the control flow that triggers the
-  hot services?
+1. Per-service attribution with a per-site answer: which syscall number is
+   dominant, and from which guest PC(s) is it issued.
+2. Bounded storage: three million events must not become three million records
+   in memory, in the report, or in committed evidence.
 
-## Design
+## Decision
 
-The census resides entirely inside the runtime's `EeHleState` to avoid
-additional host-side structures and to guarantee it is preserved across
-resumed guest sessions.
+Record every dispatched boundary in a fixed census, and keep the detailed event
+ring opt-in.
 
-### Data structures
+### Storage (inside `EeHleState`)
 
-```cpp
-struct EeSyscallCensusEntry {
-    std::uint64_t seen{0};
-    std::uint64_t handled{0};
-    std::uint64_t refused{0};
-};
+- `syscall_census[256]` — one `{seen, handled, refused}` counter triple per
+  normalized service number `0..255`. Numbers outside that range share
+  `syscall_census_overflow`, so nothing is dropped silently.
+- `syscall_hot_sites[8]` — a bounded Space-Saving table of
+  `{pc, number, count}` call sites.
+- `syscall_trace[64]` plus `capacity`, `next`, `count`, `dropped` — the optional
+  ring. `capacity == 0` (the default) retains nothing.
 
-struct EeHleState {
-    // Existing fields ...
-    std::array<EeSyscallCensusEntry, kSyscallCensusNumbers> syscall_census;
-    EeSyscallCensusEntry syscall_census_overflow;
-};
+The census lives in `EeHleState` rather than a host-side collector because the
+dispatch boundary is an inline header function that generated guest code calls
+without a host callback: the alternatives would be a new virtual/host service on
+the hot path or a per-instruction FFI edge, both of which contradict the
+generated-code ABI. The storage is bounded and the layout change is covered by
+ABI 20 (ADR 0169).
+
+### Accounting
+
+`dispatch_ee_syscall` increments the census exactly once per boundary, after the
+outcome is known:
+
+- `seen` — every dispatched boundary, including the guest-handler path.
+- `handled` — the host service returned `Status::ok`, or a registered guest
+  handler was entered.
+- `refused` — an unknown number (`unhandled_syscall`) or any other non-`ok`
+  status.
+
+`seen == handled + refused` therefore holds for every slot after each dispatch.
+This is deliberately a different quantity from `syscall_handled_count`, which
+still counts only successful host services.
+
+### Call-site attribution
+
+Hot sites are a Space-Saving estimate over at most eight residents: a site that
+stays resident has an exact count; after churn, counts are lower bounds. This is
+the honest trade for bounded storage. The dominant polling loop has one or two
+call sites, which stay resident with exact counts, and the trace ring covers
+what the table cannot.
+
+The report states the method as `"attribution": "space_saving_hot_sites"` so a
+reader does not mistake the table for an exhaustive site map.
+
+### Configuration
+
+- Census: always maintained when `--hle-syscalls` is enabled. Cost is a few
+  integer increments per boundary, negligible against service body work, and the
+  whole point of the flag is diagnosis.
+- Trace ring: `--syscall-trace <1..64>` (engine runner), clamped by the session
+  to `EeHleState::kSyscallTraceCapacity`. Disabled by default.
+
+### Run report
+
+`rg.reps2.engine.run_report.v1` gains one additive section; existing keys are
+unchanged, so existing consumers keep working:
+
+```json
+"syscall_census": {
+  "version": 1,
+  "attribution": "space_saving_hot_sites",
+  "tracked_numbers": 256,
+  "total_seen": 0,
+  "total_handled": 0,
+  "overflow_seen": 0,
+  "overflow_handled": 0,
+  "overflow_refused": 0,
+  "services": [{"number": 47, "name": "GetThreadId", "seen": 2, "handled": 2, "refused": 0}],
+  "hot_sites": [{"pc": 1051648, "number": 47, "count": 2}],
+  "last": {"pc": 1051664, "code": 0, "number": 0, "v0_before": 0, "v0_after": 0,
+           "resume_pc": 0},
+  "trace": {"capacity": 8, "retained": 3, "dropped": 0,
+            "events": [{"pc": 1051648, "number": 47, "arguments": [0, 0, 0, 0],
+                        "v0_before": 0, "v0_after": 0, "path": "host_service",
+                        "refused": 0}]}
+}
 ```
 
-`kSyscallCensusNumbers` is a compile-time constant, initially 256, to
-match the documented syscall numbers (0x0-0x255) and allow the array to
-fit inside the runtime's stack-allocation model. Values beyond that limit
-accumulate in `syscall_census_overflow`.
+Only occupied service slots are emitted, in ascending number order, so a report
+stays small when few services are called. The section contains guest addresses
+and syscall numbers only: no host paths, no ISO content, no argv, so it is safe
+to keep in frontier records.
 
-### Observers
-
-The census is updated via `record_ee_syscall_census(state, number, pc,
-refused)`:
-
-- `number` is the guest `$v1` argument (kernel service identifier).
-- `pc` is the guest PC where the syscall originated (for hot-site attribution).
-- `refused` is true if the host service layer did not produce a handler.
-
-Counters are incremented as follows:
-
-```cpp
-if (number < kSyscallCensusNumbers)
-    ++state.hle.syscall_census[number].seen;
-else
-    ++state.hle.syscall_census_overflow.seen;
-
-if (refused)
-    // count as refused, not as handled
-else
-    ++state.hle.syscall_census[number].handled;
-
-if (!refused && handler_invoked)
-    // handled counter only for successfully dispatched syscalls
-    ++state.hle.syscall_census[number].handled;
-else
-    ++state.hle.syscall_census[number].refused;
-```
-
-### Diagnostic output
-
-The engine runner can produce a bounded census report during shutdown
-or on demand. The output includes:
-
-- Syscall number, formatted as `0x%02X`.
-- Seen count (raw observations).
-- Handled count (successful dispatch).
-- Refused count (unimplemented or host-side limitations).
-- Most frequent PC (hot-site attribution) for each service.
-
-Sample output:
-
-```
-== Syscall Census (Downhill Domination, ABI 20, 5,000,000 instruction budget) ==
-   0x00: seen 37,912  handled 37,912  refused 0  hot-site 0x0025D820
-   0x44: seen 1,938    handled 0    refused 1,938  hot-site 0x0025D7FC
-   0x0A: seen 1,166    handled 1,166  refused 0  hot-site 0x0025D8A8
-   ... (remaining services with non-zero activity) ...
-   0x?? (overflow): seen 1  handled 0  refused 1
-```
-
-### Ring buffer
-
-Optional bounded trace is implemented as a circular ring buffer inside
-`EeHleState`. Each entry captures:
-
-```cpp
-struct SyscallTraceEntry {
-    std::uint64_t pc;
-    std::uint32_t number;
-    std::uint32.-forbidden
-};
-```
-
-The ring buffer is configurable via a macro to avoid an unbounded growth
-and must not retain executed guest frames or sensitive host paths.
+`last` correlates the census with the report's `final_pc` and `outcome`: it is
+the final boundary the guest dispatched, not a sample.
 
 ## Consequences
 
-1. Runtime ABI 20 restores the contract after ADR 0168 and introduces census
-   storage, expanding `EeState` by ~8,632 bytes. The previous ABI 19 modules
-   (Downhill and Black) cannot run with the new runtime and must be
-   regenerated with the latest toolchain against ABI 20.
-
-2. The census is enabled when `enable_ee_syscall_hle = true` in
-   `SessionConfig`. Diagnostic output is suppressed unless explicitly
-   requested to keep normal execution lightweight.
-
-3. The hot-site attribution requires recording a small amount of guest
-   state per service without retaining entire frames. This helps identify
-   repeated call sites that may indicate a tight loop or poll.
-
-4. The optional trace ring is opt-in to avoid exceeding memory budgets on
-   long runs; sample rate (e.g., one entry per 1,000 syscalls) can be
-   tuned for specific debugging needs.
+- The Downhill frontier can now be attributed: the dominant service number, its
+  counted boundaries, the hottest sites, and the last boundary before the stop.
+- `EeState` grows by 8,632 bytes (ADR 0169). That is the price of a
+  self-contained runtime census and is paid only once per session.
+- The trace ring is a debugging aid, not an evidence format: it retains at most
+  64 boundaries and reports `dropped`, so it must never be used to claim a
+  complete call sequence.
+- Nothing here invents scheduling, interrupt, or service behaviour. The census
+  only reports what dispatch already observed.
 
 ## Validation
 
-- `tests/rg_reps2_engine_smoke.cpp` includes `test_session_lifecycle_and_budgeted_execution`
-  which exercises the census structure through a synthetic synthetic‑run
-  module. The test verifies that a valid module is admitted (ABI 20) and
-  that a stale ABI 19 module is rejected as `runtime_abi_mismatch`.
-- `tests/reps2_syscall_census_smoke.cpp` exercises the census
-  instrumentation and hot-site counters.
-- CI gates on this branch (Windows x64/MSVC, Release): CMake configure,
-  `cmake --build build --config Release --parallel`, and
-  `ctest -C Release` all pass (45/45, including new census tests).
-- Rust frontend gates are recorded in the PR.
-
-## Future work
-
-The census can be extended with:
-
-- Correlation with device or interrupt state.
-- Cross‑process (SIF) call attribution.
-- Differential comparison between probe runs.
-
-No guest-visible behavior changes from this ADR alone.
+- `tests/syscall_census_smoke.cpp`: service and site attribution, the
+  `seen == handled + refused` invariant, two sites sharing one service, the
+  negated `i`-form folding to the same slot, the overflow bucket, ring capacity
+  and chronological order, and the disabled-trace path.
+- `tests/engine_runner_census_report.cmake`: drives the runner over a native
+  fixture that dispatches two serviced calls at one PC and one refused number at
+  another, then asserts totals, per-service accounting, hot-site attribution,
+  trace capacity/order, and the additive JSON shape.
+- Local gates (Windows x64/MSVC Release): `ctest -C Release` 47/47.
+- No real-title probe is part of this decision. The census is the instrument for
+  the next one.
