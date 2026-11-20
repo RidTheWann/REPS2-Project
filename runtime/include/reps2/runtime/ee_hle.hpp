@@ -2675,6 +2675,11 @@ inline constexpr std::uint32_t kEeSndReturnBufferBytes = 12U;
 // Function 77 (SL_COMMAND_BATCH) flushes buffered sound commands.
 inline constexpr std::uint32_t kEeSndCmdSlCommandBatch = 77U;
 inline constexpr std::uint32_t kEeSndBatchRequestBytes = 12U;
+// Loader-server commands (sid 0x00123457): the 989snd public driver's `SL_*`
+// enum. `SL_LOADBANK` (2) sends `{offset, name...}` and `SL_LOADBANKBYLOC` (3)
+// sends `{loc, size}`; both wait on `gLoadReturnValue[0] != -1`. ADR 0174.
+inline constexpr std::uint32_t kEeSndCmdSlLoadBank = 2U;
+inline constexpr std::uint32_t kEeSndCmdSlLoadBankByLoc = 3U;
 
 // CdInit (sid 0x80000592, function 0).
 //
@@ -3136,15 +3141,40 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     return false; // unmodelled command: no reply, no RPC_END
 }
 
-// The 989snd loader server (sid 0x00123457). Its functions are the bank and MMD
-// loads (`SL_LOADBANK`, ...), which need a real IOP filesystem and sound memory
-// allocator. None is modelled, so every call is recorded by the shared SIF
-// dispatch and refused and the loader caller stays blocked. ADR 0155.
+// The 989snd loader server (sid 0x00123457). The loader commands are the bank
+// and MMD loads (`SL_LOADBANK` = 2, `SL_LOADBANKBYLOC` = 3, ...; the enum is the
+// public 989snd driver's `SL_*` list), which need a real IOP filesystem and
+// sound-memory allocator. None is modelled. Serving them with a fabricated bank
+// pointer would be an invented guest value, so the two commands the recorded
+// Downhill path actually issues are answered with the documented load-failure
+// value 0 (`snd_BankLoadEx` returns 0 and sets `gLastLoadError = 256` when the
+// data source cannot be opened; the EE client treats 0 as "not loaded", not as
+// "still pending"): the reply is delivered through the normal SIF_CMD_RPC_END
+// path so the caller's `gLoadReturnValue[0]` leaves its -1 armed state and the
+// `while (gLoadReturnValue[0] == -1)` busy-wait can exit. Every other loader
+// function stays recorded and refused. ADR 0174.
 [[nodiscard]] inline bool serve_ee_snd_loader_call(
-    EeState&,
-    const EeSifRpcCall&
+    EeState& state,
+    const EeSifRpcCall& call
 ) noexcept {
-    return false;
+    auto& sif = state.hle.sif_cmd;
+    ++sif.snd_loader_call_count;
+    sif.last_snd_loader_number = call.rpc_number;
+    sif.last_snd_loader_replied = false;
+    if (call.rpc_number != kEeSndCmdSlLoadBank && call.rpc_number != kEeSndCmdSlLoadBankByLoc) {
+        return false; // unmodelled loader command: no reply, no RPC_END
+    }
+    if (call.recv_addr == 0U || call.recv_size < 4U) {
+        return false;
+    }
+    // Load-failure result word: the 989snd IOP handler writes the loader
+    // return value into the first word of the reply buffer; 0 = failed.
+    if (store_u32(state.memory, call.recv_addr, 0U) != Status::ok) {
+        return false;
+    }
+    sif.last_snd_loader_replied = true;
+    ++sif.snd_loader_replies;
+    return true;
 }
 
 // IOP FILEIO server (sid 0x80000001). The bind is registered so sceFileioInit

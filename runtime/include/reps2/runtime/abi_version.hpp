@@ -31,4 +31,8 @@
 // register context and `waiting_on_sema`, and `EeHleState` gains the
 // `active_thread_id`/`blocked_sema_id`/`main_context` fields plus the
 // scheduler counters. Modules built against ABI 21 are refused.
-#define REPS2_RUNTIME_ABI_VERSION 22
+//
+// ABI 23 covers ADR 0174: the 989snd loader server's observation fields
+// (`snd_loader_*`) in EeSifCmdState change sizeof(EeState). Modules built
+// against ABI 22 are refused.
+#define REPS2_RUNTIME_ABI_VERSION 23

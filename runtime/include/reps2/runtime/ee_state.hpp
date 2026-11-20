@@ -1235,6 +1235,13 @@ struct EeSifCmdState {
     std::uint32_t last_snd_status_addr{};
     std::uint32_t last_snd_flags{};
     bool last_snd_replied{};
+    // The loader server's calls (sid 0x00123457): ADR 0174 serves the two
+    // bank-load commands with the documented load-failure word 0 and refuses
+    // every other function, recording each call here.
+    std::uint32_t snd_loader_call_count{};
+    std::uint32_t snd_loader_replies{};
+    std::uint32_t last_snd_loader_number{};
+    bool last_snd_loader_replied{};
 
     // SIF_CMD_RESET_CMD (0x80000003): the EE asked the IOP to reboot. The
     // resident HLE IOP re-arms its RPCINIT handshake and records the request;

@@ -719,6 +719,10 @@ void print_error(
               << ",\"snd_status_addr\":" << state.hle.sif_cmd.last_snd_status_addr
               << ",\"snd_flags\":" << state.hle.sif_cmd.last_snd_flags
               << ",\"snd_replied\":" << (state.hle.sif_cmd.last_snd_replied ? 1U : 0U)
+              << ",\"snd_loader_calls\":" << state.hle.sif_cmd.snd_loader_call_count
+              << ",\"snd_loader_replies\":" << state.hle.sif_cmd.snd_loader_replies
+              << ",\"snd_loader_number\":" << state.hle.sif_cmd.last_snd_loader_number
+              << ",\"snd_loader_replied\":" << (state.hle.sif_cmd.last_snd_loader_replied ? 1U : 0U)
               << "}},\"dmac\":{\"handlers\":" << state.hle.dmac_handler_count
               << ",\"add_handler_calls\":" << state.hle.add_dmac_handler_calls
               << ",\"interrupts_delivered\":" << state.hle.dmac_interrupts_delivered

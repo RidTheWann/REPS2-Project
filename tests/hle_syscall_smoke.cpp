@@ -4932,9 +4932,8 @@ int test_989snd_calls_are_recorded_and_refused() {
     state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
     make_rpc_call_semaphore(state);
 
-    // The loader server (0x00123457) models no command, so its calls are
-    // recorded by the shared SIF dispatch and refused: no reply, no RPC_END,
-    // semaphore untouched.
+    // The loader server (0x00123457) refuses every unmodelled function: no
+    // reply, no RPC_END, semaphore untouched, reply buffer untouched.
     store_rpc_call_request(ram, reps2::runtime::kEeSifServerSnd989Alt, 0x11U, 8U, 8U);
     store_word(ram, kRpcPayload, 0xA5A5'A5A5U);
     store_word(ram, kRpcReply, 0xA5A5'A5A5U);
@@ -4946,9 +4945,50 @@ int test_989snd_calls_are_recorded_and_refused() {
     if (sif.rpc_call_count != 1U || sif.last_rpc_call_number != 0x11U) return 1055;
     if (sif.last_rpc_call_server_sid != reps2::runtime::kEeSifServerSnd989Alt) return 1056;
     if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 1057;
+    if (sif.snd_loader_call_count != 1U || sif.last_snd_loader_number != 0x11U) return 1061;
+    if (sif.last_snd_loader_replied || sif.snd_loader_replies != 0U) return 1062;
     if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 1058;
     if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 1059;
     if (state.hle.semaphores[3].count != 0) return 1060;
+    return 0;
+}
+
+// ADR 0174: the loader server serves the two bank-load commands (SL_LOADBANK
+// = 2, SL_LOADBANKBYLOC = 3) with the documented load-failure word 0 written
+// into the caller's reply buffer, then delivers SIF_CMD_RPC_END so the NOWAIT
+// caller's `gLoadReturnValue[0]` leaves its -1 armed state. A malformed call
+// (no reply buffer / too small) is refused with no mutation.
+int test_989snd_loader_bank_load_is_served_with_failure_word() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.sif_cmd = {};
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    for (const std::uint32_t fno : {2U, 3U}) {
+        store_rpc_call_request(ram, reps2::runtime::kEeSifServerSnd989Alt, fno, 8U, 4U);
+        store_word(ram, kRpcPayload, 0x1111'2222U);
+        store_word(ram, kRpcReply, 0xFFFF'FFFFU); // armed -1, like gLoadReturnValue[0]
+        const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 8U, 0U};
+        if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+            return 1070;
+        }
+        const auto& sif = state.hle.sif_cmd;
+        if (!sif.last_rpc_call_replied || sif.rpc_call_replies == 0U) return 1071;
+        if (sif.last_snd_loader_number != fno) return 1072;
+        if (!sif.last_snd_loader_replied) return 1073;
+        // The reply buffer's first word is the load result: 0 = failed, and
+        // crucially no longer the -1 pending sentinel the EE busy-waits on.
+        if (load_word(ram, kRpcReply) != 0U) return 1074;
+        if (load_word(ram, kRpcEePktbuf + 0x08U) != reps2::runtime::kEeSifCmdRpcEnd) return 1075;
+        // RPC_END released the client's semaphore.
+        if (state.hle.semaphores[3].count != 1) return 1076;
+        state.hle.semaphores[3].count = 0;
+    }
+    if (state.hle.sif_cmd.snd_loader_call_count != 2U) return 1077;
+    if (state.hle.sif_cmd.snd_loader_replies != 2U) return 1078;
     return 0;
 }
 
@@ -6551,6 +6591,8 @@ int main() {
          &test_bind_to_the_989snd_server_reaches_a_registered_server},
         {"989snd calls are recorded and refused",
          &test_989snd_calls_are_recorded_and_refused},
+        {"989snd loader serves bank-load with failure word",
+         &test_989snd_loader_bank_load_is_served_with_failure_word},
         {"989snd main server serves SL_INIT",
          &test_989snd_sl_init_is_served},
         {"989snd SL_INIT refuses a malformed request",
