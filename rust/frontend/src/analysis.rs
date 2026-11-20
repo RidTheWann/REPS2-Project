@@ -1378,13 +1378,12 @@ fn build_block(
         // The delay slot of the previous instruction (pc - 4) is excluded: it
         // must stay attached to its owning branch, and targeting it is already
         // handled by the delay-slot admission path.
-        if instruction.is_conditional_branch() {
-            if instruction.target < pc
-                && instruction.target > start_pc
-                && instruction.target != pc - 4
-            {
-                leaders.insert(instruction.target);
-            }
+        if instruction.is_conditional_branch()
+            && instruction.target < pc
+            && instruction.target > start_pc
+            && instruction.target != pc - 4
+        {
+            leaders.insert(instruction.target);
         }
 
         if instruction.is_conditional_branch() {
