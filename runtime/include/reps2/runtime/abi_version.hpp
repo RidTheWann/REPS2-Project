@@ -35,4 +35,8 @@
 // ABI 23 covers ADR 0174: the 989snd loader server's observation fields
 // (`snd_loader_*`) in EeSifCmdState change sizeof(EeState). Modules built
 // against ABI 22 are refused.
-#define REPS2_RUNTIME_ABI_VERSION 23
+//
+// ABI 24 covers ADR 0175: the GS CSR (0x12001000) and IMR (0x12001010) storage
+// registers (`gs_csr`/`gs_imr`) in EeMemory plus their MMIO dispatch entries
+// change sizeof(EeState). Modules built against ABI 23 are refused.
+#define REPS2_RUNTIME_ABI_VERSION 24

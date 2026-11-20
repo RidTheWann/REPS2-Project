@@ -1318,6 +1318,24 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_intc_timer2_smoke COMMAND reps2_intc_timer2_smoke)
 
+    # EE GS CSR (0x12001000) / IMR (0x12001010) register model (ADR 0175): the
+    # ABI-23 frontier stopped at pc=0x002434B4 on an unsupported store to GS
+    # CSR; the bounded storage registers must accept the write and read back
+    # with the status half clear (no GPU is modelled).
+    add_executable(reps2_gs_csr_smoke
+        tests/gs_csr_smoke.cpp
+    )
+    target_link_libraries(reps2_gs_csr_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_gs_csr_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_gs_csr_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_gs_csr_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_gs_csr_smoke COMMAND reps2_gs_csr_smoke)
+
     set(REPS2_COP1_ARITH_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/cop1_arith_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_ARITH_GENERATED_CPP}"
