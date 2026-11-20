@@ -6219,6 +6219,150 @@ int test_dmac_interrupt_is_not_an_intc_source() {
     return 0;
 }
 
+// --- Cooperative scheduler (ADR 0173) -------------------------------------
+// A second thread is created and started READY, the boot thread blocks on an
+// empty semaphore, and the dispatcher must switch to the READY thread: its
+// program counter becomes the recorded function and it is marked RUNNING.
+int test_scheduler_dispatches_ready_thread_on_wait_block() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+
+    const std::uint32_t thread_id = create_thread_with_priority(state, ram, 1U);
+    if (thread_id == 0U) return 750;
+    state.gpr[4].low = thread_id;
+    state.gpr[5].low = 0U;
+    if (reps2::runtime::hle_start_thread(state) != Status::ok) return 751;
+
+    // Boot thread blocks on a zero-count semaphore.
+    store_sema_parameters(ram, kSemaParameters, 0, 1, 0, 0, 0U, 0U);
+    state.gpr[4].low = kSemaParameters;
+    if (reps2::runtime::hle_create_sema(state) != Status::ok) return 752;
+    const auto sema_id = static_cast<std::uint32_t>(state.gpr[2].low);
+
+    const std::uint32_t boot_pc = 0x00201888U;
+    state.pc = boot_pc;
+    state.gpr[4].low = sema_id;
+    const Status status = reps2::runtime::hle_wait_sema(state);
+    // The service succeeded by switching to the READY thread, not by blocking.
+    if (status != Status::ok) return 753;
+    if (!state.hle.scheduler_switched_in_service) return 754;
+    if (state.hle.scheduler_switches != 1U) return 755;
+    if (state.hle.active_thread_id != thread_id) return 756;
+    // The dispatched thread starts at its recorded function.
+    if (state.pc != 0xE600U) return 757;
+    const auto& thread =
+        state.hle.threads[thread_id - reps2::runtime::kEeFirstCreatedThreadId];
+    if (thread.status != reps2::runtime::kEeThreadStatusRun) return 758;
+    // The boot thread is parked on that semaphore with its continuation saved.
+    if (!state.hle.main_context_live || state.hle.blocked_sema_id != static_cast<std::int32_t>(sema_id)) {
+        return 759;
+    }
+    if (state.hle.main_context.saved_pc != boot_pc + 4U) return 760;
+    return 0;
+}
+
+// Signalling the semaphore the boot thread parked on makes it runnable; the
+// dispatcher's scheduling point (not the signal itself) restores its context.
+int test_scheduler_wakes_parked_boot_thread_on_signal() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    const std::uint32_t thread_id = create_thread_with_priority(state, ram, 1U);
+    if (thread_id == 0U) return 761;
+    state.gpr[4].low = thread_id;
+    state.gpr[5].low = 0U;
+    if (reps2::runtime::hle_start_thread(state) != Status::ok) return 762;
+
+    store_sema_parameters(ram, kSemaParameters, 0, 1, 0, 0, 0U, 0U);
+    state.gpr[4].low = kSemaParameters;
+    if (reps2::runtime::hle_create_sema(state) != Status::ok) return 763;
+    const auto sema_id = static_cast<std::uint32_t>(state.gpr[2].low);
+
+    state.pc = 0x00201888U;
+    state.gpr[19].low = 0x1234'5678U; // a caller-saved register to prove restore
+    state.gpr[4].low = sema_id;
+    if (reps2::runtime::hle_wait_sema(state) != Status::ok) return 764;
+    if (state.hle.active_thread_id != thread_id) return 765;
+
+    // Another context signals; the boot thread is marked pending, not resumed
+    // yet (a created thread is running).
+    state.gpr[4].low = sema_id;
+    if (reps2::runtime::hle_signal_sema(state) != Status::ok) return 766;
+    if (!state.hle.main_ready_pending) return 767;
+    if (state.hle.active_thread_id != thread_id) return 768;
+
+    // The dispatcher scheduling point performs the actual resume.
+    reps2::runtime::ee_scheduler_resume_main(state);
+    if (state.hle.active_thread_id != reps2::runtime::kEeMainThreadId) return 769;
+    if (state.hle.main_context_live || state.hle.main_ready_pending) return 770;
+    if (state.hle.scheduler_resumes != 1U) return 771;
+    // The parked boot context is restored, including its PC and $s3.
+    if (state.pc != 0x0020188CU) return 772;
+    if (state.gpr[19].low != 0x1234'5678U) return 773;
+    if (state.gpr[2].low != 0U) return 774; // WaitSema success value
+    return 0;
+}
+
+// The suspended boot thread's full context (registers and PC) is captured, not
+// just the PC, so a resume continues with the same architectural state.
+int test_scheduler_preserves_suspended_boot_context() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    const std::uint32_t thread_id = create_thread_with_priority(state, ram, 1U);
+    if (thread_id == 0U) return 774;
+    state.gpr[4].low = thread_id;
+    state.gpr[5].low = 0U;
+    if (reps2::runtime::hle_start_thread(state) != Status::ok) return 775;
+
+    store_sema_parameters(ram, kSemaParameters, 0, 1, 0, 0, 0U, 0U);
+    state.gpr[4].low = kSemaParameters;
+    if (reps2::runtime::hle_create_sema(state) != Status::ok) return 776;
+    const auto sema_id = static_cast<std::uint32_t>(state.gpr[2].low);
+
+    state.pc = 0x00234600U;
+    state.gpr[16].low = 0xAAAA'0001U;
+    state.gpr[17].low = 0xAAAA'0002U;
+    state.gpr[29].low = 0x0070'FFF0U;
+    state.hi = 0x1111U;
+    state.lo = 0x2222U;
+    state.gpr[4].low = sema_id;
+    if (reps2::runtime::hle_wait_sema(state) != Status::ok) return 777;
+
+    const auto& saved = state.hle.main_context;
+    if (saved.saved_gpr[16].low != 0xAAAA'0001U) return 778;
+    if (saved.saved_gpr[17].low != 0xAAAA'0002U) return 779;
+    if (saved.saved_gpr[29].low != 0x0070'FFF0U) return 780;
+    if (saved.saved_hi != 0x1111U || saved.saved_lo != 0x2222U) return 781;
+    if (saved.saved_pc != 0x00234604U) return 782;
+    return 0;
+}
+
+// With no READY thread the block is reported, the run stops, and no context is
+// fabricated: the boot thread stays parked on its semaphore.
+int test_scheduler_reports_blocked_when_nothing_runnable() {
+    RamWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.hle.syscall_enabled = true;
+    store_sema_parameters(ram, kSemaParameters, 0, 1, 0, 0, 0U, 0U);
+    state.gpr[4].low = kSemaParameters;
+    if (reps2::runtime::hle_create_sema(state) != Status::ok) return 783;
+    const auto sema_id = static_cast<std::uint32_t>(state.gpr[2].low);
+    state.pc = 0x00201888U;
+    state.gpr[4].low = sema_id;
+    if (reps2::runtime::hle_wait_sema(state) != Status::semaphore_wait_blocked) return 784;
+    if (state.hle.scheduler_no_runnable != 1U) return 785;
+    if (state.hle.active_thread_id != 0U) return 786;
+    if (state.hle.blocked_sema_id != static_cast<std::int32_t>(sema_id)) return 787;
+    if (!state.hle.main_context_live) return 788;
+    return 0;
+}
+
 int main() {
     const struct {
         const char* what;
@@ -6548,6 +6692,14 @@ int main() {
         {"guest handler restore preserves sa and cop0",
          &test_guest_handler_restore_preserves_sa_and_cop0},
         {"guest handler overflow refuses recursion", &test_guest_handler_overflow_refuses_instead_of_recursing},
+        {"scheduler dispatches a ready thread on wait-block",
+         &test_scheduler_dispatches_ready_thread_on_wait_block},
+        {"scheduler wakes the parked boot thread on signal",
+         &test_scheduler_wakes_parked_boot_thread_on_signal},
+        {"scheduler preserves the suspended boot context",
+         &test_scheduler_preserves_suspended_boot_context},
+        {"scheduler reports blocked when nothing is runnable",
+         &test_scheduler_reports_blocked_when_nothing_runnable},
     };
 
     for (const auto& test : cases) {

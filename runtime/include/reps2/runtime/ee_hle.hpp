@@ -1407,6 +1407,250 @@ inline constexpr std::uint32_t kEeSyscallSemaphoreSuccess = 0U;
     return Status::ok;
 }
 
+// ---------------------------------------------------------------------------
+// Cooperative EE scheduler (ADR 0173).
+//
+// REPS2 executes one guest context at a time. A thread that voluntarily blocks
+// (WaitSema with a zero count) yields to the lowest-id READY thread; when that
+// thread blocks or exits, the next READY one runs. Context is captured whole
+// so a resumed thread continues exactly where it stopped.
+//
+// Fail-closed rules:
+//  * Only a voluntarily blocked thread is suspended. A thread is never made
+//    READY by an event the runtime did not produce: SignalSema on its blocked
+//    semaphore is the only wake path, matching the kernel's waiter rules.
+//  * A first dispatch starts at `function` with a fresh register file and the
+//    recorded stack pointer; no register image is fabricated for a thread that
+//    has never run.
+//  * When no READY thread exists the run stops with semaphore_wait_blocked so
+//    the frontier stays honest; the boot context is preserved, not lost.
+// ---------------------------------------------------------------------------
+
+inline void ee_scheduler_save_active_context(EeState& state) noexcept {
+    auto& hle = state.hle;
+    const auto save_into = [&state](
+        std::uint32_t& saved_pc,
+        std::array<Gpr128, 32>& saved_gpr,
+        std::uint64_t& saved_hi,
+        std::uint64_t& saved_lo,
+        std::uint64_t& saved_hi1,
+        std::uint64_t& saved_lo1,
+        std::array<std::uint32_t, 32>& saved_fpr,
+        std::uint32_t& saved_acc,
+        std::uint32_t& saved_fcsr,
+        std::uint64_t& saved_sa,
+        Vu0State& saved_vu0,
+        std::array<std::uint32_t, 32>& saved_cop0) noexcept {
+        saved_pc = state.pc;
+        saved_gpr = state.gpr;
+        saved_hi = state.hi;
+        saved_lo = state.lo;
+        saved_hi1 = state.hi1;
+        saved_lo1 = state.lo1;
+        saved_fpr = state.fpr;
+        saved_acc = state.acc;
+        saved_fcsr = state.fcsr;
+        saved_sa = state.sa;
+        saved_vu0 = state.vu0;
+        saved_cop0 = state.cop0;
+    };
+    if (hle.active_thread_id == kEeMainThreadId) {
+        save_into(hle.main_context.saved_pc, hle.main_context.saved_gpr,
+                  hle.main_context.saved_hi, hle.main_context.saved_lo,
+                  hle.main_context.saved_hi1, hle.main_context.saved_lo1,
+                  hle.main_context.saved_fpr, hle.main_context.saved_acc,
+                  hle.main_context.saved_fcsr, hle.main_context.saved_sa,
+                  hle.main_context.saved_vu0, hle.main_context.saved_cop0);
+        hle.main_context_live = true;
+        return;
+    }
+    const std::uint32_t slot = hle.active_thread_id - kEeFirstCreatedThreadId;
+    if (slot >= kEeMaxThreads) return;
+    EeThread& thread = hle.threads[slot];
+    save_into(thread.saved_pc, thread.saved_gpr, thread.saved_hi, thread.saved_lo,
+              thread.saved_hi1, thread.saved_lo1, thread.saved_fpr, thread.saved_acc,
+              thread.saved_fcsr, thread.saved_sa, thread.saved_vu0, thread.saved_cop0);
+    thread.context_live = true;
+}
+
+// Load `thread` into the live EeState fields and make it the active context.
+// A thread that has never run starts at its function with a fresh register
+// file; only the argument register ($a0) and the stack pointer come from the
+// thread record, matching what StartThread recorded.
+inline void ee_scheduler_load_thread(EeState& state, EeThread& thread) noexcept {
+    auto& hle = state.hle;
+    if (thread.context_live) {
+        state.gpr = thread.saved_gpr;
+        state.hi = thread.saved_hi;
+        state.lo = thread.saved_lo;
+        state.hi1 = thread.saved_hi1;
+        state.lo1 = thread.saved_lo1;
+        state.fpr = thread.saved_fpr;
+        state.acc = thread.saved_acc;
+        state.fcsr = thread.saved_fcsr;
+        state.sa = thread.saved_sa;
+        state.vu0 = thread.saved_vu0;
+        state.cop0 = thread.saved_cop0;
+        state.pc = thread.saved_pc;
+        ++hle.scheduler_resumes;
+    } else {
+        state.gpr = {};
+        state.hi = 0U;
+        state.lo = 0U;
+        state.hi1 = 0U;
+        state.lo1 = 0U;
+        state.fpr = {};
+        state.acc = 0U;
+        state.fcsr = 0U;
+        state.sa = 0U;
+        state.vu0 = Vu0State{};
+        state.pc = thread.function;
+        // $sp from the thread record; $gp from the record when the guest set
+        // one. $ra is set so a returning function exits through the dispatcher
+        // sentinel rather than an unmapped address.
+        state.gpr[28].low = sign_extend_word(thread.gp);
+        state.gpr[29].low = sign_extend_word(thread.stack + thread.stack_size);
+        state.gpr[31].low = sign_extend_word(kEeSyscallHandlerReturnPc);
+        state.gpr[4].low = sign_extend_word(thread.argv);
+    }
+    thread.status = kEeThreadStatusRun;
+    hle.active_thread_id = kEeFirstCreatedThreadId
+        + static_cast<std::uint32_t>(&thread - hle.threads.data());
+}
+
+// The lowest-id READY thread, removed from the queue and made RUNNING.
+[[nodiscard]] inline bool ee_scheduler_pick_ready(EeState& state) noexcept {
+    auto& hle = state.hle;
+    if (hle.ready_count == 0U) return false;
+    std::size_t best = 0U;
+    for (std::size_t i = 1U; i < hle.ready_count; ++i) {
+        if (hle.ready_queue[i] < hle.ready_queue[best]) best = i;
+    }
+    const std::uint32_t id = hle.ready_queue[best];
+    for (std::size_t i = best; i + 1U < hle.ready_count; ++i) {
+        hle.ready_queue[i] = hle.ready_queue[i + 1U];
+    }
+    --hle.ready_count;
+    const std::uint32_t slot = id - kEeFirstCreatedThreadId;
+    if (slot >= kEeMaxThreads) return false;
+    EeThread& thread = hle.threads[slot];
+    if (!thread.in_use) return false;
+    ee_scheduler_load_thread(state, thread);
+    ++hle.scheduler_switches;
+    return true;
+}
+
+// Suspend the active thread on `sema_id` and switch to the next READY thread.
+// Returns ok when another thread was dispatched, or semaphore_wait_blocked when
+// nothing can run (the caller must stop; the suspended context is preserved).
+[[nodiscard]] inline Status ee_scheduler_block_on_sema(
+    EeState& state, std::int32_t sema_id) noexcept {
+    auto& hle = state.hle;
+    ee_scheduler_save_active_context(state);
+    // The SYSCALL that blocked has not yet advanced the PC. Save resume_pc as
+    // the suspended thread's continuation so a later wake resumes right after
+    // the SYSCALL instruction.
+    const std::uint32_t continuation = state.pc + 4U;
+    if (hle.active_thread_id == kEeMainThreadId) {
+        hle.blocked_sema_id = sema_id;
+        hle.main_context.saved_pc = continuation;
+        hle.main_context_live = true;
+        hle.active_thread_id = 0U;
+    } else {
+        const std::uint32_t slot = hle.active_thread_id - kEeFirstCreatedThreadId;
+        if (slot < kEeMaxThreads) {
+            EeThread& thread = hle.threads[slot];
+            thread.waiting_on_sema = sema_id;
+            thread.saved_pc = continuation;
+            thread.context_live = true;
+            if (thread.status == kEeThreadStatusRun) {
+                thread.status = kEeThreadStatusDormant; // blocked, not runnable
+            }
+        }
+        hle.active_thread_id = 0U;
+    }
+    if (ee_scheduler_pick_ready(state)) {
+        hle.scheduler_switched_in_service = true;
+        return Status::ok;
+    }
+    ++hle.scheduler_no_runnable;
+    return Status::semaphore_wait_blocked;
+}
+
+// A SignalSema on `sema_id`: make the thread blocked on it READY again.
+//
+// The boot thread parks with `active_thread_id == 0` and its image in
+// `main_context`; a signalled main wait resumes it immediately into the live
+// EeState fields (it outranks any created thread). Created threads return to
+// the ready queue.
+inline void ee_scheduler_wake_waiter(EeState& state, std::int32_t sema_id) noexcept {
+    auto& hle = state.hle;
+    if (sema_id < 0) return;
+    const bool main_parked = hle.blocked_sema_id == sema_id && hle.main_context_live;
+    if (main_parked && hle.active_thread_id == 0U) {
+        hle.blocked_sema_id = -1;
+        hle.main_context_live = false;
+        const EeThread& c = hle.main_context;
+        state.gpr = c.saved_gpr;
+        state.hi = c.saved_hi;
+        state.lo = c.saved_lo;
+        state.hi1 = c.saved_hi1;
+        state.lo1 = c.saved_lo1;
+        state.fpr = c.saved_fpr;
+        state.acc = c.saved_acc;
+        state.fcsr = c.saved_fcsr;
+        state.sa = c.saved_sa;
+        state.vu0 = c.saved_vu0;
+        state.cop0 = c.saved_cop0;
+        state.pc = c.saved_pc;
+        hle.active_thread_id = kEeMainThreadId;
+        ++hle.scheduler_resumes;
+        // Preserve the syscall's result: the waiter returns after the SYSCALL.
+        state.gpr[kEeSyscallResultRegister].low =
+            sign_extend_word(kEeSyscallSemaphoreSuccess);
+        return;
+    }
+    // The boot thread is parked but a created thread is running: mark it ready
+    // so the next scheduling point resumes it rather than overwriting the live
+    // thread context.
+    if (main_parked) {
+        hle.main_ready_pending = true;
+    }
+    for (std::uint32_t slot = 0U; slot < kEeMaxThreads; ++slot) {
+        EeThread& thread = hle.threads[slot];
+        if (!thread.in_use || thread.waiting_on_sema != sema_id) continue;
+        thread.waiting_on_sema = -1;
+        thread.status = kEeThreadStatusReady;
+        (void)ee_insert_ready_thread(hle, kEeFirstCreatedThreadId + slot);
+    }
+}
+
+// Resume the parked boot thread into the live EeState. Used both by the
+// scheduler and by the dispatcher's scheduling point.
+inline void ee_scheduler_resume_main(EeState& state) noexcept {
+    auto& hle = state.hle;
+    const EeThread& c = hle.main_context;
+    state.gpr = c.saved_gpr;
+    state.hi = c.saved_hi;
+    state.lo = c.saved_lo;
+    state.hi1 = c.saved_hi1;
+    state.lo1 = c.saved_lo1;
+    state.fpr = c.saved_fpr;
+    state.acc = c.saved_acc;
+    state.fcsr = c.saved_fcsr;
+    state.sa = c.saved_sa;
+    state.vu0 = c.saved_vu0;
+    state.cop0 = c.saved_cop0;
+    state.pc = c.saved_pc;
+    hle.active_thread_id = kEeMainThreadId;
+    hle.main_context_live = false;
+    hle.main_ready_pending = false;
+    hle.blocked_sema_id = -1;
+    ++hle.scheduler_resumes;
+    state.gpr[kEeSyscallResultRegister].low =
+        sign_extend_word(kEeSyscallSemaphoreSuccess);
+}
+
 // SignalSema (0x42) / iSignalSema (0x43): raise the semaphore's count.
 //
 // Without a scheduler there is no thread to make runnable, so the only modelled
@@ -1424,6 +1668,7 @@ inline constexpr std::uint32_t kEeSyscallSemaphoreSuccess = 0U;
         state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallFailure);
         return Status::ok;
     }
+    ee_scheduler_wake_waiter(state, id);
     state.hle.last_sema_op_count_after = sema->count;
     state.hle.last_sema_op_valid = true;
     state.gpr[kEeSyscallResultRegister].low = sign_extend_word(kEeSyscallSemaphoreSuccess);
@@ -1433,10 +1678,11 @@ inline constexpr std::uint32_t kEeSyscallSemaphoreSuccess = 0U;
 // WaitSema (0x44): WaitSema(int sema_id).
 //
 // With a free count the call consumes it and returns the documented 0. With a
-// zero count a real kernel suspends the caller; REPS2 cannot schedule and does
-// not produce the awaited event, so it stops at the SYSCALL as
-// Status::semaphore_wait_blocked rather than returning a fabricated 0. An id
-// that names no live object is the documented failure, not a block.
+// zero count the calling thread is suspended on that semaphore and the
+// scheduler switches to another READY thread (ADR 0173). When no thread can
+// run, the run stops at the SYSCALL as Status::semaphore_wait_blocked instead
+// of returning a fabricated 0. An id that names no live object is the
+// documented failure, not a block.
 [[nodiscard]] inline Status hle_wait_sema(EeState& state) noexcept {
     const auto id = static_cast<std::int32_t>(ee_syscall_argument(state, 0));
     ++state.hle.wait_sema_calls;
@@ -1448,7 +1694,7 @@ inline constexpr std::uint32_t kEeSyscallSemaphoreSuccess = 0U;
     state.hle.last_sema_wait_count_before = sema->count;
     if (sema->count <= 0) {
         state.hle.last_sema_wait_blocked = true;
-        return Status::semaphore_wait_blocked;
+        return ee_scheduler_block_on_sema(state, id);
     }
     --sema->count;
     state.hle.last_sema_op_count_after = sema->count;
@@ -4380,10 +4626,17 @@ inline void record_ee_syscall_trace(
         if (result == Status::ok) {
             finish_ee_syscall_memory_trace(state);
             ++state.hle.syscall_handled_count;
-            state.pc = resume_pc;
-            state.hle.last_syscall_v0_after =
-                static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
-            state.hle.last_syscall_resume_pc = resume_pc;
+            // A scheduler switch inside the service (WaitSema blocking and
+            // dispatching another thread) has already installed the next
+            // context, including its PC. Overwriting it with resume_pc would
+            // resume the suspended caller instead of running the new thread.
+            if (!state.hle.scheduler_switched_in_service) {
+                state.pc = resume_pc;
+                state.hle.last_syscall_v0_after =
+                    static_cast<std::uint32_t>(state.gpr[kEeSyscallResultRegister].low);
+                state.hle.last_syscall_resume_pc = resume_pc;
+            }
+            state.hle.scheduler_switched_in_service = false;
         }
     }
 

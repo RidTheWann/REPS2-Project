@@ -483,6 +483,28 @@ struct EeThread {
     std::uint32_t attr{};
     std::uint32_t option{};
     std::uint32_t argv{};
+    // Saved guest execution context, captured when the scheduler switches away
+    // from this thread and restored when it resumes. A thread that has never
+    // run has `context_live == false`: its first dispatch starts at `function`
+    // with a fresh register file rather than a fabricated saved one. See
+    // `ee_scheduler_switch` in ee_hle.hpp.
+    bool context_live{};
+    std::uint32_t saved_pc{};
+    std::array<Gpr128, 32> saved_gpr{};
+    std::uint64_t saved_hi{};
+    std::uint64_t saved_lo{};
+    std::uint64_t saved_hi1{};
+    std::uint64_t saved_lo1{};
+    std::array<std::uint32_t, 32> saved_fpr{};
+    std::uint32_t saved_acc{};
+    std::uint32_t saved_fcsr{};
+    std::uint64_t saved_sa{};
+    Vu0State saved_vu0{};
+    std::array<std::uint32_t, 32> saved_cop0{};
+    // The semaphore this thread is blocked on, or -1. Set when the thread
+    // voluntarily blocks in WaitSema; a SignalSema on the same id makes it
+    // READY and clears this to -1.
+    std::int32_t waiting_on_sema{-1};
 };
 // Host registrations for the documented 0..255 service range are indexed
 // directly. ps2sdk's `alarm.c` InitAlarm also patches slot 0x12C
@@ -1433,6 +1455,30 @@ struct EeHleState {
     EeThreadStartRejection last_start_rejection{};
     std::uint32_t ready_count{};
     std::array<std::uint32_t, kEeMaxThreads> ready_queue{};
+    // Cooperative scheduler state (ADR 0173). `active_thread_id` is the id of
+    // the guest context currently executing (kEeMainThreadId for the boot
+    // thread). `blocked_sema_id` names the semaphore the active thread is
+    // suspended on, or -1. The boot thread's context lives in the top-level
+    // EeState fields; when it blocks, `main_context_live` records that those
+    // fields hold a saved image to restore on resume.
+    std::uint32_t active_thread_id{kEeMainThreadId};
+    std::int32_t blocked_sema_id{-1};
+    bool main_context_live{};
+    // Set when a signalled semaphore makes the parked boot thread runnable while
+    // a created thread is still running. The dispatcher resumes it at the next
+    // scheduling point instead of clobbering the running thread's context.
+    bool main_ready_pending{};
+    // Saved context of the boot thread while it is parked (active id 0). The
+    // boot thread has no record in `threads`, so its image lives here.
+    EeThread main_context{};
+    // Diagnostics for the scheduler; not guest-visible.
+    std::uint64_t scheduler_switches{};
+    std::uint64_t scheduler_resumes{};
+    std::uint64_t scheduler_no_runnable{};
+    // Set by the scheduler when a syscall service switched contexts, so the
+    // syscall dispatcher does not clobber the new context's PC with the
+    // suspended caller's resume_pc.
+    bool scheduler_switched_in_service{};
     std::uint64_t get_thread_id_calls{};
     std::uint64_t change_priority_calls{};
     std::uint32_t last_priority_thread_id{};

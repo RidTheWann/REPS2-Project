@@ -101,6 +101,8 @@ using reps2::runtime::enter_ee_guest_callback;
 using reps2::runtime::ee_dmac_line_asserted;
 using reps2::runtime::enter_ee_dmac_interrupt;
 using reps2::runtime::ee_intc_line_asserted;
+using reps2::runtime::ee_scheduler_pick_ready;
+using reps2::runtime::ee_scheduler_resume_main;
 using reps2::runtime::enter_ee_intc_interrupt;
 
 ";
@@ -178,6 +180,22 @@ const EXECUTE_CFG_TAIL: &str = "\
             if (interrupt_status != Status::ok) {
                 return interrupt_status;
             }
+            continue;
+        }
+        // Cooperative scheduling point (ADR 0173): when the active guest
+        // context has parked (no live active id) but a READY thread exists,
+        // dispatch it before fetching the next block. This is the only place a
+        // suspended context yields to another translated one. A parked boot
+        // thread that a SignalSema made runnable while a created thread is
+        // running resumes here too.
+        if (state.hle.active_thread_id == 0U && state.hle.ready_count != 0U) {
+            if (!ee_scheduler_pick_ready(state)) {
+                return Status::semaphore_wait_blocked;
+            }
+            continue;
+        }
+        if (state.hle.main_ready_pending && state.hle.main_context_live) {
+            ee_scheduler_resume_main(state);
             continue;
         }
         // Check the next fetch PC on every dispatch, including post-transfer PCs.
