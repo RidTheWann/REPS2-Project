@@ -62,6 +62,13 @@ inline constexpr std::uint32_t kEeTimer3CompareAddress{0x1000'1820U};
 // stop on an unsupported access. No GS interrupt is ever delivered. ADR 0175.
 inline constexpr std::uint32_t kEeGsCsrAddress{0x1200'1000U};
 inline constexpr std::uint32_t kEeGsImrAddress{0x1200'1010U};
+// GS CRT/video-mode registers (PS2TEK GS, 0x12000000 page). PMODE (0x12000000)
+// and SMODE2 (0x12000020) are modelled as bounded storage registers because the
+// SetGsCrt syscall (0x02) and direct guest writes target them. No display
+// output, no vsync, no GPU state. ADR 0178.
+inline constexpr std::uint32_t kEeGsPmodeAddress{0x1200'0000U};
+inline constexpr std::uint32_t kEeGsSmode1Address{0x1200'0010U};
+inline constexpr std::uint32_t kEeGsSmode2Address{0x1200'0020U};
 // T3_MODE writable fields: CLKS[1:0], GATE[2], GATS[3], GATM[4], ZRET[6],
 // CUE[7], CMPE[8], and OVFE[9]; EQUF[10] and OVFF[11] are write-one-to-clear
 // status bits latched by the progression model (ADR 0142). T3_COMP and T3_COUNT
@@ -192,6 +199,15 @@ inline Status mmio_read_gs_csr(const EeMemory&, std::uint32_t, std::uint32_t&) n
 inline Status mmio_write_gs_csr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_gs_imr(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_gs_imr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// GS CRT/video-mode registers (PMODE 0x12000000, SMODE2 0x12000020). ADR 0178.
+// SMODE1 (0x12000010) added in ADR 0179 — the guest writes it immediately after
+// PMODE in the same CRT-init sequence.
+inline Status mmio_read_gs_pmode(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_pmode(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_smode1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_smode1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_smode2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_smode2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2_count(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_timer2_count(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -251,6 +267,12 @@ struct EeMemory {
     // store the command word. IMR is a plain 16-bit mask. Reset 0. ADR 0175.
     std::uint32_t gs_csr{};
     std::uint32_t gs_imr{};
+    // GS CRT/video-mode registers: PMODE (0x12000000) and SMODE2 (0x12000020)
+    // as plain bounded storage. SetGsCrt (0x02) and direct guest stores write
+    // here; reads return the stored value. No display, no vsync. ADR 0178.
+    std::uint32_t gs_pmode{};
+    std::uint32_t gs_smode1{};
+    std::uint32_t gs_smode2{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -286,6 +308,9 @@ struct EeMemory {
         // command word. IMR is a plain 16-bit mask. Reset 0. ADR 0175.
         { kEeGsCsrAddress,       &mmio_read_gs_csr,  &mmio_write_gs_csr },
         { kEeGsImrAddress,       &mmio_read_gs_imr,  &mmio_write_gs_imr },
+        { kEeGsPmodeAddress,     &mmio_read_gs_pmode, &mmio_write_gs_pmode },
+        { kEeGsSmode1Address,    &mmio_read_gs_smode1, &mmio_write_gs_smode1 },
+        { kEeGsSmode2Address,    &mmio_read_gs_smode2, &mmio_write_gs_smode2 },
     };
 };
 
@@ -2024,6 +2049,33 @@ inline Status mmio_write_gs_imr(EeMemory& self, std::uint32_t, std::uint32_t val
     self.gs_imr = value & 0x0000'FFFFU;
     return Status::ok;
 }
+// GS CRT/video-mode registers: PMODE (0x12000000) and SMODE2 (0x12000020).
+// Plain bounded storage — reads return stored value; writes store value.
+// SetGsCrt (0x02) writes PMODE and/or SMODE2. No display, no vsync. ADR 0178.
+inline Status mmio_read_gs_pmode(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gs_pmode;
+    return Status::ok;
+}
+inline Status mmio_write_gs_pmode(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_pmode = value;
+    return Status::ok;
+}
+inline Status mmio_read_gs_smode1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gs_smode1;
+    return Status::ok;
+}
+inline Status mmio_write_gs_smode1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_smode1 = value;
+    return Status::ok;
+}
+inline Status mmio_read_gs_smode2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gs_smode2;
+    return Status::ok;
+}
+inline Status mmio_write_gs_smode2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_smode2 = value;
+    return Status::ok;
+}
 
 // Host-observable classification of how a bounded execution stopped. The names
 // are a stable, machine-readable contract for the native probe trace and any
@@ -2393,7 +2445,8 @@ inline void disable_interrupts(EeState& state) noexcept {
     // decompose the 64-bit load into a 32-bit load from the register plus
     // returning the high 32 bits as zero (the 64-bit result is zero-extended).
     // ADR 0176: 64-bit loads from 32-bit registers must reach the MMIO handler.
-    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
+        address == kEeGsPmodeAddress || address == kEeGsSmode1Address || address == kEeGsSmode2Address) {
         std::uint32_t low{};
         const auto status1 = load_u32(memory, address, low);
         if (status1 != Status::ok) return status1;
@@ -2492,7 +2545,8 @@ inline void disable_interrupts(EeState& state) noexcept {
     // The upper 4 bytes of the 64-bit store are discarded because the register
     // is only 32 bits wide (4 bytes). ADR 0176: 64-bit stores to 32-bit
     // registers must reach the MMIO handler.
-    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
+        address == kEeGsPmodeAddress || address == kEeGsSmode1Address || address == kEeGsSmode2Address) {
         const std::uint32_t low = static_cast<std::uint32_t>(value);
         return store_u32(memory, address, low);
     }
