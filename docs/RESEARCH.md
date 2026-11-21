@@ -2109,7 +2109,18 @@ limit, root set or relocated region is a different frontier.
 - **Implemented (ADR 0182, runtime ABI 31):** GIF_CTRL/GIF_MODE/GIF_STAT are
   bounded 32-bit storage with MMIO dispatch and 64-bit decomposition. No GIF/GS
   transfer, PATH activity, reset side effect, interrupt, or fabricated
-  readiness. The ABI-31 probe records the next stop.
+  readiness.
+- **Observed (ABI-31 probe `abi31-01`, main `d807103`, same digests, rebuilt
+  frontend + native module):** the GIF register writes pass; the run stops at
+  `pc=0x00238B04` after 4,645,682 instructions as `unsupported_memory_access` on
+  `sw $a0, 0($v1)` with `$v1 = 0x10000810`, `$a0 = 0x82`. **Derived:**
+  `0x10000810 = A_EE_T1_MODE` (ps2sdk `common/include/ee_regs.h`); adjacent
+  Timer 1 registers are `T1_COUNT 0x10000800`, `T1_COMP 0x10000820`,
+  `T1_HOLD 0x10000830`.
+- **Implemented (ADR 0183, runtime ABI 32):** T1_COUNT/T1_MODE/T1_COMP/T1_HOLD
+  are bounded 32-bit storage with MMIO dispatch. No counting, compare events,
+  interrupts, or clock source is modelled; a guest that reads them back sees
+  only what it wrote. The ABI-32 probe records the next stop.
 
 ## Provenance rules
 

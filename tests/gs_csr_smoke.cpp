@@ -26,6 +26,10 @@ constexpr std::uint32_t kVif1ErrAddr = reps2::runtime::kEeVif1ErrAddress;
 constexpr std::uint32_t kGifCtrlAddr = reps2::runtime::kEeGifCtrlAddress;
 constexpr std::uint32_t kGifModeAddr = reps2::runtime::kEeGifModeAddress;
 constexpr std::uint32_t kGifStatAddr = reps2::runtime::kEeGifStatAddress;
+constexpr std::uint32_t kT1CountAddr = reps2::runtime::kEeTimer1CountAddress;
+constexpr std::uint32_t kT1ModeAddr = reps2::runtime::kEeTimer1ModeAddress;
+constexpr std::uint32_t kT1CompAddr = reps2::runtime::kEeTimer1CompareAddress;
+constexpr std::uint32_t kT1HoldAddr = reps2::runtime::kEeTimer1HoldAddress;
 
 int test_gs_csr_reset_write_is_not_unsupported() {
     EeState state{};
@@ -239,6 +243,25 @@ int test_gif_ctrl_store_u64_decomposes() {
     return 0;
 }
 
+// Timer 1 registers are bounded storage. ADR 0183.
+int test_timer1_registers_storage() {
+    EeState state{};
+    if (reps2::runtime::store_u32(state.memory, kT1ModeAddr, 0x0000'0082U) != Status::ok) return 200;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, kT1ModeAddr, value) != Status::ok) return 201;
+    if (value != 0x0000'0082U) return 202;
+    if (reps2::runtime::store_u32(state.memory, kT1CountAddr, 0x0000'1234U) != Status::ok) return 203;
+    if (reps2::runtime::load_u32(state.memory, kT1CountAddr, value) != Status::ok) return 204;
+    if (value != 0x0000'1234U) return 205;
+    if (reps2::runtime::store_u32(state.memory, kT1CompAddr, 0x0000'5678U) != Status::ok) return 206;
+    if (reps2::runtime::load_u32(state.memory, kT1CompAddr, value) != Status::ok) return 207;
+    if (value != 0x0000'5678U) return 208;
+    if (reps2::runtime::store_u32(state.memory, kT1HoldAddr, 0x0000'9ABCU) != Status::ok) return 209;
+    if (reps2::runtime::load_u32(state.memory, kT1HoldAddr, value) != Status::ok) return 210;
+    if (value != 0x0000'9ABCU) return 211;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -270,6 +293,7 @@ int main() {
     run("gif_mode_storage", test_gif_mode_storage);
     run("gif_stat_storage", test_gif_stat_storage);
     run("gif_ctrl_store_u64_decomposes", test_gif_ctrl_store_u64_decomposes);
+    run("timer1_registers_storage", test_timer1_registers_storage);
     run("vif1_fbrst_store_u64_decomposes", test_vif1_fbrst_store_u64_decomposes);
 
     if (fails == 0) {

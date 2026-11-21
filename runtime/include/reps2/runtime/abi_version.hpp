@@ -82,4 +82,9 @@
 // GIF_STAT (0x10003020) are bounded storage registers with MMIO dispatch and
 // 64-bit SD/LD decomposition. sizeof(EeState) changes; ABI-30 modules are
 // refused.
-#define REPS2_RUNTIME_ABI_VERSION 31
+//
+// ABI 32 covers ADR 0183: EE Timer 1 registers T1_COUNT/T1_MODE/T1_COMP/
+// T1_HOLD (0x10000800/10/20/30) are bounded 32-bit storage with MMIO dispatch.
+// No counting, compare events, or interrupts are modelled. sizeof(EeState)
+// changes; ABI-31 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 32

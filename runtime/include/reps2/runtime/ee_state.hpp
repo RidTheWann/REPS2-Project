@@ -141,6 +141,13 @@ inline constexpr std::uint32_t kEeTimer3HblankBusCycles{9370U};
 inline constexpr std::uint32_t kEeTimer2CountAddress{0x1000'1000U};
 inline constexpr std::uint32_t kEeTimer2ModeAddress{0x1000'1010U};
 inline constexpr std::uint32_t kEeTimer2CompareAddress{0x1000'1020U};
+
+// EE Timer 1 register addresses (PS2SDK `common/include/ee_regs.h`:
+// A_EE_T1_COUNT/MODE/COMP/HOLD). Bounded storage only. ADR 0183.
+inline constexpr std::uint32_t kEeTimer1CountAddress{0x1000'0800U};
+inline constexpr std::uint32_t kEeTimer1ModeAddress{0x1000'0810U};
+inline constexpr std::uint32_t kEeTimer1CompareAddress{0x1000'0820U};
+inline constexpr std::uint32_t kEeTimer1HoldAddress{0x1000'0830U};
 // Timers 2 and 3 share one documented register field layout and clock-select
 // table (PS2TEK EE Timers groups them), so T2_MODE uses the same writable mask,
 // write-one-to-clear status bits (EQUF bit 10, OVFF bit 11), ZRET, CUE and CMPE
@@ -255,6 +262,15 @@ inline Status mmio_read_gif_stat(const EeMemory&, std::uint32_t, std::uint32_t&)
 inline Status mmio_write_gif_stat(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2_count(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_timer2_count(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// EE Timer 1 registers (ADR 0183).
+inline Status mmio_read_timer1_count(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_timer1_count(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_timer1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_timer1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_timer1_compare(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_timer1_compare(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_timer1_hold(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_timer1_hold(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_timer2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2_compare(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -262,6 +278,9 @@ inline Status mmio_write_timer2_compare(EeMemory&, std::uint32_t, std::uint32_t)
 // Timer 2 progression is materialised from the shared guest-time source; it is
 // declared here because `advance_ee_timers` precedes the handler definitions.
 inline void materialize_ee_timer2(EeMemory&) noexcept;
+// Timer 1 is bounded storage only (no counting, no interrupts, no clock source).
+// ADR 0183.
+inline void materialize_ee_timer1(EeMemory&) noexcept;
 
 inline constexpr std::size_t kEeVif1FifoCapacityQwords = 16U;
 
@@ -299,6 +318,13 @@ struct EeMemory {
     std::uint32_t timer2_count{};
     std::uint64_t timer2_cycles_at_base{};
     std::uint32_t timer2_base_count{};
+    // EE Timer 1 registers (0x10000800 count, 0x10000810 mode, 0x10000820
+    // compare, 0x10000830 hold): bounded 32-bit storage, reset 0. No counting,
+    // compare events, interrupts, or clock source is modelled. ADR 0183.
+    std::uint32_t timer1_count{};
+    std::uint32_t timer1_mode{};
+    std::uint32_t timer1_compare{};
+    std::uint32_t timer1_hold{};
     // Bounded observation of the match path: how many compare matches latched,
     // how many raised the INTC source, and how many were refused because the
     // controller state was never established. A refusal is counted, never
@@ -361,6 +387,10 @@ struct EeMemory {
         { kEeTimer3ModeAddress,  &mmio_read_timer3,  &mmio_write_timer3 },
         { kEeTimer3CompareAddress, &mmio_read_timer3_compare, &mmio_write_timer3_compare },
         { kEeTimer2CountAddress, &mmio_read_timer2_count, &mmio_write_timer2_count },
+        { kEeTimer1CountAddress, &mmio_read_timer1_count, &mmio_write_timer1_count },
+        { kEeTimer1ModeAddress,  &mmio_read_timer1,  &mmio_write_timer1 },
+        { kEeTimer1CompareAddress, &mmio_read_timer1_compare, &mmio_write_timer1_compare },
+        { kEeTimer1HoldAddress,  &mmio_read_timer1_hold,  &mmio_write_timer1_hold },
         { kEeTimer2ModeAddress,  &mmio_read_timer2,  &mmio_write_timer2 },
         { kEeTimer2CompareAddress, &mmio_read_timer2_compare, &mmio_write_timer2_compare },
         { kEeIntcStatAddress,    &mmio_read_intc_stat, &mmio_write_intc_stat },
@@ -2084,6 +2114,42 @@ inline Status mmio_write_timer2_compare(EeMemory& self, std::uint32_t, std::uint
     self.timer2_cycles_at_base = self.guest_bus_cycles;
     return Status::ok;
 }
+// Timer 1 registers (0x10000800 count, 0x10000810 mode, 0x10000820 compare,
+// 0x10000830 hold): bounded storage only, reset 0. No counting, compare events,
+// interrupts, or clock source is modelled. ADR 0183.
+inline Status mmio_read_timer1_count(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.timer1_count;
+    return Status::ok;
+}
+inline Status mmio_write_timer1_count(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.timer1_count = value;
+    return Status::ok;
+}
+inline Status mmio_read_timer1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.timer1_mode;
+    return Status::ok;
+}
+inline Status mmio_write_timer1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.timer1_mode = value;
+    return Status::ok;
+}
+inline Status mmio_read_timer1_compare(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.timer1_compare;
+    return Status::ok;
+}
+inline Status mmio_write_timer1_compare(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.timer1_compare = value;
+    return Status::ok;
+}
+inline Status mmio_read_timer1_hold(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.timer1_hold;
+    return Status::ok;
+}
+inline Status mmio_write_timer1_hold(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.timer1_hold = value;
+    return Status::ok;
+}
+inline void materialize_ee_timer1(EeMemory&) noexcept {}
 inline Status mmio_read_intc_stat(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
     return self.intc.read_stat(value) ? Status::ok : Status::unsupported_memory_access;
 }
