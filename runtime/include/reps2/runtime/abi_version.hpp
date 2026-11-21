@@ -68,4 +68,13 @@
 // storage array (`Vu0State::control`), CFC2/CTC2 are decoded, lifted and
 // emitted, and generated code reads/writes the control slots. sizeof(EeState)
 // changes; ABI-28 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 29
+// ABI 29 covers ADR 0180: the VU0 COP2 control file gains a bounded 32-word
+// storage array (`Vu0State::control`), CFC2/CTC2 are decoded, lifted and
+// emitted, and generated code reads/writes the control slots. sizeof(EeState)
+// changes; ABI-28 modules are refused.
+//
+// ABI 30 covers ADR 0181: the VIF1 FIFO port (0x10005000) is modelled as a
+// bounded 16-qword ring with qword-only push/pop through store_u128/load_u128;
+// empty reads and full writes fail closed. sizeof(EeState) changes, so
+// ABI-29 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 30

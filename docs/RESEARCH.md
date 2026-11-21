@@ -2085,6 +2085,21 @@ limit, root set or relocated region is a different frontier.
   the control word to the GPR, CTC2 stores the low GPR word. Storage only —
   no VU/VIF reset, microprogram launch, interrupt, or DMA effect. The ABI-29
   probe (`abi29-01`) records the next stop.
+- **Observed (ABI-29 probes `abi29-02`..`abi29-07`, main `5666883`, same
+  digests, rebuilt frontend + native module):** all six runs stop identically at
+  `pc=0x0024338C` after 4,645,625 instructions as `unsupported_memory_access`.
+  Disassembly/register evidence: `SQ $a2, 0($r5)` with `$r5 = 0x10005000`.
+  **Derived from primary evidence:** `0x10005000 = A_EE_VIF1_FIFO` (ps2sdk
+  `common/include/ee_regs.h`); Sony EE User's Manual register map says FIFOs
+  are 128-bit qword-only and lists `0x1000_5000` as **VIF1 FIFO (read/write)**;
+  PS2Tek documents 16-qword capacity with FQC in VIF1_STAT bits 24..28. The
+  quadword store bypassed `store_u128` MMIO handling, so the SQ failed.
+- **Implemented (ADR 0181, runtime ABI 30):** `0x10005000` is modelled as a
+  bounded 16-qword ring FIFO in `EeMemory`; SQ pushes, LQ pops oldest, empty
+  read/full write fail closed with `unsupported_memory_access`, KSEG aliases
+  normalize, non-16-aligned access returns `address_error`. No VIF command
+  parsing, DMA, GIF, VU execution, or FQC status side effect is claimed. The
+  ABI-30 probe (`abi30-01`) records the next stop.
 
 ## Provenance rules
 

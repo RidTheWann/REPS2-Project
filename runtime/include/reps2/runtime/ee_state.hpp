@@ -93,6 +93,8 @@ inline constexpr std::uint32_t kEeGsSmode2Address{0x1200'0020U};
 // ADR 0179.
 inline constexpr std::uint32_t kEeVif1FbrstAddress{0x1000'3C10U};
 inline constexpr std::uint32_t kEeVif1ErrAddress{0x1000'3C20U};
+// VIF1 FIFO (0x10005000) — 16-qword FIFO, read/write. ADR 0181.
+inline constexpr std::uint32_t kEeVif1FifoAddress{0x1000'5000U};
 // T3_MODE writable fields: CLKS[1:0], GATE[2], GATS[3], GATM[4], ZRET[6],
 // CUE[7], CMPE[8], and OVFE[9]; EQUF[10] and OVFF[11] are write-one-to-clear
 // status bits latched by the progression model (ADR 0142). T3_COMP and T3_COUNT
@@ -243,6 +245,8 @@ inline Status mmio_write_timer2_compare(EeMemory&, std::uint32_t, std::uint32_t)
 // declared here because `advance_ee_timers` precedes the handler definitions.
 inline void materialize_ee_timer2(EeMemory&) noexcept;
 
+inline constexpr std::size_t kEeVif1FifoCapacityQwords = 16U;
+
 struct EeMemory {
     std::span<std::uint8_t> main_ram{};
     // EE Timer 3 mode (0x10001810). No timer counting or interrupts are
@@ -286,6 +290,13 @@ struct EeMemory {
     std::uint64_t timer2_irq_refusals{};
     EeDmacState dmac{};
     EeIntcState intc{};
+    // Bounded software model for the VIF1 hardware FIFO: each EE SQ pushes a
+    // qword, each LQ pops oldest qword. Empty reads and full writes fail closed
+    // with unsupported_memory_access. No VIF command processing, DMA, or FIFO
+    // drain is modeled; FQC is diagnostic occupancy only. ADR 0181.
+    std::array<Gpr128, kEeVif1FifoCapacityQwords> vif1_fifo{};
+    std::size_t vif1_fifo_head{};
+    std::size_t vif1_fifo_count{};
     // GS CSR (0x12001000) / IMR (0x12001010): bounded storage registers with no
     // GPU behind them. CSR reads return the stored value with the low status
     // half always clear (no SIGNAL/FINISH/interrupt is ever raised); writes
@@ -2509,6 +2520,27 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Status::ok;
 }
 
+// Bounded VIF1 FIFO helpers used by qword loads/stores. ADR 0181.
+inline Status vif1_fifo_pop(EeMemory& memory, Gpr128& value) noexcept {
+    if (memory.vif1_fifo_count == 0U) return Status::unsupported_memory_access;
+    const std::size_t slot = memory.vif1_fifo_head;
+    value = memory.vif1_fifo[slot];
+    memory.vif1_fifo_head = (memory.vif1_fifo_head + 1U) % kEeVif1FifoCapacityQwords;
+    --memory.vif1_fifo_count;
+    return Status::ok;
+}
+
+inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
+    if (memory.vif1_fifo_count >= kEeVif1FifoCapacityQwords) {
+        return Status::unsupported_memory_access;
+    }
+    const std::size_t tail =
+        (memory.vif1_fifo_head + memory.vif1_fifo_count) % kEeVif1FifoCapacityQwords;
+    memory.vif1_fifo[tail] = value;
+    ++memory.vif1_fifo_count;
+    return Status::ok;
+}
+
 [[nodiscard]] inline Status load_u128(
     const EeMemory& memory,
     std::uint32_t address,
@@ -2748,7 +2780,12 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     const Gpr128& value
 ) noexcept {
-    std::uint32_t physical{};
+    // VIF1 FIFO (0x10005000) is a qword-only port, not RAM. A full FIFO write
+    // fails closed and leaves the FIFO unchanged. ADR 0181.
+    if (normalize_ee_mmio_address(address) == kEeVif1FifoAddress) {
+        if ((address & 0x0FU) != 0U) return Status::address_error;
+        return vif1_fifo_push(memory, value);
+    }    std::uint32_t physical{};
     const auto aligned_address = address & ~0x0FU;
     const auto status = resolve_ee_memory_access(memory, aligned_address, 16U, 1U, physical);
     if (status != Status::ok) return status;
