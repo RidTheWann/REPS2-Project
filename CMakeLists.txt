@@ -1344,6 +1344,19 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_gs_csr_smoke COMMAND reps2_gs_csr_smoke)
 
+    add_executable(reps2_vif1_fifo_smoke
+        tests/vif1_fifo_smoke.cpp
+    )
+    target_link_libraries(reps2_vif1_fifo_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_vif1_fifo_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_vif1_fifo_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_vif1_fifo_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion)
+    endif()
+    add_test(NAME reps2_vif1_fifo_smoke COMMAND reps2_vif1_fifo_smoke)
+
     set(REPS2_COP1_ARITH_GENERATED_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/cop1_arith_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_COP1_ARITH_GENERATED_CPP}"
