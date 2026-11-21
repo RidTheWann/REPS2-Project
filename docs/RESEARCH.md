@@ -2062,8 +2062,18 @@ limit, root set or relocated region is a different frontier.
 - **Implemented (ADR 0179, runtime ABI 28):** VIF1_FBRST (`0x10003C10`) and
   VIF1_ERR (`0x10003C20`) modelled as bounded 32-bit storage with MMIO
   dispatch and 64-bit decomposition. Writes are accepted and stored; no VIF
-  unit, FIFO reset, or GS transfer is modelled. The ABI-28 probe (`abi28-03`)
-  records the next stop.
+  unit, FIFO reset, or GS transfer is modelled.
+- **Observed (ABI-28 probe `abi28-03`, this branch + ADR 0179, same digests,
+  rebuilt frontend + native module):** `guest_stopped` at a further frontier
+  `pc=0x00243330` after 4,645,596 instructions as `unsupported_instruction`
+  — guest word `0x4844E000` (primary opcode `0x12` = COP0, `rs=2` = MTC0,
+  `rt=4`, `rd=28`): `mtc0 $a0, $28` (write COP0 register 28). The two VIF1
+  stores at `0x00243318`/`0x00243324` now pass. The following words
+  (`0x48C4E000` COP0 `rs=6`, `0x4844E800` MTC0 rd=29) are also COP0. This is
+  the next blocker: COP0 register writes (28/29) are not modelled by the
+  translator. **Unknown:** exact guest-visible semantics of COP0 reg 28/29
+  on this path; next engineering unit is bounded COP0 storage for those
+  registers with evidence, or the next instruction class.
 
 ## Provenance rules
 
