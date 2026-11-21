@@ -262,6 +262,30 @@ int test_timer1_registers_storage() {
     return 0;
 }
 
+// VIF0 DMAC channel-1 registers are bounded storage. ADR 0184.
+int test_dmac_ch1_registers_storage() {
+    EeState state{};
+    // CHCR/MADR/QWC/TADR are writable without prior seeding (ADR 0184).
+    if (reps2::runtime::store_u32(state.memory, 0x1000'9000U, 0x0000'0101U) != Status::ok)
+        return 300;
+    if (reps2::runtime::store_u32(state.memory, 0x1000'9010U, 0x0027'F710U) != Status::ok)
+        return 301;
+    if (reps2::runtime::store_u32(state.memory, 0x1000'9020U, 0x0000'0010U) != Status::ok)
+        return 302;
+    if (reps2::runtime::store_u32(state.memory, 0x1000'9030U, 0x0027'F800U) != Status::ok)
+        return 303;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, 0x1000'9000U, value) != Status::ok) return 304;
+    if (value != 0x0000'0101U) return 305;
+    if (reps2::runtime::load_u32(state.memory, 0x1000'9010U, value) != Status::ok) return 306;
+    if (value != 0x0027'F710U) return 307;
+    if (reps2::runtime::load_u32(state.memory, 0x1000'9020U, value) != Status::ok) return 308;
+    if (value != 0x0000'0010U) return 309;
+    if (reps2::runtime::load_u32(state.memory, 0x1000'9030U, value) != Status::ok) return 310;
+    if (value != 0x0027'F800U) return 311;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -294,6 +318,7 @@ int main() {
     run("gif_stat_storage", test_gif_stat_storage);
     run("gif_ctrl_store_u64_decomposes", test_gif_ctrl_store_u64_decomposes);
     run("timer1_registers_storage", test_timer1_registers_storage);
+    run("dmac_ch1_registers_storage", test_dmac_ch1_registers_storage);
     run("vif1_fbrst_store_u64_decomposes", test_vif1_fbrst_store_u64_decomposes);
 
     if (fails == 0) {

@@ -2120,7 +2120,17 @@ limit, root set or relocated region is a different frontier.
 - **Implemented (ADR 0183, runtime ABI 32):** T1_COUNT/T1_MODE/T1_COMP/T1_HOLD
   are bounded 32-bit storage with MMIO dispatch. No counting, compare events,
   interrupts, or clock source is modelled; a guest that reads them back sees
-  only what it wrote. The ABI-32 probe records the next stop.
+  only what it wrote.
+- **Observed (ABI-32 probe `abi32-01`, main `d49b4b7`, same digests, rebuilt
+  frontend + native module):** the Timer 1 MODE write passes; the run stops at
+  `pc=0x002433D0` after 4,670,452 instructions as `unsupported_memory_access` on
+  `lw $v1, 0($s0)` with `$s0 = 0x10009000`. **Derived:** `0x10009000 =
+  A_EE_D1_CHCR` (ps2sdk `common/include/ee_regs.h`), DMAC channel 1 (VIF0);
+  adjacent registers are MADR/QWC/TADR at `0x10009010/20/30`.
+- **Implemented (ADR 0184, runtime ABI 33):** channel-1 CHCR/MADR/QWC/TADR are
+  bounded 32-bit storage with MMIO dispatch; reads before first write fail
+  closed. No DMA transfer, VIF0 FIFO interaction, interrupt, or completion event
+  is modelled. The ABI-33 probe records the next stop.
 
 ## Provenance rules
 

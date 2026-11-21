@@ -87,4 +87,9 @@
 // T1_HOLD (0x10000800/10/20/30) are bounded 32-bit storage with MMIO dispatch.
 // No counting, compare events, or interrupts are modelled. sizeof(EeState)
 // changes; ABI-31 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 32
+//
+// ABI 33 covers ADR 0184: VIF0 DMAC channel-1 registers CHCR/MADR/QWC/TADR
+// (0x10009000/10/20/30) are bounded storage with MMIO dispatch. No DMA
+// transfer, interrupt, or completion is modelled. sizeof(EeState) changes;
+// ABI-32 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 33

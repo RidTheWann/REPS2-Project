@@ -17,6 +17,12 @@ inline constexpr std::uint32_t kEeDmacMadr5Address{0x1000'C010U};
 inline constexpr std::uint32_t kEeDmacQwc5Address{0x1000'C020U};
 inline constexpr std::uint32_t kEeDmacTadr5Address{0x1000'C030U};
 
+// VIF0 (channel 1) registers. ADR 0184.
+inline constexpr std::uint32_t kEeDmacChcr1Address{0x1000'9000U};
+inline constexpr std::uint32_t kEeDmacMadr1Address{0x1000'9010U};
+inline constexpr std::uint32_t kEeDmacQwc1Address{0x1000'9020U};
+inline constexpr std::uint32_t kEeDmacTadr1Address{0x1000'9030U};
+
 // D_CTRL bit masks.
 inline constexpr std::uint32_t kEeDmacCtrlDmaeMask{0x0000'0001U};  // bit 0: master enable
 
@@ -89,6 +95,16 @@ struct EeDmacState {
     bool qwc5_known{};
     std::uint32_t tadr5{};
     bool tadr5_known{};
+
+    // VIF0 (channel 1) registers: bounded storage only. ADR 0184.
+    std::uint32_t chcr1{};
+    bool chcr1_known{};
+    std::uint32_t madr1{};
+    bool madr1_known{};
+    std::uint32_t qwc1{};
+    bool qwc1_known{};
+    std::uint32_t tadr1{};
+    bool tadr1_known{};
 
     // Establish the HLE boot environment's DMAC state: every modelled register
     // is known and idle. This models the kernel-initialized DMAC the title
@@ -301,6 +317,49 @@ struct EeDmacState {
     [[nodiscard]] bool write_tadr5(std::uint32_t value) noexcept {
         if (!tadr5_known) return false;
         tadr5 = value;
+        return true;
+    }
+
+    // VIF0 (channel 1) registers: bounded storage only, reset unknown until
+    // seeded. No DMA transfer, interrupt, or completion is modelled. ADR 0184.
+    [[nodiscard]] bool read_chcr1(std::uint32_t& value) const noexcept {
+        if (!chcr1_known) return false;
+        value = chcr1;
+        return true;
+    }
+    [[nodiscard]] bool write_chcr1(std::uint32_t value) noexcept {
+        chcr1 = value;
+        chcr1_known = true;
+        return true;
+    }
+    [[nodiscard]] bool read_madr1(std::uint32_t& value) const noexcept {
+        if (!madr1_known) return false;
+        value = madr1;
+        return true;
+    }
+    [[nodiscard]] bool write_madr1(std::uint32_t value) noexcept {
+        madr1 = value;
+        madr1_known = true;
+        return true;
+    }
+    [[nodiscard]] bool read_qwc1(std::uint32_t& value) const noexcept {
+        if (!qwc1_known) return false;
+        value = qwc1;
+        return true;
+    }
+    [[nodiscard]] bool write_qwc1(std::uint32_t value) noexcept {
+        qwc1 = value;
+        qwc1_known = true;
+        return true;
+    }
+    [[nodiscard]] bool read_tadr1(std::uint32_t& value) const noexcept {
+        if (!tadr1_known) return false;
+        value = tadr1;
+        return true;
+    }
+    [[nodiscard]] bool write_tadr1(std::uint32_t value) noexcept {
+        tadr1 = value;
+        tadr1_known = true;
         return true;
     }
 };
