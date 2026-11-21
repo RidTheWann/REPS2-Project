@@ -2098,8 +2098,18 @@ limit, root set or relocated region is a different frontier.
   bounded 16-qword ring FIFO in `EeMemory`; SQ pushes, LQ pops oldest, empty
   read/full write fail closed with `unsupported_memory_access`, KSEG aliases
   normalize, non-16-aligned access returns `address_error`. No VIF command
-  parsing, DMA, GIF, VU execution, or FQC status side effect is claimed. The
-  ABI-30 probe (`abi30-01`) records the next stop.
+  parsing, DMA, GIF, VU execution, or FQC status side effect is claimed.
+- **Observed (ABI-30 probe `abi30-01`, main `3414868`, same digests, rebuilt
+  frontend + native module):** the VIF1 FIFO SQ writes at `0x0024338C`/
+  `0x00243398` now pass; the run stops at `pc=0x0024339C` after 4,645,625
+  instructions as `unsupported_memory_access` on `sw $a3, 0($r4)` with
+  `$r4 = 0x10003000`, `$a3 = 1`. **Derived:** `0x10003000 = A_EE_GIF_CTRL`
+  (ps2sdk `common/include/ee_regs.h`); adjacent GIF registers are
+  `GIF_MODE 0x10003010`, `GIF_STAT 0x10003020`.
+- **Implemented (ADR 0182, runtime ABI 31):** GIF_CTRL/GIF_MODE/GIF_STAT are
+  bounded 32-bit storage with MMIO dispatch and 64-bit decomposition. No GIF/GS
+  transfer, PATH activity, reset side effect, interrupt, or fabricated
+  readiness. The ABI-31 probe records the next stop.
 
 ## Provenance rules
 

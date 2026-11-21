@@ -23,6 +23,9 @@ constexpr std::uint32_t kGsPmodeAddr = reps2::runtime::kEeGsPmodeAddress;
 constexpr std::uint32_t kGsSmode2Addr = reps2::runtime::kEeGsSmode2Address;
 constexpr std::uint32_t kVif1FbrstAddr = reps2::runtime::kEeVif1FbrstAddress;
 constexpr std::uint32_t kVif1ErrAddr = reps2::runtime::kEeVif1ErrAddress;
+constexpr std::uint32_t kGifCtrlAddr = reps2::runtime::kEeGifCtrlAddress;
+constexpr std::uint32_t kGifModeAddr = reps2::runtime::kEeGifModeAddress;
+constexpr std::uint32_t kGifStatAddr = reps2::runtime::kEeGifStatAddress;
 
 int test_gs_csr_reset_write_is_not_unsupported() {
     EeState state{};
@@ -193,6 +196,49 @@ int test_vif1_fbrst_store_u64_decomposes() {
     return 0;
 }
 
+// GIF_CTRL (0x10003000) bounded storage, ADR 0182.
+int test_gif_ctrl_storage() {
+    EeState state{};
+    if (reps2::runtime::store_u32(state.memory, kGifCtrlAddr, 0x0000'0003U) != Status::ok)
+        return 100;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, kGifCtrlAddr, value) != Status::ok) return 101;
+    if (value != 0x0000'0003U) return 102;
+    return 0;
+}
+
+// GIF_MODE (0x10003010) bounded storage, ADR 0182.
+int test_gif_mode_storage() {
+    EeState state{};
+    if (reps2::runtime::store_u32(state.memory, kGifModeAddr, 0x0000'0005U) != Status::ok)
+        return 110;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, kGifModeAddr, value) != Status::ok) return 111;
+    if (value != 0x0000'0005U) return 112;
+    return 0;
+}
+
+// GIF_STAT (0x10003020) bounded storage, ADR 0182.
+int test_gif_stat_storage() {
+    EeState state{};
+    if (reps2::runtime::store_u32(state.memory, kGifStatAddr, 0x0000'00FFU) != Status::ok)
+        return 120;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, kGifStatAddr, value) != Status::ok) return 121;
+    if (value != 0x0000'00FFU) return 122;
+    return 0;
+}
+
+// 64-bit store to GIF_CTRL decomposes to 32-bit store (low word). ADR 0182.
+int test_gif_ctrl_store_u64_decomposes() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, kGifCtrlAddr, 0x0000'0001'0000'0002ULL)
+        != Status::ok)
+        return 130;
+    if (state.memory.gif_ctrl != 0x0000'0002U) return 131;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -220,6 +266,10 @@ int main() {
     run("gs_pmode_store_u64_decomposes", test_gs_pmode_store_u64_decomposes);
     run("vif1_fbrst_storage", test_vif1_fbrst_storage);
     run("vif1_err_storage", test_vif1_err_storage);
+    run("gif_ctrl_storage", test_gif_ctrl_storage);
+    run("gif_mode_storage", test_gif_mode_storage);
+    run("gif_stat_storage", test_gif_stat_storage);
+    run("gif_ctrl_store_u64_decomposes", test_gif_ctrl_store_u64_decomposes);
     run("vif1_fbrst_store_u64_decomposes", test_vif1_fbrst_store_u64_decomposes);
 
     if (fails == 0) {
