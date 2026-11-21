@@ -58,4 +58,8 @@
 // syscall service is registered. sizeof(EeState) changes, and 64-bit
 // store_u64/load_u64 decomposition extends to the new GS addresses, so
 // modules built against ABI 26 are refused.
-#define REPS2_RUNTIME_ABI_VERSION 27
+// ABI 28 covers ADR 0179: the GS SMODE1 (0x12000010) register is modelled as
+// bounded storage in EeMemory (`gs_smode1`), with MMIO dispatch and 64-bit
+// SD/LD decomposition. The guest writes it immediately after PMODE in the
+// CRT-init sequence. sizeof(EeState) changes; ABI-27 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 28

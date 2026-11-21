@@ -2047,6 +2047,15 @@ limit, root set or relocated region is a different frontier.
   composition is classified **Inferred** (PS2TEK layout + ps2sdk signature, not
   yet cross-verified against a shipped-hardware scope trace). The ABI-27 probe
   (`abi27-01`) records the outcome — see below.
+- **Observed (ABI-27 probe `abi27-01`, this branch + ADR 0178, same digests,
+  rebuilt frontend + native module):** `guest_stopped` at a further frontier
+  `pc=0x00243318` after 4,645,596 instructions as `unsupported_memory_access`
+  — a `sw $a3, 0($v0)` with `$v0 = 0x1200'0010` (GS SMODE1), `$a3 = 0x1`. The
+  CRT-init sequence writes PMODE (`0x1200'0000`), SMODE1 (`0x1200'0010`), then
+  SMODE2 (`0x1200'0020`); SMODE1 was not modelled.
+- **Implemented (ADR 0179, runtime ABI 28):** SMODE1 (`0x1200'0010`) added as
+  bounded 32-bit storage with MMIO dispatch and 64-bit decomposition. The
+  ABI-28 probe (`abi28-01`) records the outcome.
 
 ## Provenance rules
 

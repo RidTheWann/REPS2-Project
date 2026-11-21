@@ -20,6 +20,7 @@ using reps2::runtime::Status;
 constexpr std::uint32_t kGsCsrAddr = reps2::runtime::kEeGsCsrAddress;
 constexpr std::uint32_t kGsImrAddr = reps2::runtime::kEeGsImrAddress;
 constexpr std::uint32_t kGsPmodeAddr = reps2::runtime::kEeGsPmodeAddress;
+constexpr std::uint32_t kGsSmode1Addr = reps2::runtime::kEeGsSmode1Address;
 constexpr std::uint32_t kGsSmode2Addr = reps2::runtime::kEeGsSmode2Address;
 
 int test_gs_csr_reset_write_is_not_unsupported() {
@@ -157,6 +158,37 @@ int test_gs_pmode_store_u64_decomposes() {
     return 0;
 }
 
+// SMODE1 (0x12000010) is a bounded storage register. ADR 0179.
+int test_gs_smode1_storage() {
+    EeState state{};
+    if (reps2::runtime::store_u32(state.memory, kGsSmode1Addr, 0x0000'0001U) != Status::ok)
+        return 30;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, kGsSmode1Addr, value) != Status::ok) return 31;
+    if (value != 0x0000'0001U) return 32;
+    return 0;
+}
+
+// 64-bit store to SMODE1 decomposes to 32-bit store (low word). ADR 0179.
+int test_gs_smode1_store_u64_decomposes() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, kGsSmode1Addr, 0x0000'0001'0000'0005ULL)
+        != Status::ok)
+        return 33;
+    if (state.memory.gs_smode1 != 0x0000'0005U) return 34;
+    return 0;
+}
+
+// 64-bit load from SMODE1 returns the stored value zero-extended. ADR 0179.
+int test_gs_smode1_load_u64_decomposes() {
+    EeState state{};
+    state.memory.gs_smode1 = 0xDEADBEEFU;
+    std::uint64_t value = 0ULL;
+    if (reps2::runtime::load_u64(state.memory, kGsSmode1Addr, value) != Status::ok) return 35;
+    if (value != 0xDEADBEEFULL) return 36;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -182,6 +214,9 @@ int main() {
     run("gs_pmode_storage", test_gs_pmode_storage);
     run("gs_smode2_storage", test_gs_smode2_storage);
     run("gs_pmode_store_u64_decomposes", test_gs_pmode_store_u64_decomposes);
+    run("gs_smode1_storage", test_gs_smode1_storage);
+    run("gs_smode1_store_u64_decomposes", test_gs_smode1_store_u64_decomposes);
+    run("gs_smode1_load_u64_decomposes", test_gs_smode1_load_u64_decomposes);
 
     if (fails == 0) {
         printf("All GS CSR/IMR tests passed\n");
