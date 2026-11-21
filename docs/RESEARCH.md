@@ -2040,6 +2040,13 @@ limit, root set or relocated region is a different frontier.
   closed) rather than a fabricated write. Next engineering unit: model the GS
   CRT register(s) at their documented addresses with evidenced semantics, or
   identify the next syscall on the path.
+- **Implemented (ADR 0178, runtime ABI 27):** PMODE (`0x1200'0000`) and SMODE2
+  (`0x1200'0020`) modelled as bounded 32-bit storage with MMIO dispatch and
+  64-bit decomposition; `SetGsCrt` (0x02) registered in `kEeSyscallServices`,
+  composing SMODE2 from `$a0`/`$a1`/`$a2` and writing PMODE=3. The SMODE2 bit
+  composition is classified **Inferred** (PS2TEK layout + ps2sdk signature, not
+  yet cross-verified against a shipped-hardware scope trace). The ABI-27 probe
+  (`abi27-01`) records the outcome — see below.
 
 ## Provenance rules
 

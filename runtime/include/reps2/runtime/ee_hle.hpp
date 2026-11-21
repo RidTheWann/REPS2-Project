@@ -35,6 +35,7 @@ inline constexpr std::uint8_t kEeSyscallArgumentBase = 4;
 inline constexpr std::uint8_t kEeSyscallArgumentCount = 4;
 
 inline constexpr std::uint32_t kEeSyscallAddIntcHandler = 0x10U;
+inline constexpr std::uint32_t kEeSyscallSetGsCrt = 0x02U; // __NR_SetGsCrt (ps2sdk syscallnr.h)
 inline constexpr std::uint32_t kEeSyscallRemoveIntcHandler = 0x11U;
 inline constexpr std::uint32_t kEeSyscallAddDmacHandler = 0x12U;
 inline constexpr std::uint32_t kEeSyscallRemoveDmacHandler = 0x13U;
@@ -4294,6 +4295,33 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     return Status::ok;
 }
 
+// SetGsCrt (0x02): ps2sdk syscallnr.h. Signature:
+//   void SetGsCrt(s16 interlace, s16 pal_ntsc, s16 field)
+// The kernel composes a CRT mode value from the three arguments and writes it
+// to the GS video-mode registers. ADR 0178 models PMODE (0x12000000) and
+// SMODE2 (0x12000020) as bounded storage; this handler writes SMODE2 from the
+// composed value and PMODE with a fixed master-enable pattern. No display
+// output, no vsync, no GPU state — register storage only. The exact bit
+// composition is recorded as Inferred (not yet cross-verified against shipped
+// hardware behavior); if the guest later reads SMODE2/PMODE it sees what was
+// written, which is the guest-visible contract that matters here.
+[[nodiscard]] inline Status hle_set_gs_crt(EeState& state) noexcept {
+    const std::uint32_t interlace = static_cast<std::uint32_t>(ee_syscall_argument(state, 0)) & 0xFFFFU;
+    const std::uint32_t pal_ntsc = static_cast<std::uint32_t>(ee_syscall_argument(state, 1)) & 0xFFFFU;
+    const std::uint32_t field = static_cast<std::uint32_t>(ee_syscall_argument(state, 2)) & 0xFFFFU;
+    // SMODE2 bits per PS2TEK: bit0=INT (interlace), bit1=FFMD (field),
+    // bit4=EX (external video). pal_ntsc selects video mode elsewhere (SMODE1).
+    const std::uint32_t smode2 = (interlace & 0x1U) | ((field & 0x1U) << 1U)
+        | ((pal_ntsc & 0x1U) << 4U);
+    auto status = store_u32(state.memory, kEeGsSmode2Address, smode2);
+    if (status != Status::ok) return status;
+    // PMODE: enable output (bit0=EN1, bit1=EN2) — store a minimal value.
+    status = store_u32(state.memory, kEeGsPmodeAddress, 0x3U);
+    if (status != Status::ok) return status;
+    state.gpr[kEeSyscallResultRegister].low = 0U;
+    return Status::ok;
+}
+
 // Finish the optional syscall-boundary memory comparison, shared by host-serviced
 // calls and guest-handler returns so both report the same observation.
 inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
@@ -4424,6 +4452,7 @@ inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
 
 // Sorted by service number so a lookup can stop as soon as it passes the key.
 inline constexpr EeSyscallService kEeSyscallServices[] = {
+    {kEeSyscallSetGsCrt, "SetGsCrt", &hle_set_gs_crt},
     {kEeSyscallAddIntcHandler, "AddIntcHandler", &hle_add_intc_handler},
     {kEeSyscallRemoveIntcHandler, "RemoveIntcHandler", &hle_remove_intc_handler},
     {kEeSyscallAddDmacHandler, "AddDmacHandler", &hle_add_dmac_handler},
