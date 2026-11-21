@@ -49,6 +49,8 @@ inline constexpr std::uint32_t kEeSyscallGetThreadId = 0x2FU;
 inline constexpr std::uint32_t kEeSyscallReferThreadStatus = 0x30U;
 inline constexpr std::uint32_t kEeSyscallSetOsdConfigParam = 0x4AU;
 inline constexpr std::uint32_t kEeSyscallGetOsdConfigParam = 0x4BU;
+inline constexpr std::uint32_t kEeSyscallGsGetImr = 0x70U; // __NR_GsGetIMR (ps2sdk syscallnr.h)
+inline constexpr std::uint32_t kEeSyscallGsPutImr = 0x71U; // __NR_GsPutIMR (ps2sdk syscallnr.h)
 inline constexpr std::uint32_t kEeSyscallSetupThread = 0x3CU;
 inline constexpr std::uint32_t kEeSyscallSetupHeap = 0x3DU;
 inline constexpr std::uint32_t kEeSyscallEndOfHeap = 0x3EU; // __NR_EndOfHeap (ps2sdk syscallnr.h)
@@ -4271,6 +4273,27 @@ inline void initialize_hle_boot_environment(EeState& state) noexcept {
     return Status::ok;
 }
 
+// GsGetIMR (0x70) / GsPutIMR (0x71): ps2sdk syscallnr.h. The kernel routines
+// read/write the GS interrupt mask register (0x12001010). ADR 0175 models
+// IMR as a bounded 16-bit storage register, so the service reads or writes
+// that register through the same MMIO path as guest LD/SD accesses. This is
+// register storage only — no GS interrupt is modelled (ADR 0175).
+[[nodiscard]] inline Status hle_gs_get_imr(EeState& state) noexcept {
+    std::uint32_t value = 0U;
+    const auto status = load_u32(state.memory, kEeGsImrAddress, value);
+    if (status != Status::ok) return status;
+    state.gpr[kEeSyscallResultRegister].low = sign_extend_word(value);
+    return Status::ok;
+}
+
+[[nodiscard]] inline Status hle_gs_put_imr(EeState& state) noexcept {
+    const std::uint32_t value = static_cast<std::uint32_t>(ee_syscall_argument(state, 0));
+    const auto status = store_u32(state.memory, kEeGsImrAddress, value);
+    if (status != Status::ok) return status;
+    state.gpr[kEeSyscallResultRegister].low = 0U;
+    return Status::ok;
+}
+
 // Finish the optional syscall-boundary memory comparison, shared by host-serviced
 // calls and guest-handler returns so both report the same observation.
 inline void finish_ee_syscall_memory_trace(EeState& state) noexcept {
@@ -4429,6 +4452,8 @@ inline constexpr EeSyscallService kEeSyscallServices[] = {
     {kEeSyscallGetEntryAddress, "GetEntryAddress", &hle_get_entry_address},
     {kEeSyscallFlushCache, "FlushCache", &hle_flush_cache},
     {kEeSyscallSifStopDma, "SifStopDma", &hle_sif_stop_dma},
+    {kEeSyscallGsGetImr, "GsGetIMR", &hle_gs_get_imr},
+    {kEeSyscallGsPutImr, "GsPutIMR", &hle_gs_put_imr},
     {kEeSyscallSetSyscall, "SetSyscall", &hle_set_syscall},
     {kEeSyscallSifSetDma, "SifSetDma", &hle_sif_set_dma},
     {kEeSyscallSifSetDChain, "SifSetDChain", &hle_sif_set_d_chain},

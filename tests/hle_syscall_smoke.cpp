@@ -2917,6 +2917,18 @@ int test_service_table_reports_names() {
     if (reps2::runtime::find_ee_syscall_service(kCreateSema) == nullptr) {
         return 104;
     }
+    // ADR 0177: GsGetIMR/GsPutIMR registered
+    if (reps2::runtime::find_ee_syscall_service(reps2::runtime::kEeSyscallGsGetImr) == nullptr) {
+        return 111;
+    }
+    if (reps2::runtime::find_ee_syscall_service(reps2::runtime::kEeSyscallGsPutImr) == nullptr) {
+        return 112;
+    }
+    const char* const put_name =
+        reps2::runtime::ee_syscall_service_name(reps2::runtime::kEeSyscallGsPutImr);
+    if (put_name == nullptr || std::string_view(put_name) != "GsPutIMR") {
+        return 113;
+    }
     const char* const sema_name = reps2::runtime::ee_syscall_service_name(kCreateSema);
     if (sema_name == nullptr || std::string_view(sema_name) != "CreateSema") {
         return 105;

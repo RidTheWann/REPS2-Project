@@ -51,6 +51,17 @@ inline constexpr std::uint32_t kEeProcessorId{0x0000'2E20U};
 inline constexpr std::uint32_t kEeTimer3CountAddress{0x1000'1800U};
 inline constexpr std::uint32_t kEeTimer3ModeAddress{0x1000'1810U};
 inline constexpr std::uint32_t kEeTimer3CompareAddress{0x1000'1820U};
+// GS privileged registers (PS2TEK). CSR (0x12001000) is the control/status
+// register: the low 16 bits are read-only status (SIGNAL/FINISH/HSINT/VSINT/
+// EDWINT/FLUSH/RESET/NFIELD/FIELD/FIFO/REV/ID) and the high 16 bits are
+// write-1 command bits that mirror them. Writing wRESET (bit 9 of the value,
+// i.e. bit 25 of CSR) resets the GS. IMR (0x12001010) masks GS interrupts.
+// REPS2 models no GPU: CSR is a bounded storage register (guest reads back its
+// own written command word with the status half clear, reset 0) and IMR is a
+// plain 16-bit mask register, so a guest that resets/reads the GS does not
+// stop on an unsupported access. No GS interrupt is ever delivered. ADR 0175.
+inline constexpr std::uint32_t kEeGsCsrAddress{0x1200'1000U};
+inline constexpr std::uint32_t kEeGsImrAddress{0x1200'1010U};
 // T3_MODE writable fields: CLKS[1:0], GATE[2], GATS[3], GATM[4], ZRET[6],
 // CUE[7], CMPE[8], and OVFE[9]; EQUF[10] and OVFF[11] are write-one-to-clear
 // status bits latched by the progression model (ADR 0142). T3_COMP and T3_COUNT
@@ -176,6 +187,11 @@ inline Status mmio_read_intc_stat(const EeMemory&, std::uint32_t, std::uint32_t&
 inline Status mmio_write_intc_stat(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_intc_mask(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_intc_mask(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// GS CSR (0x12001000) / IMR (0x12001010) read/write handlers. ADR 0175.
+inline Status mmio_read_gs_csr(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_csr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_imr(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_imr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2_count(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_timer2_count(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -229,6 +245,12 @@ struct EeMemory {
     std::uint64_t timer2_irq_refusals{};
     EeDmacState dmac{};
     EeIntcState intc{};
+    // GS CSR (0x12001000) / IMR (0x12001010): bounded storage registers with no
+    // GPU behind them. CSR reads return the stored value with the low status
+    // half always clear (no SIGNAL/FINISH/interrupt is ever raised); writes
+    // store the command word. IMR is a plain 16-bit mask. Reset 0. ADR 0175.
+    std::uint32_t gs_csr{};
+    std::uint32_t gs_imr{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -258,6 +280,12 @@ struct EeMemory {
         { kEeTimer2CompareAddress, &mmio_read_timer2_compare, &mmio_write_timer2_compare },
         { kEeIntcStatAddress,    &mmio_read_intc_stat, &mmio_write_intc_stat },
         { kEeIntcMaskAddress,    &mmio_read_intc_mask, &mmio_write_intc_mask },
+        // GS CSR (0x12001000) / IMR (0x12001010) — bounded storage, no GPU.
+        // CSR reads return the stored value with status half clear (no GPU
+        // raises SIGNAL/FINISH/HSINT/VSINT/EDWINT/FLUSH). Writes store the
+        // command word. IMR is a plain 16-bit mask. Reset 0. ADR 0175.
+        { kEeGsCsrAddress,       &mmio_read_gs_csr,  &mmio_write_gs_csr },
+        { kEeGsImrAddress,       &mmio_read_gs_imr,  &mmio_write_gs_imr },
     };
 };
 
@@ -1976,6 +2004,26 @@ inline Status mmio_read_intc_mask(const EeMemory& self, std::uint32_t, std::uint
 inline Status mmio_write_intc_mask(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
     return self.intc.write_mask(value) ? Status::ok : Status::unsupported_memory_access;
 }
+// GS CSR (0x12001000): reads return the stored command word with the low 16
+// status bits always clear (REPS2 models no GPU, so SIGNAL/FINISH/HSINT/VSINT/
+// EDWINT/FLUSH are never raised); writes store the full word. Reset 0.
+inline Status mmio_read_gs_csr(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gs_csr & 0xFFFF'0000U;
+    return Status::ok;
+}
+inline Status mmio_write_gs_csr(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_csr = value;
+    return Status::ok;
+}
+// GS IMR (0x12001010): 16-bit interrupt mask, plain storage, reset 0.
+inline Status mmio_read_gs_imr(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gs_imr & 0x0000'FFFFU;
+    return Status::ok;
+}
+inline Status mmio_write_gs_imr(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_imr = value & 0x0000'FFFFU;
+    return Status::ok;
+}
 
 // Host-observable classification of how a bounded execution stopped. The names
 // are a stable, machine-readable contract for the native probe trace and any
@@ -2341,6 +2389,17 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint64_t& value
 ) noexcept {
+    // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
+    // decompose the 64-bit load into a 32-bit load from the register plus
+    // returning the high 32 bits as zero (the 64-bit result is zero-extended).
+    // ADR 0176: 64-bit loads from 32-bit registers must reach the MMIO handler.
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+        std::uint32_t low{};
+        const auto status1 = load_u32(memory, address, low);
+        if (status1 != Status::ok) return status1;
+        value = static_cast<std::uint64_t>(low);  // zero-extend 32-bit value
+        return status1;
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 8U, 8U, physical);
     if (status != Status::ok) return status;
@@ -2428,6 +2487,15 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint64_t value
 ) noexcept {
+    // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
+    // decompose the 64-bit write into a 32-bit write to the register itself.
+    // The upper 4 bytes of the 64-bit store are discarded because the register
+    // is only 32 bits wide (4 bytes). ADR 0176: 64-bit stores to 32-bit
+    // registers must reach the MMIO handler.
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+        const std::uint32_t low = static_cast<std::uint32_t>(value);
+        return store_u32(memory, address, low);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 8U, 8U, physical);
     if (status != Status::ok) return status;
