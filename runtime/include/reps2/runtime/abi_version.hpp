@@ -77,4 +77,9 @@
 // bounded 16-qword ring with qword-only push/pop through store_u128/load_u128;
 // empty reads and full writes fail closed. sizeof(EeState) changes, so
 // ABI-29 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 30
+//
+// ABI 31 covers ADR 0182: GIF_CTRL (0x10003000), GIF_MODE (0x10003010) and
+// GIF_STAT (0x10003020) are bounded storage registers with MMIO dispatch and
+// 64-bit SD/LD decomposition. sizeof(EeState) changes; ABI-30 modules are
+// refused.
+#define REPS2_RUNTIME_ABI_VERSION 31

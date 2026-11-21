@@ -95,6 +95,17 @@ inline constexpr std::uint32_t kEeVif1FbrstAddress{0x1000'3C10U};
 inline constexpr std::uint32_t kEeVif1ErrAddress{0x1000'3C20U};
 // VIF1 FIFO (0x10005000) — 16-qword FIFO, read/write. ADR 0181.
 inline constexpr std::uint32_t kEeVif1FifoAddress{0x1000'5000U};
+// GIF registers (0x10003000 page). ADR 0182.
+inline constexpr std::uint32_t kEeGifCtrlAddress{0x1000'3000U};
+inline constexpr std::uint32_t kEeGifModeAddress{0x1000'3010U};
+inline constexpr std::uint32_t kEeGifStatAddress{0x1000'3020U};
+inline constexpr std::uint32_t kEeGifTag0Address{0x1000'3040U};
+inline constexpr std::uint32_t kEeGifTag1Address{0x1000'3050U};
+inline constexpr std::uint32_t kEeGifTag2Address{0x1000'3060U};
+inline constexpr std::uint32_t kEeGifTag3Address{0x1000'3070U};
+inline constexpr std::uint32_t kEeGifCntAddress{0x1000'3080U};
+inline constexpr std::uint32_t kEeGifP3cntAddress{0x1000'3090U};
+inline constexpr std::uint32_t kEeGifP3tagAddress{0x1000'30A0U};
 // T3_MODE writable fields: CLKS[1:0], GATE[2], GATS[3], GATM[4], ZRET[6],
 // CUE[7], CMPE[8], and OVFE[9]; EQUF[10] and OVFF[11] are write-one-to-clear
 // status bits latched by the progression model (ADR 0142). T3_COMP and T3_COUNT
@@ -235,6 +246,13 @@ inline Status mmio_read_vif1_fbrst(const EeMemory&, std::uint32_t, std::uint32_t
 inline Status mmio_write_vif1_fbrst(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_vif1_err(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_vif1_err(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// GIF control registers (ADR 0182).
+inline Status mmio_read_gif_ctrl(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gif_ctrl(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gif_mode(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gif_mode(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gif_stat(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gif_stat(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2_count(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_timer2_count(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -313,6 +331,11 @@ struct EeMemory {
     // pipeline state changes. ADR 0179.
     std::uint32_t vif1_fbrst{};
     std::uint32_t vif1_err{};
+    // GIF_CTRL/GIF_MODE bounded storage only. GIF_STAT is derived/stored from
+    // no active transfer model; register reports remain explicit. ADR 0182.
+    std::uint32_t gif_ctrl{};
+    std::uint32_t gif_mode{};
+    std::uint32_t gif_stat{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -352,6 +375,9 @@ struct EeMemory {
         { kEeGsSmode2Address,    &mmio_read_gs_smode2, &mmio_write_gs_smode2 },
         { kEeVif1FbrstAddress,   &mmio_read_vif1_fbrst, &mmio_write_vif1_fbrst },
         { kEeVif1ErrAddress,     &mmio_read_vif1_err, &mmio_write_vif1_err },
+        { kEeGifCtrlAddress,     &mmio_read_gif_ctrl, &mmio_write_gif_ctrl },
+        { kEeGifModeAddress,     &mmio_read_gif_mode, &mmio_write_gif_mode },
+        { kEeGifStatAddress,     &mmio_read_gif_stat, &mmio_write_gif_stat },
     };
 };
 
@@ -2130,6 +2156,34 @@ inline Status mmio_write_vif1_err(EeMemory& self, std::uint32_t, std::uint32_t v
     self.vif1_err = value;
     return Status::ok;
 }
+// GIF control registers: GIF_CTRL/GIF_MODE are writable bounded storage and
+// read back what was written. GIF_STAT is bounded storage with no transfer
+// model; a guest polling it sees only what was written, never fabricated
+// readiness. ADR 0182.
+inline Status mmio_read_gif_ctrl(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gif_ctrl;
+    return Status::ok;
+}
+inline Status mmio_write_gif_ctrl(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gif_ctrl = value;
+    return Status::ok;
+}
+inline Status mmio_read_gif_mode(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gif_mode;
+    return Status::ok;
+}
+inline Status mmio_write_gif_mode(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gif_mode = value;
+    return Status::ok;
+}
+inline Status mmio_read_gif_stat(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gif_stat;
+    return Status::ok;
+}
+inline Status mmio_write_gif_stat(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gif_stat = value;
+    return Status::ok;
+}
 
 // Host-observable classification of how a bounded execution stopped. The names
 // are a stable, machine-readable contract for the native probe trace and any
@@ -2501,7 +2555,9 @@ inline void disable_interrupts(EeState& state) noexcept {
     // ADR 0176: 64-bit loads from 32-bit registers must reach the MMIO handler.
     if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
         address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
-        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress) {
+        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress ||
+        address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
+        address == kEeGifStatAddress) {
         std::uint32_t low{};
         const auto status1 = load_u32(memory, address, low);
         if (status1 != Status::ok) return status1;
@@ -2623,7 +2679,9 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     // registers must reach the MMIO handler.
     if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
         address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
-        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress) {
+        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress ||
+        address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
+        address == kEeGifStatAddress) {
         const std::uint32_t low = static_cast<std::uint32_t>(value);
         return store_u32(memory, address, low);
     }
