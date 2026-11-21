@@ -1992,6 +1992,43 @@ limit, root set or relocated region is a different frontier.
 - **Unknown:** what `0x002434B4` waits on, and whether the title's
   failed-bank-load path is fatal or retryable in the real kernel.
 
+## GS CSR 64-bit MMIO and GsPutIMR syscall frontier advance (ADR 0176/0177, runtime ABI 25/26)
+
+- **Observed (ABI-24 probe `abi24-01`, commit `0226a34`, same ISO/ELF digests,
+  5,000,000-instruction budget, 16 batches):** `guest_stopped` at
+  `pc=0x002434B4` after 4,645,561 instructions with
+  `unsupported_memory_access` — **identical** stop PC and register state to
+  the ABI-23 probe. GPRs confirm `$v1=0x12001000`, `$a0=0x200`. Static
+  disassembly: `0x002434B4` is `sd $a0, 0($v1)` (opcode `0xFC640000`, a
+  **64-bit** store), and the IMR read at `0x0024353C` is also `sd`
+  (`0xFC430000`). **Derived root cause:** ADR 0175 wired GS CSR/IMR into
+  `kMmioDevices`, but only `store_u32`/`load_u32` consult that table.
+  `store_u64`/`load_u64` (used by `SD`/`LD`) call `resolve_ee_memory_access`
+  directly, so the 64-bit store bypassed the MMIO dispatch and hit
+  `is_unsupported_physical_region(0x12001000)`. The ADR 0175 register model
+  never executed; the ABI-24 probe did not advance.
+- **Implemented (ADR 0176, runtime ABI 25):** `store_u64`/`load_u64` now
+  special-case `kEeGsCsrAddress`/`kEeGsImrAddress`: the 64-bit store writes
+  only the low 32 bits through `store_u32` (upper 4 bytes discarded — the
+  register is 32 bits wide); the 64-bit load reads the low 32 bits through
+  `load_u32` and zero-extends to 64 bits. No GPU state, no interrupt.
+- **Observed (ABI-25 probe `abi25-01`, this branch + ADR 0176, same digests,
+  rebuilt frontend + native module):** `guest_stopped` at a **new** frontier
+  `pc=0x0025AA24` after 4,645,563 instructions (2 instructions past the CSR
+  write) as `unhandled_syscall` for service `0x71` (refused=1). Static
+  disassembly of the stub at `0x0025AA20`: `addiu $v1,$zero,0x71 ; syscall` —
+  `GsPutIMR($a0)` per ps2sdk `syscallnr.h` (`__NR_GsPutIMR = 0x71`,
+  `__NR_GsGetIMR = 0x70`). This is a real frontier advance (different stop
+  PC, different stop class, passed the GS CSR write), not a boot stage.
+- **Implemented (ADR 0177, runtime ABI 26):** `GsGetIMR` (0x70) and
+  `GsPutIMR` (0x71) are registered in `kEeSyscallServices`; the handlers
+  read/write the GS IMR register (`0x12001010`) through the same MMIO path as
+  guest `lw`/`sw`. No GS interrupt is delivered; IMR stays a bounded 16-bit
+  storage register.
+- **Unknown:** what the title does after `GsPutIMR` returns, and whether the
+  sound-init path proceeds further. The ABI-26 probe (`abi26-01`) records the
+  outcome.
+
 ## Provenance rules
 
 

@@ -70,6 +70,58 @@ int test_gs_csr_alias_dispatches() {
     return 0;
 }
 
+// A 64-bit store (SD) to GS CSR writes only the low 32-bit word to the register.
+// ADR 0176: 64-bit stores to 32-bit registers must reach the MMIO handler.
+int test_gs_csr_store_u64_decomposes() {
+    EeState state{};
+    // 64-bit value 0x200 (wRESET) in low 32 bits, high 32 bits are ignored
+    if (reps2::runtime::store_u64(state.memory, kGsCsrAddr, 0x0000'0001'0000'0200ULL)
+        != Status::ok) {
+        return 13;
+    }
+    // Only low 32 bits stored; high 32 bits dropped
+    if (state.memory.gs_csr != 0x0000'0200U) return 14;
+    // IMR unaffected by CSR write
+    if (state.memory.gs_imr != 0U) return 15;
+    return 0;
+}
+
+// A 64-bit load (LD) from GS CSR returns the register value zero-extended.
+// ADR 0176: 64-bit loads from 32-bit registers must reach the MMIO handler.
+int test_gs_csr_load_u64_decomposes() {
+    EeState state{};
+    // Pre-load a value in the register (command word 0xDEAD in high 16, low 16 clear)
+    state.memory.gs_csr = 0xDEAD'0000U;
+    std::uint64_t value = 0ULL;
+    if (reps2::runtime::load_u64(state.memory, kGsCsrAddr, value) != Status::ok) return 16;
+    // 32-bit read returns high 16 only (command word); zero-extended to 64 bits
+    if (value != 0xDEAD'0000ULL) return 17;
+    return 0;
+}
+
+// 64-bit store to GS IMR writes the low 16 bits (mask) and ignores the rest.
+int test_gs_imr_store_u64_decomposes() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, kGsImrAddr, 0x0000'0000'0000'1234ULL)
+        != Status::ok) {
+        return 18;
+    }
+    // Only low 16 bits stored
+    if (state.memory.gs_imr != 0x0000'1234U) return 19;
+    return 0;
+}
+
+// 64-bit load from GS IMR returns the 16-bit mask zero-extended.
+int test_gs_imr_load_u64_decomposes() {
+    EeState state{};
+    state.memory.gs_imr = 0xABCDU;
+    std::uint64_t value = 0ULL;
+    if (reps2::runtime::load_u64(state.memory, kGsImrAddr, value) != Status::ok) return 20;
+    // Low 16 bits zero-extended to 64 bits
+    if (value != 0xABCDULL) return 21;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -88,6 +140,10 @@ int main() {
     run("gs_csr_read_clears_status_half", test_gs_csr_read_clears_status_half);
     run("gs_imr_is_16bit_mask", test_gs_imr_is_16bit_mask);
     run("gs_csr_alias_dispatches", test_gs_csr_alias_dispatches);
+    run("gs_csr_store_u64_decomposes", test_gs_csr_store_u64_decomposes);
+    run("gs_csr_load_u64_decomposes", test_gs_csr_load_u64_decomposes);
+    run("gs_imr_store_u64_decomposes", test_gs_imr_store_u64_decomposes);
+    run("gs_imr_load_u64_decomposes", test_gs_imr_load_u64_decomposes);
 
     if (fails == 0) {
         printf("All GS CSR/IMR tests passed\n");

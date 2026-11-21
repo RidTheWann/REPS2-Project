@@ -2389,6 +2389,17 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint64_t& value
 ) noexcept {
+    // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
+    // decompose the 64-bit load into a 32-bit load from the register plus
+    // returning the high 32 bits as zero (the 64-bit result is zero-extended).
+    // ADR 0176: 64-bit loads from 32-bit registers must reach the MMIO handler.
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+        std::uint32_t low{};
+        const auto status1 = load_u32(memory, address, low);
+        if (status1 != Status::ok) return status1;
+        value = static_cast<std::uint64_t>(low);  // zero-extend 32-bit value
+        return status1;
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 8U, 8U, physical);
     if (status != Status::ok) return status;
@@ -2476,6 +2487,15 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint64_t value
 ) noexcept {
+    // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
+    // decompose the 64-bit write into a 32-bit write to the register itself.
+    // The upper 4 bytes of the 64-bit store are discarded because the register
+    // is only 32 bits wide (4 bytes). ADR 0176: 64-bit stores to 32-bit
+    // registers must reach the MMIO handler.
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+        const std::uint32_t low = static_cast<std::uint32_t>(value);
+        return store_u32(memory, address, low);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 8U, 8U, physical);
     if (status != Status::ok) return status;

@@ -39,4 +39,16 @@
 // ABI 24 covers ADR 0175: the GS CSR (0x12001000) and IMR (0x12001010) storage
 // registers (`gs_csr`/`gs_imr`) in EeMemory plus their MMIO dispatch entries
 // change sizeof(EeState). Modules built against ABI 23 are refused.
-#define REPS2_RUNTIME_ABI_VERSION 24
+//
+// ABI 25 covers ADR 0176: 64-bit (SD/LD) accesses to GS CSR/IMR are decomposed
+// into 32-bit MMIO operations in store_u64/load_u64, so a 64-bit guest store
+// no longer bypasses the MMIO table and fails with unsupported_memory_access.
+// This changes generated-code-visible behavior (the store_u64/load_u64 inline
+// bodies), so modules built against ABI 24 are refused.
+//
+// ABI 26 covers ADR 0177: the GsGetIMR (0x70) / GsPutIMR (0x71) syscall services
+// are registered in the HLE service table, so the generated syscall dispatch
+// resolves them instead of returning unhandled_syscall. No state-layout
+// change (the table is compile-time), but generated modules embedding the
+// old table are refused.
+#define REPS2_RUNTIME_ABI_VERSION 26
