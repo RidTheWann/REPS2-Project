@@ -320,10 +320,9 @@ struct EeDmacState {
         return true;
     }
 
-    // VIF0 (channel 1) registers: bounded storage only, reset unknown until
-    // seeded. No DMA transfer, interrupt, or completion is modelled. ADR 0184.
+    // VIF0 (channel 1) registers: bounded storage only, reset known zero.
+    // No DMA transfer, interrupt, or completion is modelled. ADR 0184.
     [[nodiscard]] bool read_chcr1(std::uint32_t& value) const noexcept {
-        if (!chcr1_known) return false;
         value = chcr1;
         return true;
     }
@@ -333,7 +332,6 @@ struct EeDmacState {
         return true;
     }
     [[nodiscard]] bool read_madr1(std::uint32_t& value) const noexcept {
-        if (!madr1_known) return false;
         value = madr1;
         return true;
     }
@@ -343,7 +341,6 @@ struct EeDmacState {
         return true;
     }
     [[nodiscard]] bool read_qwc1(std::uint32_t& value) const noexcept {
-        if (!qwc1_known) return false;
         value = qwc1;
         return true;
     }
@@ -353,7 +350,6 @@ struct EeDmacState {
         return true;
     }
     [[nodiscard]] bool read_tadr1(std::uint32_t& value) const noexcept {
-        if (!tadr1_known) return false;
         value = tadr1;
         return true;
     }

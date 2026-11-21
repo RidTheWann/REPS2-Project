@@ -2131,6 +2131,11 @@ limit, root set or relocated region is a different frontier.
   bounded 32-bit storage with MMIO dispatch; reads before first write fail
   closed. No DMA transfer, VIF0 FIFO interaction, interrupt, or completion event
   is modelled. The ABI-33 probe records the next stop.
+- **Correction to ADR 0184 semantics after abi33-01:** the guest reads
+  `0x10009000` (D1_CHCR) before writing it, and PS2SDK `dma.c`/EE manual
+  reset semantics imply a readable idle/reset channel state. Channel-1 reads now
+  return the stored zero/reset value instead of failing closed; writes still
+  only store. No transfer/completion behavior is claimed.
 
 ## Provenance rules
 
