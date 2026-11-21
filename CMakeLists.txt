@@ -1188,12 +1188,13 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
             # SQC2 $vf0, 0x50($a0) -> stores constant again at +0x50
             0xF8800050
             # --- COP2 CFC2/CTC2 control-register transfers (ADR 0180) ---
-            # CTC2 $2, $28: control[28] (FBRST) <- low32(GPR2); GPR2 preset below
-            0x48C46000
-            # CFC2 $3, $28: GPR3 <- control[28]; must observe CTC2 value sign-extended
-            0x4863E000
-            # CFC2 $2, $29: GPR2 <- control[29] (VPU_STAT, reset 0)
-            0x4844E800
+            # CTC2 $3, $28: control[28] (FBRST) <- low32(GPR3); GPR3 preset below
+            0x48C3E000
+            # CFC2 $8, $28: GPR8 <- control[28]; preserve GPR4 memory base
+            0x4848E000
+            # CFC2 $9, $29: GPR9 <- control[29] (VPU_STAT, reset 0)
+            0x4849E800
+            0x00000000  # nop
             # --- COP2 QMTC2/QMFC2 quadword register transfers ---
             # QMTC2 $2, $vf12 -> VF12 <- GPR2 preset quadword
             0x48A26000
@@ -1207,13 +1208,13 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
             0x48206000
             # QMTC2 $0, $vf12 -> VF0 write must be discarded
             0x48A06000
-            # SQC2 $vf0, 0x70($a0) -> VF0 still holds the hardwired constant
-            0xF8800070
+            # SQC2 $vf0, 0x80($a0) -> stores hardwired constant {0,0,0,1.0f} at +0x80
+            0xF8800080
             # QMTC2 $2, $vf4 -> VF4 <- GPR2 (which QMFC2 $2, $vf0 just set to
             # the hardwired VF0 constant)
             0x48A22000
-            # SQC2 $vf4, 0x80($a0) -> proves the VF0 read path through a GPR
-            0xF8840080
+            # SQC2 $vf4, 0x90($a0) -> proves the VF0 read path through a GPR
+            0xF8840090
             0x00000000  # nop    delay-slot padding
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 COP2 data-movement block"
