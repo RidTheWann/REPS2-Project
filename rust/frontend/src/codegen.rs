@@ -90,6 +90,8 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::store_u64_right;\n\
              using reps2::runtime::read_cop0;\n\
              using reps2::runtime::write_cop0;\n\
+             using reps2::runtime::vu0_read_control;\n\
+             using reps2::runtime::vu0_write_control;\n\
              using reps2::runtime::enable_interrupts;\n\
              using reps2::runtime::disable_interrupts;\n\
              state.gpr[0] = {};\n",
@@ -299,6 +301,20 @@ pub(crate) fn emit_instruction(
             let s = src.index();
             output.push_str(&format!(
                 "    write_cop0(state, {cop0_reg}, static_cast<std::uint32_t>(state.gpr[{s}].low));\n"
+            ));
+        }
+        // CFC2/CTC2 move a word between a GPR and the VU0 control file.
+        // ADR 0180. A write to GPR[0] is dropped on CFC2; CTC2 always reads.
+        Operation::MoveFromVu0Control { dst, control_reg } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(vu0_read_control(state.vu0, {control_reg}));\n"
+            ));
+        }
+        Operation::MoveToVu0Control { src, control_reg } => {
+            let s = src.index();
+            output.push_str(&format!(
+                "    vu0_write_control(state.vu0, {control_reg}, static_cast<std::uint32_t>(state.gpr[{s}].low));\n"
             ));
         }
         Operation::EnableInterrupts => {
@@ -2713,6 +2729,28 @@ mod tests {
         assert!(cpp.contains("using reps2::runtime::write_cop0;"));
         assert!(cpp.contains("using reps2::runtime::enable_interrupts;"));
         assert!(cpp.contains("using reps2::runtime::disable_interrupts;"));
+    }
+
+    #[test]
+    fn emits_cop2_control_transfers_cfc2_ctc2() {
+        // CFC2 $4, $28 = 0x4844E000; CTC2 $4, $28 = 0x48C4E000. ADR 0180.
+        let words = [0x4844_E000u32, 0x48C4_E000u32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x1000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("CFC2/CTC2 IR");
+        let cpp = emit_cpp(&program).expect("CFC2/CTC2 C++");
+
+        assert!(cpp.contains(
+            "if (4 != 0) state.gpr[4].low = sign_extend_word(vu0_read_control(state.vu0, 28));"
+        ));
+        assert!(cpp.contains(
+            "vu0_write_control(state.vu0, 28, static_cast<std::uint32_t>(state.gpr[4].low));"
+        ));
+        assert!(cpp.contains("using reps2::runtime::vu0_read_control;"));
+        assert!(cpp.contains("using reps2::runtime::vu0_write_control;"));
     }
 
     #[test]

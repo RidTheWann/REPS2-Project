@@ -253,6 +253,10 @@ pub enum Opcode {
     Mfc0,
     /// Move To COP0: COP0[rd] = GPR[rt].
     Mtc0,
+    /// Move From COP2 Control: GPR[rt] = VU0[control[rd]].
+    Cfc2,
+    /// Move To COP2 Control: VU0[control[rd]] = GPR[rt].
+    Ctc2,
     /// Enable Interrupts: sets Status.EIE (bit 16).
     Ei,
     /// Disable Interrupts: clears Status.EIE (bit 16).
@@ -465,6 +469,8 @@ impl Opcode {
             Self::Sqc2 => "sqc2",
             Self::Qmtc2 => "qmtc2",
             Self::Qmfc2 => "qmfc2",
+            Self::Cfc2 => "cfc2",
+            Self::Ctc2 => "ctc2",
             Self::ParallelAddWord => "paddw",
             Self::ParallelSubWord => "psubw",
             Self::ParallelCompareGreaterWord => "pcgtw",
@@ -1238,6 +1244,15 @@ impl Instruction {
             Opcode::Mtc0 => {
                 effects.gpr_read_mask = rt;
             }
+            // CFC2/CTC2 move a word between a GPR and the VU0 control file;
+            // the control file is not part of the GPR/VF effect masks, so only
+            // the GPR side is recorded. ADR 0180.
+            Opcode::Cfc2 => {
+                effects.gpr_write_mask = rt;
+            }
+            Opcode::Ctc2 => {
+                effects.gpr_read_mask = rt;
+            }
             Opcode::Ei | Opcode::Di => {}
             Opcode::Eret => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1388,7 +1403,9 @@ fn decode_cop2(word: u32) -> Opcode {
     let reserved_low = word & 0x7FF; // bits 10..0
     match format {
         0x01 if reserved_low == 0 => Opcode::Qmfc2,
+        0x02 if reserved_low == 0 => Opcode::Cfc2, // CFC2: Move from VU0 control
         0x05 if reserved_low == 0 => Opcode::Qmtc2,
+        0x06 if reserved_low == 0 => Opcode::Ctc2, // CTC2: Move to VU0 control
         _ => Opcode::Unknown,
     }
 }
@@ -3497,10 +3514,20 @@ mod tests {
         // observed malformed QMFC2-shaped word (format 1, reserved bit 0 set).
         assert_eq!(decode(0x4822_0001, 0).opcode, Opcode::Unknown);
 
-        // Formats with no implemented model stay unsupported: CFC2 (2),
-        // CTC2 (6), and the VU Special1 arithmetic rows (>= 0x10).
-        assert_eq!(decode(0x4842_0002, 0).opcode, Opcode::Unknown);
-        assert_eq!(decode(0x48C2_0006, 0).opcode, Opcode::Unknown);
+        // CFC2/CTC2 (formats 2/6) move a word between a GPR and the VU0
+        // control file. ADR 0180. CFC2 $4, $28 = 0x4844E000.
+        assert_eq!(decode(0x4844_E000, 0).opcode, Opcode::Cfc2);
+        assert_eq!(decode(0x4844_E000, 0).rt, 4);
+        assert_eq!(decode(0x4844_E000, 0).rd, 28);
+        // CTC2 $4, $28 = 0x48C4E000.
+        assert_eq!(decode(0x48C4_E000, 0).opcode, Opcode::Ctc2);
+        assert_eq!(decode(0x48C4_E000, 0).rt, 4);
+        assert_eq!(decode(0x48C4_E000, 0).rd, 28);
+
+        // Reserved bits on CFC2/CTC2 are rejected, and the VU Special1
+        // arithmetic rows (>= 0x10) stay unsupported.
+        assert_eq!(decode(0x4842_0003, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(0x48C2_0007, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Unknown);
     }
 

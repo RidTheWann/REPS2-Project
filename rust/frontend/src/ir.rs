@@ -171,6 +171,14 @@ pub enum Operation {
         src: Gpr,
         cop0_reg: u8,
     },
+    MoveFromVu0Control {
+        dst: Gpr,
+        control_reg: u8,
+    },
+    MoveToVu0Control {
+        src: Gpr,
+        control_reg: u8,
+    },
     EnableInterrupts,
     DisableInterrupts,
     LoadFpuWord {
@@ -1252,6 +1260,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: gpr(instruction.rt),
                 cop0_reg: instruction.rd,
             },
+            Opcode::Cfc2 => Operation::MoveFromVu0Control {
+                dst: gpr(instruction.rt),
+                control_reg: instruction.rd,
+            },
+            Opcode::Ctc2 => Operation::MoveToVu0Control {
+                src: gpr(instruction.rt),
+                control_reg: instruction.rd,
+            },
             Opcode::Ei => Operation::EnableInterrupts,
             Opcode::Di => Operation::DisableInterrupts,
             // S-class arithmetic: fs is bits 15..11 (decoder rd), ft is bits
@@ -1827,6 +1843,23 @@ mod tests {
             program.instructions()[14].operation,
             Operation::MoveFromVu0Quadword { dst, src }
                 if dst.index() == 3 && src.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_cop2_control_transfers_cfc2_ctc2() {
+        // CFC2 $4, $28 = 0x4844E000 and CTC2 $4, $28 = 0x48C4E000.
+        let stream = [decoded(0x4844_E000, 0x3000), decoded(0x48C4_E000, 0x3004)];
+        let program = lift(&stream).expect("CFC2/CTC2 lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::MoveFromVu0Control { dst, control_reg }
+                if dst.index() == 4 && control_reg == 28
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::MoveToVu0Control { src, control_reg }
+                if src.index() == 4 && control_reg == 28
         ));
     }
 

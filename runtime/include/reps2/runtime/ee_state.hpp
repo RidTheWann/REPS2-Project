@@ -30,6 +30,9 @@ struct Gpr128 {
 // slice uses the integer register file yet, so it is not modelled.
 struct Vu0State {
     std::array<Gpr128, 32> vf{};
+    // VU0 COP2 control registers (CFC2/CTC2). Only a subset is modelled;
+    // unmodelled registers remain fail-closed until evidenced. ADR 0180.
+    std::array<std::uint32_t, 32> control{};
 };
 
 inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000ULL};
@@ -41,6 +44,20 @@ inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000U
 inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value) noexcept {
     if (index != 0U) {
         vu0.vf[index] = value;
+    }
+}
+
+// VU0 COP2 control register helpers (CFC2/CTC2). ADR 0180.
+inline constexpr std::uint8_t kVu0ControlRegisterCount = 32U;
+[[nodiscard]] inline std::uint32_t vu0_read_control(const Vu0State& vu0, std::uint8_t reg) noexcept {
+    if (reg < kVu0ControlRegisterCount) {
+        return vu0.control[reg];
+    }
+    return 0U;
+}
+inline void vu0_write_control(Vu0State& vu0, std::uint8_t reg, std::uint32_t value) noexcept {
+    if (reg < kVu0ControlRegisterCount) {
+        vu0.control[reg] = value;
     }
 }
 
@@ -62,6 +79,20 @@ inline constexpr std::uint32_t kEeTimer3CompareAddress{0x1000'1820U};
 // stop on an unsupported access. No GS interrupt is ever delivered. ADR 0175.
 inline constexpr std::uint32_t kEeGsCsrAddress{0x1200'1000U};
 inline constexpr std::uint32_t kEeGsImrAddress{0x1200'1010U};
+// GS CRT/video-mode registers (PS2TEK GS, 0x12000000 page). PMODE (0x12000000)
+// and SMODE2 (0x12000020) are modelled as bounded storage registers because the
+// SetGsCrt syscall (0x02) and direct guest writes target them. No display
+// output, no vsync, no GPU state. ADR 0178.
+inline constexpr std::uint32_t kEeGsPmodeAddress{0x1200'0000U};
+inline constexpr std::uint32_t kEeGsSmode2Address{0x1200'0020U};
+// VIF1 command registers (PS2SDK common/include/ee_regs.h): VIF1_FBRST at
+// 0x10003C10 (write-only frame-buffer/FIFO reset) and VIF1_ERR at 0x10003C20
+// (write-only error clear). Modelled as bounded write-acknowledge registers:
+// writes are accepted and stored, reads return the stored word. No VIF unit,
+// DMA or GS transfer is modelled; FBRST performs no actual FIFO reset.
+// ADR 0179.
+inline constexpr std::uint32_t kEeVif1FbrstAddress{0x1000'3C10U};
+inline constexpr std::uint32_t kEeVif1ErrAddress{0x1000'3C20U};
 // T3_MODE writable fields: CLKS[1:0], GATE[2], GATS[3], GATM[4], ZRET[6],
 // CUE[7], CMPE[8], and OVFE[9]; EQUF[10] and OVFF[11] are write-one-to-clear
 // status bits latched by the progression model (ADR 0142). T3_COMP and T3_COUNT
@@ -192,6 +223,16 @@ inline Status mmio_read_gs_csr(const EeMemory&, std::uint32_t, std::uint32_t&) n
 inline Status mmio_write_gs_csr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_gs_imr(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_gs_imr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// GS CRT/video-mode registers (PMODE 0x12000000, SMODE2 0x12000020). ADR 0178.
+inline Status mmio_read_gs_pmode(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_pmode(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_smode2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_smode2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// VIF1 command registers (ADR 0179).
+inline Status mmio_read_vif1_fbrst(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_vif1_fbrst(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_vif1_err(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_vif1_err(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2_count(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_timer2_count(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_timer2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -251,6 +292,16 @@ struct EeMemory {
     // store the command word. IMR is a plain 16-bit mask. Reset 0. ADR 0175.
     std::uint32_t gs_csr{};
     std::uint32_t gs_imr{};
+    // GS CRT/video-mode registers: PMODE (0x12000000) and SMODE2 (0x12000020)
+    // as plain bounded storage. SetGsCrt (0x02) and direct guest stores write
+    // here; reads return the stored value. No display, no vsync. ADR 0178.
+    std::uint32_t gs_pmode{};
+    std::uint32_t gs_smode2{};
+    // VIF1 write-only command registers: FBRST (0x10003C10) and ERR
+    // (0x10003C20) accept writes and store the word; reads return it. No VIF
+    // pipeline state changes. ADR 0179.
+    std::uint32_t vif1_fbrst{};
+    std::uint32_t vif1_err{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -286,6 +337,10 @@ struct EeMemory {
         // command word. IMR is a plain 16-bit mask. Reset 0. ADR 0175.
         { kEeGsCsrAddress,       &mmio_read_gs_csr,  &mmio_write_gs_csr },
         { kEeGsImrAddress,       &mmio_read_gs_imr,  &mmio_write_gs_imr },
+        { kEeGsPmodeAddress,     &mmio_read_gs_pmode, &mmio_write_gs_pmode },
+        { kEeGsSmode2Address,    &mmio_read_gs_smode2, &mmio_write_gs_smode2 },
+        { kEeVif1FbrstAddress,   &mmio_read_vif1_fbrst, &mmio_write_vif1_fbrst },
+        { kEeVif1ErrAddress,     &mmio_read_vif1_err, &mmio_write_vif1_err },
     };
 };
 
@@ -2024,6 +2079,46 @@ inline Status mmio_write_gs_imr(EeMemory& self, std::uint32_t, std::uint32_t val
     self.gs_imr = value & 0x0000'FFFFU;
     return Status::ok;
 }
+// GS CRT/video-mode registers: PMODE (0x12000000) and SMODE2 (0x12000020).
+// Plain bounded storage — reads return stored value; writes store value.
+// SetGsCrt (0x02) writes PMODE and/or SMODE2. No display, no vsync. ADR 0178.
+inline Status mmio_read_gs_pmode(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gs_pmode;
+    return Status::ok;
+}
+inline Status mmio_write_gs_pmode(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_pmode = value;
+    return Status::ok;
+}
+inline Status mmio_read_gs_smode2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.gs_smode2;
+    return Status::ok;
+}
+inline Status mmio_write_gs_smode2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_smode2 = value;
+    return Status::ok;
+}
+// VIF1_FBRST (0x10003C10) and VIF1_ERR (0x10003C20): bounded storage only.
+// The guest writes reset/error-clear commands; REPS2 models no VIF unit, so
+// the write is accepted and stored but performs no FIFO/transfer reset.
+// Reads return the stored word (ps2sdk marks both as write-only, so no guest
+// path should depend on readback). ADR 0179.
+inline Status mmio_read_vif1_fbrst(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.vif1_fbrst;
+    return Status::ok;
+}
+inline Status mmio_write_vif1_fbrst(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.vif1_fbrst = value;
+    return Status::ok;
+}
+inline Status mmio_read_vif1_err(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.vif1_err;
+    return Status::ok;
+}
+inline Status mmio_write_vif1_err(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.vif1_err = value;
+    return Status::ok;
+}
 
 // Host-observable classification of how a bounded execution stopped. The names
 // are a stable, machine-readable contract for the native probe trace and any
@@ -2393,7 +2488,9 @@ inline void disable_interrupts(EeState& state) noexcept {
     // decompose the 64-bit load into a 32-bit load from the register plus
     // returning the high 32 bits as zero (the 64-bit result is zero-extended).
     // ADR 0176: 64-bit loads from 32-bit registers must reach the MMIO handler.
-    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
+        address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
+        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress) {
         std::uint32_t low{};
         const auto status1 = load_u32(memory, address, low);
         if (status1 != Status::ok) return status1;
@@ -2492,7 +2589,9 @@ inline void disable_interrupts(EeState& state) noexcept {
     // The upper 4 bytes of the 64-bit store are discarded because the register
     // is only 32 bits wide (4 bytes). ADR 0176: 64-bit stores to 32-bit
     // registers must reach the MMIO handler.
-    if (address == kEeGsCsrAddress || address == kEeGsImrAddress) {
+    if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
+        address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
+        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress) {
         const std::uint32_t low = static_cast<std::uint32_t>(value);
         return store_u32(memory, address, low);
     }

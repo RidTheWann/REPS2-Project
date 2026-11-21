@@ -2040,6 +2040,51 @@ limit, root set or relocated region is a different frontier.
   closed) rather than a fabricated write. Next engineering unit: model the GS
   CRT register(s) at their documented addresses with evidenced semantics, or
   identify the next syscall on the path.
+- **Implemented (ADR 0178, runtime ABI 27):** PMODE (`0x1200'0000`) and SMODE2
+  (`0x1200'0020`) modelled as bounded 32-bit storage with MMIO dispatch and
+  64-bit decomposition; `SetGsCrt` (0x02) registered in `kEeSyscallServices`,
+  composing SMODE2 from `$a0`/`$a1`/`$a2` and writing PMODE=3. The SMODE2 bit
+  composition is classified **Inferred** (PS2TEK layout + ps2sdk signature, not
+  yet cross-verified against a shipped-hardware scope trace). The ABI-27 probe
+  (`abi27-01`) records the outcome — see below.
+- **Observed (ABI-27 probe `abi27-01`, this branch + ADR 0178, same digests,
+  rebuilt frontend + native module):** `guest_stopped` at a further frontier
+  `pc=0x00243318` after 4,645,596 instructions as `unsupported_memory_access`.
+  Register/PC evidence: `$v2 = 0x10003C10`, `$a3 = 0x1`, and the faulting
+  instruction is `sw $a3, 0($v2)` at `0x00243318`; the next store is
+  `sw $v0, 0($v1)` with `$v1 = 0x10003C20`, `$v0 = 2`. **Derived from
+  ps2sdk `common/include/ee_regs.h`:** `0x10003C10 = A_EE_VIF1_FBRST`
+  (VIF1 frame-buffer reset, write-only) and `0x10003C20 = A_EE_VIF1_ERR`
+  (VIF1 error status, write-only). **Earlier misdiagnosis corrected:** the
+  address was first read as `0x12000010` (GS SMODE1); the actual stop
+  register word is `0x10003C10`, so SMODE1 is not involved and the SMODE1
+  ADR was reverted (branch reset to `0412808`).
+- **Implemented (ADR 0179, runtime ABI 28):** VIF1_FBRST (`0x10003C10`) and
+  VIF1_ERR (`0x10003C20`) modelled as bounded 32-bit storage with MMIO
+  dispatch and 64-bit decomposition. Writes are accepted and stored; no VIF
+  unit, FIFO reset, or GS transfer is modelled.
+- **Observed (ABI-28 probe `abi28-03`, this branch + ADR 0179, same digests,
+  rebuilt frontend + native module):** `guest_stopped` at a further frontier
+  `pc=0x00243330` after 4,645,596 instructions as `unsupported_instruction`
+  — guest word `0x4844E000` (primary opcode `0x12` = COP0, `rs=2` = MTC0,
+  `rt=4`, `rd=28`): `mtc0 $a0, $28` (write COP0 register 28). The two VIF1
+  stores at `0x00243318`/`0x00243324` now pass. The following words
+  (`0x48C4E000` COP0 `rs=6`, `0x4844E800` MTC0 rd=29) are also COP0. This is
+  the next blocker: COP0 register writes (28/29) are not modelled by the
+  translator. **Unknown:** exact guest-visible semantics of COP0 reg 28/29
+  on this path; next engineering unit is bounded COP0 storage for those
+  registers with evidence, or the next instruction class.
+- **Correction to that ABI-28 note:** the faulting word `0x4844E000` is
+  primary opcode `0x12` = COP2, not COP0 (`0x10`). Decode: format 2 =
+  **CFC2** `$a0, $28`; `rd=28` is VU0 control register **FBRST**, `rd=29` is
+  **VPU_STAT** (Sony VU User's Manual §5.1.3/§5.5.5; Ghidra EE `cop2.sinc`;
+  PCSX2 `VU.h` `REG_FBRST=28`, `REG_VPU_STAT=29`). The following words
+  `0x48C4E000` and `0x4844E800` are CTC2/CFC2 to registers 28/29.
+- **Implemented (ADR 0180, runtime ABI 29):** CFC2/CTC2 decoded, lifted and
+  emitted; `Vu0State` gains bounded 32-word control storage; CFC2 sign-extends
+  the control word to the GPR, CTC2 stores the low GPR word. Storage only —
+  no VU/VIF reset, microprogram launch, interrupt, or DMA effect. The ABI-29
+  probe (`abi29-01`) records the next stop.
 
 ## Provenance rules
 

@@ -86,6 +86,8 @@ using reps2::runtime::store_u64_left;
 using reps2::runtime::store_u64_right;
 using reps2::runtime::read_cop0;
 using reps2::runtime::write_cop0;
+using reps2::runtime::vu0_read_control;
+using reps2::runtime::vu0_write_control;
 using reps2::runtime::enable_interrupts;
 using reps2::runtime::disable_interrupts;
 using reps2::runtime::ExceptionCode;

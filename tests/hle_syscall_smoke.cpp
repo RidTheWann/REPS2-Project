@@ -2933,6 +2933,15 @@ int test_service_table_reports_names() {
     if (sema_name == nullptr || std::string_view(sema_name) != "CreateSema") {
         return 105;
     }
+    // ADR 0178: SetGsCrt (0x02) registered, writes GS PMODE/SMODE2
+    if (reps2::runtime::find_ee_syscall_service(reps2::runtime::kEeSyscallSetGsCrt) == nullptr) {
+        return 114;
+    }
+    const char* const crt_name =
+        reps2::runtime::ee_syscall_service_name(reps2::runtime::kEeSyscallSetGsCrt);
+    if (crt_name == nullptr || std::string_view(crt_name) != "SetGsCrt") {
+        return 115;
+    }
     const char* const find_name = reps2::runtime::ee_syscall_service_name(kFindAddress);
     if (find_name == nullptr || std::string_view(find_name) != "FindAddress") {
         return 106;
