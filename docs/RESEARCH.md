@@ -2028,6 +2028,18 @@ limit, root set or relocated region is a different frontier.
 - **Unknown:** what the title does after `GsPutIMR` returns, and whether the
   sound-init path proceeds further. The ABI-26 probe (`abi26-01`) records the
   outcome.
+- **Observed (ABI-26 probe `abi26-01`, this branch + ADR 0177, same digests,
+  rebuilt frontend + native module):** `guest_stopped` at a further frontier
+  `pc=0x0025A2E4` after 4,645,581 instructions as `unhandled_syscall` for
+  service `0x02` (refused=1). Static disassembly of the stub at `0x0025A2E0`:
+  `addiu $v1,$zero,2 ; syscall` — `SetGsCrt($a0,$a1,$a2)` per ps2sdk
+  `syscallnr.h` (`__NR_SetGsCrt = 0x02`, signature `void SetGsCrt(s16
+  interlace, s16 pal_ntsc, s16 field)`). **Unknown:** the exact GS CRT
+  register target and bit composition the kernel writes; REPS2 does not model
+  the GS CRT registers, so this remains an explicit `unhandled_syscall` (fail
+  closed) rather than a fabricated write. Next engineering unit: model the GS
+  CRT register(s) at their documented addresses with evidenced semantics, or
+  identify the next syscall on the path.
 
 ## Provenance rules
 
