@@ -2074,6 +2074,17 @@ limit, root set or relocated region is a different frontier.
   translator. **Unknown:** exact guest-visible semantics of COP0 reg 28/29
   on this path; next engineering unit is bounded COP0 storage for those
   registers with evidence, or the next instruction class.
+- **Correction to that ABI-28 note:** the faulting word `0x4844E000` is
+  primary opcode `0x12` = COP2, not COP0 (`0x10`). Decode: format 2 =
+  **CFC2** `$a0, $28`; `rd=28` is VU0 control register **FBRST**, `rd=29` is
+  **VPU_STAT** (Sony VU User's Manual §5.1.3/§5.5.5; Ghidra EE `cop2.sinc`;
+  PCSX2 `VU.h` `REG_FBRST=28`, `REG_VPU_STAT=29`). The following words
+  `0x48C4E000` and `0x4844E800` are CTC2/CFC2 to registers 28/29.
+- **Implemented (ADR 0180, runtime ABI 29):** CFC2/CTC2 decoded, lifted and
+  emitted; `Vu0State` gains bounded 32-word control storage; CFC2 sign-extends
+  the control word to the GPR, CTC2 stores the low GPR word. Storage only —
+  no VU/VIF reset, microprogram launch, interrupt, or DMA effect. The ABI-29
+  probe (`abi29-01`) records the next stop.
 
 ## Provenance rules
 

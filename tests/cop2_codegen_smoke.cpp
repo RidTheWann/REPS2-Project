@@ -43,6 +43,9 @@ void preset(EeState& state) {
     state.gpr[4] = Gpr128{kScratchAddress, 0x1111'2222'3333'4444ULL};
     // GPR[2] holds a known quadword for the QMTC2 $2, $vf12 transfer.
     state.gpr[2] = Gpr128{0x0123'4567'89AB'CDEFULL, 0xFEDC'BA98'7654'3210ULL};
+    // GPR[2].low is the word moved into VU0 control register 28 by CTC2;
+    // choose a value with bit 31 set to prove sign-extension on CFC2.
+    state.gpr[2].low = 0x8000'0200ULL;
     // Fill VF file with garbage to prove LQC2/SQC2 really replace contents.
     state.vu0.vf.fill(Gpr128{0xFFFF'FFFF'FFFF'FFFFULL, 0xFFFF'FFFF'FFFF'FFFFULL});
     // Pre-fill the QMTC2/QMFC2 scratch quadwords so that every store, including
@@ -190,6 +193,15 @@ int main() {
 
     // QMFC2 $0, $vf12: the GPR0 write must be discarded.
     if (state.gpr[0].low != 0ULL || state.gpr[0].high != 0ULL) return 103;
+
+    // CFC2 $3, $28: GPR3 receives the value written by CTC2 $2, $28
+    // (sign-extended from 32 bits).
+    if (state.gpr[3].low != 0xFFFF'FF00'0000'0200ULL) return 104;
+    if (state.gpr[3].high != 0xFFFF'FFFF'FFFF'FFFFULL) return 105;
+
+    // CFC2 $2, $29: VPU_STAT is zero-initialized; read returns 0.
+    if (state.gpr[2].low != 0ULL) return 106;
+    if (state.gpr[2].high != 0ULL) return 107;
 
     return 0;
 }

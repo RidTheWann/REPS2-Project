@@ -1187,6 +1187,13 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
             0xD8800040
             # SQC2 $vf0, 0x50($a0) -> stores constant again at +0x50
             0xF8800050
+            # --- COP2 CFC2/CTC2 control-register transfers (ADR 0180) ---
+            # CTC2 $2, $28: control[28] (FBRST) <- low32(GPR2); GPR2 preset below
+            0x48C46000
+            # CFC2 $3, $28: GPR3 <- control[28]; must observe CTC2 value sign-extended
+            0x4863E000
+            # CFC2 $2, $29: GPR2 <- control[29] (VPU_STAT, reset 0)
+            0x4844E800
             # --- COP2 QMTC2/QMFC2 quadword register transfers ---
             # QMTC2 $2, $vf12 -> VF12 <- GPR2 preset quadword
             0x48A26000

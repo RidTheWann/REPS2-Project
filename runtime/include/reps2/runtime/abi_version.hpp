@@ -63,4 +63,9 @@
 // (`vif1_fbrst`/`vif1_err`) plus MMIO dispatch entries, and 64-bit SD/LD
 // decomposition extends to them. sizeof(EeState) changes; ABI-27 modules are
 // refused.
-#define REPS2_RUNTIME_ABI_VERSION 28
+//
+// ABI 29 covers ADR 0180: the VU0 COP2 control file gains a bounded 32-word
+// storage array (`Vu0State::control`), CFC2/CTC2 are decoded, lifted and
+// emitted, and generated code reads/writes the control slots. sizeof(EeState)
+// changes; ABI-28 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 29

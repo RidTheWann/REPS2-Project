@@ -30,6 +30,9 @@ struct Gpr128 {
 // slice uses the integer register file yet, so it is not modelled.
 struct Vu0State {
     std::array<Gpr128, 32> vf{};
+    // VU0 COP2 control registers (CFC2/CTC2). Only a subset is modelled;
+    // unmodelled registers remain fail-closed until evidenced. ADR 0180.
+    std::array<std::uint32_t, 32> control{};
 };
 
 inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000ULL};
@@ -41,6 +44,20 @@ inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000U
 inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value) noexcept {
     if (index != 0U) {
         vu0.vf[index] = value;
+    }
+}
+
+// VU0 COP2 control register helpers (CFC2/CTC2). ADR 0180.
+inline constexpr std::uint8_t kVu0ControlRegisterCount = 32U;
+[[nodiscard]] inline std::uint32_t vu0_read_control(const Vu0State& vu0, std::uint8_t reg) noexcept {
+    if (reg < kVu0ControlRegisterCount) {
+        return vu0.control[reg];
+    }
+    return 0U;
+}
+inline void vu0_write_control(Vu0State& vu0, std::uint8_t reg, std::uint32_t value) noexcept {
+    if (reg < kVu0ControlRegisterCount) {
+        vu0.control[reg] = value;
     }
 }
 
