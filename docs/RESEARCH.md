@@ -2047,6 +2047,23 @@ limit, root set or relocated region is a different frontier.
   composition is classified **Inferred** (PS2TEK layout + ps2sdk signature, not
   yet cross-verified against a shipped-hardware scope trace). The ABI-27 probe
   (`abi27-01`) records the outcome — see below.
+- **Observed (ABI-27 probe `abi27-01`, this branch + ADR 0178, same digests,
+  rebuilt frontend + native module):** `guest_stopped` at a further frontier
+  `pc=0x00243318` after 4,645,596 instructions as `unsupported_memory_access`.
+  Register/PC evidence: `$v2 = 0x10003C10`, `$a3 = 0x1`, and the faulting
+  instruction is `sw $a3, 0($v2)` at `0x00243318`; the next store is
+  `sw $v0, 0($v1)` with `$v1 = 0x10003C20`, `$v0 = 2`. **Derived from
+  ps2sdk `common/include/ee_regs.h`:** `0x10003C10 = A_EE_VIF1_FBRST`
+  (VIF1 frame-buffer reset, write-only) and `0x10003C20 = A_EE_VIF1_ERR`
+  (VIF1 error status, write-only). **Earlier misdiagnosis corrected:** the
+  address was first read as `0x12000010` (GS SMODE1); the actual stop
+  register word is `0x10003C10`, so SMODE1 is not involved and the SMODE1
+  ADR was reverted (branch reset to `0412808`).
+- **Implemented (ADR 0179, runtime ABI 28):** VIF1_FBRST (`0x10003C10`) and
+  VIF1_ERR (`0x10003C20`) modelled as bounded 32-bit storage with MMIO
+  dispatch and 64-bit decomposition. Writes are accepted and stored; no VIF
+  unit, FIFO reset, or GS transfer is modelled. The ABI-28 probe (`abi28-03`)
+  records the next stop.
 
 ## Provenance rules
 

@@ -58,4 +58,9 @@
 // syscall service is registered. sizeof(EeState) changes, and 64-bit
 // store_u64/load_u64 decomposition extends to the new GS addresses, so
 // modules built against ABI 26 are refused.
-#define REPS2_RUNTIME_ABI_VERSION 27
+// ABI 28 covers ADR 0179: the VIF1 command registers VIF1_FBRST (0x10003C10)
+// and VIF1_ERR (0x10003C20) are modelled as bounded storage in EeMemory
+// (`vif1_fbrst`/`vif1_err`) plus MMIO dispatch entries, and 64-bit SD/LD
+// decomposition extends to them. sizeof(EeState) changes; ABI-27 modules are
+// refused.
+#define REPS2_RUNTIME_ABI_VERSION 28

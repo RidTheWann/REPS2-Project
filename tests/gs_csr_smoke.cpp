@@ -21,6 +21,8 @@ constexpr std::uint32_t kGsCsrAddr = reps2::runtime::kEeGsCsrAddress;
 constexpr std::uint32_t kGsImrAddr = reps2::runtime::kEeGsImrAddress;
 constexpr std::uint32_t kGsPmodeAddr = reps2::runtime::kEeGsPmodeAddress;
 constexpr std::uint32_t kGsSmode2Addr = reps2::runtime::kEeGsSmode2Address;
+constexpr std::uint32_t kVif1FbrstAddr = reps2::runtime::kEeVif1FbrstAddress;
+constexpr std::uint32_t kVif1ErrAddr = reps2::runtime::kEeVif1ErrAddress;
 
 int test_gs_csr_reset_write_is_not_unsupported() {
     EeState state{};
@@ -157,6 +159,40 @@ int test_gs_pmode_store_u64_decomposes() {
     return 0;
 }
 
+// VIF1_FBRST (0x10003C10) accepts writes and reads return the stored word.
+// ADR 0179: bounded storage, no VIF FIFO reset.
+int test_vif1_fbrst_storage() {
+    EeState state{};
+    if (reps2::runtime::store_u32(state.memory, kVif1FbrstAddr, 0x0000'0001U) != Status::ok)
+        return 30;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, kVif1FbrstAddr, value) != Status::ok) return 31;
+    if (value != 0x0000'0001U) return 32;
+    return 0;
+}
+
+// VIF1_ERR (0x10003C20) accepts writes and reads return the stored word.
+// ADR 0179.
+int test_vif1_err_storage() {
+    EeState state{};
+    if (reps2::runtime::store_u32(state.memory, kVif1ErrAddr, 0x0000'0002U) != Status::ok)
+        return 33;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, kVif1ErrAddr, value) != Status::ok) return 34;
+    if (value != 0x0000'0002U) return 35;
+    return 0;
+}
+
+// 64-bit store to VIF1_FBRST decomposes to 32-bit store (low word). ADR 0179.
+int test_vif1_fbrst_store_u64_decomposes() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, kVif1FbrstAddr, 0x0000'0001'0000'0001ULL)
+        != Status::ok)
+        return 36;
+    if (state.memory.vif1_fbrst != 0x0000'0001U) return 37;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -182,6 +218,9 @@ int main() {
     run("gs_pmode_storage", test_gs_pmode_storage);
     run("gs_smode2_storage", test_gs_smode2_storage);
     run("gs_pmode_store_u64_decomposes", test_gs_pmode_store_u64_decomposes);
+    run("vif1_fbrst_storage", test_vif1_fbrst_storage);
+    run("vif1_err_storage", test_vif1_err_storage);
+    run("vif1_fbrst_store_u64_decomposes", test_vif1_fbrst_store_u64_decomposes);
 
     if (fails == 0) {
         printf("All GS CSR/IMR tests passed\n");
