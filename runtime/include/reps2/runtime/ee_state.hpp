@@ -222,6 +222,15 @@ inline Status mmio_read_dmac_pcr(const EeMemory&, std::uint32_t, std::uint32_t&)
 inline Status mmio_write_dmac_pcr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_chcr5(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_chcr5(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// VIF0 (channel 1) registers. ADR 0184.
+inline Status mmio_read_chcr1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_chcr1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_madr1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_madr1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_qwc1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_qwc1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_tadr1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_tadr1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_madr5(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_madr5(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_qwc5(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -383,6 +392,10 @@ struct EeMemory {
         { kEeDmacMadr5Address,   &mmio_read_madr5,   &mmio_write_madr5 },
         { kEeDmacQwc5Address,    &mmio_read_qwc5,    &mmio_write_qwc5 },
         { kEeDmacTadr5Address,   &mmio_read_tadr5,   &mmio_write_tadr5 },
+        { kEeDmacChcr1Address,   &mmio_read_chcr1,   &mmio_write_chcr1 },
+        { kEeDmacMadr1Address,   &mmio_read_madr1,   &mmio_write_madr1 },
+        { kEeDmacQwc1Address,    &mmio_read_qwc1,    &mmio_write_qwc1 },
+        { kEeDmacTadr1Address,   &mmio_read_tadr1,   &mmio_write_tadr1 },
         { kEeTimer3CountAddress, &mmio_read_timer3_count, &mmio_write_timer3_count },
         { kEeTimer3ModeAddress,  &mmio_read_timer3,  &mmio_write_timer3 },
         { kEeTimer3CompareAddress, &mmio_read_timer3_compare, &mmio_write_timer3_compare },
@@ -1934,6 +1947,32 @@ inline Status mmio_read_tadr5(const EeMemory& self, std::uint32_t, std::uint32_t
 }
 inline Status mmio_write_tadr5(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
     return self.dmac.write_tadr5(value) ? Status::ok : Status::unsupported_memory_access;
+}
+// VIF0 (channel 1) registers: bounded storage only; no DMA transfer, interrupt,
+// or completion is modelled. ADR 0184.
+inline Status mmio_read_chcr1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_chcr1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_chcr1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_chcr1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_madr1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_madr1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_madr1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_madr1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_qwc1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_qwc1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_qwc1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_qwc1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_tadr1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_tadr1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_tadr1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_tadr1(value) ? Status::ok : Status::unsupported_memory_access;
 }
 // Materialise Timer 3 progression from the modelled BUSCLK source. Called after
 // every host step and before each T3 register write, so the stored counter and
