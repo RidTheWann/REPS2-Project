@@ -47,6 +47,51 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     }
 }
 
+// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise VF lane subtract. Each of
+// the four 32-bit lanes is `fs - ft` using the VU single-precision rules the EE
+// FPU model already implements (truncate toward zero, no NaN/Inf/denormal,
+// exponent-based over/underflow, IEEE-754 single precision otherwise). The VU
+// manual's Data/Calculation chapter states the same rules for VU0 macro mode.
+// The 4-bit dest mask (bits 24..21, already extracted by the caller) selects
+// which lanes are written; unselected lanes keep the destination's value.
+// Evidence: Sony VU User's Manual 2.1-2.4 and 6.2 VSUB; PS2Tek COP2 Special1
+// row 5 column 4 = VSUB; PCSX2 Int_COP2SPECIAL1PrintTable[0x2C] = VSUB. ADR 0192.
+[[nodiscard]] inline Gpr128 vu0_sub_lanes(
+    const Gpr128& dst,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t dest_mask
+) noexcept {
+    const auto sub_lane = [](std::uint32_t a, std::uint32_t b) noexcept {
+        return fpu_sub(a, b).bits;
+    };
+    const auto fs_xy = static_cast<std::uint32_t>(fs.low);
+    const auto fs_zw = static_cast<std::uint32_t>(fs.low >> 32U);
+    const auto fs_xy2 = static_cast<std::uint32_t>(fs.high);
+    const auto fs_zw2 = static_cast<std::uint32_t>(fs.high >> 32U);
+    const auto ft_xy = static_cast<std::uint32_t>(ft.low);
+    const auto ft_zw = static_cast<std::uint32_t>(ft.low >> 32U);
+    const auto ft_xy2 = static_cast<std::uint32_t>(ft.high);
+    const auto ft_zw2 = static_cast<std::uint32_t>(ft.high >> 32U);
+    // Lane order in Gpr128: low word = x, next = y, then z, then w; the dest
+    // mask bit 3 is x, bit 2 is y, bit 1 is z, bit 0 is w (PS2Tek Special1).
+    auto merge = [](std::uint32_t result, std::uint32_t original, bool write) noexcept {
+        return write ? result : original;
+    };
+    const std::uint32_t dst_x = static_cast<std::uint32_t>(dst.low);
+    const std::uint32_t dst_y = static_cast<std::uint32_t>(dst.low >> 32U);
+    const std::uint32_t dst_z = static_cast<std::uint32_t>(dst.high);
+    const std::uint32_t dst_w = static_cast<std::uint32_t>(dst.high >> 32U);
+    const std::uint32_t out_x = merge(sub_lane(fs_xy, ft_xy), dst_x, (dest_mask & 0x8U) != 0U);
+    const std::uint32_t out_y = merge(sub_lane(fs_zw, ft_zw), dst_y, (dest_mask & 0x4U) != 0U);
+    const std::uint32_t out_z = merge(sub_lane(fs_xy2, ft_xy2), dst_z, (dest_mask & 0x2U) != 0U);
+    const std::uint32_t out_w = merge(sub_lane(fs_zw2, ft_zw2), dst_w, (dest_mask & 0x1U) != 0U);
+    return Gpr128{
+        static_cast<std::uint64_t>(out_x) | (static_cast<std::uint64_t>(out_y) << 32U),
+        static_cast<std::uint64_t>(out_z) | (static_cast<std::uint64_t>(out_w) << 32U),
+    };
+}
+
 // VU0 COP2 control register helpers (CFC2/CTC2). ADR 0180.
 inline constexpr std::uint8_t kVu0ControlRegisterCount = 32U;
 [[nodiscard]] inline std::uint32_t vu0_read_control(const Vu0State& vu0, std::uint8_t reg) noexcept {

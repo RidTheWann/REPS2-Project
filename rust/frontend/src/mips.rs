@@ -143,9 +143,11 @@ pub enum Opcode {
     /// `GPR[rt] = VF[rd]`. Bits 10..0 are reserved-zero. A write to GPR[0] is
     /// discarded.
     Qmfc2,
-    /// VU0 VMR32 (COP2 Special2 index 49): rotate the four 32-bit words of
-    /// VF[rd] by one position and write VF[rt]. ADR 0191.
+    /// VU0 VMR32 (COP2 Special2 index 49): rotate VF[rd] words into VF[rt].
     Vmr32,
+    /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise fs - ft into VF[fd],
+    /// masked by the 4-bit dest field (bits 24..21). ADR 0192.
+    Vsub,
     ParallelAddWord,
     ParallelSubWord,
     ParallelCompareGreaterWord,
@@ -472,6 +474,7 @@ impl Opcode {
             Self::Sqc2 => "sqc2",
             Self::Qmtc2 => "qmtc2",
             Self::Qmfc2 => "qmfc2",
+            Self::Vsub => "vsub",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
             Self::Ctc2 => "ctc2",
@@ -1208,6 +1211,12 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd);
                 effects.vf_write_mask = vf_write_bit(self.rt);
             }
+            Opcode::Vsub => {
+                // Special1: fd=bits10..6 (shift_amount), fs=bits15..11 (rd),
+                // ft=bits20..16 (rt), dest mask = bits24..21 (rs & 0xF).
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+                effects.vf_write_mask = vf_write_bit(self.shift_amount);
+            }
 
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1424,6 +1433,10 @@ fn decode_cop2(word: u32) -> Opcode {
             Opcode::Qmtc2
         }
         0x06 if (word & 0x7FF) == 0 => Opcode::Ctc2, // CTC2: reserved 10..0 must be zero
+        // COP2 Special1 (fmt >= 0x10): only VSUB (funct=0x2C, row 5 col 4)
+        // is implemented in this slice. ADR 0192. The dest mask (bits 24..21)
+        // selects which of x/y/z/w lanes are written.
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x2C => Opcode::Vsub,
         // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
         // the only Special2 operation implemented in this slice. ADR 0191.
         0x1F if (((word & 0x3) | ((word >> 4) & 0x7C)) == 49) && (((word >> 2) & 0xF) == 0xF) => {
@@ -3556,11 +3569,32 @@ mod tests {
         assert_eq!(decode(0x48C4_E000, 0).rt, 4);
         assert_eq!(decode(0x48C4_E000, 0).rd, 28);
 
-        // Reserved bits on CFC2/CTC2 are rejected, and the VU Special1
-        // arithmetic rows (>= 0x10) stay unsupported.
+        // Reserved bits on CFC2/CTC2 are rejected; the VU arithmetic rows
+        // (>= 0x10) stay unsupported except the explicitly modelled VSUB.
         assert_eq!(decode(0x4842_0003, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(0x48C2_0007, 0).opcode, Opcode::Unknown);
-        assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Unknown);
+        // VSUB (funct=0x2C) is decoded (ADR 0192); a peer Special1 funct stays
+        // Unknown.
+        assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Vsub);
+        assert_eq!(decode(0x4BCC_5AED, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vsub_and_effects() {
+        // VSUB VF11, VF11, VF12 with dest mask 0xE (x,y,z), word 0x4BCC5AEC,
+        // reached at runtime in ABI-40 at pc=0x00223D64.
+        let vsub = decode(0x4BCC_5AEC, 0);
+        assert_eq!(vsub.opcode, Opcode::Vsub);
+        assert_eq!(vsub.shift_amount, 11); // fd
+        assert_eq!(vsub.rd, 11); // fs
+        assert_eq!(vsub.rt, 12); // ft
+        assert_eq!(vsub.rs & 0xF, 0xE); // dest mask
+        let effects = vsub.effects();
+        assert_eq!(effects.vf_read_mask, (1 << 11) | (1 << 12));
+        assert_eq!(effects.vf_write_mask, 1 << 11);
+        assert_eq!(effects.gpr_read_mask, 0);
+        assert_eq!(effects.gpr_write_mask, 0);
+        assert_eq!(effects.memory, MemoryEffect::None);
     }
 
     #[test]

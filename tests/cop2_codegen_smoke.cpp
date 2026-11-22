@@ -26,6 +26,23 @@ constexpr Gpr128 kRotateExpected{0x3333'4444'AAAA'BBBBULL, 0xCCCC'DDDD'1111'2222
 static_assert(reps2::runtime::vu0_rotate_right_word(kRotateSrc).low == kRotateExpected.low);
 static_assert(reps2::runtime::vu0_rotate_right_word(kRotateSrc).high == kRotateExpected.high);
 
+// VSUB lane subtract through the VU float model (ADR 0192). Gpr128 word order
+// is x,y,z,w; dest mask bit3=x, bit2=y, bit1=z, bit0=w. 4.0 - 1.0 = 3.0.
+constexpr std::uint32_t kF4 = 0x4080'0000U;  // 4.0f
+constexpr std::uint32_t kF1 = 0x3F80'0000U;  // 1.0f
+constexpr std::uint32_t kF3 = 0x4040'0000U;  // 3.0f
+constexpr reps2::runtime::Gpr128 kVsubFs{kF4, kF4};
+constexpr reps2::runtime::Gpr128 kVsubFt{kF1, kF1};
+constexpr reps2::runtime::Gpr128 kVsubDst{
+    0xDEAD'BEEF'DEAD'BEEFULL, 0xDEAD'BEEF'DEAD'BEEFULL};
+// dest mask 0xF writes all four lanes -> all 3.0f.
+constexpr auto kVsubAll = reps2::runtime::vu0_sub_lanes(kVsubDst, kVsubFs, kVsubFt, 0xF);
+static_assert(kVsubAll.low == (static_cast<std::uint64_t>(kF3) | (static_cast<std::uint64_t>(kF3) << 32U)));
+static_assert(kVsubAll.high == (static_cast<std::uint64_t>(kF3) | (static_cast<std::uint64_t>(kF3) << 32U)));
+// dest mask 0x0 writes no lane -> destination preserved.
+constexpr auto kVsubNone = reps2::runtime::vu0_sub_lanes(kVsubDst, kVsubFs, kVsubFt, 0x0);
+static_assert(kVsubNone.low == kVsubDst.low && kVsubNone.high == kVsubDst.high);
+
 std::vector<std::uint8_t> main_ram_image(reps2::runtime::kEeMainRamSize);
 
 void preset(EeState& state) {
