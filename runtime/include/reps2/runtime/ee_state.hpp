@@ -349,9 +349,9 @@ struct EeMemory {
     std::uint32_t timer1_mode{};
     std::uint32_t timer1_compare{};
     std::uint32_t timer1_hold{};
-    // EE Scratchpad RAM (SPR) 0x70000000..0x70003FFF: 16 KiB bounded storage.
-    // ADR 0187.
-    std::array<std::uint8_t, 16384> scratchpad{};
+    // EE Scratchpad RAM (SPR) 0x70000000..0x70003FFF: 16 KiB backing owned
+    // by the session (span avoids enlarging stack-allocated EeState). ADR 0187.
+    std::span<std::uint8_t> scratchpad{};
     // Bounded observation of the match path: how many compare matches latched,
     // how many raised the INTC source, and how many were refused because the
     // controller state was never established. A refusal is counted, never
@@ -2253,44 +2253,47 @@ inline constexpr std::size_t kEeScratchpadSize{16U * 1024U};
     offset = static_cast<std::size_t>(address - kEeScratchpadBaseAddress);
     return offset <= kEeScratchpadSize && width <= kEeScratchpadSize - offset;
 }
+inline bool scratchpad_ready(const EeMemory& m) noexcept {
+    return m.scratchpad.size() >= kEeScratchpadSize;
+}
 inline Status scratchpad_read_u8(const EeMemory& m, std::uint32_t a, std::uint8_t& v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 1U, 1U, o)) return Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 1U, 1U, o) || !scratchpad_ready(m)) return Status::unmapped_memory;
     v = m.scratchpad[o]; return Status::ok;
 }
 inline Status scratchpad_write_u8(EeMemory& m, std::uint32_t a, std::uint8_t v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 1U, 1U, o)) return Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 1U, 1U, o) || !scratchpad_ready(m)) return Status::unmapped_memory;
     m.scratchpad[o] = v; return Status::ok;
 }
 inline Status scratchpad_read_u16(const EeMemory& m, std::uint32_t a, std::uint16_t& v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 2U, 2U, o)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 2U, 2U, o) || !scratchpad_ready(m)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
     v = static_cast<std::uint16_t>(m.scratchpad[o] | (static_cast<std::uint16_t>(m.scratchpad[o+1U]) << 8U)); return Status::ok;
 }
 inline Status scratchpad_write_u16(EeMemory& m, std::uint32_t a, std::uint16_t v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 2U, 2U, o)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 2U, 2U, o) || !scratchpad_ready(m)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
     m.scratchpad[o] = static_cast<std::uint8_t>(v); m.scratchpad[o+1U] = static_cast<std::uint8_t>(v >> 8U); return Status::ok;
 }
 inline Status scratchpad_read_u32(const EeMemory& m, std::uint32_t a, std::uint32_t& v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 4U, 4U, o)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 4U, 4U, o) || !scratchpad_ready(m)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
     v = 0U; for (std::size_t i=0;i<4U;++i) v |= static_cast<std::uint32_t>(m.scratchpad[o+i]) << (8U*i); return Status::ok;
 }
 inline Status scratchpad_write_u32(EeMemory& m, std::uint32_t a, std::uint32_t v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 4U, 4U, o)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 4U, 4U, o) || !scratchpad_ready(m)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
     for (std::size_t i=0;i<4U;++i) m.scratchpad[o+i] = static_cast<std::uint8_t>(v >> (8U*i)); return Status::ok;
 }
 inline Status scratchpad_read_u64(const EeMemory& m, std::uint32_t a, std::uint64_t& v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 8U, 8U, o)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 8U, 8U, o) || !scratchpad_ready(m)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
     v = 0U; for (std::size_t i=0;i<8U;++i) v |= static_cast<std::uint64_t>(m.scratchpad[o+i]) << (8U*i); return Status::ok;
 }
 inline Status scratchpad_write_u64(EeMemory& m, std::uint32_t a, std::uint64_t v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 8U, 8U, o)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 8U, 8U, o) || !scratchpad_ready(m)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
     for (std::size_t i=0;i<8U;++i) m.scratchpad[o+i] = static_cast<std::uint8_t>(v >> (8U*i)); return Status::ok;
 }
 inline Status scratchpad_read_u128(const EeMemory& m, std::uint32_t a, Gpr128& v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 16U, 16U, o)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 16U, 16U, o) || !scratchpad_ready(m)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
     v.low=0U; v.high=0U; for (std::size_t i=0;i<8U;++i) { v.low |= static_cast<std::uint64_t>(m.scratchpad[o+i]) << (8U*i); v.high |= static_cast<std::uint64_t>(m.scratchpad[o+8U+i]) << (8U*i); } return Status::ok;
 }
 inline Status scratchpad_write_u128(EeMemory& m, std::uint32_t a, const Gpr128& v) noexcept {
-    std::size_t o{}; if (!scratchpad_offset(a, 16U, 16U, o)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
+    std::size_t o{}; if (!scratchpad_offset(a, 16U, 16U, o) || !scratchpad_ready(m)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
     for (std::size_t i=0;i<8U;++i) { m.scratchpad[o+i]=static_cast<std::uint8_t>(v.low>>(8U*i)); m.scratchpad[o+8U+i]=static_cast<std::uint8_t>(v.high>>(8U*i)); } return Status::ok;
 }
 inline Status mmio_read_intc_stat(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {

@@ -120,6 +120,7 @@ public:
 
         try {
             main_ram_.assign(::reps2::runtime::kEeMainRamSize, std::uint8_t{0});
+            scratchpad_.assign(::reps2::runtime::kEeScratchpadSize, std::uint8_t{0});
         } catch (const std::bad_alloc&) {
             release_resources();
             return {SessionError::out_of_memory, EngineError::none,
@@ -134,6 +135,8 @@ public:
         state_ = {};
         state_.memory.main_ram = std::span<std::uint8_t>(
             main_ram_.data(), main_ram_.size());
+        state_.memory.scratchpad = std::span<std::uint8_t>(
+            scratchpad_.data(), scratchpad_.size());
         // The media source is host configuration, not HLE observation state, and
         // the generated initializer resets EeHleState without touching it. Attach
         // it before the initializer so boot-time code can read the host's
@@ -261,9 +264,11 @@ private:
         module_ = {};
         instruction_budget_ = 0U;
         std::vector<std::uint8_t>{}.swap(main_ram_);
+        std::vector<std::uint8_t>{}.swap(scratchpad_);
     }
 
     std::vector<std::uint8_t> main_ram_{};
+    std::vector<std::uint8_t> scratchpad_{};
     ::reps2::runtime::EeState state_{};
     Engine engine_{};
     PreparedNativeModule module_{};

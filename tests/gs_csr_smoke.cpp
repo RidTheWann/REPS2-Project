@@ -11,6 +11,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <algorithm>
+#include <vector>
 
 namespace {
 
@@ -339,6 +341,9 @@ int test_dmac_ch2_registers_storage() {
 // EE scratchpad RAM 0x70000000..0x70003FFF: bounded LE byte storage. ADR 0187.
 int test_scratchpad_accesses() {
     EeState state{};
+    static std::vector<std::uint8_t> spr(reps2::runtime::kEeScratchpadSize, 0U);
+    std::fill(spr.begin(), spr.end(), 0U);
+    state.memory.scratchpad = spr;
     std::uint32_t v = 0U;
     if (reps2::runtime::load_u32(state.memory, kEeScratchpadBaseAddress + 0x2CU, v) != Status::ok || v != 0U)
         return 400;
