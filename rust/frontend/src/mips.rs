@@ -1399,13 +1399,23 @@ fn decode_cop1(word: u32) -> Opcode {
 /// Both implemented forms reserve bits 10..0, so a non-zero reserved field is
 /// not decoded as the instruction it would otherwise name.
 fn decode_cop2(word: u32) -> Opcode {
-    let format = ((word >> 21) & 0x1F) as u8;
-    let reserved_low = word & 0x7FF; // bits 10..0
-    match format {
-        0x01 if reserved_low == 0 => Opcode::Qmfc2,
-        0x02 if reserved_low == 0 => Opcode::Cfc2, // CFC2: Move from VU0 control
-        0x05 if reserved_low == 0 => Opcode::Qmtc2,
-        0x06 if reserved_low == 0 => Opcode::Ctc2, // CTC2: Move to VU0 control
+    // QMFC2/QMTC2 have an interlock variant (.I) signaled by bit 0 (LSB).
+    // Reserved bits 10..1 must be zero; bit 0 is the interlock flag.
+    // PS2SDK/PS2TK/PCSX2/ps2xRecomp/libretro all confirm bit 0 = .I (interlock).
+    let reserved_mid = (word >> 1) & 0x3FF; // bits 10..1
+    let reserved_low_ok = reserved_mid == 0;
+    match (word >> 21) & 0x1F {
+        0x01 if reserved_low_ok => {
+            // QMFC2 (format 1): rt <- VF[rd]; interlock variant QMFC2.I if bit 0 set.
+            // We decode both variants as the same opcode; effects track interlock flag.
+            Opcode::Qmfc2
+        }
+        0x02 if (word & 0x7FF) == 0 => Opcode::Cfc2, // CFC2: reserved 10..0 must be zero
+        0x05 if reserved_low_ok => {
+            // QMTC2 (format 5): VF[rd] <- GPR[rt]; interlock variant QMTC2.I if bit 0 set.
+            Opcode::Qmtc2
+        }
+        0x06 if (word & 0x7FF) == 0 => Opcode::Ctc2, // CTC2: reserved 10..0 must be zero
         _ => Opcode::Unknown,
     }
 }
@@ -3509,10 +3519,19 @@ mod tests {
         assert_eq!(decode(0x4823_6000, 0).rt, 3);
         assert_eq!(decode(0x4823_6000, 0).rd, 12);
 
-        // Bits 10..0 are reserved; a non-zero reserved field is rejected
-        // rather than decoded as the transfer it would approximate. This is an
-        // observed malformed QMFC2-shaped word (format 1, reserved bit 0 set).
-        assert_eq!(decode(0x4822_0001, 0).opcode, Opcode::Unknown);
+        // QMFC2/QMTC2 bit 0 is the interlock flag (.I variant), NOT reserved.
+        // Evidence: PCSX2 `COP2_Interlock` tests `cpuRegs.code & 1` on COP2
+        // fmt 1/2/5/6 to choose interlocked execution (microVU_Macro.inl);
+        // ps2xRecomp enum `VU0OPS_QMFC2_NI=0x00 / VU0OPS_QMFC2_I=0x01`;
+        // libretro/parallel-ps2: "the interlock bit is known at compile time".
+        // Bits 10..1 remain reserved and must be zero.
+        // ADR 0190: 0x48220001 (QMFC2.I $2, $vf0) reached at runtime in the
+        // ABI-38 probe at pc=0x00221F24 and must decode as Qmfc2, not Unknown.
+        assert_eq!(decode(0x4822_0001, 0).opcode, Opcode::Qmfc2);
+        assert_eq!(decode(0x4822_0001, 0).rt, 2);
+        assert_eq!(decode(0x4822_0001, 0).rd, 0);
+        // Bits 10..1 non-zero on QMFC2/QMTC2 is still rejected.
+        assert_eq!(decode(0x4822_0002, 0).opcode, Opcode::Unknown);
 
         // CFC2/CTC2 (formats 2/6) move a word between a GPR and the VU0
         // control file. ADR 0180. CFC2 $4, $28 = 0x4844E000.
