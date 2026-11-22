@@ -127,6 +127,37 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     };
 }
 
+// VU0 VOPMSUB (COP2 Special1 funct=0x2E): outer-product multiply-subtract into
+// ACC. `ACC[i] -= fs[i] * ft[i]` per lane. The VU manual documents it as the
+// negation partner of VOPMULA; fpu_sub(acc, product) matches fpu_add(acc,
+// -product) there. Evidence: Sony VU User's Manual 6.2 VOPMSUB; PS2Tek row 7
+// col 4; PCSX2 Int_COP2SPECIAL1PrintTable[0x2E]. ADR 0194.
+[[nodiscard]] constexpr Gpr128 vu0_opmsub(
+    const Gpr128& acc,
+    const Gpr128& fs,
+    const Gpr128& ft
+) noexcept {
+    constexpr auto lane = [](std::uint32_t a, std::uint32_t f, std::uint32_t t) noexcept {
+        return fpu_sub(a, fpu_mul(f, t).bits).bits;
+    };
+    const auto out_x = lane(static_cast<std::uint32_t>(acc.low),
+                            static_cast<std::uint32_t>(fs.low),
+                            static_cast<std::uint32_t>(ft.low));
+    const auto out_y = lane(static_cast<std::uint32_t>(acc.low >> 32U),
+                            static_cast<std::uint32_t>(fs.low >> 32U),
+                            static_cast<std::uint32_t>(ft.low >> 32U));
+    const auto out_z = lane(static_cast<std::uint32_t>(acc.high),
+                            static_cast<std::uint32_t>(fs.high),
+                            static_cast<std::uint32_t>(ft.high));
+    const auto out_w = lane(static_cast<std::uint32_t>(acc.high >> 32U),
+                            static_cast<std::uint32_t>(fs.high >> 32U),
+                            static_cast<std::uint32_t>(ft.high >> 32U));
+    return Gpr128{
+        static_cast<std::uint64_t>(out_x) | (static_cast<std::uint64_t>(out_y) << 32U),
+        static_cast<std::uint64_t>(out_z) | (static_cast<std::uint64_t>(out_w) << 32U),
+    };
+}
+
 // VU0 COP2 control register helpers (CFC2/CTC2). ADR 0180.
 inline constexpr std::uint8_t kVu0ControlRegisterCount = 32U;
 [[nodiscard]] inline std::uint32_t vu0_read_control(const Vu0State& vu0, std::uint8_t reg) noexcept {
