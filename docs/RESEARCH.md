@@ -2146,7 +2146,17 @@ limit, root set or relocated region is a different frontier.
 - **Implemented (ADR 0185, runtime ABI 34):** channel-2 CHCR/MADR/QWC/TADR are
   bounded 32-bit storage with MMIO dispatch, reset-zero reads, write-read
   round-trips. No DMA transfer, GIF PATH activity, interrupt, or completion
-  event is modelled. The ABI-34 probe records the next stop.
+  event is modelled.
+- **Observed (ABI-34 probes `abi34-01`..`abi34-03`, main `0d7cbe9`, same
+  digests, rebuilt frontend + native module):** all three runs stop identically at
+  `pc=0x002433E0` after 4,670,452 instructions as `unsupported_memory_access` on
+  `lw $a2, 0($s0)` with `$s0 = 0x10003C00`. **Derived:** `0x10003C00 =
+  A_EE_VIF1_STAT` (ps2sdk `common/include/ee_regs.h`); PS2Tek documents its
+  status fields.
+- **Implemented (ADR 0186, runtime ABI 35):** VIF1_STAT is bounded 32-bit
+  storage with MMIO dispatch, reset-zero reads, 64-bit decomposition. No VIF
+  parsing, FIFO occupancy update, transfer status, stall, interrupt, or FQC
+  side effect is modelled. The ABI-35 probe records the next stop.
 
 ## Provenance rules
 

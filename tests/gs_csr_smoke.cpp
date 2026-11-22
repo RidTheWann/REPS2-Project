@@ -21,6 +21,7 @@ constexpr std::uint32_t kGsCsrAddr = reps2::runtime::kEeGsCsrAddress;
 constexpr std::uint32_t kGsImrAddr = reps2::runtime::kEeGsImrAddress;
 constexpr std::uint32_t kGsPmodeAddr = reps2::runtime::kEeGsPmodeAddress;
 constexpr std::uint32_t kGsSmode2Addr = reps2::runtime::kEeGsSmode2Address;
+constexpr std::uint32_t kVif1StatAddr = reps2::runtime::kEeVif1StatAddress;
 constexpr std::uint32_t kVif1FbrstAddr = reps2::runtime::kEeVif1FbrstAddress;
 constexpr std::uint32_t kVif1ErrAddr = reps2::runtime::kEeVif1ErrAddress;
 constexpr std::uint32_t kGifCtrlAddr = reps2::runtime::kEeGifCtrlAddress;
@@ -176,6 +177,19 @@ int test_gs_pmode_store_u64_decomposes() {
 
 // VIF1_FBRST (0x10003C10) accepts writes and reads return the stored word.
 // ADR 0179: bounded storage, no VIF FIFO reset.
+// VIF1_STAT (0x10003C00) bounded storage, ADR 0186.
+int test_vif1_stat_storage() {
+    EeState state{};
+    std::uint32_t value = 1U;
+    if (reps2::runtime::load_u32(state.memory, kVif1StatAddr, value) != Status::ok || value != 0U)
+        return 140;
+    if (reps2::runtime::store_u32(state.memory, kVif1StatAddr, 0x0000'00FFU) != Status::ok)
+        return 141;
+    if (reps2::runtime::load_u32(state.memory, kVif1StatAddr, value) != Status::ok || value != 0x0000'00FFU)
+        return 142;
+    return 0;
+}
+
 int test_vif1_fbrst_storage() {
     EeState state{};
     if (reps2::runtime::store_u32(state.memory, kVif1FbrstAddr, 0x0000'0001U) != Status::ok)
@@ -346,6 +360,7 @@ int main() {
     run("gs_pmode_storage", test_gs_pmode_storage);
     run("gs_smode2_storage", test_gs_smode2_storage);
     run("gs_pmode_store_u64_decomposes", test_gs_pmode_store_u64_decomposes);
+    run("vif1_stat_storage", test_vif1_stat_storage);
     run("vif1_fbrst_storage", test_vif1_fbrst_storage);
     run("vif1_err_storage", test_vif1_err_storage);
     run("gif_ctrl_storage", test_gif_ctrl_storage);
