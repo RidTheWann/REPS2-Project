@@ -219,6 +219,14 @@ pub enum Operation {
         dst: Vf,
         src: Vf,
     },
+    /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise VF lane subtract.
+    /// `dst = fs - ft` per lane, masked by the 4-bit dest field. ADR 0192.
+    Vsub {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+        dest_mask: u8,
+    },
     // Single-precision COP1 arithmetic. Every form updates the FCR31 flag
     // summary; the accumulate forms write ACC, a separate 32-bit register with
     // no COP1 address, and the two MADD forms additionally read it.
@@ -1731,6 +1739,12 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 dst: vf(instruction.rt),
                 src: vf(instruction.rd),
             },
+            Opcode::Vsub => Operation::Vsub {
+                dst: vf(instruction.shift_amount),
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+                dest_mask: instruction.rs & 0xF,
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1865,6 +1879,17 @@ mod tests {
             program.instructions()[0].operation,
             Operation::Vu0RotateRightWord { dst, src }
                 if dst.index() == 11 && src.index() == 0
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vsub() {
+        let stream = [decoded(0x4BCC_5AEC, 0x3000)];
+        let program = lift(&stream).expect("VSUB lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vsub { dst, fs, ft, dest_mask }
+                if dst.index() == 11 && fs.index() == 11 && ft.index() == 12 && dest_mask == 0xE
         ));
     }
 
