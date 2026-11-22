@@ -11,6 +11,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <algorithm>
+#include <vector>
 
 namespace {
 
@@ -35,6 +37,7 @@ constexpr std::uint32_t kDmacChcr1Addr = reps2::runtime::kEeDmacChcr1Address;
 constexpr std::uint32_t kDmacMadr1Addr = reps2::runtime::kEeDmacMadr1Address;
 constexpr std::uint32_t kDmacQwc1Addr = reps2::runtime::kEeDmacQwc1Address;
 constexpr std::uint32_t kDmacTadr1Addr = reps2::runtime::kEeDmacTadr1Address;
+constexpr std::uint32_t kEeScratchpadBaseAddress = reps2::runtime::kEeScratchpadBaseAddress;
 constexpr std::uint32_t kDmacChcr2Addr = reps2::runtime::kEeDmacChcr2Address;
 constexpr std::uint32_t kDmacMadr2Addr = reps2::runtime::kEeDmacMadr2Address;
 constexpr std::uint32_t kDmacQwc2Addr = reps2::runtime::kEeDmacQwc2Address;
@@ -335,6 +338,35 @@ int test_dmac_ch2_registers_storage() {
     return 0;
 }
 
+// EE scratchpad RAM 0x70000000..0x70003FFF: bounded LE byte storage. ADR 0187.
+int test_scratchpad_accesses() {
+    EeState state{};
+    static std::vector<std::uint8_t> spr(reps2::runtime::kEeScratchpadSize, 0U);
+    std::fill(spr.begin(), spr.end(), 0U);
+    state.memory.scratchpad = spr;
+    std::uint32_t v = 0U;
+    if (reps2::runtime::load_u32(state.memory, kEeScratchpadBaseAddress + 0x2CU, v) != Status::ok || v != 0U)
+        return 400;
+    if (reps2::runtime::store_u32(state.memory, kEeScratchpadBaseAddress + 0x2CU, 0x80000000U) != Status::ok)
+        return 401;
+    if (reps2::runtime::load_u32(state.memory, kEeScratchpadBaseAddress + 0x2CU, v) != Status::ok || v != 0x80000000U)
+        return 402;
+    if (reps2::runtime::store_u32(state.memory, kEeScratchpadBaseAddress + 0x3FFCU, 0xDEADBEEFU) != Status::ok)
+        return 403;
+    if (reps2::runtime::load_u32(state.memory, kEeScratchpadBaseAddress + 0x3FFCU, v) != Status::ok || v != 0xDEADBEEFU)
+        return 404;
+    if (reps2::runtime::store_u32(state.memory, kEeScratchpadBaseAddress + 0x3FFDU, 1U) != Status::address_error)
+        return 405;
+    if (reps2::runtime::store_u32(state.memory, kEeScratchpadBaseAddress + 0x4000U, 1U) != Status::unmapped_memory)
+        return 406;
+    std::uint64_t v64 = 0U;
+    if (reps2::runtime::store_u64(state.memory, kEeScratchpadBaseAddress + 0x10U, 0x0102'0304'0506'0708ULL) != Status::ok)
+        return 407;
+    if (reps2::runtime::load_u64(state.memory, kEeScratchpadBaseAddress + 0x10U, v64) != Status::ok || v64 != 0x0102'0304'0506'0708ULL)
+        return 408;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -370,6 +402,8 @@ int main() {
     run("timer1_registers_storage", test_timer1_registers_storage);
     run("dmac_ch1_registers_storage", test_dmac_ch1_registers_storage);
     run("dmac_ch2_registers_storage", test_dmac_ch2_registers_storage);
+
+    run("scratchpad_accesses", test_scratchpad_accesses);
     run("vif1_fbrst_store_u64_decomposes", test_vif1_fbrst_store_u64_decomposes);
 
     if (fails == 0) {
