@@ -92,6 +92,9 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::write_cop0;\n\
              using reps2::runtime::vu0_read_control;\n\
              using reps2::runtime::vu0_write_control;\n\
+             using reps2::runtime::vu0_rotate_right_word;\n\
+             using reps2::runtime::vu0_read_vf;\n\
+             using reps2::runtime::vu0_write_vf;\n\
              using reps2::runtime::enable_interrupts;\n\
              using reps2::runtime::disable_interrupts;\n\
              state.gpr[0] = {};\n",
@@ -289,6 +292,13 @@ pub(crate) fn emit_instruction(
             output.push_str(&format!(
                 "    if ({d} != 0) state.gpr[{d}] = reps2::runtime::vu0_read_vf(state.vu0, {});\n",
                 src.index()
+            ));
+        }
+        Operation::Vu0RotateRightWord { dst, src } => {
+            let d = dst.index();
+            let s = src.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_rotate_right_word(reps2::runtime::vu0_read_vf(state.vu0, {s})));\n"
             ));
         }
         Operation::MoveFromCop0 { dst, cop0_reg } => {
@@ -2751,6 +2761,24 @@ mod tests {
         ));
         assert!(cpp.contains("using reps2::runtime::vu0_read_control;"));
         assert!(cpp.contains("using reps2::runtime::vu0_write_control;"));
+    }
+
+    #[test]
+    fn emits_vu0_vmr32_rotate() {
+        // VMR32 VF11, VF0 (COP2 Special2 index 49) = 0x4BEB_033D.
+        let words = [0x4BEB_033Du32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x221F28 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VMR32 IR");
+        let cpp = emit_cpp(&program).expect("VMR32 C++");
+
+        assert!(cpp.contains("using reps2::runtime::vu0_rotate_right_word;"));
+        assert!(cpp.contains("using reps2::runtime::vu0_read_vf;"));
+        assert!(cpp.contains("using reps2::runtime::vu0_write_vf;"));
+        assert!(cpp.contains("vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_rotate_right_word(reps2::runtime::vu0_read_vf(state.vu0, 0)));"));
     }
 
     #[test]

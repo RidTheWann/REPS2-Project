@@ -19,6 +19,12 @@ using reps2::runtime::Status;
 
 constexpr std::uint64_t kScratchAddress = 0x40U;
 constexpr Gpr128 kVf0Constant{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000ULL};
+// VMR32 (ADR 0191): move with rotate per word. Sony VU manual: ft.y<-fs.x,
+// ft.z<-fs.y, ft.w<-fs.z, ft.x<-fs.w. With words [a,b,c,d] the result is [d,a,b,c].
+constexpr Gpr128 kRotateSrc{0x1111'2222'3333'4444ULL, 0xAAAA'BBBB'CCCC'DDDDULL};
+constexpr Gpr128 kRotateExpected{0x3333'4444'AAAA'BBBBULL, 0xCCCC'DDDD'1111'2222ULL};
+static_assert(reps2::runtime::vu0_rotate_right_word(kRotateSrc).low == kRotateExpected.low);
+static_assert(reps2::runtime::vu0_rotate_right_word(kRotateSrc).high == kRotateExpected.high);
 
 std::vector<std::uint8_t> main_ram_image(reps2::runtime::kEeMainRamSize);
 

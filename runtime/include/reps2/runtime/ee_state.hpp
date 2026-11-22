@@ -3530,6 +3530,20 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     };
 }
 
+// VU0 VMR32 (COP2 Special2, fhi=12/flo=1): rotate the four 32-bit words of a
+// VF register right by one position: dest.y=src.x, dest.z=src.y, dest.w=src.z,
+// dest.x=src.w (Sony VU User's Manual, MR32). ADR 0191.
+[[nodiscard]] constexpr Gpr128 vu0_rotate_right_word(const Gpr128& src) noexcept {
+    const auto word0 = static_cast<std::uint32_t>(src.low);
+    const auto word1 = static_cast<std::uint32_t>(src.low >> 32U);
+    const auto word2 = static_cast<std::uint32_t>(src.high);
+    const auto word3 = static_cast<std::uint32_t>(src.high >> 32U);
+    return Gpr128{
+        static_cast<std::uint64_t>(word3) | (static_cast<std::uint64_t>(word0) << 32U),
+        static_cast<std::uint64_t>(word1) | (static_cast<std::uint64_t>(word2) << 32U),
+    };
+}
+
 // PCPYH replicates the lowest 16-bit lane of each 64-bit half across that
 // half's four halfword lanes: result halfwords 0..3 take lane 0 of the low
 // doubleword and halfwords 4..7 take lane 4 (lane 0 of the high doubleword).
