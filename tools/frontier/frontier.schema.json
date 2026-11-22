@@ -73,7 +73,7 @@
       "properties": {
         "outcome": { "enum": ["guest_stopped", "budget_limit_reached", "guest_completed"] },
         "guest_status": {
-          "enum": ["running", "guest_completed", "instruction_budget_exhausted", "budget_exhausted", "unsupported_instruction", "unresolved_control_flow", "guest_exception", "unhandled_syscall", "semaphore_wait_blocked", "thread_wait_blocked"]
+          "enum": ["running", "guest_completed", "instruction_budget_exhausted", "budget_exhausted", "unsupported_instruction", "unresolved_control_flow", "guest_exception", "unhandled_syscall", "semaphore_wait_blocked", "thread_wait_blocked", "address_error", "unmapped_memory", "unsupported_memory_access", "invalid_memory_image", "invalid_exception_return", "syscall_handler_overflow", "integer_overflow", "undefined_word_operand", "syscall", "breakpoint", "ok"]
         },
         "guest_status_code": { "type": "integer" },
         "stop_reason": { "type": "string" },

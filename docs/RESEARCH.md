@@ -2179,6 +2179,47 @@ limit, root set or relocated region is a different frontier.
   completion is claimed. The title is still in the same init/spin path around
   `0x002433D0` (`0x002433BC..0x002433E4`), so the next investigation is the
   missing producer/event for that loop, not a new MMIO register.
+- **Observed + derived (ABI-36 spin-loop analysis, 2026-11-22):** the loop at
+  `0x002433D0..0x00243420` polls `D1_CHCR.STR` (`0x10009000`, mask `0x100`),
+  `D2_CHCR.STR` (`0x1000A000`, mask `0x100`), `VIF1_STAT[1:0]`
+  (`0x10003C00`, mask `0x3`), VU0 COP2 control reg 29 bit 8 (CFC2, mask
+  `0x100`), and `GIF_STAT[11:10]` (`0x10003020`, mask `0xC00`); it loops while
+  any is non-zero (`bnez $v0, 0x002433D0`). Guest producers of STR=1:
+  `0x00216E18` writes `D1_CHCR=0x145`, `0x001B5748` writes `D2_CHCR=0x145`
+  (both then `jal 0x002433A8`). PS2Tek DMAC I/O documents CHCR bit 8 as
+  "STR - Start/busy" with the polling idiom `while (*CHCR & CHCR_STR) {}`
+  (STR self-clears on completion). **Derived:** with CHCR stored verbatim,
+  STR stayed 1 forever and the loop spun to the budget.
+- **Implemented (ADR 0188, runtime ABI 37, merged `59b49f4`):** channel-1 and
+  channel-2 `write_chcr*` now self-clear STR on a 0->1 transition and raise the
+  channel's D_STAT status bit (bit 1 / bit 2), mirroring the SIF0 channel-5
+  pattern (ADR 0086). No DMA transfer, FIFO drain, PATH activity, or interrupt
+  delivery is modelled. Tests `test_chcr1_str_sets_dstat_vif0` and
+  `test_chcr2_str_sets_dstat_gif` failed before (exit 112/121), pass after.
+- **Observed (ABI-37 probe `abi37-01`, main `59b49f4`, same digests, rebuilt
+  frontend + native module, 5,000,000-instruction budget):** after ADR 0188 the
+  spin loop exits; the run stops at `pc=0x002181BC` after 4,670,541
+  instructions (1 batch) as `unsupported_memory_access` on
+  `sw $v1, ($s1)` with `$s1 = 0x10008020`, `$v1 = 3`.
+  **Derived:** `0x10008020 = A_EE_D0_QWC` (ps2sdk `common/include/ee_regs.h`),
+  DMAC channel 0 (VIF0); adjacent registers D0_CHCR/MADR/TADR/ASR0/ASR1 at
+  `0x10008000/10/30/40/50`. This is a genuine frontier advance: the stop
+  moved from a budget-limited spin at `0x002433D0` (79,999,756 instr) to an
+  early unsupported access at `0x002181BC` (4,670,541 instr), proving the
+  STR-completion model changed guest control flow deterministically. The
+  frontier tool's schema did not yet list `unsupported_memory_access` as a
+  valid guest status (fixed alongside), so `frontier.json` was not emitted;
+  `run-report.json` is the complete evidence.
+- **Implemented (ADR 0189, runtime ABI 38, merged `b024ddb`):** channel-0
+  registers `D0_CHCR/MADR/QWC/TADR/ASR0/ASR1` are bounded storage with MMIO
+  dispatch, 64-bit decomposition, and STR self-clear + D_STAT bit 0 on start
+  (`write_chcr0`), seeded in the idle boot state. Test
+  `test_chcr0_str_sets_dstat_vif0_ch0` failed before (exit 106), passes after.
+- **Tooling fix:** `tools/frontier/frontier.py` `GUEST_STATUSES` and
+  `tools/frontier/frontier.schema.json` now enumerate the full
+  `status_name()` set (added `address_error`, `unmapped_memory`,
+  `unsupported_memory_access`, etc.) so probes that stop on those statuses
+  produce a valid `frontier.json`. 37/37 frontier unit tests pass.
 
 ## Provenance rules
 
