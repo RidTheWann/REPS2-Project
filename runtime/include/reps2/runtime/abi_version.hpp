@@ -116,4 +116,8 @@
 // bit, mirroring the documented transfer-completion behavior already modelled
 // for channel 5 (SIF0). sizeof(EeState) changes (ch2 gains *_known fields);
 // ABI-36 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 37
+//
+// ABI 38 covers ADR 0189: VIF0 DMAC channel-0 registers (0x10008000..0x10008050)
+// are bounded storage with STR self-clear + D_STAT bit 0 on start. sizeof(EeState)
+// changes; ABI-37 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 38

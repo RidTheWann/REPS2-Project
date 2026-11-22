@@ -226,6 +226,19 @@ inline Status mmio_read_dmac_pcr(const EeMemory&, std::uint32_t, std::uint32_t&)
 inline Status mmio_write_dmac_pcr(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_chcr5(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_chcr5(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// VIF0 (channel 0) registers. ADR 0189.
+inline Status mmio_read_chcr0(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_chcr0(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_madr0(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_madr0(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_qwc0(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_qwc0(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_tadr0(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_tadr0(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_asr0(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_asr0(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_asr1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_asr1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 // VIF0 (channel 1) registers. ADR 0184.
 inline Status mmio_read_chcr1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_chcr1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
@@ -411,6 +424,12 @@ struct EeMemory {
         { kEeDmacMadr5Address,   &mmio_read_madr5,   &mmio_write_madr5 },
         { kEeDmacQwc5Address,    &mmio_read_qwc5,    &mmio_write_qwc5 },
         { kEeDmacTadr5Address,   &mmio_read_tadr5,   &mmio_write_tadr5 },
+        { kEeDmacChcr0Address,   &mmio_read_chcr0,   &mmio_write_chcr0 },
+        { kEeDmacMadr0Address,   &mmio_read_madr0,   &mmio_write_madr0 },
+        { kEeDmacQwc0Address,    &mmio_read_qwc0,    &mmio_write_qwc0 },
+        { kEeDmacTadr0Address,   &mmio_read_tadr0,   &mmio_write_tadr0 },
+        { kEeDmacAsr0Address,    &mmio_read_asr0,    &mmio_write_asr0 },
+        { kEeDmacAsr1Address,    &mmio_read_asr1,    &mmio_write_asr1 },
         { kEeDmacChcr1Address,   &mmio_read_chcr1,   &mmio_write_chcr1 },
         { kEeDmacMadr1Address,   &mmio_read_madr1,   &mmio_write_madr1 },
         { kEeDmacQwc1Address,    &mmio_read_qwc1,    &mmio_write_qwc1 },
@@ -1972,6 +1991,43 @@ inline Status mmio_read_tadr5(const EeMemory& self, std::uint32_t, std::uint32_t
 inline Status mmio_write_tadr5(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
     return self.dmac.write_tadr5(value) ? Status::ok : Status::unsupported_memory_access;
 }
+// VIF0 (channel 0) registers: bounded storage + STR completion. ADR 0189.
+inline Status mmio_read_chcr0(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_chcr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_chcr0(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_chcr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_madr0(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_madr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_madr0(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_madr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_qwc0(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_qwc0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_qwc0(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_qwc0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_tadr0(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_tadr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_tadr0(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_tadr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_asr0(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_asr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_asr0(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_asr0(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_read_asr1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    return self.dmac.read_asr1(value) ? Status::ok : Status::unsupported_memory_access;
+}
+inline Status mmio_write_asr1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    return self.dmac.write_asr1(value) ? Status::ok : Status::unsupported_memory_access;
+}
 // VIF0 (channel 1) registers: bounded storage only; no DMA transfer, interrupt,
 // or completion is modelled. ADR 0184.
 inline Status mmio_read_chcr1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
@@ -2795,7 +2851,10 @@ inline void disable_interrupts(EeState& state) noexcept {
         address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
         address == kEeVif1StatAddress || address == kEeVif1FbrstAddress ||
         address == kEeVif1ErrAddress || address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
-        address == kEeGifStatAddress) {
+        address == kEeGifStatAddress ||
+        address == kEeDmacChcr0Address || address == kEeDmacMadr0Address ||
+        address == kEeDmacQwc0Address || address == kEeDmacTadr0Address ||
+        address == kEeDmacAsr0Address || address == kEeDmacAsr1Address) {
         std::uint32_t low{};
         const auto status1 = load_u32(memory, address, low);
         if (status1 != Status::ok) return status1;
@@ -2934,7 +2993,10 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
         address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
         address == kEeVif1StatAddress || address == kEeVif1FbrstAddress ||
         address == kEeVif1ErrAddress || address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
-        address == kEeGifStatAddress) {
+        address == kEeGifStatAddress ||
+        address == kEeDmacChcr0Address || address == kEeDmacMadr0Address ||
+        address == kEeDmacQwc0Address || address == kEeDmacTadr0Address ||
+        address == kEeDmacAsr0Address || address == kEeDmacAsr1Address) {
         const std::uint32_t low = static_cast<std::uint32_t>(value);
         return store_u32(memory, address, low);
     }
