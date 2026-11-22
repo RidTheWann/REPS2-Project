@@ -105,4 +105,9 @@
 // ABI 35 covers ADR 0186: VIF1_STAT (0x10003C00) is modelled as bounded
 // 32-bit storage with MMIO dispatch and 64-bit decomposition. sizeof(EeState)
 // changes; ABI-34 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 35
+//
+// ABI 36 covers ADR 0187: EE Scratchpad RAM (0x70000000..0x70003FFF) is
+// backed by a bounded 16 KiB byte array, with width/alignment-checked
+// little-endian accessors from the standard load/store helpers.
+// sizeof(EeState) changes; ABI-35 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 36

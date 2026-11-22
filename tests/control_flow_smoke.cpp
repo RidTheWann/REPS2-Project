@@ -37,6 +37,8 @@ int main() {
     // delay slot that is either executed or annulled and a JR delay slot.
     for (const bool taken_color : {false, true}) {
         EeState color{};
+        static std::vector<std::uint8_t> color_ram(reps2::runtime::kEeMainRamSize);
+        color.memory.main_ram = color_ram;
         color.pc = 0xD200U;
         color.gpr[1] = {0x80FF'FFFF'1234'5678ULL, 0xFF00'0000'00F8'F8F8ULL};
         color.gpr[2] = {0x0000'FFFF'0000'801FULL, 0x0000'7C00'1234'5678ULL};

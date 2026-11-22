@@ -349,6 +349,9 @@ struct EeMemory {
     std::uint32_t timer1_mode{};
     std::uint32_t timer1_compare{};
     std::uint32_t timer1_hold{};
+    // EE Scratchpad RAM (SPR) 0x70000000..0x70003FFF: 16 KiB bounded storage.
+    // ADR 0187.
+    std::array<std::uint8_t, 16384> scratchpad{};
     // Bounded observation of the match path: how many compare matches latched,
     // how many raised the INTC source, and how many were refused because the
     // controller state was never established. A refusal is counted, never
@@ -2236,6 +2239,60 @@ inline Status mmio_write_timer1_hold(EeMemory& self, std::uint32_t, std::uint32_
     return Status::ok;
 }
 inline void materialize_ee_timer1(EeMemory&) noexcept {}
+
+// EE Scratchpad RAM (SPR) is a 16 KiB on-chip RAM window at 0x70000000.
+// Address validation and little-endian helpers are shared by all guest widths.
+// ADR 0187.
+inline constexpr std::uint32_t kEeScratchpadBaseAddress{0x7000'0000U};
+inline constexpr std::size_t kEeScratchpadSize{16U * 1024U};
+[[nodiscard]] inline bool scratchpad_offset(
+    std::uint32_t address, std::size_t width, std::size_t alignment,
+    std::size_t& offset) noexcept {
+    if (address < kEeScratchpadBaseAddress
+        || (alignment > 1U && (address % alignment) != 0U)) return false;
+    offset = static_cast<std::size_t>(address - kEeScratchpadBaseAddress);
+    return offset <= kEeScratchpadSize && width <= kEeScratchpadSize - offset;
+}
+inline Status scratchpad_read_u8(const EeMemory& m, std::uint32_t a, std::uint8_t& v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 1U, 1U, o)) return Status::unmapped_memory;
+    v = m.scratchpad[o]; return Status::ok;
+}
+inline Status scratchpad_write_u8(EeMemory& m, std::uint32_t a, std::uint8_t v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 1U, 1U, o)) return Status::unmapped_memory;
+    m.scratchpad[o] = v; return Status::ok;
+}
+inline Status scratchpad_read_u16(const EeMemory& m, std::uint32_t a, std::uint16_t& v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 2U, 2U, o)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
+    v = static_cast<std::uint16_t>(m.scratchpad[o] | (static_cast<std::uint16_t>(m.scratchpad[o+1U]) << 8U)); return Status::ok;
+}
+inline Status scratchpad_write_u16(EeMemory& m, std::uint32_t a, std::uint16_t v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 2U, 2U, o)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
+    m.scratchpad[o] = static_cast<std::uint8_t>(v); m.scratchpad[o+1U] = static_cast<std::uint8_t>(v >> 8U); return Status::ok;
+}
+inline Status scratchpad_read_u32(const EeMemory& m, std::uint32_t a, std::uint32_t& v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 4U, 4U, o)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
+    v = 0U; for (std::size_t i=0;i<4U;++i) v |= static_cast<std::uint32_t>(m.scratchpad[o+i]) << (8U*i); return Status::ok;
+}
+inline Status scratchpad_write_u32(EeMemory& m, std::uint32_t a, std::uint32_t v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 4U, 4U, o)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
+    for (std::size_t i=0;i<4U;++i) m.scratchpad[o+i] = static_cast<std::uint8_t>(v >> (8U*i)); return Status::ok;
+}
+inline Status scratchpad_read_u64(const EeMemory& m, std::uint32_t a, std::uint64_t& v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 8U, 8U, o)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
+    v = 0U; for (std::size_t i=0;i<8U;++i) v |= static_cast<std::uint64_t>(m.scratchpad[o+i]) << (8U*i); return Status::ok;
+}
+inline Status scratchpad_write_u64(EeMemory& m, std::uint32_t a, std::uint64_t v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 8U, 8U, o)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
+    for (std::size_t i=0;i<8U;++i) m.scratchpad[o+i] = static_cast<std::uint8_t>(v >> (8U*i)); return Status::ok;
+}
+inline Status scratchpad_read_u128(const EeMemory& m, std::uint32_t a, Gpr128& v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 16U, 16U, o)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
+    v.low=0U; v.high=0U; for (std::size_t i=0;i<8U;++i) { v.low |= static_cast<std::uint64_t>(m.scratchpad[o+i]) << (8U*i); v.high |= static_cast<std::uint64_t>(m.scratchpad[o+8U+i]) << (8U*i); } return Status::ok;
+}
+inline Status scratchpad_write_u128(EeMemory& m, std::uint32_t a, const Gpr128& v) noexcept {
+    std::size_t o{}; if (!scratchpad_offset(a, 16U, 16U, o)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
+    for (std::size_t i=0;i<8U;++i) { m.scratchpad[o+i]=static_cast<std::uint8_t>(v.low>>(8U*i)); m.scratchpad[o+8U+i]=static_cast<std::uint8_t>(v.high>>(8U*i)); } return Status::ok;
+}
 inline Status mmio_read_intc_stat(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
     return self.intc.read_stat(value) ? Status::ok : Status::unsupported_memory_access;
 }
@@ -2446,8 +2503,11 @@ inline Status mmio_write_gif_stat(EeMemory& self, std::uint32_t, std::uint32_t v
 [[nodiscard]] constexpr bool is_unsupported_physical_region(std::uint32_t address) noexcept {
     // The physical 0x10000000..0x1FFFFFFF window contains EE registers,
     // reserved areas, IOP memory and BIOS; none is backed by main RAM here.
-    return (address >= 0x10000000U && address < 0x20000000U)
-        || (address >= 0x70000000U && address < 0x70004000U);
+    // Scratchpad RAM (0x70000000..0x70003FFF) is backed separately. ADR 0187.
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return false; // SPR is backed
+    }
+    return (address >= 0x10000000U && address < 0x20000000U);
 }
 
 [[nodiscard]] constexpr bool resolve_ee_main_ram_address(
@@ -2655,6 +2715,9 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint8_t& value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_read_u8(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 1U, 1U, physical);
     if (status != Status::ok) return status;
@@ -2667,6 +2730,9 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint16_t& value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_read_u16(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 2U, 2U, physical);
     if (status != Status::ok) return status;
@@ -2689,6 +2755,9 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint32_t& value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_read_u32(memory, address, value);
+    }
     // Normalize direct-mapped KSEG0/KSEG1 aliases before MMIO lookup.
     const auto mmio_address = normalize_ee_mmio_address(address);
     for (const auto& device : memory.kMmioDevices) {
@@ -2712,6 +2781,9 @@ inline void disable_interrupts(EeState& state) noexcept {
     std::uint32_t address,
     std::uint64_t& value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_read_u64(memory, address, value);
+    }
     // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
     // decompose the 64-bit load into a 32-bit load from the register plus
     // returning the high 32 bits as zero (the 64-bit result is zero-extended).
@@ -2765,6 +2837,9 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     std::uint32_t address,
     Gpr128& value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_read_u128(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto aligned_address = address & ~0x0FU;
     const auto status = resolve_ee_memory_access(memory, aligned_address, 16U, 1U, physical);
@@ -2786,6 +2861,9 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     std::uint32_t address,
     std::uint8_t value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_write_u8(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 1U, 1U, physical);
     if (status != Status::ok) return status;
@@ -2798,6 +2876,9 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     std::uint32_t address,
     std::uint16_t value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_write_u16(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 2U, 2U, physical);
     if (status != Status::ok) return status;
@@ -2812,6 +2893,9 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     std::uint32_t address,
     std::uint32_t value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_write_u32(memory, address, value);
+    }
     // Normalize direct-mapped KSEG0/KSEG1 aliases before MMIO lookup.
     const auto mmio_address = normalize_ee_mmio_address(address);
     for (const auto& device : memory.kMmioDevices) {
@@ -2835,6 +2919,9 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     std::uint32_t address,
     std::uint64_t value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_write_u64(memory, address, value);
+    }
     // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
     // decompose the 64-bit write into a 32-bit write to the register itself.
     // The upper 4 bytes of the 64-bit store are discarded because the register
@@ -3001,6 +3088,9 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     std::uint32_t address,
     const Gpr128& value
 ) noexcept {
+    if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
+        return scratchpad_write_u128(memory, address, value);
+    }
     // VIF1 FIFO (0x10005000) is a qword-only port, not RAM. A full FIFO write
     // fails closed and leaves the FIFO unchanged. ADR 0181.
     if (normalize_ee_mmio_address(address) == kEeVif1FifoAddress) {

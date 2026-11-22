@@ -2156,7 +2156,19 @@ limit, root set or relocated region is a different frontier.
 - **Implemented (ADR 0186, runtime ABI 35):** VIF1_STAT is bounded 32-bit
   storage with MMIO dispatch, reset-zero reads, 64-bit decomposition. No VIF
   parsing, FIFO occupancy update, transfer status, stall, interrupt, or FQC
-  side effect is modelled. The ABI-35 probe records the next stop.
+  side effect is modelled.
+- **Observed (ABI-35 probes `abi35-01`/`abi35-02`, main `97d5caa`, same
+  digests, rebuilt frontend + native module):** the VIF1_STAT read at
+  `pc=0x002433E0` passes; the run stops at `pc=0x00218118` after 4,670,492
+  instructions as `unsupported_memory_access` on `sw $a2, 0x2c($s0)` with
+  `$s0 = 0x70000000`, `$a2 = 0x800000`. **Derived:** `0x70000000` is the EE
+  Data Scratchpad (SPR) window `0x70000000..0x70003FFF` (Sony EE User's Manual,
+  16 KB).
+- **Implemented (ADR 0187, runtime ABI 36):** SPR is backed by a bounded 16 KiB
+  byte array in `EeMemory`; all guest load/store widths route through
+  alignment-checked little-endian helpers, and the SPR range is removed from
+  `is_unsupported_physical_region`. No DMA/MFIFO/SPR-channel/cache behavior is
+  modelled. The ABI-36 probe records the next stop.
 
 ## Provenance rules
 
