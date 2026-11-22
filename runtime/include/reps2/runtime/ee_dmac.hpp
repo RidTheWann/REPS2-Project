@@ -38,6 +38,8 @@ inline constexpr std::uint32_t kEeDmacDStatUnmodelledStatusWriteMask{0x0000'E000
 inline constexpr std::uint32_t kEeDmacDStatInterruptMaskMask{0x63FF'0000U};
 inline constexpr std::uint32_t kEeDmacDStatReadableMask{0x63FF'E3FFU};
 inline constexpr std::uint32_t kEeDmacDStatSif0StatusBit{0x0000'0020U};
+inline constexpr std::uint32_t kEeDmacDStatVif0StatusBit{0x0000'0002U};
+inline constexpr std::uint32_t kEeDmacDStatGifStatusBit{0x0000'0004U};
 inline constexpr std::uint32_t kEeDmacDStatBusErrorStatusBit{0x0000'8000U};
 
 // The documented DMAC interrupt condition, independent of device state.
@@ -114,9 +116,13 @@ struct EeDmacState {
 
     // GIF (channel 2) registers: bounded storage only, reset known zero. ADR 0185.
     std::uint32_t chcr2{};
+    bool chcr2_known{};
     std::uint32_t madr2{};
+    bool madr2_known{};
     std::uint32_t qwc2{};
+    bool qwc2_known{};
     std::uint32_t tadr2{};
+    bool tadr2_known{};
 
     // Establish the HLE boot environment's DMAC state: every modelled register
     // is known and idle. This models the kernel-initialized DMAC the title
@@ -134,6 +140,14 @@ struct EeDmacState {
         madr5 = 0; madr5_known = true;
         qwc5 = 0; qwc5_known = true;
         tadr5 = 0; tadr5_known = true;
+        chcr1 = 0; chcr1_known = true;
+        madr1 = 0; madr1_known = true;
+        qwc1 = 0; qwc1_known = true;
+        tadr1 = 0; tadr1_known = true;
+        chcr2 = 0; chcr2_known = true;
+        madr2 = 0; madr2_known = true;
+        qwc2 = 0; qwc2_known = true;
+        tadr2 = 0; tadr2_known = true;
     }
 
     // Seed D_CTRL from device/test input. No hardware reset default.
@@ -339,8 +353,17 @@ struct EeDmacState {
         return true;
     }
     [[nodiscard]] bool write_chcr1(std::uint32_t value) noexcept {
+        const bool was_str = (chcr1 & kEeDmacChcrStrMask) != 0U;
+        const bool now_str = (value & kEeDmacChcrStrMask) != 0U;
+
         chcr1 = value;
         chcr1_known = true;
+
+        if (!was_str && now_str && d_stat_known) {
+            d_stat |= kEeDmacDStatVif0StatusBit;
+            d_stat &= kEeDmacDStatReadableMask;
+            chcr1 &= ~kEeDmacChcrStrMask;
+        }
         return true;
     }
     [[nodiscard]] bool read_madr1(std::uint32_t& value) const noexcept {
@@ -378,7 +401,17 @@ struct EeDmacState {
         return true;
     }
     [[nodiscard]] bool write_chcr2(std::uint32_t value) noexcept {
+        const bool was_str = (chcr2 & kEeDmacChcrStrMask) != 0U;
+        const bool now_str = (value & kEeDmacChcrStrMask) != 0U;
+
         chcr2 = value;
+        chcr2_known = true;
+
+        if (!was_str && now_str && d_stat_known) {
+            d_stat |= kEeDmacDStatGifStatusBit;
+            d_stat &= kEeDmacDStatReadableMask;
+            chcr2 &= ~kEeDmacChcrStrMask;
+        }
         return true;
     }
     [[nodiscard]] bool read_madr2(std::uint32_t& value) const noexcept {
@@ -387,6 +420,7 @@ struct EeDmacState {
     }
     [[nodiscard]] bool write_madr2(std::uint32_t value) noexcept {
         madr2 = value;
+        madr2_known = true;
         return true;
     }
     [[nodiscard]] bool read_qwc2(std::uint32_t& value) const noexcept {
@@ -395,6 +429,7 @@ struct EeDmacState {
     }
     [[nodiscard]] bool write_qwc2(std::uint32_t value) noexcept {
         qwc2 = value;
+        qwc2_known = true;
         return true;
     }
     [[nodiscard]] bool read_tadr2(std::uint32_t& value) const noexcept {
@@ -403,6 +438,7 @@ struct EeDmacState {
     }
     [[nodiscard]] bool write_tadr2(std::uint32_t value) noexcept {
         tadr2 = value;
+        tadr2_known = true;
         return true;
     }
 };

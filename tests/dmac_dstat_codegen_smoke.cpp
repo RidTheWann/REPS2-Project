@@ -297,6 +297,38 @@ int test_dmac_device_interrupt_pending() {
     return 0;
 }
 
+// A guest starts DMAC channel 1 (VIF0) by setting STR. The documented transfer
+// completion behavior clears STR and raises the channel status bit in D_STAT.
+// Evidence: guest code at 0x00216DFC writes D1_CHCR=0x145 then waits for
+// STR==0 at 0x002433D0. ps2sdk/EE manual: STR self-clears on completion.
+int test_chcr1_str_sets_dstat_vif0() {
+    EeState state{};
+    state.memory.dmac.seed_d_stat(0U);
+    std::uint32_t value = 0U;
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeDmacChcr1Address, 0x145U)
+        != Status::ok) return 1;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacChcr1Address, value)
+        != Status::ok || (value & 0x100U) != 0U) return 2;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacDStatAddress, value)
+        != Status::ok || (value & (1U << 1U)) == 0U) return 3;
+    return 0;
+}
+
+// Same STR completion contract for channel 2 (GIF), guest writes D2_CHCR=0x145
+// at 0x0021B748 before polling STR in the same loop.
+int test_chcr2_str_sets_dstat_gif() {
+    EeState state{};
+    state.memory.dmac.seed_d_stat(0U);
+    std::uint32_t value = 0U;
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeDmacChcr2Address, 0x145U)
+        != Status::ok) return 1;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacChcr2Address, value)
+        != Status::ok || (value & 0x100U) != 0U) return 2;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacDStatAddress, value)
+        != Status::ok || (value & (1U << 2U)) == 0U) return 3;
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -319,6 +351,14 @@ int main() {
     if (const auto result = test_chcr5_str_sets_dstat_sif0(); result != 0) {
         std::fprintf(stderr, "CHCR5 STR sets D_STAT SIF0 test failed at check %d\n", result);
         return 70 + result;
+    }
+    if (const auto result = test_chcr1_str_sets_dstat_vif0(); result != 0) {
+        std::fprintf(stderr, "CHCR1 STR sets D_STAT VIF0 test failed at check %d\n", result);
+        return 110 + result;
+    }
+    if (const auto result = test_chcr2_str_sets_dstat_gif(); result != 0) {
+        std::fprintf(stderr, "CHCR2 STR sets D_STAT GIF test failed at check %d\n", result);
+        return 120 + result;
     }
     if (const auto result = test_idle_boot_state_is_readable(); result != 0) {
         std::fprintf(stderr, "idle boot-state DMAC test failed at check %d\n", result);
