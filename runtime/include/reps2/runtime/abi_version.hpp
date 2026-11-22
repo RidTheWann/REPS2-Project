@@ -101,4 +101,8 @@
 // (0x1000A000/10/20/30) are bounded storage with MMIO dispatch. No DMA
 // transfer, interrupt, or completion is modelled. sizeof(EeState) changes;
 // ABI-33 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 34
+//
+// ABI 35 covers ADR 0186: VIF1_STAT (0x10003C00) is modelled as bounded
+// 32-bit storage with MMIO dispatch and 64-bit decomposition. sizeof(EeState)
+// changes; ABI-34 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 35

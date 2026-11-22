@@ -91,6 +91,10 @@ inline constexpr std::uint32_t kEeGsSmode2Address{0x1200'0020U};
 // writes are accepted and stored, reads return the stored word. No VIF unit,
 // DMA or GS transfer is modelled; FBRST performs no actual FIFO reset.
 // ADR 0179.
+// VIF1_STAT (0x10003C00): plain bounded 32-bit storage with reset zero.
+// No VIF parsing, FIFO direction, stalls, or transfer status is modelled.
+// ADR 0186.
+inline constexpr std::uint32_t kEeVif1StatAddress{0x1000'3C00U};
 inline constexpr std::uint32_t kEeVif1FbrstAddress{0x1000'3C10U};
 inline constexpr std::uint32_t kEeVif1ErrAddress{0x1000'3C20U};
 // VIF1 FIFO (0x10005000) — 16-qword FIFO, read/write. ADR 0181.
@@ -267,6 +271,8 @@ inline Status mmio_write_gs_pmode(EeMemory&, std::uint32_t, std::uint32_t) noexc
 inline Status mmio_read_gs_smode2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_gs_smode2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 // VIF1 command registers (ADR 0179).
+inline Status mmio_read_vif1_stat(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_vif1_stat(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_vif1_fbrst(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_vif1_fbrst(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_vif1_err(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -373,6 +379,7 @@ struct EeMemory {
     // VIF1 write-only command registers: FBRST (0x10003C10) and ERR
     // (0x10003C20) accept writes and store the word; reads return it. No VIF
     // pipeline state changes. ADR 0179.
+    std::uint32_t vif1_stat{};
     std::uint32_t vif1_fbrst{};
     std::uint32_t vif1_err{};
     // GIF_CTRL/GIF_MODE bounded storage only. GIF_STAT is derived/stored from
@@ -429,6 +436,7 @@ struct EeMemory {
         { kEeGsImrAddress,       &mmio_read_gs_imr,  &mmio_write_gs_imr },
         { kEeGsPmodeAddress,     &mmio_read_gs_pmode, &mmio_write_gs_pmode },
         { kEeGsSmode2Address,    &mmio_read_gs_smode2, &mmio_write_gs_smode2 },
+        { kEeVif1StatAddress,    &mmio_read_vif1_stat, &mmio_write_vif1_stat },
         { kEeVif1FbrstAddress,   &mmio_read_vif1_fbrst, &mmio_write_vif1_fbrst },
         { kEeVif1ErrAddress,     &mmio_read_vif1_err, &mmio_write_vif1_err },
         { kEeGifCtrlAddress,     &mmio_read_gif_ctrl, &mmio_write_gif_ctrl },
@@ -2300,6 +2308,17 @@ inline Status mmio_write_vif1_err(EeMemory& self, std::uint32_t, std::uint32_t v
     self.vif1_err = value;
     return Status::ok;
 }
+// VIF1_STAT (0x10003C00): plain bounded 32-bit storage with reset zero.
+// No VIF parsing, FIFO direction, stalls, or transfer status is modelled.
+// ADR 0186.
+inline Status mmio_read_vif1_stat(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = self.vif1_stat;
+    return Status::ok;
+}
+inline Status mmio_write_vif1_stat(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.vif1_stat = value;
+    return Status::ok;
+}
 // GIF control registers: GIF_CTRL/GIF_MODE are writable bounded storage and
 // read back what was written. GIF_STAT is bounded storage with no transfer
 // model; a guest polling it sees only what was written, never fabricated
@@ -2699,8 +2718,8 @@ inline void disable_interrupts(EeState& state) noexcept {
     // ADR 0176: 64-bit loads from 32-bit registers must reach the MMIO handler.
     if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
         address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
-        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress ||
-        address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
+        address == kEeVif1StatAddress || address == kEeVif1FbrstAddress ||
+        address == kEeVif1ErrAddress || address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
         address == kEeGifStatAddress) {
         std::uint32_t low{};
         const auto status1 = load_u32(memory, address, low);
@@ -2823,8 +2842,8 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     // registers must reach the MMIO handler.
     if (address == kEeGsCsrAddress || address == kEeGsImrAddress ||
         address == kEeGsPmodeAddress || address == kEeGsSmode2Address ||
-        address == kEeVif1FbrstAddress || address == kEeVif1ErrAddress ||
-        address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
+        address == kEeVif1StatAddress || address == kEeVif1FbrstAddress ||
+        address == kEeVif1ErrAddress || address == kEeGifCtrlAddress || address == kEeGifModeAddress ||
         address == kEeGifStatAddress) {
         const std::uint32_t low = static_cast<std::uint32_t>(value);
         return store_u32(memory, address, low);
