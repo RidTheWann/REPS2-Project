@@ -2168,7 +2168,17 @@ limit, root set or relocated region is a different frontier.
   byte array in `EeMemory`; all guest load/store widths route through
   alignment-checked little-endian helpers, and the SPR range is removed from
   `is_unsupported_physical_region`. No DMA/MFIFO/SPR-channel/cache behavior is
-  modelled. The ABI-36 probe records the next stop.
+  modelled.
+- **Observed (ABI-36 probe `abi36-01`, main `402f850`, same digests, rebuilt
+  frontend + native module, 5,000,000-instruction budget, 16 batches):** after
+  the SPR `sw` at `pc=0x00218118` passes, the run no longer stops on unsupported
+  memory; it reaches `budget_limit_reached` after 79,999,756 instructions in 16
+  batches (`syscalls_seen=1242 handled=1225`, final PC `0x002433D0`). This is a
+  real frontier advance in the sense that execution now runs to the budget
+  instead of stopping early; it is **not** a boot stage and no guest-visible
+  completion is claimed. The title is still in the same init/spin path around
+  `0x002433D0` (`0x002433BC..0x002433E4`), so the next investigation is the
+  missing producer/event for that loop, not a new MMIO register.
 
 ## Provenance rules
 

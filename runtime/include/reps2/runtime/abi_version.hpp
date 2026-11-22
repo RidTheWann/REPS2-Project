@@ -110,4 +110,10 @@
 // backed by a bounded 16 KiB byte array, with width/alignment-checked
 // little-endian accessors from the standard load/store helpers.
 // sizeof(EeState) changes; ABI-35 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 36
+//
+// ABI 37 covers ADR 0188: DMAC channels 1 (VIF0) and 2 (GIF) CHCR writes that
+// raise STR (bit 8) now self-clear STR and raise the channel's D_STAT status
+// bit, mirroring the documented transfer-completion behavior already modelled
+// for channel 5 (SIF0). sizeof(EeState) changes (ch2 gains *_known fields);
+// ABI-36 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 37
