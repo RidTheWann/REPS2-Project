@@ -60,6 +60,17 @@ GUEST_STATUSES = {
     "unhandled_syscall",
     "semaphore_wait_blocked",
     "thread_wait_blocked",
+    "address_error",
+    "unmapped_memory",
+    "unsupported_memory_access",
+    "invalid_memory_image",
+    "invalid_exception_return",
+    "syscall_handler_overflow",
+    "integer_overflow",
+    "undefined_word_operand",
+    "syscall",
+    "breakpoint",
+    "ok",
 }
 
 # Fields that legitimately vary between two runs of the same configuration.
