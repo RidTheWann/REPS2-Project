@@ -310,7 +310,7 @@ pub(crate) fn emit_instruction(
         } => {
             let d = dst.index();
             output.push_str(&format!(
-                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
                 fs.index(),
                 ft.index()
             ));
@@ -2790,7 +2790,7 @@ mod tests {
 
         assert!(cpp.contains("using reps2::runtime::vu0_sub_lanes;"));
         assert!(cpp.contains(
-            "vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 14));"
+            "vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 14));"
         ));
     }
 
