@@ -30,6 +30,14 @@ constexpr std::uint32_t kT1CountAddr = reps2::runtime::kEeTimer1CountAddress;
 constexpr std::uint32_t kT1ModeAddr = reps2::runtime::kEeTimer1ModeAddress;
 constexpr std::uint32_t kT1CompAddr = reps2::runtime::kEeTimer1CompareAddress;
 constexpr std::uint32_t kT1HoldAddr = reps2::runtime::kEeTimer1HoldAddress;
+constexpr std::uint32_t kDmacChcr1Addr = reps2::runtime::kEeDmacChcr1Address;
+constexpr std::uint32_t kDmacMadr1Addr = reps2::runtime::kEeDmacMadr1Address;
+constexpr std::uint32_t kDmacQwc1Addr = reps2::runtime::kEeDmacQwc1Address;
+constexpr std::uint32_t kDmacTadr1Addr = reps2::runtime::kEeDmacTadr1Address;
+constexpr std::uint32_t kDmacChcr2Addr = reps2::runtime::kEeDmacChcr2Address;
+constexpr std::uint32_t kDmacMadr2Addr = reps2::runtime::kEeDmacMadr2Address;
+constexpr std::uint32_t kDmacQwc2Addr = reps2::runtime::kEeDmacQwc2Address;
+constexpr std::uint32_t kDmacTadr2Addr = reps2::runtime::kEeDmacTadr2Address;
 
 int test_gs_csr_reset_write_is_not_unsupported() {
     EeState state{};
@@ -265,24 +273,51 @@ int test_timer1_registers_storage() {
 // VIF0 DMAC channel-1 registers are bounded storage. ADR 0184.
 int test_dmac_ch1_registers_storage() {
     EeState state{};
-    // CHCR/MADR/QWC/TADR are writable without prior seeding (ADR 0184).
-    if (reps2::runtime::store_u32(state.memory, 0x1000'9000U, 0x0000'0101U) != Status::ok)
+    // CHCR/MADR/QWC/TADR are writable storage; reset reads are zero.
+    std::uint32_t value = 1U;
+    if (reps2::runtime::load_u32(state.memory, kDmacChcr1Addr, value) != Status::ok || value != 0U)
         return 300;
-    if (reps2::runtime::store_u32(state.memory, 0x1000'9010U, 0x0027'F710U) != Status::ok)
+    if (reps2::runtime::store_u32(state.memory, kDmacChcr1Addr, 0x0000'0101U) != Status::ok)
         return 301;
-    if (reps2::runtime::store_u32(state.memory, 0x1000'9020U, 0x0000'0010U) != Status::ok)
+    if (reps2::runtime::store_u32(state.memory, kDmacMadr1Addr, 0x0027'F710U) != Status::ok)
         return 302;
-    if (reps2::runtime::store_u32(state.memory, 0x1000'9030U, 0x0027'F800U) != Status::ok)
+    if (reps2::runtime::store_u32(state.memory, kDmacQwc1Addr, 0x0000'0010U) != Status::ok)
         return 303;
-    std::uint32_t value = 0U;
-    if (reps2::runtime::load_u32(state.memory, 0x1000'9000U, value) != Status::ok) return 304;
-    if (value != 0x0000'0101U) return 305;
-    if (reps2::runtime::load_u32(state.memory, 0x1000'9010U, value) != Status::ok) return 306;
-    if (value != 0x0027'F710U) return 307;
-    if (reps2::runtime::load_u32(state.memory, 0x1000'9020U, value) != Status::ok) return 308;
-    if (value != 0x0000'0010U) return 309;
-    if (reps2::runtime::load_u32(state.memory, 0x1000'9030U, value) != Status::ok) return 310;
-    if (value != 0x0027'F800U) return 311;
+    if (reps2::runtime::store_u32(state.memory, kDmacTadr1Addr, 0x0027'F800U) != Status::ok)
+        return 304;
+    if (reps2::runtime::load_u32(state.memory, kDmacChcr1Addr, value) != Status::ok || value != 0x0000'0101U)
+        return 305;
+    if (reps2::runtime::load_u32(state.memory, kDmacMadr1Addr, value) != Status::ok || value != 0x0027'F710U)
+        return 306;
+    if (reps2::runtime::load_u32(state.memory, kDmacQwc1Addr, value) != Status::ok || value != 0x0000'0010U)
+        return 307;
+    if (reps2::runtime::load_u32(state.memory, kDmacTadr1Addr, value) != Status::ok || value != 0x0027'F800U)
+        return 308;
+    return 0;
+}
+
+// GIF DMAC channel-2 registers are bounded storage, no transfer effect. ADR 0185.
+int test_dmac_ch2_registers_storage() {
+    EeState state{};
+    std::uint32_t value = 1U;
+    if (reps2::runtime::load_u32(state.memory, kDmacChcr2Addr, value) != Status::ok || value != 0U)
+        return 320;
+    if (reps2::runtime::store_u32(state.memory, kDmacChcr2Addr, 0x0000'0101U) != Status::ok)
+        return 321;
+    if (reps2::runtime::store_u32(state.memory, kDmacMadr2Addr, 0x0027'F710U) != Status::ok)
+        return 322;
+    if (reps2::runtime::store_u32(state.memory, kDmacQwc2Addr, 0x0000'0010U) != Status::ok)
+        return 323;
+    if (reps2::runtime::store_u32(state.memory, kDmacTadr2Addr, 0x0027'F800U) != Status::ok)
+        return 324;
+    if (reps2::runtime::load_u32(state.memory, kDmacChcr2Addr, value) != Status::ok || value != 0x0000'0101U)
+        return 325;
+    if (reps2::runtime::load_u32(state.memory, kDmacMadr2Addr, value) != Status::ok || value != 0x0027'F710U)
+        return 326;
+    if (reps2::runtime::load_u32(state.memory, kDmacQwc2Addr, value) != Status::ok || value != 0x0000'0010U)
+        return 327;
+    if (reps2::runtime::load_u32(state.memory, kDmacTadr2Addr, value) != Status::ok || value != 0x0027'F800U)
+        return 328;
     return 0;
 }
 
@@ -319,6 +354,7 @@ int main() {
     run("gif_ctrl_store_u64_decomposes", test_gif_ctrl_store_u64_decomposes);
     run("timer1_registers_storage", test_timer1_registers_storage);
     run("dmac_ch1_registers_storage", test_dmac_ch1_registers_storage);
+    run("dmac_ch2_registers_storage", test_dmac_ch2_registers_storage);
     run("vif1_fbrst_store_u64_decomposes", test_vif1_fbrst_store_u64_decomposes);
 
     if (fails == 0) {

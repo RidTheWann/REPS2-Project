@@ -92,4 +92,13 @@
 // (0x10009000/10/20/30) are bounded storage with MMIO dispatch. No DMA
 // transfer, interrupt, or completion is modelled. sizeof(EeState) changes;
 // ABI-32 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 33
+// ABI 33 covers ADR 0184: VIF0 DMAC channel-1 registers CHCR/MADR/QWC/TADR
+// (0x10009000/10/20/30) are bounded storage with MMIO dispatch. The guest
+// writes them without prior seeding; reads before first write fail closed.
+// sizeof(EeState) changes; ABI-32 modules are refused.
+//
+// ABI 34 covers ADR 0185: GIF DMAC channel-2 registers CHCR/MADR/QWC/TADR
+// (0x1000A000/10/20/30) are bounded storage with MMIO dispatch. No DMA
+// transfer, interrupt, or completion is modelled. sizeof(EeState) changes;
+// ABI-33 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 34

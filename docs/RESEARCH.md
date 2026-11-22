@@ -2136,6 +2136,17 @@ limit, root set or relocated region is a different frontier.
   reset semantics imply a readable idle/reset channel state. Channel-1 reads now
   return the stored zero/reset value instead of failing closed; writes still
   only store. No transfer/completion behavior is claimed.
+- **Observed (ABI-33 probe `abi33-03`, main `58cc73b`, same digests, rebuilt
+  frontend + native module):** the channel-1 CHCR read at `pc=0x002433D0` now
+  passes; the run stops at `pc=0x002433D8` after 4,670,452 instructions as
+  `unsupported_memory_access` on `lw $a1, 0($r9)` with `$r9 = 0x1000A000`.
+  **Derived:** `0x1000A000 = A_EE_D2_CHCR`, DMAC channel 2 (GIF); ps2sdk
+  `common/include/ee_regs.h` lists D2_CHCR/MADR/QWC/TADR at
+  `0x1000A000/10/20/30`, and `dma.c` confirms channel-2 CHCR is readable.
+- **Implemented (ADR 0185, runtime ABI 34):** channel-2 CHCR/MADR/QWC/TADR are
+  bounded 32-bit storage with MMIO dispatch, reset-zero reads, write-read
+  round-trips. No DMA transfer, GIF PATH activity, interrupt, or completion
+  event is modelled. The ABI-34 probe records the next stop.
 
 ## Provenance rules
 
