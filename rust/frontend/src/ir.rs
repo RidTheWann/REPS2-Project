@@ -230,6 +230,17 @@ pub enum Operation {
         fs: Vf,
         ft: Vf,
     },
+    /// VU0 broadcast ACC multiply-add (VMULAx idx 24, VMADDAy idx 9,
+    /// VMADDAz idx 10). ADR 0195.
+    Vu0AccBroadcastMul {
+        fs: Vf,
+        ft: Vf,
+        broadcast_lane: u8,
+        accumulate: bool,
+    },
+    /// VU0 VWAITQ (Special2 index 59): Q-register sync; no-op in this model.
+    /// ADR 0195.
+    Vu0WaitQ,
     /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise VF lane subtract.
     /// `dst = fs - ft` per lane, masked by the 4-bit dest field. ADR 0192.
     Vsub {
@@ -1764,6 +1775,25 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 fs: vf(instruction.rd),
                 ft: vf(instruction.rt),
             },
+            Opcode::Vmulax => Operation::Vu0AccBroadcastMul {
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+                broadcast_lane: 0,
+                accumulate: false,
+            },
+            Opcode::Vmadday => Operation::Vu0AccBroadcastMul {
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+                broadcast_lane: 1,
+                accumulate: true,
+            },
+            Opcode::Vmaddaz => Operation::Vu0AccBroadcastMul {
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+                broadcast_lane: 2,
+                accumulate: true,
+            },
+            Opcode::Vwaitq => Operation::Vu0WaitQ,
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,

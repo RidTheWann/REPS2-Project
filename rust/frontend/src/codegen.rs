@@ -96,6 +96,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::vu0_sub_lanes;\n\
              using reps2::runtime::vu0_opmula;\n\
              using reps2::runtime::vu0_opmsub;\n\
+             using reps2::runtime::vu0_acc_broadcast_mul;\n\
              using reps2::runtime::vu0_read_vf;\n\
              using reps2::runtime::vu0_write_vf;\n\
              using reps2::runtime::enable_interrupts;\n\
@@ -330,6 +331,24 @@ pub(crate) fn emit_instruction(
                 fs.index(),
                 ft.index()
             ));
+        }
+        Operation::Vu0AccBroadcastMul {
+            fs,
+            ft,
+            broadcast_lane,
+            accumulate,
+        } => {
+            output.push_str(&format!(
+                "    state.vu0.acc = reps2::runtime::vu0_acc_broadcast_mul(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {}, {});\n",
+                fs.index(),
+                ft.index(),
+                broadcast_lane,
+                accumulate
+            ));
+        }
+        Operation::Vu0WaitQ => {
+            // ponytail: Q pipeline is not modelled; VWAITQ is an explicit no-op
+            // until a Q-timing ADR exists.
         }
         Operation::MoveFromCop0 { dst, cop0_reg } => {
             let d = dst.index();
