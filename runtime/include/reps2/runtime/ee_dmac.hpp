@@ -17,6 +17,14 @@ inline constexpr std::uint32_t kEeDmacMadr5Address{0x1000'C010U};
 inline constexpr std::uint32_t kEeDmacQwc5Address{0x1000'C020U};
 inline constexpr std::uint32_t kEeDmacTadr5Address{0x1000'C030U};
 
+// VIF0 (channel 0) registers. ADR 0189.
+inline constexpr std::uint32_t kEeDmacChcr0Address{0x1000'8000U};
+inline constexpr std::uint32_t kEeDmacMadr0Address{0x1000'8010U};
+inline constexpr std::uint32_t kEeDmacQwc0Address{0x1000'8020U};
+inline constexpr std::uint32_t kEeDmacTadr0Address{0x1000'8030U};
+inline constexpr std::uint32_t kEeDmacAsr0Address{0x1000'8040U};
+inline constexpr std::uint32_t kEeDmacAsr1Address{0x1000'8050U};
+
 // VIF0 (channel 1) registers. ADR 0184.
 inline constexpr std::uint32_t kEeDmacChcr1Address{0x1000'9000U};
 inline constexpr std::uint32_t kEeDmacMadr1Address{0x1000'9010U};
@@ -38,6 +46,7 @@ inline constexpr std::uint32_t kEeDmacDStatUnmodelledStatusWriteMask{0x0000'E000
 inline constexpr std::uint32_t kEeDmacDStatInterruptMaskMask{0x63FF'0000U};
 inline constexpr std::uint32_t kEeDmacDStatReadableMask{0x63FF'E3FFU};
 inline constexpr std::uint32_t kEeDmacDStatSif0StatusBit{0x0000'0020U};
+inline constexpr std::uint32_t kEeDmacDStatCh0StatusBit{0x0000'0001U};   // channel 0
 inline constexpr std::uint32_t kEeDmacDStatVif0StatusBit{0x0000'0002U};
 inline constexpr std::uint32_t kEeDmacDStatGifStatusBit{0x0000'0004U};
 inline constexpr std::uint32_t kEeDmacDStatBusErrorStatusBit{0x0000'8000U};
@@ -104,6 +113,20 @@ struct EeDmacState {
     std::uint32_t tadr5{};
     bool tadr5_known{};
 
+    // VIF0 (channel 0) registers: bounded storage + STR completion. ADR 0189.
+    std::uint32_t chcr0{};
+    bool chcr0_known{};
+    std::uint32_t madr0{};
+    bool madr0_known{};
+    std::uint32_t qwc0{};
+    bool qwc0_known{};
+    std::uint32_t tadr0{};
+    bool tadr0_known{};
+    std::uint32_t asr0{};
+    bool asr0_known{};
+    std::uint32_t asr1{};
+    bool asr1_known{};
+
     // VIF0 (channel 1) registers: bounded storage only. ADR 0184.
     std::uint32_t chcr1{};
     bool chcr1_known{};
@@ -140,6 +163,12 @@ struct EeDmacState {
         madr5 = 0; madr5_known = true;
         qwc5 = 0; qwc5_known = true;
         tadr5 = 0; tadr5_known = true;
+        chcr0 = 0; chcr0_known = true;
+        madr0 = 0; madr0_known = true;
+        qwc0 = 0; qwc0_known = true;
+        tadr0 = 0; tadr0_known = true;
+        asr0 = 0; asr0_known = true;
+        asr1 = 0; asr1_known = true;
         chcr1 = 0; chcr1_known = true;
         madr1 = 0; madr1_known = true;
         qwc1 = 0; qwc1_known = true;
@@ -343,6 +372,71 @@ struct EeDmacState {
     [[nodiscard]] bool write_tadr5(std::uint32_t value) noexcept {
         if (!tadr5_known) return false;
         tadr5 = value;
+        return true;
+    }
+
+    // VIF0 (channel 0) registers: bounded storage + STR completion. ADR 0189.
+    [[nodiscard]] bool read_chcr0(std::uint32_t& value) const noexcept {
+        value = chcr0;
+        return true;
+    }
+    [[nodiscard]] bool write_chcr0(std::uint32_t value) noexcept {
+        const bool was_str = (chcr0 & kEeDmacChcrStrMask) != 0U;
+        const bool now_str = (value & kEeDmacChcrStrMask) != 0U;
+
+        chcr0 = value;
+        chcr0_known = true;
+
+        if (!was_str && now_str && d_stat_known) {
+            d_stat |= kEeDmacDStatCh0StatusBit;
+            d_stat &= kEeDmacDStatReadableMask;
+            chcr0 &= ~kEeDmacChcrStrMask;
+        }
+        return true;
+    }
+    [[nodiscard]] bool read_madr0(std::uint32_t& value) const noexcept {
+        value = madr0;
+        return true;
+    }
+    [[nodiscard]] bool write_madr0(std::uint32_t value) noexcept {
+        madr0 = value;
+        madr0_known = true;
+        return true;
+    }
+    [[nodiscard]] bool read_qwc0(std::uint32_t& value) const noexcept {
+        value = qwc0;
+        return true;
+    }
+    [[nodiscard]] bool write_qwc0(std::uint32_t value) noexcept {
+        qwc0 = value;
+        qwc0_known = true;
+        return true;
+    }
+    [[nodiscard]] bool read_tadr0(std::uint32_t& value) const noexcept {
+        value = tadr0;
+        return true;
+    }
+    [[nodiscard]] bool write_tadr0(std::uint32_t value) noexcept {
+        tadr0 = value;
+        tadr0_known = true;
+        return true;
+    }
+    [[nodiscard]] bool read_asr0(std::uint32_t& value) const noexcept {
+        value = asr0;
+        return true;
+    }
+    [[nodiscard]] bool write_asr0(std::uint32_t value) noexcept {
+        asr0 = value;
+        asr0_known = true;
+        return true;
+    }
+    [[nodiscard]] bool read_asr1(std::uint32_t& value) const noexcept {
+        value = asr1;
+        return true;
+    }
+    [[nodiscard]] bool write_asr1(std::uint32_t value) noexcept {
+        asr1 = value;
+        asr1_known = true;
         return true;
     }
 

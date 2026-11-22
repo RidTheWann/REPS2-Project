@@ -314,6 +314,22 @@ int test_chcr1_str_sets_dstat_vif0() {
     return 0;
 }
 
+// Channel 0 (VIF0) is the next frontier after ADR 0188: the ABI-37 probe
+// stopped at 0x002181BC on sw $v1,($s1) with $s1=0x10008020 (D0_QWC).
+// PS2SDK ee_regs.h: D0_CHCR/MADR/QWC/TADR/ASR0/ASR1 at 0x10008000..0x10008050.
+int test_chcr0_str_sets_dstat_vif0_ch0() {
+    EeState state{};
+    state.memory.dmac.seed_d_stat(0U);
+    std::uint32_t value = 0U;
+    if (reps2::runtime::store_u32(state.memory, 0x10008020U, 3U) != Status::ok) return 1;
+    if (reps2::runtime::load_u32(state.memory, 0x10008020U, value) != Status::ok || value != 3U) return 2;
+    if (reps2::runtime::store_u32(state.memory, 0x10008000U, 0x145U) != Status::ok) return 3;
+    if (reps2::runtime::load_u32(state.memory, 0x10008000U, value) != Status::ok || (value & 0x100U) != 0U) return 4;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacDStatAddress, value)
+        != Status::ok || (value & (1U << 0U)) == 0U) return 5;
+    return 0;
+}
+
 // Same STR completion contract for channel 2 (GIF), guest writes D2_CHCR=0x145
 // at 0x0021B748 before polling STR in the same loop.
 int test_chcr2_str_sets_dstat_gif() {
@@ -351,6 +367,10 @@ int main() {
     if (const auto result = test_chcr5_str_sets_dstat_sif0(); result != 0) {
         std::fprintf(stderr, "CHCR5 STR sets D_STAT SIF0 test failed at check %d\n", result);
         return 70 + result;
+    }
+    if (const auto result = test_chcr0_str_sets_dstat_vif0_ch0(); result != 0) {
+        std::fprintf(stderr, "CHCR0 STR sets D_STAT VIF0 ch0 test failed at check %d\n", result);
+        return 105 + result;
     }
     if (const auto result = test_chcr1_str_sets_dstat_vif0(); result != 0) {
         std::fprintf(stderr, "CHCR1 STR sets D_STAT VIF0 test failed at check %d\n", result);
