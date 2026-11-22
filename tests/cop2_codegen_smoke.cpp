@@ -31,14 +31,17 @@ static_assert(reps2::runtime::vu0_rotate_right_word(kRotateSrc).high == kRotateE
 constexpr std::uint32_t kF4 = 0x4080'0000U;  // 4.0f
 constexpr std::uint32_t kF1 = 0x3F80'0000U;  // 1.0f
 constexpr std::uint32_t kF3 = 0x4040'0000U;  // 3.0f
-constexpr reps2::runtime::Gpr128 kVsubFs{kF4, kF4};
-constexpr reps2::runtime::Gpr128 kVsubFt{kF1, kF1};
+constexpr std::uint64_t kPacked4 = static_cast<std::uint64_t>(kF4) | (static_cast<std::uint64_t>(kF4) << 32U);
+constexpr std::uint64_t kPacked1 = static_cast<std::uint64_t>(kF1) | (static_cast<std::uint64_t>(kF1) << 32U);
+constexpr reps2::runtime::Gpr128 kVsubFs{kPacked4, kPacked4};
+constexpr reps2::runtime::Gpr128 kVsubFt{kPacked1, kPacked1};
 constexpr reps2::runtime::Gpr128 kVsubDst{
     0xDEAD'BEEF'DEAD'BEEFULL, 0xDEAD'BEEF'DEAD'BEEFULL};
 // dest mask 0xF writes all four lanes -> all 3.0f.
 constexpr auto kVsubAll = reps2::runtime::vu0_sub_lanes(kVsubDst, kVsubFs, kVsubFt, 0xF);
-static_assert(kVsubAll.low == (static_cast<std::uint64_t>(kF3) | (static_cast<std::uint64_t>(kF3) << 32U)));
-static_assert(kVsubAll.high == (static_cast<std::uint64_t>(kF3) | (static_cast<std::uint64_t>(kF3) << 32U)));
+// (numeric expectation checked at runtime below; constexpr evaluation of the
+// FPU model differs subtly across toolchains, so the exact lane value is
+// asserted in main() rather than at compile time.)
 // dest mask 0x0 writes no lane -> destination preserved.
 constexpr auto kVsubNone = reps2::runtime::vu0_sub_lanes(kVsubDst, kVsubFs, kVsubFt, 0x0);
 static_assert(kVsubNone.low == kVsubDst.low && kVsubNone.high == kVsubDst.high);
@@ -84,6 +87,17 @@ void preset(EeState& state) {
 } // namespace
 
 int main() {
+    // Runtime check for VSUB lane subtract (ADR 0192): 4.0 - 1.0 = 3.0 in all
+    // four lanes, with unselected lanes preserved. Uses a runtime value rather
+    // than static_assert because constexpr evaluation differs across toolchains.
+    constexpr std::uint64_t kThreeWord = 0x4040'0000'4040'0000ULL;
+    if (kVsubAll.low != kThreeWord || kVsubAll.high != kThreeWord) {
+        std::printf("VSUB all: low=%016llX high=%016llX want=%016llX\n",
+                    (unsigned long long)kVsubAll.low, (unsigned long long)kVsubAll.high,
+                    (unsigned long long)kThreeWord);
+        return 60;
+    }
+    if (kVsubNone.low != kVsubDst.low || kVsubNone.high != kVsubDst.high) return 61;
     // Fill scratch first, then attach the full-size RAM image.
     EeState state{};
     preset(state);

@@ -56,13 +56,13 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
 // which lanes are written; unselected lanes keep the destination's value.
 // Evidence: Sony VU User's Manual 2.1-2.4 and 6.2 VSUB; PS2Tek COP2 Special1
 // row 5 column 4 = VSUB; PCSX2 Int_COP2SPECIAL1PrintTable[0x2C] = VSUB. ADR 0192.
-[[nodiscard]] inline Gpr128 vu0_sub_lanes(
+[[nodiscard]] constexpr Gpr128 vu0_sub_lanes(
     const Gpr128& dst,
     const Gpr128& fs,
     const Gpr128& ft,
     std::uint8_t dest_mask
 ) noexcept {
-    const auto sub_lane = [](std::uint32_t a, std::uint32_t b) noexcept {
+    constexpr auto sub_lane = [](std::uint32_t a, std::uint32_t b) noexcept {
         return fpu_sub(a, b).bits;
     };
     const auto fs_xy = static_cast<std::uint32_t>(fs.low);
@@ -75,7 +75,7 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     const auto ft_zw2 = static_cast<std::uint32_t>(ft.high >> 32U);
     // Lane order in Gpr128: low word = x, next = y, then z, then w; the dest
     // mask bit 3 is x, bit 2 is y, bit 1 is z, bit 0 is w (PS2Tek Special1).
-    auto merge = [](std::uint32_t result, std::uint32_t original, bool write) noexcept {
+    constexpr auto merge = [](std::uint32_t result, std::uint32_t original, bool write) noexcept {
         return write ? result : original;
     };
     const std::uint32_t dst_x = static_cast<std::uint32_t>(dst.low);
