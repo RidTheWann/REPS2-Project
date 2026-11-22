@@ -65,8 +65,10 @@ lowest-risk, highest-count S4 slice.
 
 - The 182 `QMTC2`/`QMFC2` stop sites in the reachable probe are translated:
   `fmt5` stops 176 -> 0, and 6 of the 8 `fmt1` sites -> 0. The 2 remaining
-  `fmt1` sites are the malformed word `0x48220001` (format 1 with reserved bit
-  0 set), which stays `Unknown` and keeps failing closed.
+  `fmt1` sites are the **interlocked** word `0x48220001`
+  (QMFC2.I, format 1 with interlock bit 0 set), which was previously misclassified
+  as malformed but is a valid QMFC2.I (interlock variant). After ADR 0190
+  it decodes as `Qmfc2` with interlock flag set.
 - The raw stop count barely moves because the newly-translated code continues
   into the next unsupported family. Frontend counts for the same image,
   `PostADR153` -> `PostADR154`: basic blocks 60,935 -> 60,958 (+23), guest
@@ -91,8 +93,9 @@ lowest-risk, highest-count S4 slice.
 
 - Decoder test `decodes_cop2_quadword_register_transfers_and_reserved_fields`:
   `0x48A26000` decodes as `Qmtc2` with `rt=2 rd=12`, `0x48236000` as `Qmfc2`
-  with `rt=3 rd=12`; the malformed `0x48220001` (reserved bit 0) and the
-  unimplemented formats CFC2 `0x48420002`, CTC2 `0x48C20006`, Special1
+  with `rt=3 rd=12`; the interlocked `0x48220001` (QMFC2.I, bit 0 = interlock,
+  decoded as `Qmfc2` after ADR 0190), the genuinely malformed `0x4822_0002`
+  (reserved bit 1 set), and the unimplemented formats CFC2 `0x48420002`, CTC2 `0x48C20006`, Special1
   `0x4BCC5AEC` all stay `Unknown`.
 - Effects test `effects_track_cop2_vf_dependencies`: QMTC2 reads `GPR2`, writes
   `VF12`, no memory and no exception; QMTC2 to VF0 writes nothing; QMFC2 reads
