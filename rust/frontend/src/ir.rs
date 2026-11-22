@@ -212,6 +212,13 @@ pub enum Operation {
         dst: Gpr,
         src: Vf,
     },
+    /// VU0 VMR32 (COP2 Special2 index 49): rotate the four 32-bit words of
+    /// `src` right by one position into `dst`. A write to VF0 is dropped.
+    /// ADR 0191.
+    Vu0RotateRightWord {
+        dst: Vf,
+        src: Vf,
+    },
     // Single-precision COP1 arithmetic. Every form updates the FCR31 flag
     // summary; the accumulate forms write ACC, a separate 32-bit register with
     // no COP1 address, and the two MADD forms additionally read it.
@@ -1720,6 +1727,10 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 dst: gpr(instruction.rt),
                 src: vf(instruction.rd),
             },
+            Opcode::Vmr32 => Operation::Vu0RotateRightWord {
+                dst: vf(instruction.rt),
+                src: vf(instruction.rd),
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1843,6 +1854,17 @@ mod tests {
             program.instructions()[14].operation,
             Operation::MoveFromVu0Quadword { dst, src }
                 if dst.index() == 3 && src.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vmr32_rotate() {
+        let stream = [decoded(0x4BEB_033D, 0x3000)];
+        let program = lift(&stream).expect("VMR32 lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vu0RotateRightWord { dst, src }
+                if dst.index() == 11 && src.index() == 0
         ));
     }
 

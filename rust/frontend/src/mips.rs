@@ -143,6 +143,9 @@ pub enum Opcode {
     /// `GPR[rt] = VF[rd]`. Bits 10..0 are reserved-zero. A write to GPR[0] is
     /// discarded.
     Qmfc2,
+    /// VU0 VMR32 (COP2 Special2 index 49): rotate the four 32-bit words of
+    /// VF[rd] by one position and write VF[rt]. ADR 0191.
+    Vmr32,
     ParallelAddWord,
     ParallelSubWord,
     ParallelCompareGreaterWord,
@@ -469,6 +472,7 @@ impl Opcode {
             Self::Sqc2 => "sqc2",
             Self::Qmtc2 => "qmtc2",
             Self::Qmfc2 => "qmfc2",
+            Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
             Self::Ctc2 => "ctc2",
             Self::ParallelAddWord => "paddw",
@@ -1200,6 +1204,10 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd);
                 effects.gpr_write_mask = rt;
             }
+            Opcode::Vmr32 => {
+                effects.vf_read_mask = vf_read_bit(self.rd);
+                effects.vf_write_mask = vf_write_bit(self.rt);
+            }
 
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1416,6 +1424,11 @@ fn decode_cop2(word: u32) -> Opcode {
             Opcode::Qmtc2
         }
         0x06 if (word & 0x7FF) == 0 => Opcode::Ctc2, // CTC2: reserved 10..0 must be zero
+        // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
+        // the only Special2 operation implemented in this slice. ADR 0191.
+        0x1F if (((word & 0x3) | ((word >> 4) & 0x7C)) == 49) && (((word >> 2) & 0xF) == 0xF) => {
+            Opcode::Vmr32
+        }
         _ => Opcode::Unknown,
     }
 }
@@ -3548,6 +3561,24 @@ mod tests {
         assert_eq!(decode(0x4842_0003, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(0x48C2_0007, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vmr32_register_transfer() {
+        // VMR32 VF11, VF0 (COP2 Special2, fhi=12, flo=1, PCSX2 index 49).
+        // Reached at runtime in ABI-39 at pc=0x00221F28; VF0 is the constant
+        // (0,0,0,1) so VMR32 VF11,VF0 is fully determined without VU numeric state.
+        // ADR 0191.
+        let vmr32 = decode(0x4BEB_033D, 0);
+        assert_eq!(vmr32.opcode, Opcode::Vmr32);
+        assert_eq!(vmr32.rt, 11);
+        assert_eq!(vmr32.rd, 0);
+        let effects = vmr32.effects();
+        assert_eq!(effects.vf_read_mask, 1 << 0);
+        assert_eq!(effects.vf_write_mask, 1 << 11);
+        assert_eq!(effects.gpr_read_mask, 0);
+        assert_eq!(effects.gpr_write_mask, 0);
+        assert_eq!(effects.memory, MemoryEffect::None);
     }
 
     #[test]
