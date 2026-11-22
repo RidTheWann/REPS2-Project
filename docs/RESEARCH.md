@@ -2220,6 +2220,25 @@ limit, root set or relocated region is a different frontier.
   `status_name()` set (added `address_error`, `unmapped_memory`,
   `unsupported_memory_access`, etc.) so probes that stop on those statuses
   produce a valid `frontier.json`. 37/37 frontier unit tests pass.
+- **Implemented (ADR 0190, merge `a2e3c0f`, frontend-only, no ABI bump):**
+  `decode_cop2` accepts bit 0 as the interlock flag for QMFC2 (`fmt=1`) and
+  QMTC2 (`fmt=5`); bits 10..1 remain reserved. CFC2/CTC2 keep the full
+  10..0 reserved check. `0x48220001` is valid QMFC2.I `$2,VF0`, not malformed.
+  Decoder test updated (`0x48220001 -> Qmfc2`, `0x48220002 -> Unknown`).
+  ADR 0154, RESEARCH, PROJECT_STATE and CAPABILITIES were corrected in the
+  same PR after audit.
+- **Observed (ABI-39 probe `abi39-01`, main `a2e3c0f`, same digests, rebuilt
+  frontend, 5,000,000-instruction budget):** the `0x00221F24` stop is gone.
+  Generated `block_0x00221F20` now emits
+  `state.gpr[2] = vu0_read_vf(state.vu0, 0);` for QMFC2.I, confirming ADR 0190
+  at generated-code level; the run advances exactly one instruction to
+  `pc=0x00221F28`, stopping at 4,673,151 instructions as
+  `unsupported_instruction` on `0x4BEB033D`. Decoding that word: primary
+  `0x12` COP2, `fmt=31` (Special2/Special1 family, `fhi=12`, `flo=1`, opcode
+  index 49) — a VU0 macro arithmetic operation requiring a VU numeric model.
+  This is a minimal but genuine frontier advance: 4,673,150 -> 4,673,151
+  instructions and the QMFC2.I path is now executed rather than refused.
+  No boot stage or playable claim is made.
 - **Observed (ABI-38 probe `abi38-01`, main `8495109`, same digests, rebuilt
   frontend + native module, 5,000,000-instruction budget, 1 batch):** after
   ADR 0189 the D0_QWC write at `0x002181BC` succeeds (channel 0 bounded
