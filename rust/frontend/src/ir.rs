@@ -225,6 +225,11 @@ pub enum Operation {
         fs: Vf,
         ft: Vf,
     },
+    /// VU0 VOPMSUB (COP2 Special1 funct=0x2E): ACC -= fs * ft. ADR 0194.
+    Vopmsub {
+        fs: Vf,
+        ft: Vf,
+    },
     /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise VF lane subtract.
     /// `dst = fs - ft` per lane, masked by the 4-bit dest field. ADR 0192.
     Vsub {
@@ -1755,6 +1760,10 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 fs: vf(instruction.rd),
                 ft: vf(instruction.rt),
             },
+            Opcode::Vopmsub => Operation::Vopmsub {
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1910,6 +1919,16 @@ mod tests {
         assert!(matches!(
             program.instructions()[0].operation,
             Operation::Vopmula { fs, ft } if fs.index() == 11 && ft.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vopmsub() {
+        let stream = [decoded(0x4BCC_5AEE, 0x3000)];
+        let program = lift(&stream).expect("VOPMSUB lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vopmsub { fs, ft } if fs.index() == 11 && ft.index() == 12
         ));
     }
 

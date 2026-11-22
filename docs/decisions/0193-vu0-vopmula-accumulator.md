@@ -1,11 +1,12 @@
-# ADR 0193: VU0 VOPMULA (COP2 Special1 funct=0x3E) outer product multiply-accumulate (runtime ABI 39)
+# ADR 0193: VU0 VOPMULA/VOPMSUB accumulator (runtime ABI 39)
 
 - **Status:** Accepted
 - **Date:** 2026-11-23
 - **Scope:** `rust/frontend/src/mips.rs` (`Opcode::Vopmula`, decode, effects),
   `rust/frontend/src/ir.rs` (`Operation::Vopmula`),
   `rust/frontend/src/codegen.rs` (emit),
-  `runtime/include/reps2/runtime/ee_state.hpp` (`Vu0State::acc` + `vu0_opmula` helper),
+  `runtime/include/reps2/runtime/ee_state.hpp` (`Vu0State::acc` + `vu0_opmula`/
+  `vu0_opmsub` helpers),
   `runtime/include/reps2/runtime/abi_version.hpp` (ABI 38 -> 39),
   `docs/RESEARCH.md`.
 - **Related:** ADR 0192 (VSUB), ADR 0191 (VMR32), ADR 0154 (COP2 transfers).
@@ -38,8 +39,12 @@ VOPMULA, VADDA, VMULA, VMSUBA, VADDAq, etc.
 ## Decision
 
 1. Add `Gpr128 acc` field to `Vu0State` (zero-initialized).
-2. Decode COP2 Special1 `funct=0x3E` as `Opcode::Vopmula`.
-3. IR: `Operation::Vopmula { fs, ft }` (dest is implicit ACC, no fd).
+2. Decode COP2 Special1 `funct=0x3E` as `Opcode::Vopmula` and `funct=0x2E` as
+   `Opcode::Vopmsub`. The ABI-44 probe (`abi44-01`, pc `0x0023DD8C`) stopped on
+   `0x4BCB62EE`, the VOPMSUB partner of the same ACC register; both ship in this
+   slice because they share the ACC contract and neither is useful alone.
+3. IR: `Operation::Vopmula { fs, ft }` and `Operation::Vopmsub { fs, ft }`
+   (destination is the implicit ACC, no fd).
 4. Codegen: `state.vu0.acc = vu0_opmula(state.vu0.acc, vu0_read_vf(fs), vu0_read_vf(ft))`.
 5. Runtime helper `vu0_opmula` (header-only `constexpr`) computes outer-product
    MAC per lane using the same `fpu_mul` + `fpu_add` model as the EE FPU

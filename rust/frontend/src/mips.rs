@@ -151,6 +151,8 @@ pub enum Opcode {
     /// VU0 VOPMULA (COP2 Special1 funct=0x3E): outer-product multiply-accumulate
     /// `ACC[i] += fs[i] * ft[i]`. Destination is ACC, not a VF register. ADR 0193.
     Vopmula,
+    /// VU0 VOPMSUB (COP2 Special1 funct=0x2E): outer-product multiply-subtract.
+    Vopmsub,
     ParallelAddWord,
     ParallelSubWord,
     ParallelCompareGreaterWord,
@@ -479,6 +481,7 @@ impl Opcode {
             Self::Qmfc2 => "qmfc2",
             Self::Vsub => "vsub",
             Self::Vopmula => "vopmula",
+            Self::Vopmsub => "vopmsub",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
             Self::Ctc2 => "ctc2",
@@ -1221,8 +1224,8 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
-            Opcode::Vopmula => {
-                // VOPMULA writes ACC, not VF; reads fs (rd) and ft (rt).
+            Opcode::Vopmula | Opcode::Vopmsub => {
+                // VOPMULA/VOPMSUB write ACC, not VF; read fs (rd) and ft (rt).
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
             }
 
@@ -1446,6 +1449,7 @@ fn decode_cop2(word: u32) -> Opcode {
         // selects which of x/y/z/w lanes are written.
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x2C => Opcode::Vsub,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x3E => Opcode::Vopmula,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x2E => Opcode::Vopmsub,
         // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
         // the only Special2 operation implemented in this slice. ADR 0191.
         0x1F if (((word & 0x3) | ((word >> 4) & 0x7C)) == 49) && (((word >> 2) & 0xF) == 0xF) => {
@@ -3587,7 +3591,21 @@ mod tests {
         assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Vsub);
         assert_eq!(decode(0x4BCC_5AED, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(0x4BCC_5AFE, 0).opcode, Opcode::Vopmula);
-        assert_eq!(decode(0x4BCC_5AEE, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(0x4BCC_5AEE, 0).opcode, Opcode::Vopmsub);
+        assert_eq!(decode(0x4BCC_5AEF, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vopmsub_and_effects() {
+        // VOPMSUB VF11, VF12 (funct=0x2E), word 0x4BCC5AEE.
+        let vopmsub = decode(0x4BCC_5AEE, 0);
+        assert_eq!(vopmsub.opcode, Opcode::Vopmsub);
+        assert_eq!(vopmsub.rd, 11); // fs
+        assert_eq!(vopmsub.rt, 12); // ft
+        let effects = vopmsub.effects();
+        assert_eq!(effects.vf_read_mask, (1 << 11) | (1 << 12));
+        assert_eq!(effects.vf_write_mask, 0); // ACC, not VF
+        assert_eq!(effects.memory, MemoryEffect::None);
     }
 
     #[test]
