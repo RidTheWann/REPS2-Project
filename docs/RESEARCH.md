@@ -2220,6 +2220,26 @@ limit, root set or relocated region is a different frontier.
   `status_name()` set (added `address_error`, `unmapped_memory`,
   `unsupported_memory_access`, etc.) so probes that stop on those statuses
   produce a valid `frontier.json`. 37/37 frontier unit tests pass.
+- **Observed (ABI-38 probe `abi38-01`, main `8495109`, same digests, rebuilt
+  frontend + native module, 5,000,000-instruction budget, 1 batch):** after
+  ADR 0189 the D0_QWC write at `0x002181BC` succeeds (channel 0 bounded
+  storage + STR completion works), and the run advances to `pc=0x00221F24`
+  after 4,673,150 instructions, stopping as `unsupported_instruction` on
+  COP2 word `0x48220001`. Decoding: primary `0x12` COP2, `fmt=1` (QMFC2),
+  `rt=2` (`$v0`), `rd=0` (VF0), **reserved bit 0 = 1** (malformed; decoder
+  requires reserved bits 10..0 = 0). This is the **same malformed word** the
+  ABI-29 static census already recorded at `PostADR154` (one of 2 remaining
+  `fmt1` sites, `0x48220001`, reserved bit 0 set, kept fail-closed), now
+  reached at runtime for the first time after ADR 0188/0189 cleared the
+  DMAC stops. The
+  frontier advanced from a budget-limited spin at `0x002433D0` (79,999,756
+  instr, ABI-36) → D0_QWC unsupported at `0x002181BC` (4,670,541 instr,
+  ABI-37) → malformed CFC2 at `0x00221F24` (4,673,150 instr, ABI-38).
+  `frontier.json` was successfully emitted because the schema now accepts
+  `unsupported_instruction`. Next evidence gate: whether the title has
+  valid CFC2 to COP2 control registers that we must model (reg 1 = Status
+  bit 0x100 = VPU_STAT bit 8 "ZS" sticky zero flag), or if these are all
+  malformed and can stay fail-closed.
 
 ## Provenance rules
 
