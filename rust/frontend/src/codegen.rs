@@ -94,6 +94,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::vu0_write_control;\n\
              using reps2::runtime::vu0_rotate_right_word;\n\
              using reps2::runtime::vu0_sub_lanes;\n\
+             using reps2::runtime::vu0_opmula;\n\
              using reps2::runtime::vu0_read_vf;\n\
              using reps2::runtime::vu0_write_vf;\n\
              using reps2::runtime::enable_interrupts;\n\
@@ -310,7 +311,14 @@ pub(crate) fn emit_instruction(
         } => {
             let d = dst.index();
             output.push_str(&format!(
-                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
+                fs.index(),
+                ft.index()
+            ));
+        }
+        Operation::Vopmula { fs, ft } => {
+            output.push_str(&format!(
+                "    state.vu0.acc = reps2::runtime::vu0_opmula(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}));\n",
                 fs.index(),
                 ft.index()
             ));
@@ -2778,6 +2786,21 @@ mod tests {
     }
 
     #[test]
+    fn emits_vu0_vopmula() {
+        let words = [0x4BCC_5AFEu32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x23DD88 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VOPMULA IR");
+        let cpp = emit_cpp(&program).expect("VOPMULA C++");
+        assert!(cpp.contains(
+            "state.vu0.acc = reps2::runtime::vu0_opmula(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12));"
+        ));
+    }
+
+    #[test]
     fn emits_vu0_vsub() {
         let words = [0x4BCC_5AECu32];
         let decoded = words
@@ -2790,7 +2813,7 @@ mod tests {
 
         assert!(cpp.contains("using reps2::runtime::vu0_sub_lanes;"));
         assert!(cpp.contains(
-            "vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 14));"
+            "vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_sub_lanes(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 14));"
         ));
     }
 

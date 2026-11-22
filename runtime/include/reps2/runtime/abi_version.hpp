@@ -120,4 +120,6 @@
 // ABI 38 covers ADR 0189: VIF0 DMAC channel-0 registers (0x10008000..0x10008050)
 // are bounded storage with STR self-clear + D_STAT bit 0 on start. sizeof(EeState)
 // changes; ABI-37 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 38
+// ABI 39 covers ADR 0193: VU0 accumulator (Vu0State::acc) added for VOPMULA.
+// sizeof(EeState) changes; ABI-38 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 39
