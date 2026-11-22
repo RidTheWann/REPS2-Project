@@ -148,6 +148,9 @@ pub enum Opcode {
     /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise fs - ft into VF[fd],
     /// masked by the 4-bit dest field (bits 24..21). ADR 0192.
     Vsub,
+    /// VU0 VOPMULA (COP2 Special1 funct=0x3E): outer-product multiply-accumulate
+    /// `ACC[i] += fs[i] * ft[i]`. Destination is ACC, not a VF register. ADR 0193.
+    Vopmula,
     ParallelAddWord,
     ParallelSubWord,
     ParallelCompareGreaterWord,
@@ -475,6 +478,7 @@ impl Opcode {
             Self::Qmtc2 => "qmtc2",
             Self::Qmfc2 => "qmfc2",
             Self::Vsub => "vsub",
+            Self::Vopmula => "vopmula",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
             Self::Ctc2 => "ctc2",
@@ -1217,6 +1221,10 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
+            Opcode::Vopmula => {
+                // VOPMULA writes ACC, not VF; reads fs (rd) and ft (rt).
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+            }
 
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1437,6 +1445,7 @@ fn decode_cop2(word: u32) -> Opcode {
         // is implemented in this slice. ADR 0192. The dest mask (bits 24..21)
         // selects which of x/y/z/w lanes are written.
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x2C => Opcode::Vsub,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x3E => Opcode::Vopmula,
         // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
         // the only Special2 operation implemented in this slice. ADR 0191.
         0x1F if (((word & 0x3) | ((word >> 4) & 0x7C)) == 49) && (((word >> 2) & 0xF) == 0xF) => {
@@ -3573,10 +3582,26 @@ mod tests {
         // (>= 0x10) stay unsupported except the explicitly modelled VSUB.
         assert_eq!(decode(0x4842_0003, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(0x48C2_0007, 0).opcode, Opcode::Unknown);
-        // VSUB (funct=0x2C) is decoded (ADR 0192); a peer Special1 funct stays
-        // Unknown.
+        // VSUB (funct=0x2C) and VOPMULA (funct=0x3E) are decoded (ADR 0192/0193);
+        // a peer Special1 funct stays Unknown.
         assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Vsub);
         assert_eq!(decode(0x4BCC_5AED, 0).opcode, Opcode::Unknown);
+        assert_eq!(decode(0x4BCC_5AFE, 0).opcode, Opcode::Vopmula);
+        assert_eq!(decode(0x4BCC_5AEE, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vopmula_and_effects() {
+        // VOPMULA VF11, VF12 (funct=0x3E), word 0x4BCC5AFE at pc=0x0023DD88.
+        let vopmula = decode(0x4BCC_5AFE, 0);
+        assert_eq!(vopmula.opcode, Opcode::Vopmula);
+        assert_eq!(vopmula.rd, 11); // fs
+        assert_eq!(vopmula.rt, 12); // ft
+        let effects = vopmula.effects();
+        assert_eq!(effects.vf_read_mask, (1 << 11) | (1 << 12));
+        assert_eq!(effects.vf_write_mask, 0); // ACC, not VF
+        assert_eq!(effects.gpr_read_mask, 0);
+        assert_eq!(effects.memory, MemoryEffect::None);
     }
 
     #[test]

@@ -30,6 +30,9 @@ struct Gpr128 {
 // slice uses the integer register file yet, so it is not modelled.
 struct Vu0State {
     std::array<Gpr128, 32> vf{};
+    // VU0 accumulator register. Written by VOPMULA/VADDA/VMULA etc.
+    // Initialized to zero. ADR 0193.
+    Gpr128 acc{};
     // VU0 COP2 control registers (CFC2/CTC2). Only a subset is modelled;
     // unmodelled registers remain fail-closed until evidenced. ADR 0180.
     std::array<std::uint32_t, 32> control{};
@@ -86,6 +89,38 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     const std::uint32_t out_y = merge(sub_lane(fs_zw, ft_zw), dst_y, (dest_mask & 0x4U) != 0U);
     const std::uint32_t out_z = merge(sub_lane(fs_xy2, ft_xy2), dst_z, (dest_mask & 0x2U) != 0U);
     const std::uint32_t out_w = merge(sub_lane(fs_zw2, ft_zw2), dst_w, (dest_mask & 0x1U) != 0U);
+    return Gpr128{
+        static_cast<std::uint64_t>(out_x) | (static_cast<std::uint64_t>(out_y) << 32U),
+        static_cast<std::uint64_t>(out_z) | (static_cast<std::uint64_t>(out_w) << 32U),
+    };
+}
+
+// VU0 VOPMULA (COP2 Special1 funct=0x3E): outer-product multiply-accumulate into
+// ACC. `ACC[i] += fs[i] * ft[i]` per lane, using the same single-precision
+// truncate-toward-zero/no-NaN/no-denormal rules as fpu_mul/fpu_add. The 4-bit
+// dest field is ignored (destination is always ACC). Evidence: Sony VU User's
+// Manual 6.2 VOPMULA; PS2Tek row 7 col 6; PCSX2 Int_COP2SPECIAL1PrintTable[0x3E].
+// ADR 0193.
+[[nodiscard]] constexpr Gpr128 vu0_opmula(
+    const Gpr128& acc,
+    const Gpr128& fs,
+    const Gpr128& ft
+) noexcept {
+    constexpr auto lane = [](std::uint32_t a, std::uint32_t f, std::uint32_t t) noexcept {
+        return fpu_add(a, fpu_mul(f, t).bits).bits;
+    };
+    const auto out_x = lane(static_cast<std::uint32_t>(acc.low),
+                            static_cast<std::uint32_t>(fs.low),
+                            static_cast<std::uint32_t>(ft.low));
+    const auto out_y = lane(static_cast<std::uint32_t>(acc.low >> 32U),
+                            static_cast<std::uint32_t>(fs.low >> 32U),
+                            static_cast<std::uint32_t>(ft.low >> 32U));
+    const auto out_z = lane(static_cast<std::uint32_t>(acc.high),
+                            static_cast<std::uint32_t>(fs.high),
+                            static_cast<std::uint32_t>(ft.high));
+    const auto out_w = lane(static_cast<std::uint32_t>(acc.high >> 32U),
+                            static_cast<std::uint32_t>(fs.high >> 32U),
+                            static_cast<std::uint32_t>(ft.high >> 32U));
     return Gpr128{
         static_cast<std::uint64_t>(out_x) | (static_cast<std::uint64_t>(out_y) << 32U),
         static_cast<std::uint64_t>(out_z) | (static_cast<std::uint64_t>(out_w) << 32U),

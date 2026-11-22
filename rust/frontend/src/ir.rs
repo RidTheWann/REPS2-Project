@@ -219,6 +219,12 @@ pub enum Operation {
         dst: Vf,
         src: Vf,
     },
+    /// VU0 VOPMULA (COP2 Special1 funct=0x3E): outer-product multiply-accumulate
+    /// into ACC register. `ACC[i] += fs[i] * ft[i]` per lane. ADR 0193.
+    Vopmula {
+        fs: Vf,
+        ft: Vf,
+    },
     /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise VF lane subtract.
     /// `dst = fs - ft` per lane, masked by the 4-bit dest field. ADR 0192.
     Vsub {
@@ -1745,6 +1751,10 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 ft: vf(instruction.rt),
                 dest_mask: instruction.rs & 0xF,
             },
+            Opcode::Vopmula => Operation::Vopmula {
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1890,6 +1900,16 @@ mod tests {
             program.instructions()[0].operation,
             Operation::Vsub { dst, fs, ft, dest_mask }
                 if dst.index() == 11 && fs.index() == 11 && ft.index() == 12 && dest_mask == 0xE
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vopmula() {
+        let stream = [decoded(0x4BCC_5AFE, 0x3000)];
+        let program = lift(&stream).expect("VOPMULA lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vopmula { fs, ft } if fs.index() == 11 && ft.index() == 12
         ));
     }
 
