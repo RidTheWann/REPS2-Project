@@ -23,6 +23,12 @@ inline constexpr std::uint32_t kEeDmacMadr1Address{0x1000'9010U};
 inline constexpr std::uint32_t kEeDmacQwc1Address{0x1000'9020U};
 inline constexpr std::uint32_t kEeDmacTadr1Address{0x1000'9030U};
 
+// GIF (channel 2) registers. ADR 0185.
+inline constexpr std::uint32_t kEeDmacChcr2Address{0x1000'A000U};
+inline constexpr std::uint32_t kEeDmacMadr2Address{0x1000'A010U};
+inline constexpr std::uint32_t kEeDmacQwc2Address{0x1000'A020U};
+inline constexpr std::uint32_t kEeDmacTadr2Address{0x1000'A030U};
+
 // D_CTRL bit masks.
 inline constexpr std::uint32_t kEeDmacCtrlDmaeMask{0x0000'0001U};  // bit 0: master enable
 
@@ -105,6 +111,12 @@ struct EeDmacState {
     bool qwc1_known{};
     std::uint32_t tadr1{};
     bool tadr1_known{};
+
+    // GIF (channel 2) registers: bounded storage only, reset known zero. ADR 0185.
+    std::uint32_t chcr2{};
+    std::uint32_t madr2{};
+    std::uint32_t qwc2{};
+    std::uint32_t tadr2{};
 
     // Establish the HLE boot environment's DMAC state: every modelled register
     // is known and idle. This models the kernel-initialized DMAC the title
@@ -356,6 +368,41 @@ struct EeDmacState {
     [[nodiscard]] bool write_tadr1(std::uint32_t value) noexcept {
         tadr1 = value;
         tadr1_known = true;
+        return true;
+    }
+
+    // GIF (channel 2) registers: bounded storage only, reset known zero.
+    // No DMA transfer, interrupt, or completion is modelled. ADR 0185.
+    [[nodiscard]] bool read_chcr2(std::uint32_t& value) const noexcept {
+        value = chcr2;
+        return true;
+    }
+    [[nodiscard]] bool write_chcr2(std::uint32_t value) noexcept {
+        chcr2 = value;
+        return true;
+    }
+    [[nodiscard]] bool read_madr2(std::uint32_t& value) const noexcept {
+        value = madr2;
+        return true;
+    }
+    [[nodiscard]] bool write_madr2(std::uint32_t value) noexcept {
+        madr2 = value;
+        return true;
+    }
+    [[nodiscard]] bool read_qwc2(std::uint32_t& value) const noexcept {
+        value = qwc2;
+        return true;
+    }
+    [[nodiscard]] bool write_qwc2(std::uint32_t value) noexcept {
+        qwc2 = value;
+        return true;
+    }
+    [[nodiscard]] bool read_tadr2(std::uint32_t& value) const noexcept {
+        value = tadr2;
+        return true;
+    }
+    [[nodiscard]] bool write_tadr2(std::uint32_t value) noexcept {
+        tadr2 = value;
         return true;
     }
 };
