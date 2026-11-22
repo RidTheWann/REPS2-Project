@@ -158,6 +158,51 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     };
 }
 
+// VU0 VMULAx/VMADDAy/VMADDAz (COP2 Special2 indices 24/9/10): broadcast one
+// lane of ft across all four lanes and multiply-accumulate with fs into ACC:
+//   ACC[i] = ACC[i] + fs[i] * ft[broadcast_lane]   (VMULAx replaces ACC)
+// `accumulate=false` for VMULAx, true for VMADDAy/VMADDAz. Evidence: Sony VU
+// manual 6.2 VMULAbc/VMADDAbc, ps2sdk vuhw.c matrix-vector pattern. ADR 0195.
+[[nodiscard]] constexpr Gpr128 vu0_acc_broadcast_mul(
+    const Gpr128& acc,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t broadcast_lane,
+    bool accumulate
+) noexcept {
+    const std::uint32_t ft_lanes[4] = {
+        static_cast<std::uint32_t>(ft.low),
+        static_cast<std::uint32_t>(ft.low >> 32U),
+        static_cast<std::uint32_t>(ft.high),
+        static_cast<std::uint32_t>(ft.high >> 32U),
+    };
+    const std::uint32_t fs_lanes[4] = {
+        static_cast<std::uint32_t>(fs.low),
+        static_cast<std::uint32_t>(fs.low >> 32U),
+        static_cast<std::uint32_t>(fs.high),
+        static_cast<std::uint32_t>(fs.high >> 32U),
+    };
+    const std::uint32_t acc_lanes[4] = {
+        static_cast<std::uint32_t>(acc.low),
+        static_cast<std::uint32_t>(acc.low >> 32U),
+        static_cast<std::uint32_t>(acc.high),
+        static_cast<std::uint32_t>(acc.high >> 32U),
+    };
+    const std::uint32_t scalar = ft_lanes[broadcast_lane & 3U];
+    const auto combine = [&](std::uint32_t base, std::uint32_t source) noexcept {
+        const auto product = fpu_mul(source, scalar).bits;
+        return accumulate ? fpu_add(base, product).bits : product;
+    };
+    const auto out_x = combine(acc_lanes[0], fs_lanes[0]);
+    const auto out_y = combine(acc_lanes[1], fs_lanes[1]);
+    const auto out_z = combine(acc_lanes[2], fs_lanes[2]);
+    const auto out_w = combine(acc_lanes[3], fs_lanes[3]);
+    return Gpr128{
+        static_cast<std::uint64_t>(out_x) | (static_cast<std::uint64_t>(out_y) << 32U),
+        static_cast<std::uint64_t>(out_z) | (static_cast<std::uint64_t>(out_w) << 32U),
+    };
+}
+
 // VU0 COP2 control register helpers (CFC2/CTC2). ADR 0180.
 inline constexpr std::uint8_t kVu0ControlRegisterCount = 32U;
 [[nodiscard]] inline std::uint32_t vu0_read_control(const Vu0State& vu0, std::uint8_t reg) noexcept {

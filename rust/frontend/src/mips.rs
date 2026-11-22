@@ -145,6 +145,14 @@ pub enum Opcode {
     Qmfc2,
     /// VU0 VMR32 (COP2 Special2 index 49): rotate VF[rd] words into VF[rt].
     Vmr32,
+    /// VU0 VMULAx (COP2 Special2 index 24): ACC = fs * ft.x (broadcast).
+    Vmulax,
+    /// VU0 VMADDAy (COP2 Special2 index 9): ACC += fs * ft.y (broadcast).
+    Vmadday,
+    /// VU0 VMADDAz (COP2 Special2 index 10): ACC += fs * ft.z (broadcast).
+    Vmaddaz,
+    /// VU0 VWAITQ (COP2 Special2 index 59): Q sync; no-op in this model. ADR 0195.
+    Vwaitq,
     /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise fs - ft into VF[fd],
     /// masked by the 4-bit dest field (bits 24..21). ADR 0192.
     Vsub,
@@ -482,6 +490,10 @@ impl Opcode {
             Self::Vsub => "vsub",
             Self::Vopmula => "vopmula",
             Self::Vopmsub => "vopmsub",
+            Self::Vmulax => "vmulax",
+            Self::Vmadday => "vmadday",
+            Self::Vmaddaz => "vmaddaz",
+            Self::Vwaitq => "vwaitq",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
             Self::Ctc2 => "ctc2",
@@ -1228,6 +1240,11 @@ impl Instruction {
                 // VOPMULA/VOPMSUB write ACC, not VF; read fs (rd) and ft (rt).
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
             }
+            Opcode::Vmulax | Opcode::Vmadday | Opcode::Vmaddaz => {
+                // Broadcast multiply-add into ACC: reads fs and ft, writes ACC.
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+            }
+            Opcode::Vwaitq => {}
 
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1452,6 +1469,10 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x2E => Opcode::Vopmsub,
         // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
         // the only Special2 operation implemented in this slice. ADR 0191.
+        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 9 => Opcode::Vmadday,
+        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 10 => Opcode::Vmaddaz,
+        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 24 => Opcode::Vmulax,
+        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 59 => Opcode::Vwaitq,
         0x1F if (((word & 0x3) | ((word >> 4) & 0x7C)) == 49) && (((word >> 2) & 0xF) == 0xF) => {
             Opcode::Vmr32
         }
