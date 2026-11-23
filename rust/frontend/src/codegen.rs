@@ -417,6 +417,16 @@ pub(crate) fn emit_instruction(
                 "    {{ const std::uint16_t vi_{vi}_addr = reps2::runtime::vu0_read_vi(state.vu0, {vi}); reps2::runtime::vu0_write_vumem_qword(state.vu0, vi_{vi}_addr, reps2::runtime::vu0_read_vf(state.vu0, {s})); reps2::runtime::vu0_write_vi(state.vu0, {vi}, static_cast<std::uint16_t>(vi_{vi}_addr + 1U)); }}\n"
             ));
         }
+        Operation::Vilwr { dst, vi } => {
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vi(state.vu0, {dst}, reps2::runtime::vu0_read_vumem_word(state.vu0, reps2::runtime::vu0_read_vi(state.vu0, {vi})));\\n"
+            ));
+        }
+        Operation::Viswr { src, vi } => {
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vumem_word(state.vu0, reps2::runtime::vu0_read_vi(state.vu0, {vi}), reps2::runtime::vu0_read_vi(state.vu0, {src}));\\n"
+            ));
+        }
         Operation::Vu0WaitQ => {
             // ponytail: Q pipeline is not modelled; VWAITQ is an explicit no-op
             // until a Q-timing ADR exists.
@@ -2988,6 +2998,20 @@ mod tests {
         // VLQI VF17, VI13
         assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 17, reps2::runtime::vu0_read_vumem_qword(state.vu0, vi_13_addr))"));
         assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 13, static_cast<std::uint16_t>(vi_13_addr + 1U));"));
+    }
+
+    #[test]
+    fn emits_vu0_vilwr_viswr() {
+        let words = [0x4BEC_5AFCu32, 0x4BEC_5AFDu32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x22E438 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VILWR/VISWR IR");
+        let cpp = emit_cpp(&program).expect("VILWR/VISWR C++");
+        assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 12, reps2::runtime::vu0_read_vumem_word(state.vu0, reps2::runtime::vu0_read_vi(state.vu0, 11)))"));
+        assert!(cpp.contains("reps2::runtime::vu0_write_vumem_word(state.vu0, reps2::runtime::vu0_read_vi(state.vu0, 11), reps2::runtime::vu0_read_vi(state.vu0, 12))"));
     }
 
     #[test]

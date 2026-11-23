@@ -161,6 +161,12 @@ pub enum Opcode {
     /// VU0 VSQI (COP2 Special2 index 53): VF -> VU Mem0 quadword store, then
     /// VI[is] += 1 (post-increment). ADR 0202.
     Vsqi,
+    /// VU0 VILWR (COP2 Special2 index 44): VI[it] = VU Mem0 16-bit word at
+    /// byte address VI[is] (no increment). ADR 0207.
+    Vilwr,
+    /// VU0 VISWR (COP2 Special2 index 45): VU Mem0 16-bit word at byte address
+    /// VI[is] = VI[it] (no increment). ADR 0207.
+    Viswr,
     /// VU0 VADDbc (COP2 Special1 funct 0x00..0x03): masked broadcast add. ADR 0198.
     Vaddx,
     Vaddy,
@@ -530,6 +536,8 @@ impl Opcode {
             Self::Vmove => "vmove",
             Self::Vlqi => "vlqi",
             Self::Vsqi => "vsqi",
+            Self::Vilwr => "vilwr",
+            Self::Viswr => "viswr",
             Self::Vaddx => "vaddx",
             Self::Vaddy => "vaddy",
             Self::Vaddz => "vaddz",
@@ -1309,6 +1317,12 @@ impl Instruction {
                 // writes no VF; VI file not in the VF/GPR masks.
                 effects.vf_read_mask = vf_read_bit(self.rt);
             }
+            Opcode::Vilwr => {
+                // VILWR: reads/writes the VI file and VU Mem0, not VF/GPR.
+            }
+            Opcode::Viswr => {
+                // VISWR: reads the VI file and VU Mem0, not VF/GPR.
+            }
             Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
                 // VADDbc: reads fs (rd) and ft (rt), writes fd (sa) masked.
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
@@ -1629,6 +1643,14 @@ fn decode_cop2(word: u32) -> Opcode {
         }
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 53 => {
             Opcode::Vsqi
+        }
+        // VILWR (index 44) / VISWR (index 45): VI<->VU Mem0 16-bit word access
+        // via the VI base register (byte address), no increment. ADR 0207.
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 44 => {
+            Opcode::Vilwr
+        }
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 45 => {
+            Opcode::Viswr
         }
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 59 => {
             Opcode::Vwaitq
@@ -3809,6 +3831,20 @@ mod tests {
         let effects = vlqi.effects();
         assert_eq!(effects.vf_read_mask, 0);
         assert_ne!(effects.vf_write_mask, 0);
+    }
+
+    #[test]
+    fn decodes_vu0_vilwr_viswr() {
+        // VILWR: word 0x4BEC5AFC at 0x0022E438 (Special2 index 44, it=12, is=11).
+        let vilwr = decode(0x4BEC_5AFC, 0);
+        assert_eq!(vilwr.opcode, Opcode::Vilwr);
+        assert_eq!(vilwr.rt, 12);
+        assert_eq!(vilwr.rd, 11);
+        // VISWR: word 0x4BEC5AFD at 0x0022E43C (Special2 index 45, it=12, is=11).
+        let viswr = decode(0x4BEC_5AFD, 0);
+        assert_eq!(viswr.opcode, Opcode::Viswr);
+        assert_eq!(viswr.rt, 12);
+        assert_eq!(viswr.rd, 11);
     }
 
     #[test]

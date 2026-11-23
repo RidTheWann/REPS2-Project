@@ -297,6 +297,18 @@ pub enum Operation {
         src: Vf,
         vi: u8,
     },
+    /// VU0 VILWR (COP2 Special2 index 44): VI[it] = VU Mem0 word at byte
+    /// address VI[is]. ADR 0207.
+    Vilwr {
+        dst: u8,
+        vi: u8,
+    },
+    /// VU0 VISWR (COP2 Special2 index 45): VU Mem0 word at byte address VI[is]
+    /// = VI[it]. ADR 0207.
+    Viswr {
+        src: u8,
+        vi: u8,
+    },
     /// VU0 VMADDbc masked broadcast multiply-add. ADR 0200.
     VmaddBroadcast {
         dst: Vf,
@@ -1903,6 +1915,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: vf(instruction.rt),
                 vi: instruction.rd & 0xF,
             },
+            Opcode::Vilwr => Operation::Vilwr {
+                dst: instruction.rt & 0xF,
+                vi: instruction.rd & 0xF,
+            },
+            Opcode::Viswr => Operation::Viswr {
+                src: instruction.rt & 0xF,
+                vi: instruction.rd & 0xF,
+            },
             Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
                 let lane = match instruction.opcode {
                     Opcode::Vaddx => 0,
@@ -2116,6 +2136,22 @@ mod tests {
         assert!(matches!(
             program.instructions()[1].operation,
             Operation::Vlqi { dst, vi } if dst.index() == 17 && vi == 13
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vilwr_viswr() {
+        // VILWR: index 44 (fhi=11, flo=0), word 0x4BEC5AFC at 0x0022E438.
+        // rt=12 (it), rd=11 (is).
+        let instructions = [decoded(0x4BEC_5AFC, 0x3000), decoded(0x4BEC_5AFD, 0x3004)];
+        let program = lift(&instructions).expect("VILWR/VISWR lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vilwr { dst, vi } if dst == 12 && vi == 11
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::Viswr { src, vi } if src == 12 && vi == 11
         ));
     }
 
