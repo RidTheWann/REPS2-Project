@@ -267,6 +267,24 @@ pub enum Operation {
         is: u8,
         it: u8,
     },
+    /// VU0 VISUB (COP2 Special1 funct=0x39): VI[fd] = VI[is] - VI[it]. ADR 0204.
+    Visub {
+        dst: u8,
+        is: u8,
+        it: u8,
+    },
+    /// VU0 VIAND (COP2 Special1 funct=0x3C): VI[fd] = VI[is] & VI[it]. ADR 0204.
+    Viand {
+        dst: u8,
+        is: u8,
+        it: u8,
+    },
+    /// VU0 VIOR (COP2 Special1 funct=0x3D): VI[fd] = VI[is] | VI[it]. ADR 0204.
+    Vior {
+        dst: u8,
+        is: u8,
+        it: u8,
+    },
     /// VU0 VLQI (COP2 Special2 index 52): VF[ft] = VU Mem0[VI[is] * 16];
     /// VI[is] += 1 (post-increment). ADR 0202.
     Vlqi {
@@ -1862,6 +1880,21 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 is: instruction.rd,
                 it: instruction.rt,
             },
+            Opcode::Visub => Operation::Visub {
+                dst: instruction.shift_amount,
+                is: instruction.rd,
+                it: instruction.rt,
+            },
+            Opcode::Viand => Operation::Viand {
+                dst: instruction.shift_amount,
+                is: instruction.rd,
+                it: instruction.rt,
+            },
+            Opcode::Vior => Operation::Vior {
+                dst: instruction.shift_amount,
+                is: instruction.rd,
+                it: instruction.rt,
+            },
             Opcode::Vlqi => Operation::Vlqi {
                 dst: vf(instruction.rt),
                 vi: instruction.rd & 0xF,
@@ -2083,6 +2116,28 @@ mod tests {
         assert!(matches!(
             program.instructions()[1].operation,
             Operation::Vlqi { dst, vi } if dst.index() == 17 && vi == 13
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_visub_viand_vior() {
+        let stream = [
+            decoded(0x4BCB_61BC, 0x3000),
+            decoded(0x4BCB_68BD, 0x3004),
+            decoded(0x4A0B_7079, 0x3008),
+        ];
+        let program = lift(&stream).expect("VISUB/VIAND/VIOR lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Viand { dst, is, it } if dst == 6 && is == 12 && it == 11
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::Vior { dst, is, it } if dst == 2 && is == 13 && it == 11
+        ));
+        assert!(matches!(
+            program.instructions()[2].operation,
+            Operation::Visub { dst, is, it } if dst == 1 && is == 14 && it == 11
         ));
     }
 

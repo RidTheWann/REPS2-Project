@@ -267,5 +267,9 @@ int main() {
     if (state.vu0.vi[8] != 15U) return 113;
     if (state.vu0.vi[5] != 0U) return 114;
 
+    // ADR 0204: VIAND vi9 <- vi8 & vi7 = 15; VIOR vi10 <- vi5 | vi8 = 15.
+    if (state.vu0.vi[9] != 15U) return 115;
+    if (state.vu0.vi[10] != 15U) return 116;
+
     return 0;
 }
