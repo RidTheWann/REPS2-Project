@@ -3961,6 +3961,30 @@ int test_cdvd_scmd_readclock_replies_with_bcd_clock() {
     return 0;
 }
 
+int test_cdvd_scmd_geterror_replies_no_error() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // CD_SCMD_GETERROR (0x04) has no payload and reads one 4-byte error code.
+    // REPS2 has modelled no failed transfer, so SCECdErNO (0) is the answer.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdScm, 0x04U, 0U, 4U);
+    store_word(ram, kRpcReply, 0xA5A5'A5A5U);
+    const reps2::runtime::SifDmaTransfer payload{0U, 0U, 0, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 1050;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.scmd_call_count != 1U || sif.scmd_replies != 1U) return 1051;
+    if (sif.last_scmd_number != 0x04U || !sif.last_scmd_replied) return 1052;
+    if (load_word(ram, kRpcReply) != 0U) return 1053;
+    if (sif.rpc_call_replies != 1U || !sif.last_rpc_call_replied) return 1054;
+    return 0;
+}
+
 int test_cdvd_scmd_mmode_refuses_a_malformed_request() {
     SifWindow ram{};
     EeState state{};
@@ -6593,6 +6617,8 @@ int main() {
          &test_cdvd_scmd_mmode_records_the_media_mode_and_replies_one},
         {"cdvd scmd readclock replies with a deterministic bcd clock",
          &test_cdvd_scmd_readclock_replies_with_bcd_clock},
+        {"cdvd scmd geterror replies no error",
+         &test_cdvd_scmd_geterror_replies_no_error},
         {"cdvd scmd mmode refuses a malformed request",
          &test_cdvd_scmd_mmode_refuses_a_malformed_request},
         {"fileio init handshake is served with version and flags",

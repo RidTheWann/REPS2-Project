@@ -2800,8 +2800,24 @@ inline constexpr std::uint32_t kEeCdvdScmdReadClock = 0x01U;
     return true;
 }
 
-// cdvdfsv's SIF RPC callback dispatches by function number. Only the two
-// evidenced functions above are served; every other S-command stays refused.
+// CD_SCMD_GETERROR (sid 0x80000593, function 4). Reports the last CDVD error.
+// REPS2 has no physical drive and no failed transfer has been modelled, so the
+// truthful value is SCECdErNO (0) from libcdvd-common.h. ADR 0206.
+inline constexpr std::uint32_t kEeCdvdScmdGetError = 0x04U;
+
+[[nodiscard]] inline bool serve_ee_cdvd_scmd_geterror(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    if (call.recv_addr == 0U || call.recv_size < 4U) {
+        return false; // need one word for the error code
+    }
+    // SCECdErNO = 0x00 (libcdvd-common.h SCECdvdErrorCode)
+    return store_u32(state.memory, call.recv_addr, 0U) == Status::ok;
+}
+
+// cdvdfsv's SIF RPC callback dispatches by function number. Only evidenced
+// functions are served; every other S-command stays refused.
 [[nodiscard]] inline bool serve_ee_cdvd_scmd_call(
     EeState& state,
     const EeSifRpcCall& call
@@ -2815,7 +2831,9 @@ inline constexpr std::uint32_t kEeCdvdScmdReadClock = 0x01U;
         ? serve_ee_cdvd_scmd_mmode(state, call)
         : call.rpc_number == kEeCdvdScmdReadClock
             ? serve_ee_cdvd_scmd_readclock(state, call)
-            : false;
+            : call.rpc_number == kEeCdvdScmdGetError
+                ? serve_ee_cdvd_scmd_geterror(state, call)
+                : false;
     if (!served) {
         return false; // unmodelled S-command: no RPC_END, caller stays blocked
     }
