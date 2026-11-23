@@ -269,6 +269,11 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME reps2_signed_doubleword_codegen_smoke COMMAND reps2_signed_doubleword_codegen_smoke)
+    if(MSVC)
+        # EeState grew with VU0 data memory (ADR 0202); this fixture keeps
+        # several states live on the stack at once.
+        target_link_options(reps2_signed_doubleword_codegen_smoke PRIVATE /STACK:4194304)
+    endif()
 
     set(REPS2_WORD_OVERFLOW_GENERATED_CPP "${REPS2_GENERATED_DIR}/word_overflow_program.cpp")
     add_custom_command(
@@ -302,6 +307,11 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME reps2_word_overflow_codegen_smoke COMMAND reps2_word_overflow_codegen_smoke)
+    if(MSVC)
+        # EeState grew with VU0 data memory (ADR 0202); this fixture keeps
+        # several states live on the stack at once.
+        target_link_options(reps2_word_overflow_codegen_smoke PRIVATE /STACK:4194304)
+    endif()
 
     set(REPS2_HILO_GENERATED_CPP "${REPS2_GENERATED_DIR}/hilo_program.cpp")
     add_custom_command(
@@ -1215,6 +1225,16 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
             0x48A22000
             # SQC2 $vf4, 0x90($a0) -> proves the VF0 read path through a GPR
             0xF8840090
+            # --- ADR 0201/0202: VI file + VU Mem0 quadword transfers ---
+            # VIADDI vi7, vi0, 15 -> VI7 = 15.
+            0x4A0703F2
+            # VSQI VF5, vi2++ -> VU Mem0 qword 0 <- VF5 (preset pattern);
+            # VI2 resets to 0 and becomes 1.
+            0x4BE5137D
+            # VLQI VF6, vi3++ -> VF6 <- VU Mem0 qword 0; VI3 resets to 0.
+            0x4BE61B7C
+            # SQC2 VF6, 0xA0($a0) -> proves VLQI loaded the VSQI value.
+            0xF88600A0
             0x00000000  # nop    delay-slot padding
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 COP2 data-movement block"
@@ -1537,7 +1557,7 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     if(MSVC)
         # This smoke keeps many architectural state snapshots live in one test.
         # The EE state grew with VU0 state, exceeding MSVC's default stack.
-        target_link_options(reps2_cfg_codegen_smoke PRIVATE /STACK:4194304)
+        target_link_options(reps2_cfg_codegen_smoke PRIVATE /STACK:16777216)
     endif()
 
     # EE syscall HLE dispatch: the same generated fixture, driven with the HLE
@@ -1670,7 +1690,7 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
 
     add_test(NAME reps2_cfg_split_codegen_smoke COMMAND reps2_cfg_split_codegen_smoke)
     if(MSVC)
-        target_link_options(reps2_cfg_split_codegen_smoke PRIVATE /STACK:4194304)
+        target_link_options(reps2_cfg_split_codegen_smoke PRIVATE /STACK:16777216)
     endif()
 
     # The host media boundary is runtime-only; it needs no generated code.

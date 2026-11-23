@@ -244,5 +244,24 @@ int main() {
     // CFC2 $9, $29: VPU_STAT is zero-initialized; read returns 0.
     if (state.gpr[9].low != 0ULL) return 106;
 
+    // ADR 0201: VIADDI vi7 <- vi0 + 15 = 15 (VI0 is hardwired zero).
+    // All VI registers started at zero; VI7 is now 15.
+    if (state.vu0.vi[7] != 15U) return 107;
+
+    // ADR 0202: VSQI VF5, vi2++ stored the VF5 pattern (loaded earlier from
+    // +0x20) to VU Mem0 qword 0, then incremented VI2 from 0 to 1. The bytes
+    // AA BB CC DD EE FF 00 11 22 33 44 55 66 77 88 99 load little-endian.
+    const auto stored = reps2::runtime::vu0_read_vumem_qword(state.vu0, 0U);
+    if (stored.low != 0x1100'FFEE'DDCC'BBAAULL) return 108;
+    if (stored.high != 0x9988'7766'5544'3322ULL) return 109;
+    if (state.vu0.vi[2] != 1U) return 110;
+
+    // VLQI VF6, vi3++ loaded VU Mem0 qword 0 into VF6 (VI3: 0 -> 1), and
+    // SQC2 wrote that same quadword to main RAM at +0xA0.
+    for (std::size_t i = 0; i < 16; ++i) {
+        if (main_ram_image[kScratchAddress + 0xA0 + i] != main_ram_image[kScratchAddress + 0x20 + i]) return 111;
+    }
+    if (state.vu0.vi[3] != 1U) return 112;
+
     return 0;
 }

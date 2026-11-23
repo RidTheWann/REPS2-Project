@@ -4,7 +4,7 @@
 
 The workspace at `D:\REPS2-Project` contained no `.git` directory and the GitHub repository `RidTheWann/REPS2-Project` was empty (`isEmpty: true`, `pushedAt: 2026-11-12T19:12:57Z`, no commits). The local backup `C:\Users\RidTheWann\REPS2-Backups\REPS2-Project-20261104-045206.bundle` and its bare `.git` restored 562 commits through `4bcbaf4` (2026-11-04, PR #71). The working-tree content documented below as `main` `431f71d` (2026-11-11) is preserved in the recovery commit; commits between PR #72 and PR #82 were not in any local object store and are not individually recoverable. A byte-level inventory against the backup found `.github/workflows/ci.yml` as the only missing tracked file; it was restored identically from the backup. Post-recovery local verification: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --locked`, CMake Release build, `ctest -C Release` (40/40), and desktop core tests (31/31). GitHub Releases and remote history from the former repository were not recoverable; Pages and the CI workflows (Rust/CMake, roadmap dashboard, desktop tests/publish, desktop packaging) were reconstructed from the surviving sources in follow-up pull requests. The backup layers created after that incident, their verification record and the restore procedure are documented in `docs/BACKUP_AND_RECOVERY.md`.
 
-Updated: 2026-11-19 (main @ af51115)
+Updated: 2026-11-24 (main @ 345e8a6, runtime ABI 41)
 
 ## Objective
 
@@ -257,6 +257,11 @@ Keep the ISO, extracted ELF, BIOS/firmware, REA Evidence bundles and full decomp
 ## Local PS2 EE toolchain
 
 A project-local PS2 EE toolchain is installed at `D:\ps2dev\v2.0.0\ps2dev` from the official ps2dev `v2.0.0` Windows release (archive SHA-256 recorded in `D:\ps2dev\v2.0.0\VERIFICATION.md`). Verified: `objdump`, `readelf`, `as` and `ld` (GNU Binutils 2.45.1) for target `mips64r5900el-ps2-elf`; `gcc` is **not** verified because its `libiconv-2.dll`/`libwinpthread-1.dll` dependencies are absent. The toolchain is used only to inspect/assemble synthetic fixtures and to disassemble SDK/guest code outside Git; no game material is committed.
+
+
+## VU0 integer/memory frontier (ADR 0201/0202, 2026-11-24)
+
+Runtime ABI 41 (ADR 0201 VI file + VIADDI; ADR 0202 VU0 data memory 4 KiB + VLQI/VSQI). Fresh probe `abi54-01` on merged main `345e8a6` (Windows x64/MSVC, ISO `0fe2b777...a7eb86`, boot ELF `adfda7b7...f0cf0c`): the `pc=0x0023CEF0` VIADDI stop is gone; VSQI/VLQI transfer VU Mem0 qwords via VI2/VI3 and advance the frontier to `pc=0x00221F5C`, `unsupported_instruction` on COP2 Special1 `0x4A004BF8` (`VIADD`) after 4,717,085 instructions (+8,357). Census: 62,010 blocks, 328,279 instructions, 457 unsupported stops (was 459). Generated-code smoke test `reps2_cop2_codegen_smoke` covers VIADDI + VSQI/VLQI + VI post-increment. Rust fmt/clippy/test (394 lib tests) and CTest 51/51 pass. No boot-tested or playable claim.
 
 ## Remaining M4 exit criteria
 
