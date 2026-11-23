@@ -169,6 +169,9 @@ pub enum Opcode {
     /// VU0 VIADDI (COP2 Special1 funct=0x32): VI[fd] = VI[fs] + sign_ext(imm).
     /// ADR 0201.
     Viaddi,
+    /// VU0 VIADD (COP2 Special1 funct=0x38): VI[fd] = VI[is] + VI[it].
+    /// ADR 0203.
+    Viadd,
     /// VU0 VMADDbc (COP2 Special1 funct 0x08..0x0B): fd.dest = ACC + fs*ft.bc.
     /// ADR 0200.
     Vmaddx,
@@ -526,6 +529,7 @@ impl Opcode {
             Self::Vaddz => "vaddz",
             Self::Vaddw => "vaddw",
             Self::Viaddi => "viaddi",
+            Self::Viadd => "viadd",
             Self::Vmaddx => "vmaddx",
             Self::Vmaddy => "vmaddy",
             Self::Vmaddz2 => "vmaddz",
@@ -1316,6 +1320,10 @@ impl Instruction {
                 // VIADDI: integer add immediate; touches the VI file, not VF/GPR.
                 // Effects on the VI file are not tracked by the VF/GPR masks.
             }
+            Opcode::Viadd => {
+                // VIADD: integer register add; touches only the VI file, which
+                // is not tracked by the VF/GPR effect masks. ADR 0203.
+            }
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
                 effects.may_raise_exception = true;
@@ -1545,6 +1553,8 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x02 => Opcode::Vaddz,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x32 => Opcode::Viaddi,
+        // Special1 funct 0x38 = VIADD: VI[fd] = VI[is] + VI[it]. ADR 0203.
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x38 => Opcode::Viadd,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x08 => Opcode::Vmaddx,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x09 => Opcode::Vmaddy,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0A => Opcode::Vmaddz2,
@@ -3756,6 +3766,16 @@ mod tests {
         let effects = vlqi.effects();
         assert_eq!(effects.vf_read_mask, 0);
         assert_ne!(effects.vf_write_mask, 0);
+    }
+
+    #[test]
+    fn decodes_vu0_viadd() {
+        // VIADD VI15, VI9, VI0 (Special1 funct 0x38), word 0x4A004BF8 at 0x00221F5C.
+        let insn = decode(0x4A00_4BF8, 0);
+        assert_eq!(insn.opcode, Opcode::Viadd);
+        assert_eq!(insn.rt, 0); // it
+        assert_eq!(insn.rd, 9); // is
+        assert_eq!(insn.shift_amount, 15); // id
     }
 
     #[test]
