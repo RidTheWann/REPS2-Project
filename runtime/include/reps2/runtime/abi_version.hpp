@@ -122,4 +122,6 @@
 // changes; ABI-37 modules are refused.
 // ABI 39 covers ADR 0193: VU0 accumulator (Vu0State::acc) added for VOPMULA.
 // sizeof(EeState) changes; ABI-38 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 39
+// ABI 40 covers ADR 0201: VU0 integer register file (Vu0State::vi, 16x u16).
+// sizeof(EeState) changes; ABI-39 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 40

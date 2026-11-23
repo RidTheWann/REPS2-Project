@@ -160,6 +160,9 @@ pub enum Opcode {
     Vaddy,
     Vaddz,
     Vaddw,
+    /// VU0 VIADDI (COP2 Special1 funct=0x32): VI[fd] = VI[fs] + sign_ext(imm).
+    /// ADR 0201.
+    Viaddi,
     /// VU0 VMADDbc (COP2 Special1 funct 0x08..0x0B): fd.dest = ACC + fs*ft.bc.
     /// ADR 0200.
     Vmaddx,
@@ -514,6 +517,7 @@ impl Opcode {
             Self::Vaddy => "vaddy",
             Self::Vaddz => "vaddz",
             Self::Vaddw => "vaddw",
+            Self::Viaddi => "viaddi",
             Self::Vmaddx => "vmaddx",
             Self::Vmaddy => "vmaddy",
             Self::Vmaddz2 => "vmaddz",
@@ -1290,6 +1294,10 @@ impl Instruction {
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
 
+            Opcode::Viaddi => {
+                // VIADDI: integer add immediate; touches the VI file, not VF/GPR.
+                // Effects on the VI file are not tracked by the VF/GPR masks.
+            }
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
                 effects.may_raise_exception = true;
@@ -1518,6 +1526,7 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x01 => Opcode::Vaddy,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x02 => Opcode::Vaddz,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x32 => Opcode::Viaddi,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x08 => Opcode::Vmaddx,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x09 => Opcode::Vmaddy,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0A => Opcode::Vmaddz2,
@@ -3699,6 +3708,16 @@ mod tests {
         let effects = vmaddx.effects();
         assert_eq!(effects.vf_write_mask, 1 << 17);
         assert_ne!(effects.vf_read_mask, 0);
+    }
+
+    #[test]
+    fn decodes_vu0_viaddi() {
+        // VIADDI $7, $0, 15 (funct 0x32), word 0x4A0703F2 at 0x0023CEF0.
+        let insn = decode(0x4A07_03F2, 0);
+        assert_eq!(insn.opcode, Opcode::Viaddi);
+        assert_eq!(insn.rt, 7); // dst VI
+        assert_eq!(insn.rd, 0); // src VI
+        assert_eq!(insn.shift_amount & 0x1F, 15); // imm5
     }
 
     #[test]
