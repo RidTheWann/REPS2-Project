@@ -153,6 +153,9 @@ pub enum Opcode {
     Vmaddaz,
     /// VU0 VWAITQ (COP2 Special2 index 59): Q sync; no-op in this model. ADR 0195.
     Vwaitq,
+    /// VU0 VMADDw (COP2 Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
+    /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
+    Vmaddw,
     /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise fs - ft into VF[fd],
     /// masked by the 4-bit dest field (bits 24..21). ADR 0192.
     Vsub,
@@ -494,6 +497,7 @@ impl Opcode {
             Self::Vmadday => "vmadday",
             Self::Vmaddaz => "vmaddaz",
             Self::Vwaitq => "vwaitq",
+            Self::Vmaddw => "vmaddw",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
             Self::Ctc2 => "ctc2",
@@ -1245,6 +1249,11 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
             }
             Opcode::Vwaitq => {}
+            Opcode::Vmaddw => {
+                // VF[fd] = ACC + fs * ft.w: reads fs, ft, and ACC; writes VF[fd].
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+                effects.vf_write_mask = vf_write_bit(self.shift_amount);
+            }
 
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
@@ -1467,13 +1476,30 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x2C => Opcode::Vsub,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x3E => Opcode::Vopmula,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x2E => Opcode::Vopmsub,
+        // Special1 broadcast multiply-add VMADDw (funct 0x0B) writes VF[fd]:
+        // VF[fd] = ACC + fs * ft.w, the final step of a matrix-vector multiply.
+        // funct 0x3C..0x3F are Special2 entries, not Special1. ADR 0196.
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0B => Opcode::Vmaddw,
         // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
         // the only Special2 operation implemented in this slice. ADR 0191.
-        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 9 => Opcode::Vmadday,
-        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 10 => Opcode::Vmaddaz,
-        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 24 => Opcode::Vmulax,
-        0x1F if ((word & 0x3) | ((word >> 4) & 0x7C)) == 59 => Opcode::Vwaitq,
-        0x1F if (((word & 0x3) | ((word >> 4) & 0x7C)) == 49) && (((word >> 2) & 0xF) == 0xF) => {
+        // The Special2 table applies only when bits 5..0 >= 0x3C; lower funct
+        // values belong to Special1 and decode through their own arms above.
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 9 => {
+            Opcode::Vmadday
+        }
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 10 => {
+            Opcode::Vmaddaz
+        }
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 24 => {
+            Opcode::Vmulax
+        }
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 59 => {
+            Opcode::Vwaitq
+        }
+        0x1F if (word & 0x3F) >= 0x3C
+            && ((word & 0x3) | ((word >> 4) & 0x7C)) == 49
+            && (((word >> 2) & 0xF) == 0xF) =>
+        {
             Opcode::Vmr32
         }
         _ => Opcode::Unknown,
@@ -3614,6 +3640,24 @@ mod tests {
         assert_eq!(decode(0x4BCC_5AFE, 0).opcode, Opcode::Vopmula);
         assert_eq!(decode(0x4BCC_5AEE, 0).opcode, Opcode::Vopmsub);
         assert_eq!(decode(0x4BCC_5AEF, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vmaddw_and_effects() {
+        // VMADDw (funct=0x0B) writes VF[fd]=ACC+fs*ft.w. Word 0x4BEE6B8B at
+        // pc=0x00221950 (ABI-45/46 frontier). ADR 0196.
+        let vmaddw = decode(0x4BEE_6B8B, 0);
+        assert_eq!(vmaddw.opcode, Opcode::Vmaddw);
+        assert_eq!(vmaddw.shift_amount, 14); // fd
+        assert_eq!(vmaddw.rd, 13); // fs
+        assert_eq!(vmaddw.rt, 14); // ft
+        let effects = vmaddw.effects();
+        assert_eq!(effects.vf_read_mask, (1 << 13) | (1 << 14));
+        assert_eq!(effects.vf_write_mask, 1 << 14);
+        assert_eq!(effects.memory, MemoryEffect::None);
+        // A word with Special2 index 63 but funct>=0x3C must not be confused
+        // with the Special1 VMADDw above.
+        assert_eq!(decode(0x4BEF_6BCB, 0).opcode, Opcode::Vmaddw);
     }
 
     #[test]

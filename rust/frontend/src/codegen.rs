@@ -350,6 +350,15 @@ pub(crate) fn emit_instruction(
             // ponytail: Q pipeline is not modelled; VWAITQ is an explicit no-op
             // until a Q-timing ADR exists.
         }
+        Operation::Vu0MaddW { dst, fs, ft } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_acc_broadcast_mul(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), 3, true));
+",
+                fs.index(),
+                ft.index()
+            ));
+        }
         Operation::MoveFromCop0 { dst, cop0_reg } => {
             let d = dst.index();
             output.push_str(&format!(
@@ -2876,6 +2885,21 @@ mod tests {
         assert!(cpp.contains("using reps2::runtime::vu0_opmsub;"));
         assert!(cpp.contains(
             "state.vu0.acc = reps2::runtime::vu0_opmsub(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12));"
+        ));
+    }
+
+    #[test]
+    fn emits_vu0_vmaddw() {
+        let words = [0x4BEE_6B8Bu32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x221950 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VMADDw IR");
+        let cpp = emit_cpp(&program).expect("VMADDw C++");
+        assert!(cpp.contains(
+            "vu0_write_vf(state.vu0, 14, reps2::runtime::vu0_acc_broadcast_mul(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, 13), reps2::runtime::vu0_read_vf(state.vu0, 14), 3, true));"
         ));
     }
 

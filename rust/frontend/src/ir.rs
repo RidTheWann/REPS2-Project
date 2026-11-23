@@ -241,6 +241,13 @@ pub enum Operation {
     /// VU0 VWAITQ (Special2 index 59): Q-register sync; no-op in this model.
     /// ADR 0195.
     Vu0WaitQ,
+    /// VU0 VMADDw (Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
+    /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
+    Vu0MaddW {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+    },
     /// VU0 VSUB (COP2 Special1 funct=0x2C): element-wise VF lane subtract.
     /// `dst = fs - ft` per lane, masked by the 4-bit dest field. ADR 0192.
     Vsub {
@@ -1794,6 +1801,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 accumulate: true,
             },
             Opcode::Vwaitq => Operation::Vu0WaitQ,
+            Opcode::Vmaddw => Operation::Vu0MaddW {
+                dst: vf(instruction.shift_amount),
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+            },
             other => {
                 return Err(LiftError::UnsupportedOpcode {
                     pc: instruction.pc,
@@ -1959,6 +1971,17 @@ mod tests {
         assert!(matches!(
             program.instructions()[0].operation,
             Operation::Vopmsub { fs, ft } if fs.index() == 11 && ft.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vmaddw() {
+        let stream = [decoded(0x4BEE_6B8B, 0x3000)];
+        let program = lift(&stream).expect("VMADDw lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vu0MaddW { dst, fs, ft }
+                if dst.index() == 14 && fs.index() == 13 && ft.index() == 14
         ));
     }
 
