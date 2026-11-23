@@ -255,6 +255,14 @@ pub enum Operation {
         broadcast_lane: u8,
         dest_mask: u8,
     },
+    /// VU0 VMADDbc masked broadcast multiply-add. ADR 0200.
+    VmaddBroadcast {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+        broadcast_lane: u8,
+        dest_mask: u8,
+    },
     /// VU0 VMADDw (Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
     /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
     Vu0MaddW {
@@ -1828,6 +1836,20 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                     _ => 3,
                 };
                 Operation::VaddBroadcast {
+                    dst: vf(instruction.shift_amount),
+                    fs: vf(instruction.rd),
+                    ft: vf(instruction.rt),
+                    broadcast_lane: lane,
+                    dest_mask: instruction.rs & 0xF,
+                }
+            }
+            Opcode::Vmaddx | Opcode::Vmaddy | Opcode::Vmaddz2 => {
+                let lane = match instruction.opcode {
+                    Opcode::Vmaddx => 0,
+                    Opcode::Vmaddy => 1,
+                    _ => 2,
+                };
+                Operation::VmaddBroadcast {
                     dst: vf(instruction.shift_amount),
                     fs: vf(instruction.rd),
                     ft: vf(instruction.rt),
