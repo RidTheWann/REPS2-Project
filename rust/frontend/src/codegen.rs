@@ -355,7 +355,7 @@ pub(crate) fn emit_instruction(
             immediate,
         } => {
             output.push_str(&format!(
-                "    if ({dst} != 0) state.vu0.vi[{dst}] = static_cast<std::uint16_t>(state.vu0.vi[{src}] + static_cast<std::int16_t>({immediate}));\n"
+                "    reps2::runtime::vu0_write_vi(state.vu0, {dst}, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, {src}) + static_cast<std::int16_t>({immediate})));\n"
             ));
         }
         Operation::VaddBroadcast {
@@ -383,6 +383,18 @@ pub(crate) fn emit_instruction(
             output.push_str(&format!(
                 "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_move_masked(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
                 src.index()
+            ));
+        }
+        Operation::Vlqi { dst, vi } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    {{ const std::uint16_t vi_{vi}_addr = reps2::runtime::vu0_read_vi(state.vu0, {vi}); reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_read_vumem_qword(state.vu0, vi_{vi}_addr)); reps2::runtime::vu0_write_vi(state.vu0, {vi}, static_cast<std::uint16_t>(vi_{vi}_addr + 1U)); }}\n"
+            ));
+        }
+        Operation::Vsqi { src, vi } => {
+            let s = src.index();
+            output.push_str(&format!(
+                "    {{ const std::uint16_t vi_{vi}_addr = reps2::runtime::vu0_read_vi(state.vu0, {vi}); reps2::runtime::vu0_write_vumem_qword(state.vu0, vi_{vi}_addr, reps2::runtime::vu0_read_vf(state.vu0, {s})); reps2::runtime::vu0_write_vi(state.vu0, {vi}, static_cast<std::uint16_t>(vi_{vi}_addr + 1U)); }}\n"
             ));
         }
         Operation::Vu0WaitQ => {
@@ -2941,6 +2953,24 @@ mod tests {
     }
 
     #[test]
+    fn emits_vu0_vlqi_vsqi() {
+        let words = [0x4BE7_8B7Du32, 0x4BF1_6B7Cu32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x23CEF8 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VLQI/VSQI IR");
+        let cpp = emit_cpp(&program).expect("VLQI/VSQI C++");
+        // VSQI VF7, VI1
+        assert!(cpp.contains("reps2::runtime::vu0_write_vumem_qword(state.vu0, vi_1_addr, reps2::runtime::vu0_read_vf(state.vu0, 7))"));
+        assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 1, static_cast<std::uint16_t>(vi_1_addr + 1U));"));
+        // VLQI VF17, VI13
+        assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 17, reps2::runtime::vu0_read_vumem_qword(state.vu0, vi_13_addr))"));
+        assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 13, static_cast<std::uint16_t>(vi_13_addr + 1U));"));
+    }
+
+    #[test]
     fn emits_vu0_viaddi() {
         let words = [0x4A07_03F2u32];
         let decoded = words
@@ -2950,7 +2980,7 @@ mod tests {
             .collect::<Vec<_>>();
         let program = ir::lift(&decoded).expect("VIADDI IR");
         let cpp = emit_cpp(&program).expect("VIADDI C++");
-        assert!(cpp.contains("state.vu0.vi[7] = static_cast<std::uint16_t>(state.vu0.vi[0] + static_cast<std::int16_t>(15));"));
+        assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 7, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, 0) + static_cast<std::int16_t>(15)));"));
     }
 
     #[test]

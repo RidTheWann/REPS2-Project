@@ -124,4 +124,6 @@
 // sizeof(EeState) changes; ABI-38 modules are refused.
 // ABI 40 covers ADR 0201: VU0 integer register file (Vu0State::vi, 16x u16).
 // sizeof(EeState) changes; ABI-39 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 40
+// ABI 41 covers ADR 0202: VU0 data memory (Vu0State::data_mem, 256x Gpr128).
+// sizeof(EeState) changes; ABI-40 modules are refused.
+#define REPS2_RUNTIME_ABI_VERSION 41

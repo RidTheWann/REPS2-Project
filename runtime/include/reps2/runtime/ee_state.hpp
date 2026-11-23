@@ -26,8 +26,8 @@ struct Gpr128 {
 // The Gpr128 low/high lanes therefore contain X/Y and Z/W, respectively.
 // VF0 is not storage: it always reads as the constant `(0.0, 0.0, 0.0, 1.0)`
 // and ignores writes, so the read/write helpers below are the only supported
-// access path. VI0 is likewise the constant zero, but no instruction in this
-// slice uses the integer register file yet, so it is not modelled.
+// access path. VI0 is likewise the constant zero, handled by vu0_read_vi /
+// vu0_write_vi below (ADR 0201/0202).
 struct Vu0State {
     std::array<Gpr128, 32> vf{};
     // VU0 accumulator register. Written by VOPMULA/VOPMSUB/VADDA/VMULA etc.
@@ -39,7 +39,24 @@ struct Vu0State {
     // VU0 COP2 control registers (CFC2/CTC2). Only a subset is modelled;
     // unmodelled registers remain fail-closed until evidenced. ADR 0180.
     std::array<std::uint32_t, 32> control{};
+    // VU0 data memory (VU Mem0), 4 KiB = 256 quadwords, reset zero.
+    // Accessed by VLQI/VSQI/VLQD/VSQD via VI base register (ADR 0202) and
+    // by EE MMIO at 0x11004000 (not yet modelled). VU0 address mask is 0xFF.
+    std::array<Gpr128, 256> data_mem{};
 };
+
+// VU0 VU Mem0 quadword access via a VI base register. The 16-bit VI value is a
+// qword index: byte address = vi * 16, masked to the 4 KiB VU0 window
+// (mask 0xFF). Evidence: Sony VU User's Manual 1.1.5 (VU Mem 4 KiB, 128-bit
+// width, qword aligned, address/16 is the word index); PCSX2 getVUmem
+// `(x & 0xff) * 16` for VU0. ADR 0202.
+[[nodiscard]] inline Gpr128 vu0_read_vumem_qword(const Vu0State& vu0, std::uint16_t vi_index) noexcept {
+    return vu0.data_mem[vi_index & 0xFFU];
+}
+
+inline void vu0_write_vumem_qword(Vu0State& vu0, std::uint16_t vi_index, const Gpr128& value) noexcept {
+    vu0.data_mem[vi_index & 0xFFU] = value;
+}
 
 inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000ULL};
 
@@ -50,6 +67,22 @@ inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000U
 inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value) noexcept {
     if (index != 0U) {
         vu0.vf[index] = value;
+    }
+}
+
+// VU0 VI register access. The instruction encoders carry a 5-bit VI operand but
+// only VI00..VI15 exist, so the value is ANDed with 0xF (PCSX2 wiki "PS2 VU
+// Documentation Part 1": "for values greater than 15, the value is ANDed with
+// 0xf"). VI00 is the constant zero, so a write to index 0 is dropped.
+// ADR 0202.
+[[nodiscard]] inline std::uint16_t vu0_read_vi(const Vu0State& vu0, std::uint8_t index) noexcept {
+    return vu0.vi[index & 0x0FU];
+}
+
+inline void vu0_write_vi(Vu0State& vu0, std::uint8_t index, std::uint16_t value) noexcept {
+    const std::uint8_t i = static_cast<std::uint8_t>(index & 0x0FU);
+    if (i != 0U) {
+        vu0.vi[i] = value;
     }
 }
 

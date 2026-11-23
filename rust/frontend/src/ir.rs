@@ -261,6 +261,18 @@ pub enum Operation {
         src: u8,
         immediate: i16,
     },
+    /// VU0 VLQI (COP2 Special2 index 52): VF[ft] = VU Mem0[VI[is] * 16];
+    /// VI[is] += 1 (post-increment). ADR 0202.
+    Vlqi {
+        dst: Vf,
+        vi: u8,
+    },
+    /// VU0 VSQI (COP2 Special2 index 53): VU Mem0[VI[is] * 16] = VF[ft];
+    /// VI[is] += 1 (post-increment). ADR 0202.
+    Vsqi {
+        src: Vf,
+        vi: u8,
+    },
     /// VU0 VMADDbc masked broadcast multiply-add. ADR 0200.
     VmaddBroadcast {
         dst: Vf,
@@ -1839,6 +1851,14 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: instruction.rd,
                 immediate: (instruction.shift_amount & 0x1F) as i8 as i16,
             },
+            Opcode::Vlqi => Operation::Vlqi {
+                dst: vf(instruction.rt),
+                vi: instruction.rd & 0xF,
+            },
+            Opcode::Vsqi => Operation::Vsqi {
+                src: vf(instruction.rt),
+                vi: instruction.rd & 0xF,
+            },
             Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
                 let lane = match instruction.opcode {
                     Opcode::Vaddx => 0,
@@ -2038,6 +2058,20 @@ mod tests {
         assert!(matches!(
             program.instructions()[0].operation,
             Operation::Vopmsub { fs, ft } if fs.index() == 11 && ft.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vlqi_vsqi() {
+        let stream = [decoded(0x4BE7_8B7D, 0x3000), decoded(0x4BF1_6B7C, 0x3004)];
+        let program = lift(&stream).expect("VLQI/VSQI lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vsqi { src, vi } if src.index() == 7 && vi == 1
+        ));
+        assert!(matches!(
+            program.instructions()[1].operation,
+            Operation::Vlqi { dst, vi } if dst.index() == 17 && vi == 13
         ));
     }
 

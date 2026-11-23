@@ -155,6 +155,12 @@ pub enum Opcode {
     Vwaitq,
     /// VU0 VMOVE (COP2 Special2 index 48): masked VF-to-VF move. ADR 0197.
     Vmove,
+    /// VU0 VLQI (COP2 Special2 index 52): VU Mem0 -> VF quadword load, then
+    /// VI[is] += 1 (post-increment). ADR 0202.
+    Vlqi,
+    /// VU0 VSQI (COP2 Special2 index 53): VF -> VU Mem0 quadword store, then
+    /// VI[is] += 1 (post-increment). ADR 0202.
+    Vsqi,
     /// VU0 VADDbc (COP2 Special1 funct 0x00..0x03): masked broadcast add. ADR 0198.
     Vaddx,
     Vaddy,
@@ -513,6 +519,8 @@ impl Opcode {
             Self::Vmaddaz => "vmaddaz",
             Self::Vwaitq => "vwaitq",
             Self::Vmove => "vmove",
+            Self::Vlqi => "vlqi",
+            Self::Vsqi => "vsqi",
             Self::Vaddx => "vaddx",
             Self::Vaddy => "vaddy",
             Self::Vaddz => "vaddz",
@@ -1278,6 +1286,16 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd);
                 effects.vf_write_mask = vf_write_bit(self.rt);
             }
+            Opcode::Vlqi => {
+                // VF[rt] <- VU Mem0 qword at VI[rd]; VI[rd] += 1. Reads no VF,
+                // writes VF[rt]; VI file not in the VF/GPR masks.
+                effects.vf_write_mask = vf_write_bit(self.rt);
+            }
+            Opcode::Vsqi => {
+                // VU Mem0 qword at VI[rd] <- VF[rt]; VI[rd] += 1. Reads VF[rt],
+                // writes no VF; VI file not in the VF/GPR masks.
+                effects.vf_read_mask = vf_read_bit(self.rt);
+            }
             Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
                 // VADDbc: reads fs (rd) and ft (rt), writes fd (sa) masked.
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
@@ -1549,6 +1567,15 @@ fn decode_cop2(word: u32) -> Opcode {
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 47 => Opcode::Nop,
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 48 => {
             Opcode::Vmove
+        }
+        // VLQI (index 52) / VSQI (index 53): VU data memory quadword load/store
+        // with post-increment. The VI operand is the 4-bit `rd` field (bits
+        // 15..11) and the VF operand is `rt` (bits 20..16). ADR 0202.
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 52 => {
+            Opcode::Vlqi
+        }
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 53 => {
+            Opcode::Vsqi
         }
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 59 => {
             Opcode::Vwaitq
@@ -3708,6 +3735,27 @@ mod tests {
         let effects = vmaddx.effects();
         assert_eq!(effects.vf_write_mask, 1 << 17);
         assert_ne!(effects.vf_read_mask, 0);
+    }
+
+    #[test]
+    fn decodes_vu0_vlqi_vsqi() {
+        // VSQI VF7, VI17++ (Special2 idx 53), word 0x4BE78B7D at 0x0023CEF8.
+        let vsqi = decode(0x4BE7_8B7D, 0);
+        assert_eq!(vsqi.opcode, Opcode::Vsqi);
+        assert_eq!(vsqi.rt, 7); // VF source
+        assert_eq!(vsqi.rd & 0xF, 1); // VI base (rd=17 masked to 4 bits)
+        let effects = vsqi.effects();
+        assert_ne!(effects.vf_read_mask, 0);
+        assert_eq!(effects.vf_write_mask, 0);
+
+        // VLQI VF17, VI13++ (Special2 idx 52), synthetic word 0x4BF1_6B7C.
+        let vlqi = decode(0x4BF1_6B7C, 0);
+        assert_eq!(vlqi.opcode, Opcode::Vlqi);
+        assert_eq!(vlqi.rt & 0x1F, 17);
+        assert_eq!(vlqi.rd & 0xF, 13);
+        let effects = vlqi.effects();
+        assert_eq!(effects.vf_read_mask, 0);
+        assert_ne!(effects.vf_write_mask, 0);
     }
 
     #[test]
