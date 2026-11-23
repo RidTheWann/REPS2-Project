@@ -2741,18 +2741,11 @@ inline constexpr std::uint32_t kEeSndCmdSlLoadBankByLoc = 3U;
 // readable request word / writable 4-byte reply) is likewise refused. See ADR 0122.
 inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
 
-[[nodiscard]] inline bool serve_ee_cdvd_scmd_call(
+[[nodiscard]] inline bool serve_ee_cdvd_scmd_mmode(
     EeState& state,
     const EeSifRpcCall& call
 ) noexcept {
     auto& sif = state.hle.sif_cmd;
-    ++sif.scmd_call_count;
-    sif.last_scmd_number = call.rpc_number;
-    sif.last_scmd_replied = false;
-
-    if (call.rpc_number != kEeCdvdScmdMmode) {
-        return false; // unmodelled S-command: no RPC_END, caller stays blocked
-    }
     if (call.send_size != 4U || call.recv_addr == 0U || call.recv_size < 4U) {
         return false; // not the documented one-word request + 4-byte reply
     }
@@ -2766,6 +2759,66 @@ inline constexpr std::uint32_t kEeCdvdScmdMmode = 0x22U;
     sif.cdvd_mmode = media; // mirrors cdvdman's g_cdvdman_mmode
     sif.last_scmd_media = media;
     sif.last_scmd_retres = 1U;
+    return true;
+}
+
+// CD_SCMD_READCLOCK (sid 0x80000593, function 1). Returns a deterministic
+// BCD clock (2000-01-01 00:00:00, stat=0) with result=1 (success).
+// Evidence: libcdvd-common.h sceCdReadClock returns 1 on success; sceCdCLOCK
+// fields are BCD (libcdvd-common.h btoi/itob macros); cdvdfsv rpcSCmd_cdreadclock
+// writes { int result; sceCdCLOCK rtc; } into the 16-byte reply. ADR 0205.
+inline constexpr std::uint32_t kEeCdvdScmdReadClock = 0x01U;
+
+[[nodiscard]] inline bool serve_ee_cdvd_scmd_readclock(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    if (call.recv_addr == 0U || call.recv_size < 16U) {
+        return false; // need 16 bytes for { result + 8-byte clock }
+    }
+    if (store_u32(state.memory, call.recv_addr, 1U) != Status::ok) {
+        return false; // result = 1 (SCECdErNO success)
+    }
+    // sceCdCLOCK { stat, second, minute, hour, pad, day, month, year }, BCD.
+    // Fixed 2000-01-01 00:00:00 keeps a probe byte-reproducible; 0 and 1 have
+    // the same binary and BCD encoding.
+    static constexpr std::uint8_t clock_bytes[8] = {0, 0, 0, 0, 0, 1, 1, 0};
+    const auto pack = [](std::size_t base) {
+        return static_cast<std::uint32_t>(clock_bytes[base]) |
+               (static_cast<std::uint32_t>(clock_bytes[base + 1U]) << 8) |
+               (static_cast<std::uint32_t>(clock_bytes[base + 2U]) << 16) |
+               (static_cast<std::uint32_t>(clock_bytes[base + 3U]) << 24);
+    };
+    if (store_u32(state.memory, call.recv_addr + 4U, pack(0U)) != Status::ok) {
+        return false;
+    }
+    if (store_u32(state.memory, call.recv_addr + 8U, pack(4U)) != Status::ok) {
+        return false;
+    }
+    sif.last_scmd_retres = 1U;
+    return true;
+}
+
+// cdvdfsv's SIF RPC callback dispatches by function number. Only the two
+// evidenced functions above are served; every other S-command stays refused.
+[[nodiscard]] inline bool serve_ee_cdvd_scmd_call(
+    EeState& state,
+    const EeSifRpcCall& call
+) noexcept {
+    auto& sif = state.hle.sif_cmd;
+    ++sif.scmd_call_count;
+    sif.last_scmd_number = call.rpc_number;
+    sif.last_scmd_replied = false;
+
+    const bool served = call.rpc_number == kEeCdvdScmdMmode
+        ? serve_ee_cdvd_scmd_mmode(state, call)
+        : call.rpc_number == kEeCdvdScmdReadClock
+            ? serve_ee_cdvd_scmd_readclock(state, call)
+            : false;
+    if (!served) {
+        return false; // unmodelled S-command: no RPC_END, caller stays blocked
+    }
     sif.last_scmd_replied = true;
     ++sif.scmd_replies;
     return true;
