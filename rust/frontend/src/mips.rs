@@ -160,6 +160,11 @@ pub enum Opcode {
     Vaddy,
     Vaddz,
     Vaddw,
+    /// VU0 VMADDbc (COP2 Special1 funct 0x08..0x0B): fd.dest = ACC + fs*ft.bc.
+    /// ADR 0200.
+    Vmaddx,
+    Vmaddy,
+    Vmaddz2,
     /// VU0 VMADDw (COP2 Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
     /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
     Vmaddw,
@@ -509,6 +514,9 @@ impl Opcode {
             Self::Vaddy => "vaddy",
             Self::Vaddz => "vaddz",
             Self::Vaddw => "vaddw",
+            Self::Vmaddx => "vmaddx",
+            Self::Vmaddy => "vmaddy",
+            Self::Vmaddz2 => "vmaddz",
             Self::Vmaddw => "vmaddw",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
@@ -1271,8 +1279,13 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
+            Opcode::Vmaddx | Opcode::Vmaddy | Opcode::Vmaddz2 => {
+                // VMADDbc (x/y/z): reads fs (rd), ft (rt), and ACC; writes VF[fd].
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+                effects.vf_write_mask = vf_write_bit(self.shift_amount);
+            }
             Opcode::Vmaddw => {
-                // VF[fd] = ACC + fs * ft.w: reads fs, ft, and ACC; writes VF[fd].
+                // VMADDw: VF[fd] = ACC + fs * ft.w; reads fs, ft, writes VF[fd].
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
@@ -1505,6 +1518,9 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x01 => Opcode::Vaddy,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x02 => Opcode::Vaddz,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x08 => Opcode::Vmaddx,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x09 => Opcode::Vmaddy,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0A => Opcode::Vmaddz2,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0B => Opcode::Vmaddw,
         // Special1 funct 0x3F = VNOP (PCSX2 SPECIAL1 table row 15 col 15).
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x3F => Opcode::Nop,
@@ -3672,6 +3688,17 @@ mod tests {
         assert_eq!(decode(0x4BCC_5AFE, 0).opcode, Opcode::Vopmula);
         assert_eq!(decode(0x4BCC_5AEE, 0).opcode, Opcode::Vopmsub);
         assert_eq!(decode(0x4BCC_5AEF, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vmaddx_and_effects() {
+        // VMADDx (funct=0x08), word 0x4BE00448 at pc=0x002239FC (ABI-51).
+        let vmaddx = decode(0x4BE0_0448, 0);
+        assert_eq!(vmaddx.opcode, Opcode::Vmaddx);
+        assert_eq!(vmaddx.shift_amount, 17); // fd
+        let effects = vmaddx.effects();
+        assert_eq!(effects.vf_write_mask, 1 << 17);
+        assert_ne!(effects.vf_read_mask, 0);
     }
 
     #[test]

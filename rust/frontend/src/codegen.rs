@@ -99,6 +99,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::vu0_acc_broadcast_mul;\n\
              using reps2::runtime::vu0_move_masked;\n\
              using reps2::runtime::vu0_broadcast_add;\n\
+             using reps2::runtime::vu0_broadcast_madd;\n\
              using reps2::runtime::vu0_read_vf;\n\
              using reps2::runtime::vu0_write_vf;\n\
              using reps2::runtime::enable_interrupts;\n\
@@ -378,6 +379,19 @@ pub(crate) fn emit_instruction(
         Operation::Vu0WaitQ => {
             // ponytail: Q pipeline is not modelled; VWAITQ is an explicit no-op
             // until a Q-timing ADR exists.
+        }
+        Operation::VmaddBroadcast {
+            dst,
+            fs,
+            ft,
+            broadcast_lane,
+            dest_mask,
+        } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_broadcast_madd(reps2::runtime::vu0_read_vf(state.vu0, {d}), state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {}, {}));\n",
+                fs.index(), ft.index(), broadcast_lane, dest_mask
+            ));
         }
         Operation::Vu0MaddW { dst, fs, ft } => {
             let d = dst.index();

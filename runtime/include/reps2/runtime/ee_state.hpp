@@ -245,6 +245,55 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     };
 }
 
+// VU0 VMADDbc (COP2 Special1 funct 0x08..0x0B): masked broadcast multiply-add
+// `fd.dest = ACC + fs * ft.bc`. Same FPU rules as VADDbc. Evidence: Sony VU
+// manual 6.2 VMADDbc; PCSX2 Int_COP2SPECIAL1PrintTable[0x08..0x0B]. ADR 0200.
+[[nodiscard]] constexpr Gpr128 vu0_broadcast_madd(
+    const Gpr128& dst,
+    const Gpr128& acc,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t broadcast_lane,
+    std::uint8_t dest_mask
+) noexcept {
+    const std::uint32_t fs_lanes[4] = {
+        static_cast<std::uint32_t>(fs.low),
+        static_cast<std::uint32_t>(fs.low >> 32U),
+        static_cast<std::uint32_t>(fs.high),
+        static_cast<std::uint32_t>(fs.high >> 32U),
+    };
+    const std::uint32_t ft_lanes[4] = {
+        static_cast<std::uint32_t>(ft.low),
+        static_cast<std::uint32_t>(ft.low >> 32U),
+        static_cast<std::uint32_t>(ft.high),
+        static_cast<std::uint32_t>(ft.high >> 32U),
+    };
+    const std::uint32_t dst_lanes[4] = {
+        static_cast<std::uint32_t>(dst.low),
+        static_cast<std::uint32_t>(dst.low >> 32U),
+        static_cast<std::uint32_t>(dst.high),
+        static_cast<std::uint32_t>(dst.high >> 32U),
+    };
+    const auto scalar = ft_lanes[broadcast_lane & 3U];
+    const auto acc_lane = [](std::uint64_t w, unsigned shift) {
+        return static_cast<std::uint32_t>(w >> shift);
+    };
+    const std::uint32_t acc_lanes[4] = {
+        acc_lane(acc.low, 0U), acc_lane(acc.low, 32U),
+        acc_lane(acc.high, 0U), acc_lane(acc.high, 32U),
+    };
+    const std::uint32_t out[4] = {
+        (dest_mask & 0x8U) ? fpu_add(acc_lanes[0], fpu_mul(fs_lanes[0], scalar).bits).bits : dst_lanes[0],
+        (dest_mask & 0x4U) ? fpu_add(acc_lanes[1], fpu_mul(fs_lanes[1], scalar).bits).bits : dst_lanes[1],
+        (dest_mask & 0x2U) ? fpu_add(acc_lanes[2], fpu_mul(fs_lanes[2], scalar).bits).bits : dst_lanes[2],
+        (dest_mask & 0x1U) ? fpu_add(acc_lanes[3], fpu_mul(fs_lanes[3], scalar).bits).bits : dst_lanes[3],
+    };
+    return Gpr128{
+        static_cast<std::uint64_t>(out[0]) | (static_cast<std::uint64_t>(out[1]) << 32U),
+        static_cast<std::uint64_t>(out[2]) | (static_cast<std::uint64_t>(out[3]) << 32U),
+    };
+}
+
 // VU0 VMOVE (COP2 Special2 index 48): masked 4-lane VF move. dest mask bits
 // 3=x, 2=y, 1=z, 0=w; unselected lanes keep the destination value. Evidence:
 // Sony VU User's Manual 6.2 VMOVE; PS2Tek S2 row 6 col 0; PCSX2 table[48].
