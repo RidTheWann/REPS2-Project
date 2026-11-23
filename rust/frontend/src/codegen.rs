@@ -98,6 +98,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::vu0_opmsub;\n\
              using reps2::runtime::vu0_acc_broadcast_mul;\n\
              using reps2::runtime::vu0_move_masked;\n\
+             using reps2::runtime::vu0_broadcast_add;\n\
              using reps2::runtime::vu0_read_vf;\n\
              using reps2::runtime::vu0_write_vf;\n\
              using reps2::runtime::enable_interrupts;\n\
@@ -345,6 +346,22 @@ pub(crate) fn emit_instruction(
                 ft.index(),
                 broadcast_lane,
                 accumulate
+            ));
+        }
+        Operation::VaddBroadcast {
+            dst,
+            fs,
+            ft,
+            broadcast_lane,
+            dest_mask,
+        } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_broadcast_add(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {}, {}));\n",
+                fs.index(),
+                ft.index(),
+                broadcast_lane,
+                dest_mask
             ));
         }
         Operation::Vmove {
@@ -2897,6 +2914,22 @@ mod tests {
         assert!(cpp.contains("using reps2::runtime::vu0_opmsub;"));
         assert!(cpp.contains(
             "state.vu0.acc = reps2::runtime::vu0_opmsub(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12));"
+        ));
+    }
+
+    #[test]
+    fn emits_vu0_vaddx() {
+        let words = [0x4A50_0380u32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x2239CC + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VADDx IR");
+        let cpp = emit_cpp(&program).expect("VADDx C++");
+        assert!(cpp.contains("using reps2::runtime::vu0_broadcast_add;"));
+        assert!(cpp.contains(
+            "vu0_write_vf(state.vu0, 14, reps2::runtime::vu0_broadcast_add(reps2::runtime::vu0_read_vf(state.vu0, 14), reps2::runtime::vu0_read_vf(state.vu0, 0), reps2::runtime::vu0_read_vf(state.vu0, 16), 0, 2));"
         ));
     }
 

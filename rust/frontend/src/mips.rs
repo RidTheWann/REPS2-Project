@@ -155,6 +155,11 @@ pub enum Opcode {
     Vwaitq,
     /// VU0 VMOVE (COP2 Special2 index 48): masked VF-to-VF move. ADR 0197.
     Vmove,
+    /// VU0 VADDbc (COP2 Special1 funct 0x00..0x03): masked broadcast add. ADR 0198.
+    Vaddx,
+    Vaddy,
+    Vaddz,
+    Vaddw,
     /// VU0 VMADDw (COP2 Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
     /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
     Vmaddw,
@@ -500,6 +505,10 @@ impl Opcode {
             Self::Vmaddaz => "vmaddaz",
             Self::Vwaitq => "vwaitq",
             Self::Vmove => "vmove",
+            Self::Vaddx => "vaddx",
+            Self::Vaddy => "vaddy",
+            Self::Vaddz => "vaddz",
+            Self::Vaddw => "vaddw",
             Self::Vmaddw => "vmaddw",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
@@ -1257,6 +1266,11 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd);
                 effects.vf_write_mask = vf_write_bit(self.rt);
             }
+            Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
+                // VADDbc: reads fs (rd) and ft (rt), writes fd (sa) masked.
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+                effects.vf_write_mask = vf_write_bit(self.shift_amount);
+            }
             Opcode::Vmaddw => {
                 // VF[fd] = ACC + fs * ft.w: reads fs, ft, and ACC; writes VF[fd].
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
@@ -1487,6 +1501,10 @@ fn decode_cop2(word: u32) -> Opcode {
         // Special1 broadcast multiply-add VMADDw (funct 0x0B) writes VF[fd]:
         // VF[fd] = ACC + fs * ft.w, the final step of a matrix-vector multiply.
         // funct 0x3C..0x3F are Special2 entries, not Special1. ADR 0196.
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x00 => Opcode::Vaddx,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x01 => Opcode::Vaddy,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x02 => Opcode::Vaddz,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0B => Opcode::Vmaddw,
         // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
         // the only Special2 operation implemented in this slice. ADR 0191.
@@ -3651,6 +3669,20 @@ mod tests {
         assert_eq!(decode(0x4BCC_5AFE, 0).opcode, Opcode::Vopmula);
         assert_eq!(decode(0x4BCC_5AEE, 0).opcode, Opcode::Vopmsub);
         assert_eq!(decode(0x4BCC_5AEF, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vaddx_and_effects() {
+        // VADDx VF14, VF0, VF16 dest 0x2, word 0x4A500380 at 0x002239C8.
+        let vaddx = decode(0x4A50_0380, 0);
+        assert_eq!(vaddx.opcode, Opcode::Vaddx);
+        assert_eq!(vaddx.shift_amount, 14); // fd
+        assert_eq!(vaddx.rd, 0); // fs
+        assert_eq!(vaddx.rt, 16); // ft
+        assert_eq!(vaddx.rs & 0xF, 0x2); // dest mask
+        let effects = vaddx.effects();
+        assert_eq!(effects.vf_read_mask, (1 << 0) | (1 << 16));
+        assert_eq!(effects.vf_write_mask, 1 << 14);
     }
 
     #[test]
