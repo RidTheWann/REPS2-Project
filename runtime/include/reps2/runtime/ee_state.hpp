@@ -58,6 +58,43 @@ inline void vu0_write_vumem_qword(Vu0State& vu0, std::uint16_t vi_index, const G
     vu0.data_mem[vi_index & 0xFFU] = value;
 }
 
+// VU0 VU Mem0 16-bit word access for VILWR/VISWR (COP2 Special2 indices 44/45).
+// The VI base register here is a BYTE address into the 4 KiB VU Mem0 window, not
+// a qword index: PCSX2 mVU_ILWR uses `regs().Mem + VI[is]` with the address
+// masked to the VU0 window (`mVUaddrFix`). Word offset is therefore
+// `(vi_byte_address & 0xFFF) >> 1`; the low 12 bits give the 4 KiB window.
+// Evidence: Sony VU User's Manual 6.2 VILWR/VISWR; PCSX2 `microVU_Lower.inl`
+// mVU_ILWR/mVU_ISWR. ADR 0207.
+[[nodiscard]] inline std::uint16_t vu0_read_vumem_word(
+    const Vu0State& vu0,
+    std::uint16_t vi_byte_address
+) noexcept {
+    const std::size_t word_index =
+        static_cast<std::size_t>((vi_byte_address & 0x0FFFU) >> 1U);
+    const std::size_t qword_index = word_index >> 3U;
+    const std::size_t word_in_qword = word_index & 0x7U;
+    const Gpr128& qword = vu0.data_mem[qword_index & 0xFFU];
+    const std::uint64_t lane = word_in_qword < 4U ? qword.low : qword.high;
+    const unsigned shift = static_cast<unsigned>(word_in_qword & 0x3U) * 16U;
+    return static_cast<std::uint16_t>((lane >> shift) & 0xFFFFU);
+}
+
+inline void vu0_write_vumem_word(
+    Vu0State& vu0,
+    std::uint16_t vi_byte_address,
+    std::uint16_t value
+) noexcept {
+    const std::size_t word_index =
+        static_cast<std::size_t>((vi_byte_address & 0x0FFFU) >> 1U);
+    const std::size_t qword_index = word_index >> 3U;
+    const std::size_t word_in_qword = word_index & 0x7U;
+    Gpr128& qword = vu0.data_mem[qword_index & 0xFFU];
+    std::uint64_t& lane = word_in_qword < 4U ? qword.low : qword.high;
+    const unsigned shift = static_cast<unsigned>(word_in_qword & 0x3U) * 16U;
+    const std::uint64_t mask = static_cast<std::uint64_t>(0xFFFFU) << shift;
+    lane = (lane & ~mask) | ((static_cast<std::uint64_t>(value) << shift) & mask);
+}
+
 inline constexpr Gpr128 kVu0Vf0{0x0000'0000'0000'0000ULL, 0x3F80'0000'0000'0000ULL};
 
 [[nodiscard]] inline Gpr128 vu0_read_vf(const Vu0State& vu0, std::uint8_t index) noexcept {
