@@ -172,6 +172,12 @@ pub enum Opcode {
     Vaddy,
     Vaddz,
     Vaddw,
+    /// VU0 VMULbc (COP2 Special1 funct 0x18..0x1B): masked broadcast multiply.
+    /// ADR 0208.
+    Vmulx,
+    Vmuly,
+    Vmulz,
+    Vmulw,
     /// VU0 VIADDI (COP2 Special1 funct=0x32): VI[fd] = VI[fs] + sign_ext(imm).
     /// ADR 0201.
     Viaddi,
@@ -542,6 +548,10 @@ impl Opcode {
             Self::Vaddy => "vaddy",
             Self::Vaddz => "vaddz",
             Self::Vaddw => "vaddw",
+            Self::Vmulx => "vmulx",
+            Self::Vmuly => "vmuly",
+            Self::Vmulz => "vmulz",
+            Self::Vmulw => "vmulw",
             Self::Viaddi => "viaddi",
             Self::Viadd => "viadd",
             Self::Visub => "visub",
@@ -1328,6 +1338,11 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
+            Opcode::Vmulx | Opcode::Vmuly | Opcode::Vmulz | Opcode::Vmulw => {
+                // VMULbc: reads fs (rd) and ft (rt), writes fd (sa) masked. ADR 0208.
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+                effects.vf_write_mask = vf_write_bit(self.shift_amount);
+            }
             Opcode::Vmaddx | Opcode::Vmaddy | Opcode::Vmaddz2 => {
                 // VMADDbc (x/y/z): reads fs (rd), ft (rt), and ACC; writes VF[fd].
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
@@ -1587,6 +1602,11 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x01 => Opcode::Vaddy,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x02 => Opcode::Vaddz,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
+        // VMULbc: funct 0x18..0x1B. ADR 0208.
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x18 => Opcode::Vmulx,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x19 => Opcode::Vmuly,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x1A => Opcode::Vmulz,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x1B => Opcode::Vmulw,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x32 => Opcode::Viaddi,
         // Special1 funct 0x38 = VIADD: VI[fd] = VI[is] + VI[it]. ADR 0203.
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x38 => Opcode::Viadd,
@@ -3877,6 +3897,19 @@ mod tests {
         assert_eq!(insn.rt, 0); // it
         assert_eq!(insn.rd, 9); // is
         assert_eq!(insn.shift_amount, 15); // id
+    }
+
+    #[test]
+    fn decodes_vu0_vmulbroadcast() {
+        // VMULx: funct 0x18, word 0x4BEC5AD8 at 0x0022E438 (fs=rd=11, ft=rt=12, fd=sa=11).
+        let m = decode(0x4BEC_5AD8, 0);
+        assert_eq!(m.opcode, Opcode::Vmulx);
+        assert_eq!(m.rd, 11);
+        assert_eq!(m.rt, 12);
+        assert_eq!(m.shift_amount, 11);
+        let fx = m.effects();
+        assert_eq!(fx.vf_write_mask, 1 << 11);
+        assert_ne!(fx.vf_read_mask, 0);
     }
 
     #[test]

@@ -247,6 +247,14 @@ pub enum Operation {
         src: Vf,
         dest_mask: u8,
     },
+    /// VU0 VMULbc (Special1 funct 0x18..0x1B): masked broadcast multiply. ADR 0208.
+    VmulBroadcast {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+        broadcast_lane: u8,
+        dest_mask: u8,
+    },
     /// VU0 VADDbc (Special1 funct 0x00..0x03): masked broadcast add. ADR 0198.
     VaddBroadcast {
         dst: Vf,
@@ -1938,6 +1946,21 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                     dest_mask: instruction.rs & 0xF,
                 }
             }
+            Opcode::Vmulx | Opcode::Vmuly | Opcode::Vmulz | Opcode::Vmulw => {
+                let lane = match instruction.opcode {
+                    Opcode::Vmulx => 0,
+                    Opcode::Vmuly => 1,
+                    Opcode::Vmulz => 2,
+                    _ => 3,
+                };
+                Operation::VmulBroadcast {
+                    dst: vf(instruction.shift_amount),
+                    fs: vf(instruction.rd),
+                    ft: vf(instruction.rt),
+                    broadcast_lane: lane,
+                    dest_mask: instruction.rs & 0xF,
+                }
+            }
             Opcode::Vmaddx | Opcode::Vmaddy | Opcode::Vmaddz2 => {
                 let lane = match instruction.opcode {
                     Opcode::Vmaddx => 0,
@@ -2136,6 +2159,17 @@ mod tests {
         assert!(matches!(
             program.instructions()[1].operation,
             Operation::Vlqi { dst, vi } if dst.index() == 17 && vi == 13
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vmulbroadcast() {
+        let stream = [decoded(0x4BEC_5AD8, 0x3000)];
+        let program = lift(&stream).expect("VMULbc lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::VmulBroadcast { dst, fs, ft, broadcast_lane, dest_mask }
+                if dst.index() == 11 && fs.index() == 11 && ft.index() == 12 && broadcast_lane == 0 && dest_mask == 0xF
         ));
     }
 

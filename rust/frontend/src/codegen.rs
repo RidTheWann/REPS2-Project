@@ -378,6 +378,22 @@ pub(crate) fn emit_instruction(
                 "    reps2::runtime::vu0_write_vi(state.vu0, {dst}, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, {is}) | reps2::runtime::vu0_read_vi(state.vu0, {it})));\n"
             ));
         }
+        Operation::VmulBroadcast {
+            dst,
+            fs,
+            ft,
+            broadcast_lane,
+            dest_mask,
+        } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_broadcast_mul(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {}, {}));\n",
+                fs.index(),
+                ft.index(),
+                broadcast_lane,
+                dest_mask
+            ));
+        }
         Operation::VaddBroadcast {
             dst,
             fs,
@@ -3040,6 +3056,19 @@ mod tests {
         let program = ir::lift(&decoded).expect("VIADD IR");
         let cpp = emit_cpp(&program).expect("VIADD C++");
         assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 15, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, 9) + reps2::runtime::vu0_read_vi(state.vu0, 0)));"));
+    }
+
+    #[test]
+    fn emits_vu0_vmulbroadcast() {
+        let words = [0x4BEC_5AD8u32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x22E438 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VMULbc IR");
+        let cpp = emit_cpp(&program).expect("VMULbc C++");
+        assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_broadcast_mul(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 0, 15));"));
     }
 
     #[test]
