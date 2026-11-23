@@ -30,9 +30,12 @@ struct Gpr128 {
 // slice uses the integer register file yet, so it is not modelled.
 struct Vu0State {
     std::array<Gpr128, 32> vf{};
-    // VU0 accumulator register. Written by VOPMULA/VADDA/VMULA etc.
+    // VU0 accumulator register. Written by VOPMULA/VOPMSUB/VADDA/VMULA etc.
     // Initialized to zero. ADR 0193.
     Gpr128 acc{};
+    // VU0 integer registers VI00..VI15 (16-bit). VI00 is constant zero.
+    // Used by loop counters, VIADDI, VISWR/VILWR addressing. ADR 0201.
+    std::array<std::uint16_t, 16> vi{};
     // VU0 COP2 control registers (CFC2/CTC2). Only a subset is modelled;
     // unmodelled registers remain fail-closed until evidenced. ADR 0180.
     std::array<std::uint32_t, 32> control{};

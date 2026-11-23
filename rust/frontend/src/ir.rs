@@ -255,6 +255,12 @@ pub enum Operation {
         broadcast_lane: u8,
         dest_mask: u8,
     },
+    /// VU0 VIADDI: VI[fd] = VI[fs] + sign_ext(imm5). ADR 0201.
+    Viaddi {
+        dst: u8,
+        src: u8,
+        immediate: i16,
+    },
     /// VU0 VMADDbc masked broadcast multiply-add. ADR 0200.
     VmaddBroadcast {
         dst: Vf,
@@ -1828,6 +1834,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: vf(instruction.rd),
                 dest_mask: instruction.rs & 0xF,
             },
+            Opcode::Viaddi => Operation::Viaddi {
+                dst: instruction.rt,
+                src: instruction.rd,
+                immediate: (instruction.shift_amount & 0x1F) as i8 as i16,
+            },
             Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
                 let lane = match instruction.opcode {
                     Opcode::Vaddx => 0,
@@ -2027,6 +2038,17 @@ mod tests {
         assert!(matches!(
             program.instructions()[0].operation,
             Operation::Vopmsub { fs, ft } if fs.index() == 11 && ft.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_viaddi() {
+        let stream = [decoded(0x4A07_03F2, 0x3000)];
+        let program = lift(&stream).expect("VIADDI lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Viaddi { dst, src, immediate }
+                if dst == 7 && src == 0 && immediate == 15
         ));
     }
 
