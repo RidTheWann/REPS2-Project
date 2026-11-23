@@ -203,6 +203,29 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     };
 }
 
+// VU0 VMOVE (COP2 Special2 index 48): masked 4-lane VF move. dest mask bits
+// 3=x, 2=y, 1=z, 0=w; unselected lanes keep the destination value. Evidence:
+// Sony VU User's Manual 6.2 VMOVE; PS2Tek S2 row 6 col 0; PCSX2 table[48].
+// ADR 0197.
+[[nodiscard]] constexpr Gpr128 vu0_move_masked(
+    const Gpr128& dst,
+    const Gpr128& src,
+    std::uint8_t dest_mask
+) noexcept {
+    const auto out_x = (dest_mask & 0x8U) ? static_cast<std::uint32_t>(src.low)
+                                         : static_cast<std::uint32_t>(dst.low);
+    const auto out_y = (dest_mask & 0x4U) ? static_cast<std::uint32_t>(src.low >> 32U)
+                                         : static_cast<std::uint32_t>(dst.low >> 32U);
+    const auto out_z = (dest_mask & 0x2U) ? static_cast<std::uint32_t>(src.high)
+                                         : static_cast<std::uint32_t>(dst.high);
+    const auto out_w = (dest_mask & 0x1U) ? static_cast<std::uint32_t>(src.high >> 32U)
+                                         : static_cast<std::uint32_t>(dst.high >> 32U);
+    return Gpr128{
+        static_cast<std::uint64_t>(out_x) | (static_cast<std::uint64_t>(out_y) << 32U),
+        static_cast<std::uint64_t>(out_z) | (static_cast<std::uint64_t>(out_w) << 32U),
+    };
+}
+
 // VU0 COP2 control register helpers (CFC2/CTC2). ADR 0180.
 inline constexpr std::uint8_t kVu0ControlRegisterCount = 32U;
 [[nodiscard]] inline std::uint32_t vu0_read_control(const Vu0State& vu0, std::uint8_t reg) noexcept {

@@ -153,6 +153,8 @@ pub enum Opcode {
     Vmaddaz,
     /// VU0 VWAITQ (COP2 Special2 index 59): Q sync; no-op in this model. ADR 0195.
     Vwaitq,
+    /// VU0 VMOVE (COP2 Special2 index 48): masked VF-to-VF move. ADR 0197.
+    Vmove,
     /// VU0 VMADDw (COP2 Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
     /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
     Vmaddw,
@@ -497,6 +499,7 @@ impl Opcode {
             Self::Vmadday => "vmadday",
             Self::Vmaddaz => "vmaddaz",
             Self::Vwaitq => "vwaitq",
+            Self::Vmove => "vmove",
             Self::Vmaddw => "vmaddw",
             Self::Vmr32 => "vmr32",
             Self::Cfc2 => "cfc2",
@@ -1249,6 +1252,11 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
             }
             Opcode::Vwaitq => {}
+            Opcode::Vmove => {
+                // VF[rt] = VF[rd], masked by dest (bits 24..21). No ACC.
+                effects.vf_read_mask = vf_read_bit(self.rd);
+                effects.vf_write_mask = vf_write_bit(self.rt);
+            }
             Opcode::Vmaddw => {
                 // VF[fd] = ACC + fs * ft.w: reads fs, ft, and ACC; writes VF[fd].
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
@@ -1492,6 +1500,9 @@ fn decode_cop2(word: u32) -> Opcode {
         }
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 24 => {
             Opcode::Vmulax
+        }
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 48 => {
+            Opcode::Vmove
         }
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 59 => {
             Opcode::Vwaitq
@@ -3640,6 +3651,21 @@ mod tests {
         assert_eq!(decode(0x4BCC_5AFE, 0).opcode, Opcode::Vopmula);
         assert_eq!(decode(0x4BCC_5AEE, 0).opcode, Opcode::Vopmsub);
         assert_eq!(decode(0x4BCC_5AEF, 0).opcode, Opcode::Unknown);
+    }
+
+    #[test]
+    fn decodes_vu0_vmove_and_effects() {
+        // VMOVE VF20, VF14 (Special2 idx 48, dest 0xF), word 0x4BF4733C at
+        // pc=0x002239C8. ADR 0197.
+        let vmove = decode(0x4BF4_733C, 0);
+        assert_eq!(vmove.opcode, Opcode::Vmove);
+        assert_eq!(vmove.rd, 14); // fs
+        assert_eq!(vmove.rt, 20); // ft
+        assert_eq!(vmove.rs & 0xF, 0xF); // dest mask
+        let effects = vmove.effects();
+        assert_eq!(effects.vf_read_mask, 1 << 14);
+        assert_eq!(effects.vf_write_mask, 1 << 20);
+        assert_eq!(effects.memory, MemoryEffect::None);
     }
 
     #[test]

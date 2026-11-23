@@ -97,6 +97,7 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::vu0_opmula;\n\
              using reps2::runtime::vu0_opmsub;\n\
              using reps2::runtime::vu0_acc_broadcast_mul;\n\
+             using reps2::runtime::vu0_move_masked;\n\
              using reps2::runtime::vu0_read_vf;\n\
              using reps2::runtime::vu0_write_vf;\n\
              using reps2::runtime::enable_interrupts;\n\
@@ -344,6 +345,17 @@ pub(crate) fn emit_instruction(
                 ft.index(),
                 broadcast_lane,
                 accumulate
+            ));
+        }
+        Operation::Vmove {
+            dst,
+            src,
+            dest_mask,
+        } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_move_masked(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
+                src.index()
             ));
         }
         Operation::Vu0WaitQ => {
@@ -2885,6 +2897,22 @@ mod tests {
         assert!(cpp.contains("using reps2::runtime::vu0_opmsub;"));
         assert!(cpp.contains(
             "state.vu0.acc = reps2::runtime::vu0_opmsub(state.vu0.acc, reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12));"
+        ));
+    }
+
+    #[test]
+    fn emits_vu0_vmove() {
+        let words = [0x4BF4_733Cu32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x2239C8 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VMOVE IR");
+        let cpp = emit_cpp(&program).expect("VMOVE C++");
+        assert!(cpp.contains("using reps2::runtime::vu0_move_masked;"));
+        assert!(cpp.contains(
+            "vu0_write_vf(state.vu0, 20, reps2::runtime::vu0_move_masked(reps2::runtime::vu0_read_vf(state.vu0, 20), reps2::runtime::vu0_read_vf(state.vu0, 14), 15));"
         ));
     }
 
