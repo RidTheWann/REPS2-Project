@@ -259,9 +259,9 @@ Keep the ISO, extracted ELF, BIOS/firmware, REA Evidence bundles and full decomp
 A project-local PS2 EE toolchain is installed at `D:\ps2dev\v2.0.0\ps2dev` from the official ps2dev `v2.0.0` Windows release (archive SHA-256 recorded in `D:\ps2dev\v2.0.0\VERIFICATION.md`). Verified: `objdump`, `readelf`, `as` and `ld` (GNU Binutils 2.45.1) for target `mips64r5900el-ps2-elf`; `gcc` is **not** verified because its `libiconv-2.dll`/`libwinpthread-1.dll` dependencies are absent. The toolchain is used only to inspect/assemble synthetic fixtures and to disassemble SDK/guest code outside Git; no game material is committed.
 
 
-## VU0 integer/memory frontier (ADR 0201/0202, 2026-11-24)
+## VU0 integer/memory frontier (ADR 0201/0202/0203/0204, 2026-11-24)
 
-Runtime ABI 41 (ADR 0201 VI file + VIADDI; ADR 0202 VU0 data memory 4 KiB + VLQI/VSQI). Fresh probe `abi54-01` on merged main `345e8a6` (Windows x64/MSVC, ISO `0fe2b777...a7eb86`, boot ELF `adfda7b7...f0cf0c`): the `pc=0x0023CEF0` VIADDI stop is gone; VSQI/VLQI transfer VU Mem0 qwords via VI2/VI3 and advance the frontier to `pc=0x00221F5C`, `unsupported_instruction` on COP2 Special1 `0x4A004BF8` (`VIADD`) after 4,717,085 instructions (+8,357). Census: 62,010 blocks, 328,279 instructions, 457 unsupported stops (was 459). Generated-code smoke test `reps2_cop2_codegen_smoke` covers VIADDI + VSQI/VLQI + VI post-increment. Rust fmt/clippy/test (394 lib tests) and CTest 51/51 pass. No boot-tested or playable claim.
+Runtime ABI 41 (ADR 0201 VI file + VIADDI; ADR 0202 VU0 data memory 4 KiB + VLQI/VSQI; ADR 0203 VIADD; ADR 0204 VISUB/VIAND/VIOR). Fresh probe `abi56-01` on merged main `936c7a2` (Windows x64/MSVC, ISO `0fe2b777...a7eb86`, boot ELF `adfda7b7...f0cf0c`): the VSQI/VLQI/VIADD sequence at `0x0023CEF0..0x0023CF24` executes; VIAND/VIOR at `0x0022FFC8..0x0022FFD4` execute. The frontier advances from `pc=0x0023CEF0` to `pc=0x0025A724` (the `WaitSema` stub) after 4,722,454 instructions; census unsupported stops 457 -> 364. The frontier is now a service gap (a `WaitSema` blocked on a refused SIF RPC, server `0x80000413`, fno 1), not an instruction gap. Generated-code smoke test `reps2_cop2_codegen_smoke` covers VIADDI + VSQI/VLQI + VIADD + VIAND/VIOR + VI post-increment. Rust fmt/clippy/test (400 lib tests) and CTest 51/51 pass. No boot-tested or playable claim.
 
 ## Remaining M4 exit criteria
 
