@@ -261,6 +261,12 @@ pub enum Operation {
         src: u8,
         immediate: i16,
     },
+    /// VU0 VIADD (COP2 Special1 funct=0x38): VI[fd] = VI[is] + VI[it]. ADR 0203.
+    Viadd {
+        dst: u8,
+        is: u8,
+        it: u8,
+    },
     /// VU0 VLQI (COP2 Special2 index 52): VF[ft] = VU Mem0[VI[is] * 16];
     /// VI[is] += 1 (post-increment). ADR 0202.
     Vlqi {
@@ -1851,6 +1857,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: instruction.rd,
                 immediate: (instruction.shift_amount & 0x1F) as i8 as i16,
             },
+            Opcode::Viadd => Operation::Viadd {
+                dst: instruction.shift_amount,
+                is: instruction.rd,
+                it: instruction.rt,
+            },
             Opcode::Vlqi => Operation::Vlqi {
                 dst: vf(instruction.rt),
                 vi: instruction.rd & 0xF,
@@ -2072,6 +2083,16 @@ mod tests {
         assert!(matches!(
             program.instructions()[1].operation,
             Operation::Vlqi { dst, vi } if dst.index() == 17 && vi == 13
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_viadd() {
+        let stream = [decoded(0x4A00_4BF8, 0x3000)];
+        let program = lift(&stream).expect("VIADD lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Viadd { dst, is, it } if dst == 15 && is == 9 && it == 0
         ));
     }
 

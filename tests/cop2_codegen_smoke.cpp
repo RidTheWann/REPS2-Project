@@ -263,5 +263,9 @@ int main() {
     }
     if (state.vu0.vi[3] != 1U) return 112;
 
+    // ADR 0203: VIADD vi8 <- vi7 + vi0 = 15; VIADD vi5 <- vi0 + vi0 = 0.
+    if (state.vu0.vi[8] != 15U) return 113;
+    if (state.vu0.vi[5] != 0U) return 114;
+
     return 0;
 }

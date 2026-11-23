@@ -1235,6 +1235,9 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
             0x4BE61B7C
             # SQC2 VF6, 0xA0($a0) -> proves VLQI loaded the VSQI value.
             0xF88600A0
+            # VIADD vi8, vi7, vi0 -> vi8 = 15; VIADD vi5, vi0, vi0 -> 0.
+            0x4A003A38
+            0x4A000178
             0x00000000  # nop    delay-slot padding
         DEPENDS "${REPS2_FRONTEND_EXECUTABLE}"
         COMMENT "AOT-compiling the synthetic R5900 COP2 data-movement block"
