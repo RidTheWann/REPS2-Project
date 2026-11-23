@@ -1506,6 +1506,8 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x02 => Opcode::Vaddz,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0B => Opcode::Vmaddw,
+        // Special1 funct 0x3F = VNOP (PCSX2 SPECIAL1 table row 15 col 15).
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x3F => Opcode::Nop,
         // COP2 Special2 (fmt=31): VMR32 is PCSX2 index 49 (fhi=12, flo=1),
         // the only Special2 operation implemented in this slice. ADR 0191.
         // The Special2 table applies only when bits 5..0 >= 0x3C; lower funct
@@ -1519,6 +1521,7 @@ fn decode_cop2(word: u32) -> Opcode {
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 24 => {
             Opcode::Vmulax
         }
+        0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 47 => Opcode::Nop,
         0x1F if (word & 0x3F) >= 0x3C && ((word & 0x3) | ((word >> 4) & 0x7C)) == 48 => {
             Opcode::Vmove
         }
@@ -3683,6 +3686,18 @@ mod tests {
         let effects = vaddx.effects();
         assert_eq!(effects.vf_read_mask, (1 << 0) | (1 << 16));
         assert_eq!(effects.vf_write_mask, 1 << 14);
+    }
+
+    #[test]
+    fn decodes_vu0_vnop_as_nop() {
+        // COP2 Special1 funct=0x3F = VNOP, a no-operation. Word 0x4A0002FF
+        // reached at pc=0x002239DC (ABI-50). ADR 0199.
+        let vnop = decode(0x4A00_02FF, 0);
+        assert_eq!(vnop.opcode, Opcode::Nop);
+        let effects = vnop.effects();
+        assert_eq!(effects.vf_read_mask, 0);
+        assert_eq!(effects.vf_write_mask, 0);
+        assert_eq!(effects.memory, MemoryEffect::None);
     }
 
     #[test]
