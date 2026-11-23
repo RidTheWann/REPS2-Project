@@ -318,6 +318,40 @@ inline void vu0_write_vi(Vu0State& vu0, std::uint8_t index, std::uint16_t value)
     };
 }
 
+// VU0 VMULbc (COP2 Special1 funct 0x18..0x1B): masked broadcast multiply
+// , same lane/mask rules as VADDbc (ADR 0198).
+[[nodiscard]] constexpr Gpr128 vu0_broadcast_mul(
+    const Gpr128& dst,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t broadcast_lane,
+    std::uint8_t dest_mask
+) noexcept {
+    const std::uint32_t fs_lanes[4] = {
+        static_cast<std::uint32_t>(fs.low), static_cast<std::uint32_t>(fs.low >> 32U),
+        static_cast<std::uint32_t>(fs.high), static_cast<std::uint32_t>(fs.high >> 32U),
+    };
+    const std::uint32_t ft_lanes[4] = {
+        static_cast<std::uint32_t>(ft.low), static_cast<std::uint32_t>(ft.low >> 32U),
+        static_cast<std::uint32_t>(ft.high), static_cast<std::uint32_t>(ft.high >> 32U),
+    };
+    const std::uint32_t dst_lanes[4] = {
+        static_cast<std::uint32_t>(dst.low), static_cast<std::uint32_t>(dst.low >> 32U),
+        static_cast<std::uint32_t>(dst.high), static_cast<std::uint32_t>(dst.high >> 32U),
+    };
+    const auto scalar = ft_lanes[broadcast_lane & 3U];
+    const std::uint32_t out[4] = {
+        (dest_mask & 0x8U) ? fpu_mul(fs_lanes[0], scalar).bits : dst_lanes[0],
+        (dest_mask & 0x4U) ? fpu_mul(fs_lanes[1], scalar).bits : dst_lanes[1],
+        (dest_mask & 0x2U) ? fpu_mul(fs_lanes[2], scalar).bits : dst_lanes[2],
+        (dest_mask & 0x1U) ? fpu_mul(fs_lanes[3], scalar).bits : dst_lanes[3],
+    };
+    return Gpr128{
+        static_cast<std::uint64_t>(out[0]) | (static_cast<std::uint64_t>(out[1]) << 32U),
+        static_cast<std::uint64_t>(out[2]) | (static_cast<std::uint64_t>(out[3]) << 32U),
+    };
+}
+
 // VU0 VMADDbc (COP2 Special1 funct 0x08..0x0B): masked broadcast multiply-add
 // `fd.dest = ACC + fs * ft.bc`. Same FPU rules as VADDbc. Evidence: Sony VU
 // manual 6.2 VMADDbc; PCSX2 Int_COP2SPECIAL1PrintTable[0x08..0x0B]. ADR 0200.
