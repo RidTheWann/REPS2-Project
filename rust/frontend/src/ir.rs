@@ -241,6 +241,12 @@ pub enum Operation {
     /// VU0 VWAITQ (Special2 index 59): Q-register sync; no-op in this model.
     /// ADR 0195.
     Vu0WaitQ,
+    /// VU0 VMOVE (COP2 Special2 index 48): masked VF-to-VF move. ADR 0197.
+    Vmove {
+        dst: Vf,
+        src: Vf,
+        dest_mask: u8,
+    },
     /// VU0 VMADDw (Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
     /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
     Vu0MaddW {
@@ -1801,6 +1807,11 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 accumulate: true,
             },
             Opcode::Vwaitq => Operation::Vu0WaitQ,
+            Opcode::Vmove => Operation::Vmove {
+                dst: vf(instruction.rt),
+                src: vf(instruction.rd),
+                dest_mask: instruction.rs & 0xF,
+            },
             Opcode::Vmaddw => Operation::Vu0MaddW {
                 dst: vf(instruction.shift_amount),
                 fs: vf(instruction.rd),
@@ -1971,6 +1982,17 @@ mod tests {
         assert!(matches!(
             program.instructions()[0].operation,
             Operation::Vopmsub { fs, ft } if fs.index() == 11 && ft.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vmove() {
+        let stream = [decoded(0x4BF4_733C, 0x3000)];
+        let program = lift(&stream).expect("VMOVE lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vmove { dst, src, dest_mask }
+                if dst.index() == 20 && src.index() == 14 && dest_mask == 0xF
         ));
     }
 
