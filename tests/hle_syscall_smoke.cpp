@@ -3932,6 +3932,35 @@ int test_cdvd_scmd_mmode_records_the_media_mode_and_replies_one() {
     return 0;
 }
 
+int test_cdvd_scmd_readclock_replies_with_bcd_clock() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    // CD_SCMD_READCLOCK (0x01) sends no payload and reads a 16-byte reply:
+    // { int result; sceCdCLOCK clock }, with BCD values per libcdvd-common.h.
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerCdScm, 0x01U, 0U, 16U);
+    const reps2::runtime::SifDmaTransfer payload{0U, 0U, 0, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 990;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.scmd_call_count != 1U || sif.scmd_replies != 1U) return 991;
+    if (sif.last_scmd_number != 0x01U || !sif.last_scmd_replied) return 992;
+    // result = 1 (SCECdErNO success)
+    if (load_word(ram, kRpcReply) != 1U) return 993;
+    // sceCdCLOCK = { stat=0, second=0, minute=0, hour=0, pad=0, day=1, month=1, year=0 }
+    const auto clock_low = load_word(ram, kRpcReply + 4U);
+    const auto clock_high = load_word(ram, kRpcReply + 8U);
+    if (clock_low != 0x00000000U) return 994;
+    if (clock_high != 0x0001'0100U) return 995;
+    if (sif.rpc_call_replies != 1U || !sif.last_rpc_call_replied) return 996;
+    return 0;
+}
+
 int test_cdvd_scmd_mmode_refuses_a_malformed_request() {
     SifWindow ram{};
     EeState state{};
@@ -6562,6 +6591,8 @@ int main() {
          &test_boot_environment_registers_the_cdvd_scmd_server},
         {"cdvd scmd mmode records the media mode and replies one",
          &test_cdvd_scmd_mmode_records_the_media_mode_and_replies_one},
+        {"cdvd scmd readclock replies with a deterministic bcd clock",
+         &test_cdvd_scmd_readclock_replies_with_bcd_clock},
         {"cdvd scmd mmode refuses a malformed request",
          &test_cdvd_scmd_mmode_refuses_a_malformed_request},
         {"fileio init handshake is served with version and flags",
