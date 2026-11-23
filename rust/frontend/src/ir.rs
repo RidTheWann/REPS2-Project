@@ -247,6 +247,14 @@ pub enum Operation {
         src: Vf,
         dest_mask: u8,
     },
+    /// VU0 VADDbc (Special1 funct 0x00..0x03): masked broadcast add. ADR 0198.
+    VaddBroadcast {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+        broadcast_lane: u8,
+        dest_mask: u8,
+    },
     /// VU0 VMADDw (Special1 funct=0x0B): VF[fd] = ACC + fs * ft.w
     /// (broadcast w), the final step of a matrix-vector multiply. ADR 0196.
     Vu0MaddW {
@@ -1812,6 +1820,21 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: vf(instruction.rd),
                 dest_mask: instruction.rs & 0xF,
             },
+            Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
+                let lane = match instruction.opcode {
+                    Opcode::Vaddx => 0,
+                    Opcode::Vaddy => 1,
+                    Opcode::Vaddz => 2,
+                    _ => 3,
+                };
+                Operation::VaddBroadcast {
+                    dst: vf(instruction.shift_amount),
+                    fs: vf(instruction.rd),
+                    ft: vf(instruction.rt),
+                    broadcast_lane: lane,
+                    dest_mask: instruction.rs & 0xF,
+                }
+            }
             Opcode::Vmaddw => Operation::Vu0MaddW {
                 dst: vf(instruction.shift_amount),
                 fs: vf(instruction.rd),
@@ -1982,6 +2005,18 @@ mod tests {
         assert!(matches!(
             program.instructions()[0].operation,
             Operation::Vopmsub { fs, ft } if fs.index() == 11 && ft.index() == 12
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vaddx() {
+        let stream = [decoded(0x4A50_0380, 0x3000)];
+        let program = lift(&stream).expect("VADDx lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::VaddBroadcast { dst, fs, ft, broadcast_lane, dest_mask }
+                if dst.index() == 14 && fs.index() == 0 && ft.index() == 16
+                    && broadcast_lane == 0 && dest_mask == 0x2
         ));
     }
 

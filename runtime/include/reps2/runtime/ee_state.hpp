@@ -203,6 +203,48 @@ inline void vu0_write_vf(Vu0State& vu0, std::uint8_t index, const Gpr128& value)
     };
 }
 
+// VU0 VADDx/VADDy/VADDz/VADDw (COP2 Special1 funct 0x00..0x03): broadcast
+// one lane of ft across all four fields, `fd.dest = fs + ft.bc`, where dest
+// is the 4-bit mask (bits 24..21). Evidence: Sony VU User's Manual 6.2
+// VADDbc; PCSX2 Int_COP2SPECIAL1PrintTable[0..3]. ADR 0198.
+[[nodiscard]] constexpr Gpr128 vu0_broadcast_add(
+    const Gpr128& dst,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t broadcast_lane,
+    std::uint8_t dest_mask
+) noexcept {
+    const std::uint32_t fs_lanes[4] = {
+        static_cast<std::uint32_t>(fs.low),
+        static_cast<std::uint32_t>(fs.low >> 32U),
+        static_cast<std::uint32_t>(fs.high),
+        static_cast<std::uint32_t>(fs.high >> 32U),
+    };
+    const std::uint32_t ft_lanes[4] = {
+        static_cast<std::uint32_t>(ft.low),
+        static_cast<std::uint32_t>(ft.low >> 32U),
+        static_cast<std::uint32_t>(ft.high),
+        static_cast<std::uint32_t>(ft.high >> 32U),
+    };
+    const std::uint32_t dst_lanes[4] = {
+        static_cast<std::uint32_t>(dst.low),
+        static_cast<std::uint32_t>(dst.low >> 32U),
+        static_cast<std::uint32_t>(dst.high),
+        static_cast<std::uint32_t>(dst.high >> 32U),
+    };
+    const auto scalar = ft_lanes[broadcast_lane & 3U];
+    const std::uint32_t out[4] = {
+        (dest_mask & 0x8U) ? fpu_add(fs_lanes[0], scalar).bits : dst_lanes[0],
+        (dest_mask & 0x4U) ? fpu_add(fs_lanes[1], scalar).bits : dst_lanes[1],
+        (dest_mask & 0x2U) ? fpu_add(fs_lanes[2], scalar).bits : dst_lanes[2],
+        (dest_mask & 0x1U) ? fpu_add(fs_lanes[3], scalar).bits : dst_lanes[3],
+    };
+    return Gpr128{
+        static_cast<std::uint64_t>(out[0]) | (static_cast<std::uint64_t>(out[1]) << 32U),
+        static_cast<std::uint64_t>(out[2]) | (static_cast<std::uint64_t>(out[3]) << 32U),
+    };
+}
+
 // VU0 VMOVE (COP2 Special2 index 48): masked 4-lane VF move. dest mask bits
 // 3=x, 2=y, 1=z, 0=w; unselected lanes keep the destination value. Evidence:
 // Sony VU User's Manual 6.2 VMOVE; PS2Tek S2 row 6 col 0; PCSX2 table[48].
