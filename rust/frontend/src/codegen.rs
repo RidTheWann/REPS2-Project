@@ -363,6 +363,21 @@ pub(crate) fn emit_instruction(
                 "    reps2::runtime::vu0_write_vi(state.vu0, {dst}, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, {is}) + reps2::runtime::vu0_read_vi(state.vu0, {it})));\n"
             ));
         }
+        Operation::Visub { dst, is, it } => {
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vi(state.vu0, {dst}, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, {is}) - reps2::runtime::vu0_read_vi(state.vu0, {it})));\n"
+            ));
+        }
+        Operation::Viand { dst, is, it } => {
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vi(state.vu0, {dst}, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, {is}) & reps2::runtime::vu0_read_vi(state.vu0, {it})));\n"
+            ));
+        }
+        Operation::Vior { dst, is, it } => {
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vi(state.vu0, {dst}, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, {is}) | reps2::runtime::vu0_read_vi(state.vu0, {it})));\n"
+            ));
+        }
         Operation::VaddBroadcast {
             dst,
             fs,
@@ -2973,6 +2988,21 @@ mod tests {
         // VLQI VF17, VI13
         assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 17, reps2::runtime::vu0_read_vumem_qword(state.vu0, vi_13_addr))"));
         assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 13, static_cast<std::uint16_t>(vi_13_addr + 1U));"));
+    }
+
+    #[test]
+    fn emits_vu0_visub_viand_vior() {
+        let words = [0x4BCB_61BCu32, 0x4BCB_68BDu32, 0x4A0B_7079u32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x22FFC8 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VISUB/VIAND/VIOR IR");
+        let cpp = emit_cpp(&program).expect("VISUB/VIAND/VIOR C++");
+        assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 6, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, 12) & reps2::runtime::vu0_read_vi(state.vu0, 11)));"));
+        assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 2, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, 13) | reps2::runtime::vu0_read_vi(state.vu0, 11)));"));
+        assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 1, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, 14) - reps2::runtime::vu0_read_vi(state.vu0, 11)));"));
     }
 
     #[test]

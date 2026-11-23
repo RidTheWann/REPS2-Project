@@ -172,6 +172,12 @@ pub enum Opcode {
     /// VU0 VIADD (COP2 Special1 funct=0x38): VI[fd] = VI[is] + VI[it].
     /// ADR 0203.
     Viadd,
+    /// VU0 VISUB (COP2 Special1 funct=0x39): VI[fd] = VI[is] - VI[it]. ADR 0204.
+    Visub,
+    /// VU0 VIAND (COP2 Special1 funct=0x3C): VI[fd] = VI[is] & VI[it]. ADR 0204.
+    Viand,
+    /// VU0 VIOR (COP2 Special1 funct=0x3D): VI[fd] = VI[is] | VI[it]. ADR 0204.
+    Vior,
     /// VU0 VMADDbc (COP2 Special1 funct 0x08..0x0B): fd.dest = ACC + fs*ft.bc.
     /// ADR 0200.
     Vmaddx,
@@ -530,6 +536,9 @@ impl Opcode {
             Self::Vaddw => "vaddw",
             Self::Viaddi => "viaddi",
             Self::Viadd => "viadd",
+            Self::Visub => "visub",
+            Self::Viand => "viand",
+            Self::Vior => "vior",
             Self::Vmaddx => "vmaddx",
             Self::Vmaddy => "vmaddy",
             Self::Vmaddz2 => "vmaddz",
@@ -1324,6 +1333,18 @@ impl Instruction {
                 // VIADD: integer register add; touches only the VI file, which
                 // is not tracked by the VF/GPR effect masks. ADR 0203.
             }
+            Opcode::Visub => {
+                // VISUB: integer register subtract; touches only the VI file.
+                // ADR 0204.
+            }
+            Opcode::Viand => {
+                // VIAND: integer register bitwise AND; touches only the VI file.
+                // ADR 0204.
+            }
+            Opcode::Vior => {
+                // VIOR: integer register bitwise OR; touches only the VI file.
+                // ADR 0204.
+            }
             Opcode::Syscall | Opcode::Break => {
                 effects.control_flow = ControlFlowEffect::Trap;
                 effects.may_raise_exception = true;
@@ -1555,6 +1576,28 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x32 => Opcode::Viaddi,
         // Special1 funct 0x38 = VIADD: VI[fd] = VI[is] + VI[it]. ADR 0203.
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x38 => Opcode::Viadd,
+        // Special1 funct 0x39 = VISUB (fmt != 31 only; fmt=31 is Special2 idx 57).
+        _ if (word >> 21) & 0x1F >= 0x10
+            && (word >> 21) & 0x1F != 0x1F
+            && (word & 0x3F) == 0x39 =>
+        {
+            Opcode::Visub
+        }
+        // Special1 funct 0x3C = VIAND (fmt != 31 only; fmt=31 is Special2).
+        // ADR 0196 gate: funct 0x3C..0x3F with fmt=0x1F route to Special2.
+        _ if (word >> 21) & 0x1F >= 0x10
+            && (word >> 21) & 0x1F != 0x1F
+            && (word & 0x3F) == 0x3C =>
+        {
+            Opcode::Viand
+        }
+        // Special1 funct 0x3D = VIOR (fmt != 31 only).
+        _ if (word >> 21) & 0x1F >= 0x10
+            && (word >> 21) & 0x1F != 0x1F
+            && (word & 0x3F) == 0x3D =>
+        {
+            Opcode::Vior
+        }
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x08 => Opcode::Vmaddx,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x09 => Opcode::Vmaddy,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x0A => Opcode::Vmaddz2,
@@ -3766,6 +3809,28 @@ mod tests {
         let effects = vlqi.effects();
         assert_eq!(effects.vf_read_mask, 0);
         assert_ne!(effects.vf_write_mask, 0);
+    }
+
+    #[test]
+    fn decodes_vu0_visub_viand_vior() {
+        // VIAND vi6, vi12, vi11 (funct 0x3C, fmt 0x1E), word 0x4BCB61BC at 0x0022FFC8.
+        let viand = decode(0x4BCB_61BC, 0);
+        assert_eq!(viand.opcode, Opcode::Viand);
+        assert_eq!(viand.rt, 11);
+        assert_eq!(viand.rd, 12);
+        assert_eq!(viand.shift_amount, 6);
+        // VIOR vi2, vi13, vi11 (funct 0x3D, fmt 0x1E), word 0x4BCB68BD at 0x0022FFCC.
+        let vior = decode(0x4BCB_68BD, 0);
+        assert_eq!(vior.opcode, Opcode::Vior);
+        assert_eq!(vior.rt, 11);
+        assert_eq!(vior.rd, 13);
+        assert_eq!(vior.shift_amount, 2);
+        // VISUB (funct 0x39), synthetic word 0x4A0B7079.
+        let visub = decode(0x4A0B_7079, 0);
+        assert_eq!(visub.opcode, Opcode::Visub);
+        assert_eq!(visub.rt, 11);
+        assert_eq!(visub.rd, 14);
+        assert_eq!(visub.shift_amount, 1);
     }
 
     #[test]
