@@ -1591,12 +1591,12 @@ fn decode_cop2(word: u32) -> Opcode {
             // We decode both variants as the same opcode; effects track interlock flag.
             Opcode::Qmfc2
         }
-        0x02 if (word & 0x7FF) == 0 => Opcode::Cfc2, // CFC2: reserved 10..0 must be zero
+        0x02 if reserved_low_ok => Opcode::Cfc2, // CFC2(.I): bit 0 = interlock, bits 10..1 reserved
         0x05 if reserved_low_ok => {
             // QMTC2 (format 5): VF[rd] <- GPR[rt]; interlock variant QMTC2.I if bit 0 set.
             Opcode::Qmtc2
         }
-        0x06 if (word & 0x7FF) == 0 => Opcode::Ctc2, // CTC2: reserved 10..0 must be zero
+        0x06 if reserved_low_ok => Opcode::Ctc2, // CTC2(.I): bit 0 = interlock, bits 10..1 reserved
         // COP2 Special1 (fmt >= 0x10): only VSUB (funct=0x2C, row 5 col 4)
         // is implemented in this slice. ADR 0192. The dest mask (bits 24..21)
         // selects which of x/y/z/w lanes are written.
@@ -3818,10 +3818,15 @@ mod tests {
         assert_eq!(decode(0x48C4_E000, 0).rt, 4);
         assert_eq!(decode(0x48C4_E000, 0).rd, 28);
 
-        // Reserved bits on CFC2/CTC2 are rejected; the VU arithmetic rows
-        // (>= 0x10) stay unsupported except the explicitly modelled VSUB.
+        // Reserved bits on CFC2/CTC2 are rejected; bit 0 alone is the interlock
+        // flag (ADR 0212), same rule as ADR 0190 for QMFC2/QMTC2.
         assert_eq!(decode(0x4842_0003, 0).opcode, Opcode::Unknown);
         assert_eq!(decode(0x48C2_0007, 0).opcode, Opcode::Unknown);
+        // CFC2.I $24, $2 at 0x21B844 = 0x48581001 (bit 0 set, bits 10..1 zero).
+        assert_eq!(decode(0x4858_1001, 0).opcode, Opcode::Cfc2);
+        assert_eq!(decode(0x4858_1001, 0).rt, 24);
+        assert_eq!(decode(0x4858_1001, 0).rd, 2);
+        assert_eq!(decode(0x48D8_1001, 0).opcode, Opcode::Ctc2);
         // VSUB (funct=0x2C) and VOPMULA (funct=0x3E) are decoded (ADR 0192/0193);
         // a peer Special1 funct stays Unknown.
         assert_eq!(decode(0x4BCC_5AEC, 0).opcode, Opcode::Vsub);
