@@ -1789,13 +1789,11 @@ fn emit_shift(
     let s = src.index();
     if arithmetic {
         output.push_str(&format!(
-            "    if (!is_word_value(state.gpr[{s}].low)) return Status::undefined_word_operand;\n\
-             \x20   if ({d} != 0) state.gpr[{d}].low = sign_extend_word(arithmetic_shift_right_word(static_cast<std::uint32_t>(state.gpr[{s}].low), {amount}U));\n"
+            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(arithmetic_shift_right_word(static_cast<std::uint32_t>(state.gpr[{s}].low), {amount}U));\n"
         ));
     } else {
         output.push_str(&format!(
-            "    if (!is_word_value(state.gpr[{s}].low)) return Status::undefined_word_operand;\n\
-             \x20   if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[{s}].low) {operator} {amount}U);\n"
+            "    if ({d} != 0) state.gpr[{d}].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[{s}].low) {operator} {amount}U);\n"
         ));
     }
 }
@@ -1922,6 +1920,40 @@ mod tests {
         assert!(cpp.contains(
             "if (!is_word_value(state.gpr[5].low)) return Status::undefined_word_operand"
         ));
+    }
+
+    #[test]
+    fn emits_word_shifts_from_non_word_operands_without_guard() {
+        // ADR 0213: SLL/SRL/SRA consume only GPR[31:0]; the source need not be
+        // a canonical word value. Doubleword producers legitimately leave the
+        // high lane inconsistent with the low lane.
+        // Variable shifts SLLV/SRLV/SRAV require shift_amount == 0 (bits 5..0).
+        let words = [
+            0x00087482,                                // srl $14, $8, 18 (the abi65 frontier word)
+            (12 << 21) | (9 << 16) | (6 << 11) | 0x04, // sllv $6, $9, $12
+            (12 << 21) | (9 << 16) | (7 << 11) | 0x06, // srlv $7, $9, $12
+            (12 << 21) | (9 << 16) | (8 << 11) | 0x07, // srav $8, $9, $12
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0xB000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("word shifts lift");
+        let cpp = emit_cpp(&program).expect("word shift C++");
+        assert!(cpp.contains("state.gpr[14].low = sign_extend_word(static_cast<std::uint32_t>(state.gpr[8].low) >> 18U)"));
+        for index in 6..=8 {
+            let line = cpp
+                .lines()
+                .find(|line| line.contains(&format!("state.gpr[{index}].low = sign_extend_word")));
+            assert!(
+                line.is_some(),
+                "missing masked word shift into gpr[{index}]"
+            );
+            let guard = format!("is_word_value(state.gpr[{index}].low)");
+            assert!(!line.unwrap().contains(&guard));
+        }
+        assert!(!cpp.contains("is_word_value(state.gpr[8].low)"));
     }
 
     #[test]
