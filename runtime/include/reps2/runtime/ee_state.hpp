@@ -168,6 +168,44 @@ inline void vu0_write_vi(Vu0State& vu0, std::uint8_t index, std::uint16_t value)
     };
 }
 
+// VU0 VADD (COP2 Special1 funct=0x28): masked lane add `fd.lane = fs.lane +
+// ft.lane`, same lane/mask rules as vu0_sub_lanes (ADR 0192) but with fpu_add.
+// Evidence: Sony VU User's Manual 6.2 VADD (p. 241); PS2Tek Special1 row 5 col 0;
+// PCSX2 Int_COP2SPECIAL1PrintTable[0x28] = VADD. ADR 0209.
+[[nodiscard]] constexpr Gpr128 vu0_add_lanes(
+    const Gpr128& dst,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t dest_mask
+) noexcept {
+    constexpr auto add_lane = [](std::uint32_t a, std::uint32_t b) noexcept {
+        return fpu_add(a, b).bits;
+    };
+    const auto fs_xy = static_cast<std::uint32_t>(fs.low);
+    const auto fs_zw = static_cast<std::uint32_t>(fs.low >> 32U);
+    const auto fs_xy2 = static_cast<std::uint32_t>(fs.high);
+    const auto fs_zw2 = static_cast<std::uint32_t>(fs.high >> 32U);
+    const auto ft_xy = static_cast<std::uint32_t>(ft.low);
+    const auto ft_zw = static_cast<std::uint32_t>(ft.low >> 32U);
+    const auto ft_xy2 = static_cast<std::uint32_t>(ft.high);
+    const auto ft_zw2 = static_cast<std::uint32_t>(ft.high >> 32U);
+    constexpr auto merge = [](std::uint32_t result, std::uint32_t original, bool write) noexcept {
+        return write ? result : original;
+    };
+    const std::uint32_t dst_x = static_cast<std::uint32_t>(dst.low);
+    const std::uint32_t dst_y = static_cast<std::uint32_t>(dst.low >> 32U);
+    const std::uint32_t dst_z = static_cast<std::uint32_t>(dst.high);
+    const std::uint32_t dst_w = static_cast<std::uint32_t>(dst.high >> 32U);
+    const std::uint32_t out_x = merge(add_lane(fs_xy, ft_xy), dst_x, (dest_mask & 0x8U) != 0U);
+    const std::uint32_t out_y = merge(add_lane(fs_zw, ft_zw), dst_y, (dest_mask & 0x4U) != 0U);
+    const std::uint32_t out_z = merge(add_lane(fs_xy2, ft_xy2), dst_z, (dest_mask & 0x2U) != 0U);
+    const std::uint32_t out_w = merge(add_lane(fs_zw2, ft_zw2), dst_w, (dest_mask & 0x1U) != 0U);
+    return Gpr128{
+        static_cast<std::uint64_t>(out_x) | (static_cast<std::uint64_t>(out_y) << 32U),
+        static_cast<std::uint64_t>(out_z) | (static_cast<std::uint64_t>(out_w) << 32U),
+    };
+}
+
 // VU0 VOPMULA (COP2 Special1 funct=0x3E): outer-product multiply-accumulate into
 // ACC. `ACC[i] += fs[i] * ft[i]` per lane, using the same single-precision
 // truncate-toward-zero/no-NaN/no-denormal rules as fpu_mul/fpu_add. The 4-bit

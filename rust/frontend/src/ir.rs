@@ -255,6 +255,13 @@ pub enum Operation {
         broadcast_lane: u8,
         dest_mask: u8,
     },
+    /// VU0 VADD (Special1 funct 0x28): masked vector add. ADR 0209.
+    Vadd {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+        dest_mask: u8,
+    },
     /// VU0 VADDbc (Special1 funct 0x00..0x03): masked broadcast add. ADR 0198.
     VaddBroadcast {
         dst: Vf,
@@ -1931,6 +1938,12 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 src: instruction.rt & 0xF,
                 vi: instruction.rd & 0xF,
             },
+            Opcode::Vadd => Operation::Vadd {
+                dst: vf(instruction.shift_amount),
+                fs: vf(instruction.rd),
+                ft: vf(instruction.rt),
+                dest_mask: instruction.rs & 0xF,
+            },
             Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
                 let lane = match instruction.opcode {
                     Opcode::Vaddx => 0,
@@ -2159,6 +2172,17 @@ mod tests {
         assert!(matches!(
             program.instructions()[1].operation,
             Operation::Vlqi { dst, vi } if dst.index() == 17 && vi == 13
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vadd() {
+        let stream = [decoded(0x4BCC_5AE8, 0x3000)];
+        let program = lift(&stream).expect("VADD lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vadd { dst, fs, ft, dest_mask }
+                if dst.index() == 11 && fs.index() == 11 && ft.index() == 12 && dest_mask == 0xE
         ));
     }
 

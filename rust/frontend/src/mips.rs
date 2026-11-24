@@ -172,6 +172,8 @@ pub enum Opcode {
     Vaddy,
     Vaddz,
     Vaddw,
+    /// VU0 VADD (Special1 funct 0x28): masked vector add. ADR 0209.
+    Vadd,
     /// VU0 VMULbc (COP2 Special1 funct 0x18..0x1B): masked broadcast multiply.
     /// ADR 0208.
     Vmulx,
@@ -548,6 +550,7 @@ impl Opcode {
             Self::Vaddy => "vaddy",
             Self::Vaddz => "vaddz",
             Self::Vaddw => "vaddw",
+            Self::Vadd => "vadd",
             Self::Vmulx => "vmulx",
             Self::Vmuly => "vmuly",
             Self::Vmulz => "vmulz",
@@ -1338,6 +1341,11 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
+            Opcode::Vadd => {
+                // VADD: reads fs (rd) and ft (rt), writes fd (sa) masked. ADR 0209.
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+                effects.vf_write_mask = vf_write_bit(self.shift_amount);
+            }
             Opcode::Vmulx | Opcode::Vmuly | Opcode::Vmulz | Opcode::Vmulw => {
                 // VMULbc: reads fs (rd) and ft (rt), writes fd (sa) masked. ADR 0208.
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
@@ -1602,6 +1610,8 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x01 => Opcode::Vaddy,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x02 => Opcode::Vaddz,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
+        // VADD: funct 0x28 (row 5 col 0), masked vector add. ADR 0209.
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x28 => Opcode::Vadd,
         // VMULbc: funct 0x18..0x1B. ADR 0208.
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x18 => Opcode::Vmulx,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x19 => Opcode::Vmuly,
@@ -3897,6 +3907,19 @@ mod tests {
         assert_eq!(insn.rt, 0); // it
         assert_eq!(insn.rd, 9); // is
         assert_eq!(insn.shift_amount, 15); // id
+    }
+
+    #[test]
+    fn decodes_vu0_vadd() {
+        // VADD: funct 0x28, word 0x4BCC5AE8 at 0x002300F8 (fs=rd=11, ft=rt=12, fd=sa=11).
+        let m = decode(0x4BCC_5AE8, 0);
+        assert_eq!(m.opcode, Opcode::Vadd);
+        assert_eq!(m.rd, 11);
+        assert_eq!(m.rt, 12);
+        assert_eq!(m.shift_amount, 11);
+        let fx = m.effects();
+        assert_eq!(fx.vf_write_mask, 1 << 11);
+        assert_ne!(fx.vf_read_mask, 0);
     }
 
     #[test]
