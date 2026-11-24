@@ -394,6 +394,19 @@ pub(crate) fn emit_instruction(
                 dest_mask
             ));
         }
+        Operation::Vadd {
+            dst,
+            fs,
+            ft,
+            dest_mask,
+        } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_add_lanes(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
+                fs.index(),
+                ft.index()
+            ));
+        }
         Operation::VaddBroadcast {
             dst,
             fs,
@@ -3056,6 +3069,19 @@ mod tests {
         let program = ir::lift(&decoded).expect("VIADD IR");
         let cpp = emit_cpp(&program).expect("VIADD C++");
         assert!(cpp.contains("reps2::runtime::vu0_write_vi(state.vu0, 15, static_cast<std::uint16_t>(reps2::runtime::vu0_read_vi(state.vu0, 9) + reps2::runtime::vu0_read_vi(state.vu0, 0)));"));
+    }
+
+    #[test]
+    fn emits_vu0_vadd() {
+        let words = [0x4BCC_5AE8u32];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x2300F8 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VADD IR");
+        let cpp = emit_cpp(&program).expect("VADD C++");
+        assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_add_lanes(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 14));"));
     }
 
     #[test]
