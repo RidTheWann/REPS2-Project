@@ -137,6 +137,18 @@ public:
             main_ram_.data(), main_ram_.size());
         state_.memory.scratchpad = std::span<std::uint8_t>(
             scratchpad_.data(), scratchpad_.size());
+        // VU0 data memory (VU Mem0) is exposed to the EE as MMIO at
+        // 0x11004000..0x11004FF0 and is backed by Vu0State::data_mem; bind the
+        // MMIO span to that storage. ADR 0211.
+        state_.memory.vu_mem = std::span<std::uint8_t>(
+            reinterpret_cast<std::uint8_t*>(state_.vu0.data_mem.data()),
+            state_.vu0.data_mem.size() * sizeof(::reps2::runtime::Gpr128));
+        // VU0 data memory (VU Mem0) is exposed to the EE as MMIO at
+        // 0x11004000..0x11004FF0 and is backed by Vu0State::data_mem; bind the
+        // MMIO span to that storage. ADR 0211.
+        state_.memory.vu_mem = std::span<std::uint8_t>(
+            reinterpret_cast<std::uint8_t*>(state_.vu0.data_mem.data()),
+            state_.vu0.data_mem.size() * sizeof(::reps2::runtime::Gpr128));
         // The media source is host configuration, not HLE observation state, and
         // the generated initializer resets EeHleState without touching it. Attach
         // it before the initializer so boot-time code can read the host's
