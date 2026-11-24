@@ -67,10 +67,14 @@ not a producer bug.
 ## Validation
 
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --
-  -D warnings`, `cargo test --workspace --locked` (new unit tests:
-  shift-of-non-word-operand emits no guard and sign-extends the result).
-- `tests/` generated-code smoke: a program whose GPR is loaded with a full
-  64-bit value (LD) then SRL'd must execute `ok` and produce the
-  sign-extended word.
-- Fresh real-title probe to be recorded in `docs/RESEARCH.md` when the owner
-  runs it with the ISO; not run here (no game assets in repo).
+  -D warnings`, `cargo test --workspace --locked` (410 lib tests, including
+  `emits_word_shifts_from_non_word_operands_without_guard`).
+- CMake Release build + `ctest -C Release`: 52/52 pass on Windows x64/MSVC.
+- Fresh real-title probe (`abi65` rerun on main `d20afd9`, runtime ABI 41,
+  Downhill Domination USA ISO `0fe2b777...a7eb86`, boot ELF
+  `adfda7b7...f0cf0c`): the `0x0021B9B8` stop is gone; the run executes
+  5,179,512 instructions in 2 batches and stops at `pc=0x00217D8C` as
+  `unsupported_instruction` on word `0x41010003` (COP0 `TLBP`), a genuine
+  TLB-management instruction. Census unchanged: 63,937 blocks, 347,734 guest
+  instructions, 77 unsupported stops. Evidence recorded in `docs/RESEARCH.md`
+  and `docs/PROJECT_STATE.md`. No boot-tested or playable claim.
