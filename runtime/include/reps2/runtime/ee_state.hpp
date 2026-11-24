@@ -780,6 +780,13 @@ struct EeMemory {
     // EE Scratchpad RAM (SPR) 0x70000000..0x70003FFF: 16 KiB backing owned
     // by the session (span avoids enlarging stack-allocated EeState). ADR 0187.
     std::span<std::uint8_t> scratchpad{};
+    // VU0 data memory (VU Mem0) MMIO window 0x11004000..0x11004FF0 (4 KiB),
+    // backed by Vu0State::data_mem and bound by the engine session (span avoids
+    // enlarging EeState). ADR 0211.
+    // VU0 data memory (VU Mem0) MMIO window 0x11004000..0x11004FF0 (4 KiB),
+    // backed by Vu0State::data_mem and bound by the engine session (span avoids
+    // enlarging EeState). ADR 0211.
+    std::span<std::uint8_t> vu_mem{};
     // Bounded observation of the match path: how many compare matches latched,
     // how many raised the INTC source, and how many were refused because the
     // controller state was never established. A refusal is counted, never
@@ -2716,6 +2723,22 @@ inline void materialize_ee_timer1(EeMemory&) noexcept {}
 // ADR 0187.
 inline constexpr std::uint32_t kEeScratchpadBaseAddress{0x7000'0000U};
 inline constexpr std::size_t kEeScratchpadSize{16U * 1024U};
+// VU0 data memory (VU Mem0) EE MMIO window 0x11004000..0x11004FF0 (4 KiB),
+// 128-bit aligned. Backed by EeMemory::vu_mem (span bound to Vu0State::data_mem
+// by the engine session). ADR 0211.
+inline constexpr std::uint32_t kEeVuMem0BaseAddress{0x1100'4000U};
+inline constexpr std::size_t kEeVuMem0Size{4U * 1024U};
+[[nodiscard]] inline bool vu_mem_offset(
+    std::uint32_t address, std::size_t width, std::size_t alignment,
+    std::size_t& offset) noexcept {
+    if (address < kEeVuMem0BaseAddress
+        || (alignment > 1U && (address % alignment) != 0U)) return false;
+    offset = static_cast<std::size_t>(address - kEeVuMem0BaseAddress);
+    return offset <= kEeVuMem0Size && width <= kEeVuMem0Size - offset;
+}
+inline bool vu_mem_ready(const EeMemory& m) noexcept {
+    return m.vu_mem.size() >= kEeVuMem0Size;
+}
 [[nodiscard]] inline bool scratchpad_offset(
     std::uint32_t address, std::size_t width, std::size_t alignment,
     std::size_t& offset) noexcept {
@@ -2766,6 +2789,46 @@ inline Status scratchpad_read_u128(const EeMemory& m, std::uint32_t a, Gpr128& v
 inline Status scratchpad_write_u128(EeMemory& m, std::uint32_t a, const Gpr128& v) noexcept {
     std::size_t o{}; if (!scratchpad_offset(a, 16U, 16U, o) || !scratchpad_ready(m)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
     for (std::size_t i=0;i<8U;++i) { m.scratchpad[o+i]=static_cast<std::uint8_t>(v.low>>(8U*i)); m.scratchpad[o+8U+i]=static_cast<std::uint8_t>(v.high>>(8U*i)); } return Status::ok;
+}
+inline Status vu_mem_read_u8(const EeMemory& m, std::uint32_t a, std::uint8_t& v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 1U, 1U, o) || !vu_mem_ready(m)) return Status::unmapped_memory;
+    v = m.vu_mem[o]; return Status::ok;
+}
+inline Status vu_mem_write_u8(EeMemory& m, std::uint32_t a, std::uint8_t v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 1U, 1U, o) || !vu_mem_ready(m)) return Status::unmapped_memory;
+    m.vu_mem[o] = v; return Status::ok;
+}
+inline Status vu_mem_read_u16(const EeMemory& m, std::uint32_t a, std::uint16_t& v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 2U, 2U, o) || !vu_mem_ready(m)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
+    v = static_cast<std::uint16_t>(m.vu_mem[o] | (static_cast<std::uint16_t>(m.vu_mem[o+1U]) << 8U)); return Status::ok;
+}
+inline Status vu_mem_write_u16(EeMemory& m, std::uint32_t a, std::uint16_t v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 2U, 2U, o) || !vu_mem_ready(m)) return (a & 1U) ? Status::address_error : Status::unmapped_memory;
+    m.vu_mem[o] = static_cast<std::uint8_t>(v); m.vu_mem[o+1U] = static_cast<std::uint8_t>(v >> 8U); return Status::ok;
+}
+inline Status vu_mem_read_u32(const EeMemory& m, std::uint32_t a, std::uint32_t& v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 4U, 4U, o) || !vu_mem_ready(m)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
+    v = 0U; for (std::size_t i=0;i<4U;++i) v |= static_cast<std::uint32_t>(m.vu_mem[o+i]) << (8U*i); return Status::ok;
+}
+inline Status vu_mem_write_u32(EeMemory& m, std::uint32_t a, std::uint32_t v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 4U, 4U, o) || !vu_mem_ready(m)) return (a & 3U) ? Status::address_error : Status::unmapped_memory;
+    for (std::size_t i=0;i<4U;++i) m.vu_mem[o+i] = static_cast<std::uint8_t>(v >> (8U*i)); return Status::ok;
+}
+inline Status vu_mem_read_u64(const EeMemory& m, std::uint32_t a, std::uint64_t& v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 8U, 8U, o) || !vu_mem_ready(m)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
+    v = 0U; for (std::size_t i=0;i<8U;++i) v |= static_cast<std::uint64_t>(m.vu_mem[o+i]) << (8U*i); return Status::ok;
+}
+inline Status vu_mem_write_u64(EeMemory& m, std::uint32_t a, std::uint64_t v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 8U, 8U, o) || !vu_mem_ready(m)) return (a & 7U) ? Status::address_error : Status::unmapped_memory;
+    for (std::size_t i=0;i<8U;++i) m.vu_mem[o+i] = static_cast<std::uint8_t>(v >> (8U*i)); return Status::ok;
+}
+inline Status vu_mem_read_u128(const EeMemory& m, std::uint32_t a, Gpr128& v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 16U, 16U, o) || !vu_mem_ready(m)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
+    v.low=0U; v.high=0U; for (std::size_t i=0;i<8U;++i) { v.low |= static_cast<std::uint64_t>(m.vu_mem[o+i]) << (8U*i); v.high |= static_cast<std::uint64_t>(m.vu_mem[o+8U+i]) << (8U*i); } return Status::ok;
+}
+inline Status vu_mem_write_u128(EeMemory& m, std::uint32_t a, const Gpr128& v) noexcept {
+    std::size_t o{}; if (!vu_mem_offset(a, 16U, 16U, o) || !vu_mem_ready(m)) return (a & 15U) ? Status::address_error : Status::unmapped_memory;
+    for (std::size_t i=0;i<8U;++i) { m.vu_mem[o+i]=static_cast<std::uint8_t>(v.low>>(8U*i)); m.vu_mem[o+8U+i]=static_cast<std::uint8_t>(v.high>>(8U*i)); } return Status::ok;
 }
 inline Status mmio_read_intc_stat(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
     return self.intc.read_stat(value) ? Status::ok : Status::unsupported_memory_access;
@@ -2981,6 +3044,11 @@ inline Status mmio_write_gif_stat(EeMemory& self, std::uint32_t, std::uint32_t v
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return false; // SPR is backed
     }
+    // VU Mem0 is backed by EeMemory::vu_mem (span bound to Vu0State::data_mem).
+    // ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return false;
+    }
     return (address >= 0x10000000U && address < 0x20000000U);
 }
 
@@ -3192,6 +3260,10 @@ inline void disable_interrupts(EeState& state) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_read_u8(memory, address, value);
     }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_read_u8(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 1U, 1U, physical);
     if (status != Status::ok) return status;
@@ -3206,6 +3278,10 @@ inline void disable_interrupts(EeState& state) noexcept {
 ) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_read_u16(memory, address, value);
+    }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_read_u16(memory, address, value);
     }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 2U, 2U, physical);
@@ -3232,6 +3308,10 @@ inline void disable_interrupts(EeState& state) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_read_u32(memory, address, value);
     }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_read_u32(memory, address, value);
+    }
     // Normalize direct-mapped KSEG0/KSEG1 aliases before MMIO lookup.
     const auto mmio_address = normalize_ee_mmio_address(address);
     for (const auto& device : memory.kMmioDevices) {
@@ -3257,6 +3337,10 @@ inline void disable_interrupts(EeState& state) noexcept {
 ) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_read_u64(memory, address, value);
+    }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_read_u64(memory, address, value);
     }
     // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
     // decompose the 64-bit load into a 32-bit load from the register plus
@@ -3317,6 +3401,10 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_read_u128(memory, address, value);
     }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_read_u128(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto aligned_address = address & ~0x0FU;
     const auto status = resolve_ee_memory_access(memory, aligned_address, 16U, 1U, physical);
@@ -3341,6 +3429,10 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_write_u8(memory, address, value);
     }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_write_u8(memory, address, value);
+    }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 1U, 1U, physical);
     if (status != Status::ok) return status;
@@ -3355,6 +3447,10 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
 ) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_write_u16(memory, address, value);
+    }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_write_u16(memory, address, value);
     }
     std::uint32_t physical{};
     const auto status = resolve_ee_memory_access(memory, address, 2U, 2U, physical);
@@ -3372,6 +3468,10 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
 ) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_write_u32(memory, address, value);
+    }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_write_u32(memory, address, value);
     }
     // Normalize direct-mapped KSEG0/KSEG1 aliases before MMIO lookup.
     const auto mmio_address = normalize_ee_mmio_address(address);
@@ -3398,6 +3498,10 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
 ) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_write_u64(memory, address, value);
+    }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_write_u64(memory, address, value);
     }
     // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
     // decompose the 64-bit write into a 32-bit write to the register itself.
@@ -3570,6 +3674,10 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
 ) noexcept {
     if (address >= kEeScratchpadBaseAddress && address < kEeScratchpadBaseAddress + kEeScratchpadSize) {
         return scratchpad_write_u128(memory, address, value);
+    }
+    // VU Mem0 MMIO window. ADR 0211.
+    if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
+        return vu_mem_write_u128(memory, address, value);
     }
     // VIF1 FIFO (0x10005000) is a qword-only port, not RAM. A full FIFO write
     // fails closed and leaves the FIFO unchanged. ADR 0181.

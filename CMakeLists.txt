@@ -1264,6 +1264,17 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_cop2_codegen_smoke COMMAND reps2_cop2_codegen_smoke)
 
+    # VU0 VU Mem0 MMIO at 0x11004000..0x11004FF0 (ADR 0211).
+    add_executable(reps2_vu_mem_smoke tests/vu_mem_smoke.cpp)
+    target_link_libraries(reps2_vu_mem_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_vu_mem_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_vu_mem_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_vu_mem_smoke PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+    endif()
+    add_test(NAME reps2_vu_mem_smoke COMMAND reps2_vu_mem_smoke)
+
     set(REPS2_DMAC_DSTAT_GENERATED_CPP "${REPS2_GENERATED_DIR}/dmac_dstat_program.cpp")
     add_custom_command(
         OUTPUT "${REPS2_DMAC_DSTAT_GENERATED_CPP}"
