@@ -2292,6 +2292,17 @@ limit, root set or relocated region is a different frontier.
 - **Implemented (ADR 0209, runtime ABI 41 unchanged):** `vu0_add_lanes` (masked lane add, `fpu_add`, same lane/mask rules as `vu0_sub_lanes`), decode Special1 `funct=0x28` as `Opcode::Vadd`, IR `Operation::Vadd`.
 - **Derived (next gate):** the VU0 macro arithmetic frontier continues: VSUB (`funct=0x2C`), VADD (done), VMUL variants, VMAX/VMINI (`funct=0x10..0x17`) and VMINIi remain. Each is a bounded VU single-precision lane op on the existing `fpu_add`/`fpu_sub`/`fpu_mul` model.
 
+- **Observed (ABI-42 probe `abi64-01`, main `7dda45f` + ADR 0211, runtime ABI 41):** the VU Mem0 SQ stop at `pc=0x0021CBC0` is resolved. The run advances to `pc=0x0021B7E8` on word `0x788A0040` (COP2 `fmt=0x1E` LQ, `rs=4`, `rt=10`, `imm=0x40`), stopping as `unresolved_control_flow` after 5,178,204 instructions (+9,578 from abi63). Census: 63,919 blocks, 347,574 guest instructions, 89 unsupported stops (was 89, but 449 in abi63). The VU Mem0 SQ and VADD are now resolved.
+
+**Derived:** The frontier has advanced past the VU Mem0 SQ store and VADD instructions. The new blocker is `unresolved_control_flow` at `pc=0x21B7E8` (COP2 Special1 LQ, `funct=0x00` = LQ, loading VF10 from VI4+0x40). This is a CFG gap — an indirect branch target was not resolved during static analysis. The VU Mem0 SQ (`pc=0x21CBC0`), VADD (`pc=0x2300F8`), and VIADDI (`pc=0x23CEF0`) are all resolved. Remaining frontier blocks are CFG discovery gaps in the code after the VU Mem0 transfer.
+
+**Derived (next gate):** The frontier is now limited by CFG discovery (indirect branch resolution), not missing VU0 instructions. The next slice should improve indirect branch resolution (e.g., extend root discovery, add VRAM/DMA target analysis) rather than adding more VU0 instructions.
+
+**Unknown:** whether the `unresolved_control_flow` is due to an unmodelled VU0 instruction (e.g., VILWR/VISWR `pc=0x21CBC4..0x21CBCC` were previously failed, but may now be decoded), or purely a CFG gap.
+
+**Implemented (ADR 0211, runtime ABI 41 unchanged):** VU0 data memory (VU Mem0) at EE MMIO `0x11004000..0x11004FF0` (4 KiB) backed by `Vu0State::data_mem` via `EeMemory::vu_mem` span; `load_u8`/`u16`/`u32`/`u64`/`u128` and `store_u8`/`u16`/`u32`/`u64`/`u128` helpers route through `vu_mem_offset`; `is_unsupported_physical_region` exemption for `0x11004000..0x11004FF0`; `initialize_hle_boot_environment` registers MMIO dispatch entry. Generated-code smoke test `reps2_vu_mem_smoke` covers round-trip, bounds, and public `store_u128` path.
+
+**Validation:** `cargo fmt/clippy/test` (409 lib tests), CTest 52/52 pass. Fresh probe (abi64) recorded. Next gate: CFG improvement (indirect branch resolution) or remaining VU0 arithmetic.
 ## Provenance rules
 
 
