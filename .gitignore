@@ -27,3 +27,7 @@ __pycache__/
 **/TestResults/
 .agent/
 AGENTS.md
+CLAUDE.md
+.mcp.json
+.claude/
+Testing/
