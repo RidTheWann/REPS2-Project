@@ -263,6 +263,10 @@ A project-local PS2 EE toolchain is installed at `D:\ps2dev\v2.0.0\ps2dev` from 
 
 Runtime ABI 41 (ADR 0201 VI file + VIADDI; ADR 0202 VU0 data memory 4 KiB + VLQI/VSQI; ADR 0203 VIADD; ADR 0204 VISUB/VIAND/VIOR). Fresh probe `abi56-01` on merged main `936c7a2` (Windows x64/MSVC, ISO `0fe2b777...a7eb86`, boot ELF `adfda7b7...f0cf0c`): the VSQI/VLQI/VIADD sequence at `0x0023CEF0..0x0023CF24` executes; VIAND/VIOR at `0x0022FFC8..0x0022FFD4` execute. The frontier advances from `pc=0x0023CEF0` to `pc=0x0025A724` (the `WaitSema` stub) after 4,722,454 instructions; census unsupported stops 457 -> 364. The frontier is now a service gap (a `WaitSema` blocked on a refused SIF RPC, server `0x80000413`, fno 1), not an instruction gap. Generated-code smoke test `reps2_cop2_codegen_smoke` covers VIADDI + VSQI/VLQI + VIADD + VIAND/VIOR + VI post-increment. Rust fmt/clippy/test (400 lib tests) and CTest 51/51 pass. No boot-tested or playable claim.
 
+
+
+**Word-shift operand scope (ADR 0213, 2026-11-25):** the `abi65-01` probe stopped at `pc=0x0021B9B8` as `undefined_word_operand` on `srl $14,$8,18`. The `is_word_value` source guard on word shifts was over-strict per MIPS64: SLL/SRL/SRA consume GPR[31:0] only, so a full-64-bit source from a legal doubleword instruction is legal guest state, not a producer bug. Removed the source guard from fixed and variable word shifts in `codegen.rs`; result still `sign_extend_word(static_cast<uint32_t>(low) op amount)`. Downstream word guards unchanged; GPR[0] suppression untouched. Unit test added. No runtime state, no ABI bump. Gates: cargo fmt/clippy/test (410 lib tests), CTest 52/52 Release Windows/MSVC. No real-title probe rerun (no game assets in repo). Next probe should advance past `pc=0x0021B9B8`. No boot-tested or playable claim.
+
 ## Remaining M4 exit criteria
 
 The remaining work is evidence-led and should be pursued in this order:
