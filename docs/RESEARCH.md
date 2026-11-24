@@ -2303,6 +2303,10 @@ limit, root set or relocated region is a different frontier.
 **Implemented (ADR 0211, runtime ABI 41 unchanged):** VU0 data memory (VU Mem0) at EE MMIO `0x11004000..0x11004FF0` (4 KiB) backed by `Vu0State::data_mem` via `EeMemory::vu_mem` span; `load_u8`/`u16`/`u32`/`u64`/`u128` and `store_u8`/`u16`/`u32`/`u64`/`u128` helpers route through `vu_mem_offset`; `is_unsupported_physical_region` exemption for `0x11004000..0x11004FF0`; `initialize_hle_boot_environment` registers MMIO dispatch entry. Generated-code smoke test `reps2_vu_mem_smoke` covers round-trip, bounds, and public `store_u128` path.
 
 **Validation:** `cargo fmt/clippy/test` (409 lib tests), CTest 52/52 pass. Fresh probe (abi64) recorded. Next gate: CFG improvement (indirect branch resolution) or remaining VU0 arithmetic.
+- **Observed (ABI-43 probe `abi65-01`, main `56adce1` + ADR 0212, runtime ABI 41):** the CFC2.I decode fix works. The frontier advances from `pc=0x0021B7E8` to `pc=0x0021B9B8`, stopping as `undefined_word_operand` on word `0x00087482` (SRL, `rs=0`, `rt=8`, `rd=14`, `sa=18`, `funct=0x02`) after 5,178,388 instructions. Census: 63,937 blocks, 347,734 guest instructions, 77 unsupported stops (was 89).
+- **Implemented (ADR 0212, runtime ABI 41 unchanged):** CFC2 (`fmt=0x02`) and CTC2 (`fmt=0x06`) now accept bit 0 as the interlock flag (`.I`), the same rule ADR 0190 established for QMFC2/QMTC2. Bits 10..1 remain reserved. The prior stricter mask rejected `0x48581001` (CFC2.I $24, $2) at the frontier block's delay slot, which skipped the whole block as a tolerable speculative-decode failure.
+- **Derived (next gate):** the new stop is `undefined_word_operand` — a runtime data-flow check, not a decode or CFG gap. The generated block at `0x0021B9B8` executes but a `is_word_value` guard fails on one of its GPR operands, meaning guest state reaching that point holds a value the frontend's word-width model rejects. Investigate the producer of the offending operand before changing the guard.
+
 ## Provenance rules
 
 
