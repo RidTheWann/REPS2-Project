@@ -1,6 +1,0 @@
-{
-  "schema_version": 1,
-  "kind": "reps2.native_build_identity",
-  "cache_key_sha256": "7ce33ed0bc4c51f46e9dcff9c7035f713a19af764374836c9bdb789794f99ec2",
-  "toolchain_report": "reps2-native-toolchain-Release.json"
-}
