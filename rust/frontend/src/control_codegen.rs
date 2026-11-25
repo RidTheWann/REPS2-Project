@@ -418,16 +418,24 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             // Cop0Condition is fail-closed: when DMAC state is unseeded the
             // predicate is an empty optional, and the block must stop with
             // unsupported_memory_access instead of approximating CPCOND0.
+            //
+            // Exception: a BREAK trap in the delay slot of a *non-likely*
+            // branch fires regardless of the branch outcome, so the CPCOND0
+            // predicate is never observed and the DMAC state must not be
+            // queried first (a non-likely BC0 with a break delay slot must
+            // deliver the BREAK exception even when D_STAT/D_PCR are unseeded).
+            // A likely branch still needs the predicate: it decides whether
+            // the break delay slot is annulled.
+            let delay_slot_is_break_trap = matches!(
+                delay_slot,
+                ControlDelaySlot::GuestException {
+                    trap: TrapKind::Break,
+                    ..
+                }
+            );
             let is_cop0 = matches!(condition, BranchCondition::Cop0Condition { .. });
-            let needs_branch_predicate = is_cop0
-                || *delay_slot_policy == DelaySlotPolicy::AnnulWhenNotTaken
-                || !matches!(
-                    delay_slot,
-                    ControlDelaySlot::GuestException {
-                        trap: TrapKind::Break,
-                        ..
-                    }
-                );
+            let needs_branch_predicate = *delay_slot_policy == DelaySlotPolicy::AnnulWhenNotTaken
+                || !delay_slot_is_break_trap;
             if needs_branch_predicate {
                 if is_cop0 {
                     let BranchCondition::Cop0Condition { when_set } = condition else {
@@ -1194,5 +1202,41 @@ mod tests {
         assert!(cpp.contains("0x0000100CU"));
         assert!(cpp.contains("0x00001008U"));
         assert!(cpp.contains("state.pc = branch_taken_00001000"));
+    }
+
+    #[test]
+    fn emits_cop0_branch_with_break_delay_slot_without_cpcond0_query() {
+        // Non-likely BC0T whose delay slot is BREAK: the trap fires regardless
+        // of the branch outcome, so CPCOND0 must never be queried first — the
+        // BREAK exception must be delivered even when D_STAT/D_PCR are unseeded.
+        let words = [
+            (0x10 << 26) | (8 << 21) | (1 << 16) | 2, // bc0t t0, +2 words
+            0x0000_000D,                              // delay slot: break
+            0x240A_0005,                              // not-taken path: addiu t2, zero, 5
+        ];
+        let segments = [segment(0x1000, &words)];
+        let roots = [0x1000];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic bc0t-with-break CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("C++ output");
+
+        // No CPCOND0 query: BREAK delay slot fires regardless of the branch.
+        assert!(
+            !cpp.contains("cop0_condition()"),
+            "CPCOND0 must not be queried before a break delay-slot trap"
+        );
+        // BREAK exception is raised unconditionally.
+        assert!(
+            cpp.contains("raise_ee_exception(state, ExceptionCode::Breakpoint, true)"),
+            "missing break exception in delay slot"
+        );
+        // Branch dispatch still present after the trap site (fallthrough target).
+        assert!(cpp.contains("0x00001008U"));
     }
 }

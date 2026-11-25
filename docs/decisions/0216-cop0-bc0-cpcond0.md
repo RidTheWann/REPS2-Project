@@ -1,8 +1,8 @@
 # ADR 0216: COP0 BC0 branch family (BC0F/BC0T/BC0FL/BC0TL) on CPCOND0
 
-- **Status:** Accepted
+- **Status:** Accepted (context corrected, see erratum below)
 - **Date:** 2026-11-25
-- **Scope:** Decoder, instruction effects, CFG branch conditions, typed IR, C++20 AOT codegen, EE DMAC runtime model, synthetic CFG fixture, ADR/RESEARCH evidence. No real-title probe here (DMAC not seeded → fail-closed); next frontier slice will advance past the current `pc=0x00217D8C` stop.
+- **Scope:** Decoder, instruction effects, CFG branch conditions, typed IR, C++20 AOT codegen, EE DMAC runtime model, synthetic CFG fixture, ADR/RESEARCH evidence.
 - **Related:** ADR 0214 (BC0T/BC0F frontier gate), ADR 0153 (DMAC interrupt), ADR 0105 (DMAC CPCOND0 predicate), Sony EE Core Instruction Set Manual v6.0 Ch.4 pp.290-293.
 
 ## Context
@@ -46,21 +46,32 @@ ADR 0214 left BC0T/BC0F as `Opcode::Unknown` (fail-closed) because the COP0 cond
 
 8. **Tests and gates:**
    - `cargo test --lib` adds `decodes_cop0_bc0_branches_on_cpcond0` (decode/offset/likely/reserved) and `emits_cop0_branch_condition_and_fail_closed_on_unknown_dmac` (codegen checks for `state.memory.dmac.cop0_condition()` call, fail-closed return, and correct targets).
-   - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --locked`: 415 passed.
+   - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --locked`: 415 passed (416 after follow-up PR #56).
    - CMake Release build + `ctest --test-dir build -C Release --output-on-failure`: 52/52 pass on Windows x64/MSVC.
+
+## Errata — real-title probe result (2026-11-26)
+
+The context sentence "the real-title run does not seed D_PCR/D_STAT either" is **corrected**: HLE boot calls `dmac.seed_idle_boot_state()` (`ee_hle.hpp`, `initialize_hle_boot_environment`), setting `d_stat=0`, `d_stat_known=true`, `pcr=0`, `pcr_known=true`. Therefore `cop0_condition()` returns `true` (`((0 | ~0) & 0x3FF) == 0x3FF`) and is **not** nullopt at real-title runtime — the BC0T at `0x217D8C` is taken and execution continues. The exact predicate value is derived, not approximated.
+
+**Observed real-title evidence (probe `frontier-bc0-probe`, merged `main` `f6beeaf`, runtime ABI 41, Windows x64/MSVC, ISO `0fe2b777…a7eb86`, boot ELF `adfda7b7…f0cf0c`):**
+- `run-report.json`: `outcome=budget_limit_reached`, final `pc=0x0025ABB0`, `instructions_executed=79,999,926` over 16 batches, **no stop at `0x00217D8C`** — execution advances past BC0T.
+- `dmac.handlers=2`, `dmac.interrupts_delivered=0`, `dmac.interrupts_completed=0`.
+- `syscalls_seen=1,636`, `syscalls_handled=1,619`, callbacks `82/82`, SIF/SCMD/Ncmd/FileIO all served per census.
+
+Consequently the BC0T stop category changes from "unsupported instruction" to "advances past" once `CPCOND0` is seeded as known-true by the HLE boot environment. No DMA completion model is needed for this title's boot path because `D_PCR=0` selects no channels, so `CPCOND0` is vacuously true from boot state. The fail-closed `nullopt` path remains for unseeded synthetic fixtures only.
 
 ## Consequences
 
-- The `pc=0x00217D8C` BC0T stop now **decodes** instead of being `Opcode::Unknown`. However, the frontier probe still stops there with `unsupported_memory_access` because the synthetic DMAC state is unseeded (the real-title run does not seed `D_PCR`/`D_STAT` either — that requires a DMA model and is out of scope for this slice). The stop category changes from "unsupported instruction" to "unsupported memory access (DMAC state unknown)" which is a fail-closed gate, not an approximation.
-- `CPCOND0` is modeled exactly from `D_STAT`/`D_PCR`. The predicate is fail-closed when the DMAC is unseeded, satisfying "Fail Closed" and "Evidence Before Assertion".
+- The `pc=0x00217D8C` BC0T stop now **decodes** and is taken under HLE boot seed state; real-title probe advances past it to `pc=0x0025ABB0`. The stop category changes from "unsupported instruction" to "advances past" (no guest-visible boot stage claimed).
+- `CPCOND0` is modeled exactly from `D_STAT`/`D_PCR`. The predicate is fail-closed (`nullopt`) when the DMAC is unseeded (synthetic fixtures), satisfying "Fail Closed" and "Evidence Before Assertion".
 - No runtime ABI bump (`REPS2_RUNTIME_ABI_VERSION` remains 41); the DMAC state was already in `EeMemory` (ADR 0153).
-- Next gate: seed `D_PCR` from the title's ELF/DMAC usage and model at least one DMA channel completion (e.g., SIF0 or VIF0) so `CPCOND0` can be known. That will advance the frontier past this BC0T.
+- Next gate: model DMA channel completion (SIF0/VIF0) when CPCOND0 is expected false during boot, if the frontier reaches such a BC0F wait loop.
 
 ## Validation
 
-- Rust gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --locked` (415 lib tests, including new BC0 decode and codegen tests).
+- Rust gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --locked` (416 lib tests including new BC0 decode/codegen and break-delay-slot tests).
 - C++ gates: CMake Release build, `ctest --test-dir build -C Release --output-on-failure`: 52/52 pass on Windows x64/MSVC.
-- No boot-tested or playable claim. The frontier remains at `pc=0x00217D8C` (`unsupported_memory_access` on unseeded DMAC).
+- Real-title probe recorded in `docs/RESEARCH.md`; no boot-tested or playable claim.
 
 ## References
 
