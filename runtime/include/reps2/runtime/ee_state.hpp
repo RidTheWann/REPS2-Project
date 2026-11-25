@@ -206,6 +206,91 @@ inline void vu0_write_vi(Vu0State& vu0, std::uint8_t index, std::uint16_t value)
     };
 }
 
+// VU0 VMAXx/y/z/w (COP2 Special1 funct 0x10..0x13): broadcast one lane of ft
+// across all lanes, take element-wise max with fs, masked by dest field.
+// `broadcast_lane` is funct & 0x3 (0=x, 1=y, 2=z, 3=w). Evidence: Sony VU
+// User's Manual 6.2 VMAX; PS2Tek Special1 row 5 col 8..0xB; PCSX2
+// Int_COP2SPECIAL1PrintTable[0x10..0x13]. ADR 0215.
+[[nodiscard]] constexpr Gpr128 vu0_broadcast_max(
+    const Gpr128& dst,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t broadcast_lane,
+    std::uint8_t dest_mask
+) noexcept {
+    const std::uint32_t fs_lanes[4] = {
+        static_cast<std::uint32_t>(fs.low),
+        static_cast<std::uint32_t>(fs.low >> 32U),
+        static_cast<std::uint32_t>(fs.high),
+        static_cast<std::uint32_t>(fs.high >> 32U),
+    };
+    const std::uint32_t ft_lanes[4] = {
+        static_cast<std::uint32_t>(ft.low),
+        static_cast<std::uint32_t>(ft.low >> 32U),
+        static_cast<std::uint32_t>(ft.high),
+        static_cast<std::uint32_t>(ft.high >> 32U),
+    };
+    const std::uint32_t dst_lanes[4] = {
+        static_cast<std::uint32_t>(dst.low),
+        static_cast<std::uint32_t>(dst.low >> 32U),
+        static_cast<std::uint32_t>(dst.high),
+        static_cast<std::uint32_t>(dst.high >> 32U),
+    };
+    const std::uint32_t scalar = ft_lanes[broadcast_lane & 3U];
+    const std::uint32_t out[4] = {
+        (dest_mask & 0x8U) ? fpu_max(fs_lanes[0], scalar).bits : dst_lanes[0],
+        (dest_mask & 0x4U) ? fpu_max(fs_lanes[1], scalar).bits : dst_lanes[1],
+        (dest_mask & 0x2U) ? fpu_max(fs_lanes[2], scalar).bits : dst_lanes[2],
+        (dest_mask & 0x1U) ? fpu_max(fs_lanes[3], scalar).bits : dst_lanes[3],
+    };
+    return Gpr128{
+        static_cast<std::uint64_t>(out[0]) | (static_cast<std::uint64_t>(out[1]) << 32U),
+        static_cast<std::uint64_t>(out[2]) | (static_cast<std::uint64_t>(out[3]) << 32U),
+    };
+}
+
+// VU0 VMINIx/y/z/w (COP2 Special1 funct 0x14..0x17): broadcast one lane of ft,
+// take element-wise minimum with fs, masked by dest field.
+// Evidence: Sony VU User's Manual 6.2 VMINI; PS2Tek Special1 row 5 col 0xC..0xF;
+// PCSX2 Int_COP2SPECIAL1PrintTable[0x14..0x17]. ADR 0215.
+[[nodiscard]] constexpr Gpr128 vu0_broadcast_min(
+    const Gpr128& dst,
+    const Gpr128& fs,
+    const Gpr128& ft,
+    std::uint8_t broadcast_lane,
+    std::uint8_t dest_mask
+) noexcept {
+    const std::uint32_t fs_lanes[4] = {
+        static_cast<std::uint32_t>(fs.low),
+        static_cast<std::uint32_t>(fs.low >> 32U),
+        static_cast<std::uint32_t>(fs.high),
+        static_cast<std::uint32_t>(fs.high >> 32U),
+    };
+    const std::uint32_t ft_lanes[4] = {
+        static_cast<std::uint32_t>(ft.low),
+        static_cast<std::uint32_t>(ft.low >> 32U),
+        static_cast<std::uint32_t>(ft.high),
+        static_cast<std::uint32_t>(ft.high >> 32U),
+    };
+    const std::uint32_t dst_lanes[4] = {
+        static_cast<std::uint32_t>(dst.low),
+        static_cast<std::uint32_t>(dst.low >> 32U),
+        static_cast<std::uint32_t>(dst.high),
+        static_cast<std::uint32_t>(dst.high >> 32U),
+    };
+    const std::uint32_t scalar = ft_lanes[broadcast_lane & 3U];
+    const std::uint32_t out[4] = {
+        (dest_mask & 0x8U) ? fpu_min(fs_lanes[0], scalar).bits : dst_lanes[0],
+        (dest_mask & 0x4U) ? fpu_min(fs_lanes[1], scalar).bits : dst_lanes[1],
+        (dest_mask & 0x2U) ? fpu_min(fs_lanes[2], scalar).bits : dst_lanes[2],
+        (dest_mask & 0x1U) ? fpu_min(fs_lanes[3], scalar).bits : dst_lanes[3],
+    };
+    return Gpr128{
+        static_cast<std::uint64_t>(out[0]) | (static_cast<std::uint64_t>(out[1]) << 32U),
+        static_cast<std::uint64_t>(out[2]) | (static_cast<std::uint64_t>(out[3]) << 32U),
+    };
+}
+
 // VU0 VOPMULA (COP2 Special1 funct=0x3E): outer-product multiply-accumulate into
 // ACC. `ACC[i] += fs[i] * ft[i]` per lane, using the same single-precision
 // truncate-toward-zero/no-NaN/no-denormal rules as fpu_mul/fpu_add. The 4-bit

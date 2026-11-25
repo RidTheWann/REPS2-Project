@@ -174,3 +174,4 @@ the `adr_numbers_are_unique_and_match_titles` test in `rust/frontend/tests/repo_
 | [0171](0171-runtime-abi-21-layout-contract.md) | Runtime ABI 21 covers the Timer 2 and INTC handler state | Accepted |
 | [0172](0172-ee-timer2-intc-delivery.md) | Model EE Timer 2 and deliver INTC interrupts to registered `AddIntcHandler` handlers | Accepted |
 | [0173](0173-ee-cooperative-scheduler.md) | Cooperative EE scheduler (runtime ABI 22) | Accepted |
+| [0215](0215-vu0-vmax-vmini.md) | Decode, lift and AOT-lower VU0 VMAX/VMINI macro broadcast min/max (funct 0x10..0x17) | Accepted |

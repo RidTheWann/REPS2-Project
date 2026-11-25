@@ -192,6 +192,18 @@ pub enum Opcode {
     Viand,
     /// VU0 VIOR (COP2 Special1 funct=0x3D): VI[fd] = VI[is] | VI[it]. ADR 0204.
     Vior,
+    /// VU0 VMAXx/y/z/w (COP2 Special1 funct=0x10..0x13): element-wise maximum
+    /// `fd.lane = max(fs.lane, ft.lane)`, masked by dest field. ADR 0215.
+    Vmaxx,
+    Vmaxy,
+    Vmaxz,
+    Vmaxw,
+    /// VU0 VMINIx/y/z/w (COP2 Special1 funct=0x14..0x17): element-wise minimum
+    /// `fd.lane = min(fs.lane, ft.lane)`, masked by dest field. ADR 0215.
+    Vminix,
+    Vminiy,
+    Vminiz,
+    Vminiw,
     /// VU0 VMADDbc (COP2 Special1 funct 0x08..0x0B): fd.dest = ACC + fs*ft.bc.
     /// ADR 0200.
     Vmaddx,
@@ -560,6 +572,14 @@ impl Opcode {
             Self::Visub => "visub",
             Self::Viand => "viand",
             Self::Vior => "vior",
+            Self::Vmaxx => "vmaxx",
+            Self::Vmaxy => "vmaxy",
+            Self::Vmaxz => "vmaxz",
+            Self::Vmaxw => "vmaxw",
+            Self::Vminix => "vminix",
+            Self::Vminiy => "vminiy",
+            Self::Vminiz => "vminiz",
+            Self::Vminiw => "vminiw",
             Self::Vmaddx => "vmaddx",
             Self::Vmaddy => "vmaddy",
             Self::Vmaddz2 => "vmaddz",
@@ -1346,6 +1366,18 @@ impl Instruction {
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
                 effects.vf_write_mask = vf_write_bit(self.shift_amount);
             }
+            Opcode::Vmaxx
+            | Opcode::Vmaxy
+            | Opcode::Vmaxz
+            | Opcode::Vmaxw
+            | Opcode::Vminix
+            | Opcode::Vminiy
+            | Opcode::Vminiz
+            | Opcode::Vminiw => {
+                // VMAX/VMINI: reads fs (rd) and ft (rt), writes fd (sa) masked. ADR 0215.
+                effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
+                effects.vf_write_mask = vf_write_bit(self.shift_amount);
+            }
             Opcode::Vmulx | Opcode::Vmuly | Opcode::Vmulz | Opcode::Vmulw => {
                 // VMULbc: reads fs (rd) and ft (rt), writes fd (sa) masked. ADR 0208.
                 effects.vf_read_mask = vf_read_bit(self.rd) | vf_read_bit(self.rt);
@@ -1612,6 +1644,16 @@ fn decode_cop2(word: u32) -> Opcode {
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x03 => Opcode::Vaddw,
         // VADD: funct 0x28 (row 5 col 0), masked vector add. ADR 0209.
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x28 => Opcode::Vadd,
+        // VMAX/VMINI: element-wise max/min, funct 0x10..0x13 / 0x14..0x17.
+        // PCSX2 Int_COP2SPECIAL1PrintTable[0x10..0x17]; Sony VU manual 6.2. ADR 0215.
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x10 => Opcode::Vmaxx,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x11 => Opcode::Vmaxy,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x12 => Opcode::Vmaxz,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x13 => Opcode::Vmaxw,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x14 => Opcode::Vminix,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x15 => Opcode::Vminiy,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x16 => Opcode::Vminiz,
+        _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x17 => Opcode::Vminiw,
         // VMULbc: funct 0x18..0x1B. ADR 0208.
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x18 => Opcode::Vmulx,
         _ if (word >> 21) & 0x1F >= 0x10 && (word & 0x3F) == 0x19 => Opcode::Vmuly,
@@ -3948,6 +3990,29 @@ mod tests {
         assert_eq!(insn.rt, 7); // dst VI
         assert_eq!(insn.rd, 0); // src VI
         assert_eq!(insn.shift_amount & 0x1F, 15); // imm5
+    }
+
+    #[test]
+    fn decodes_vu0_vmaxx_vminiw() {
+        // VMAXx $11, $11, $12 dest 0xF (frontier census word).
+        // funct 0x10, rs&0xF = 0xF mask, rt=12, rd=11, sa=11.
+        let vmax = decode(0x4BEC_5AD0, 0);
+        assert_eq!(vmax.opcode, Opcode::Vmaxx);
+        assert_eq!(vmax.shift_amount, 11); // fd
+        assert_eq!(vmax.rd, 11); // fs
+        assert_eq!(vmax.rt, 12); // ft
+        assert_eq!(vmax.rs & 0xF, 0xF); // dest mask
+        let fx = vmax.effects();
+        assert_eq!(fx.vf_read_mask, vf_read_bit(11) | vf_read_bit(12));
+        assert_eq!(fx.vf_write_mask, vf_write_bit(11));
+
+        // VMINIw $3, $8, $9 dest 0x1. funct 0x17.
+        let vmin = decode(0x4A29_40D7, 0);
+        assert_eq!(vmin.opcode, Opcode::Vminiw);
+        assert_eq!(vmin.shift_amount, 3);
+        assert_eq!(vmin.rd, 8);
+        assert_eq!(vmin.rt, 9);
+        assert_eq!(vmin.rs & 0xF, 0x1);
     }
 
     #[test]
