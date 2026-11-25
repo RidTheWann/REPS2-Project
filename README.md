@@ -121,12 +121,12 @@ ctest --test-dir build -C Release --output-on-failure
 
 The Rust frontend is produced at build/cargo-target/release/reps2.exe on Windows and build/cargo-target/release/reps2 on Linux.
 
-For Rust-only validation:
+For Rust-only validation, run from `rust/`:
 
 ~~~sh
-cargo fmt --manifest-path rust/Cargo.toml --all -- --check
-cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
-cargo test --manifest-path rust/Cargo.toml --workspace --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
 ~~~
 
 ### CLI entry points
