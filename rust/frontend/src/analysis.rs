@@ -84,6 +84,15 @@ pub enum BranchCondition {
     FpuCondition {
         when_set: bool,
     },
+    /// The CPCOND0 signal (COP0 condition) driven by the EE DMAC: set iff every
+    /// DMA channel selected in D_PCR.CPC has its D_STAT.CIS bit set
+    /// (Sony EE Core Instruction Set Manual v6.0 Ch.4, ADR 0216). BC0F branches
+    /// when it is clear and BC0T when it is set. Until the DMAC completion
+    /// model is applied to the guest state, decoding BC0 yields fail-closed
+    /// instead of approximating the condition.
+    Cop0Condition {
+        when_set: bool,
+    },
 }
 
 /// The semantic role of an outgoing static edge.
@@ -1592,6 +1601,8 @@ fn branch_condition(instruction: DecodedInstruction) -> Option<BranchCondition> 
         }
         Opcode::Bc1f | Opcode::Bc1fl => Some(BranchCondition::FpuCondition { when_set: false }),
         Opcode::Bc1t | Opcode::Bc1tl => Some(BranchCondition::FpuCondition { when_set: true }),
+        Opcode::Bc0f | Opcode::Bc0fl => Some(BranchCondition::Cop0Condition { when_set: false }),
+        Opcode::Bc0t | Opcode::Bc0tl => Some(BranchCondition::Cop0Condition { when_set: true }),
         _ => None,
     }
 }

@@ -625,6 +625,9 @@ fn verify_terminator_registers(terminator: &ControlTerminator) -> Result<(), Con
                 | BranchCondition::LessThanZero { register }
                 | BranchCondition::GreaterThanOrEqualZero { register } => validate(*register)?,
                 BranchCondition::FpuCondition { .. } => {}
+                // Cop0Condition reads DMAC state, not a guest register; there
+                // is no register operand to validate.
+                BranchCondition::Cop0Condition { .. } => {}
             }
             if let Some(register) = link_register {
                 validate(*register)?;

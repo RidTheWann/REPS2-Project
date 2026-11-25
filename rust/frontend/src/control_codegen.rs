@@ -12,7 +12,7 @@
 //! slice. The partitioned files share nothing but the runtime header and can
 //! be compiled in parallel.
 
-use crate::analysis::DelaySlotPolicy;
+use crate::analysis::{BranchCondition, DelaySlotPolicy};
 use crate::control_ir::{
     ControlBlock, ControlDelaySlot, ControlError, ControlProgram, ControlTerminator, TrapKind,
 };
@@ -412,7 +412,15 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
             // A SYSCALL in an executed delay slot resumes at the branch target
             // or the fallthrough after the HLE layer services it, so the
             // predicate is materialized even when no annulment needs it.
-            let needs_branch_predicate = *delay_slot_policy == DelaySlotPolicy::AnnulWhenNotTaken
+            let syscall_resume = format!(
+                "(branch_taken_{guest_pc:08X} ? 0x{target_pc:08X}U : 0x{fallthrough_pc:08X}U)"
+            );
+            // Cop0Condition is fail-closed: when DMAC state is unseeded the
+            // predicate is an empty optional, and the block must stop with
+            // unsupported_memory_access instead of approximating CPCOND0.
+            let is_cop0 = matches!(condition, BranchCondition::Cop0Condition { .. });
+            let needs_branch_predicate = is_cop0
+                || *delay_slot_policy == DelaySlotPolicy::AnnulWhenNotTaken
                 || !matches!(
                     delay_slot,
                     ControlDelaySlot::GuestException {
@@ -420,14 +428,29 @@ fn emit_terminator(output: &mut String, terminator: &ControlTerminator, index: u
                         ..
                     }
                 );
-            let syscall_resume = format!(
-                "(branch_taken_{guest_pc:08X} ? 0x{target_pc:08X}U : 0x{fallthrough_pc:08X}U)"
-            );
             if needs_branch_predicate {
-                output.push_str(&format!(
-                    "    const bool branch_taken_{guest_pc:08X} = {};\n",
-                    condition_expression(*condition)
-                ));
+                if is_cop0 {
+                    let BranchCondition::Cop0Condition { when_set } = condition else {
+                        unreachable!("is_cop0 checked above")
+                    };
+                    output.push_str(&format!(
+                        "    const auto branch_cond_{guest_pc:08X} = state.memory.dmac.cop0_condition();\n"
+                    ));
+                    output.push_str(&format!(
+                        "    if (!branch_cond_{guest_pc:08X}.has_value()) {{\n\
+                         \x20       state.pc = 0x{guest_pc:08X}U;\n\
+                         \x20       return Status::unsupported_memory_access;\n    }}\n"
+                    ));
+                    let relation = if *when_set { "" } else { "!" };
+                    output.push_str(&format!(
+                        "    const bool branch_taken_{guest_pc:08X} = {relation}*branch_cond_{guest_pc:08X};\n"
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "    const bool branch_taken_{guest_pc:08X} = {};\n",
+                        condition_expression(*condition)
+                    ));
+                }
             }
             emit_link_write(output, *link_register, guest_pc.wrapping_add(8));
             match delay_slot_policy {
@@ -643,6 +666,13 @@ fn condition_expression(condition: crate::analysis::BranchCondition) -> String {
         BranchCondition::FpuCondition { when_set } => {
             let relation = if when_set { "!=" } else { "==" };
             format!("(state.fcsr & reps2::runtime::kFpuCondition) {relation} 0")
+        }
+        // Cop0Condition is emitted by the dedicated fail-closed path in
+        // emit_terminator (which reads state.memory.dmac.cop0_condition()).
+        // This arm exists only for exhaustiveness and mirrors that predicate.
+        BranchCondition::Cop0Condition { when_set } => {
+            let prefix = if when_set { "" } else { "!" };
+            format!("{prefix}*state.memory.dmac.cop0_condition()")
         }
     }
 }
@@ -1126,5 +1156,43 @@ mod tests {
                 .iter()
                 .all(|unit| !unit.contains("initialize_ee_state"))
         );
+    }
+
+    #[test]
+    fn emits_cop0_branch_condition_and_fail_closed_on_unknown_dmac() {
+        // BC0T t0-style: primary 0x10, rs 8, rt 1 (BC0T), offset 2 words.
+        // delay slot is ExecuteAlways (non-likely), so the predicate is
+        // materialized even on the not-taken path.
+        let words = [
+            (0x10 << 26) | (8 << 21) | (1 << 16) | 2, // bc0t, +2 words
+            0x2409_0007,                              // delay slot
+            0x240A_0005,                              // not-taken path
+        ];
+        let segments = [segment(0x1000, &words)];
+        let roots = [0x1000];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &roots,
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic bc0t CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("C++ output");
+
+        // The generated predicate reads CPCOND0 via the DMAC helper.
+        assert!(
+            cpp.contains("state.memory.dmac.cop0_condition()"),
+            "missing CPCOND0 read"
+        );
+        // Fail-closed: unseeded DMAC state yields unsupported_memory_access.
+        assert!(
+            cpp.contains("Status::unsupported_memory_access"),
+            "missing fail-closed return"
+        );
+        // Branch target = pc+4+8 = 0x100C; fallthrough = pc+8 = 0x1008.
+        assert!(cpp.contains("0x0000100CU"));
+        assert!(cpp.contains("0x00001008U"));
+        assert!(cpp.contains("state.pc = branch_taken_00001000"));
     }
 }

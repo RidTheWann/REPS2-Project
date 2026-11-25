@@ -1954,6 +1954,28 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x03E0_0008, // taken return
         0x240D_000B, // return delay slot: t5 = 11
     ];
+    // BC0 branches on CPCOND0 (COP0 condition from DMAC D_STAT/D_PCR). This
+    // synthetic fixture never seeds the DMAC, so CPCOND0 is unknown and the
+    // generated predicate stops with unsupported_memory_access (fail-closed).
+    // Sony EE Core Instruction Set Manual v6.0 Ch.4 pp.290-293; ADR 0216.
+    let cop0_branch = [
+        (0x10 << 26) | (8 << 21) | (1 << 16) | 2, // bc0t, target 0x740C
+        0x2409_0007,                              // delay slot: t1 = 7
+        0x240A_0005,                              // not-taken path: t2 = 5
+        0x240B_0009,                              // taken path: t3 = 9
+        0x03E0_0008,                              // common return
+        0x240D_000B,                              // return delay slot: t5 = 11
+    ];
+    let cop0_branch_likely = [
+        (0x10 << 26) | (8 << 21) | (2 << 16) | 4, // bc0fl, target 0x7518
+        0x2409_0007,                              // delay slot: t1 = 7 (taken only)
+        0x240A_0005,                              // not-taken path: t2 = 5
+        0x03E0_0008,                              // not-taken return
+        0x240E_000D,                              // return delay slot: t6 = 13
+        0x240C_0009,                              // taken path: t4 = 9
+        0x03E0_0008,                              // taken return
+        0x240D_000B,                              // return delay slot: t5 = 11
+    ];
     let break_trap = [
         0x0000_004D, // break code 1: a guest trap, not an unknown encoding
     ];
@@ -2134,6 +2156,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0x7100, &fpu_branch_false),
         segment(0x7200, &fpu_branch_likely),
         segment(0x7300, &fpu_branch_likely_true),
+        segment(0x7400, &cop0_branch),
+        segment(0x7500, &cop0_branch_likely),
         segment(0x8000, &break_trap),
         segment(0xB000, &syscall_in_branch_delay),
         segment(0xB100, &break_in_branch_likely_delay),
@@ -2182,6 +2206,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0x7100, "fpu-branch-false-fixture"),
         entry(0x7200, "fpu-branch-likely-fixture"),
         entry(0x7300, "fpu-branch-likely-true-fixture"),
+        entry(0x7400, "cop0-branch-fixture"),
+        entry(0x7500, "cop0-branch-likely-fixture"),
         entry(0x8000, "break-trap-fixture"),
         entry(0xB000, "syscall-delay-slot-fixture"),
         entry(0xB100, "branch-likely-trap-delay-slot-fixture"),
@@ -2205,8 +2231,9 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
     entries.push(entry(0xCC00, "conditional-trap-delay-slot-fixture"));
     let mut roots = vec![
         0x1000, 0x2000, 0x3000, 0xD000, 0xD100, 0x3100, 0x3200, 0x4000, 0x5000, 0x5100, 0x5200,
-        0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x8000,
-        0xB000, 0xB100, 0xB200, 0xF000, 0xF004, 0xE000, 0xE100, 0xE200, 0xE300, 0xE400, 0xE500,
+        0x5300, 0x5400, 0x5500, 0x5600, 0x5700, 0x5800, 0x7000, 0x7100, 0x7200, 0x7300, 0x7400,
+        0x7500, 0x8000, 0xB000, 0xB100, 0xB200, 0xF000, 0xF004, 0xE000, 0xE100, 0xE200, 0xE300,
+        0xE400, 0xE500,
         // Keep the continuation PCs as explicit fixture roots as a regression
         // guard for multi-root analysis; production CFG discovery also reaches
         // them through its lenient SyscallContinuation edges.
