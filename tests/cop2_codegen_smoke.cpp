@@ -46,6 +46,25 @@ constexpr auto kVsubAll = reps2::runtime::vu0_sub_lanes(kVsubDst, kVsubFs, kVsub
 constexpr auto kVsubNone = reps2::runtime::vu0_sub_lanes(kVsubDst, kVsubFs, kVsubFt, 0x0);
 static_assert(kVsubNone.low == kVsubDst.low && kVsubNone.high == kVsubDst.high);
 
+// VMAX/VMINI broadcast (ADR 0215): ft lane w (lane 3) broadcast across all
+// four destination lanes; max/min against fs per lane, masked by dest mask.
+// fs = [4.0, 1.0, 2.0, 9.0], ft = [0.0, 0.0, 0.0, 3.0] -> broadcast w = 3.0.
+// max = [4.0, 3.0, 3.0, 9.0]; min = [3.0, 1.0, 2.0, 3.0].
+constexpr std::uint32_t kF2 = 0x4000'0000U;  // 2.0f
+constexpr std::uint32_t kF9 = 0x4110'0000U;  // 9.0f
+constexpr reps2::runtime::Gpr128 kVmaxFs{
+    static_cast<std::uint64_t>(kF4) | (static_cast<std::uint64_t>(kF1) << 32U),
+    static_cast<std::uint64_t>(kF2) | (static_cast<std::uint64_t>(kF9) << 32U)};
+constexpr reps2::runtime::Gpr128 kVmaxFt{
+    static_cast<std::uint64_t>(0x0U) | (static_cast<std::uint64_t>(0x0U) << 32U),
+    static_cast<std::uint64_t>(0x0U) | (static_cast<std::uint64_t>(kF3) << 32U)};
+constexpr reps2::runtime::Gpr128 kVmaxDst{
+    0xDEAD'BEEF'DEAD'BEEFULL, 0xDEAD'BEEF'DEAD'BEEFULL};
+constexpr auto kVmaxAll = reps2::runtime::vu0_broadcast_max(kVmaxDst, kVmaxFs, kVmaxFt, 3, 0xF);
+constexpr auto kVminAll = reps2::runtime::vu0_broadcast_min(kVmaxDst, kVmaxFs, kVmaxFt, 3, 0xF);
+constexpr auto kVmaxNone = reps2::runtime::vu0_broadcast_max(kVmaxDst, kVmaxFs, kVmaxFt, 3, 0x0);
+static_assert(kVmaxNone.low == kVmaxDst.low && kVmaxNone.high == kVmaxDst.high);
+
 std::vector<std::uint8_t> main_ram_image(reps2::runtime::kEeMainRamSize);
 
 void preset(EeState& state) {

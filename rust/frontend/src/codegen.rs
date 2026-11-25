@@ -94,6 +94,9 @@ pub fn emit_cpp(program: &Program) -> Result<String, VerifyError> {
              using reps2::runtime::vu0_write_control;\n\
              using reps2::runtime::vu0_rotate_right_word;\n\
              using reps2::runtime::vu0_sub_lanes;\n\
+             using reps2::runtime::vu0_add_lanes;\n\
+             using reps2::runtime::vu0_broadcast_max;\n\
+             using reps2::runtime::vu0_broadcast_min;\n\
              using reps2::runtime::vu0_opmula;\n\
              using reps2::runtime::vu0_opmsub;\n\
              using reps2::runtime::vu0_acc_broadcast_mul;\n\
@@ -403,6 +406,34 @@ pub(crate) fn emit_instruction(
             let d = dst.index();
             output.push_str(&format!(
                 "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_add_lanes(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {dest_mask}));\n",
+                fs.index(),
+                ft.index()
+            ));
+        }
+        Operation::Vmax {
+            dst,
+            fs,
+            ft,
+            broadcast_lane,
+            dest_mask,
+        } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_broadcast_max(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {broadcast_lane}, {dest_mask}));\n",
+                fs.index(),
+                ft.index()
+            ));
+        }
+        Operation::Vmin {
+            dst,
+            fs,
+            ft,
+            broadcast_lane,
+            dest_mask,
+        } => {
+            let d = dst.index();
+            output.push_str(&format!(
+                "    reps2::runtime::vu0_write_vf(state.vu0, {d}, reps2::runtime::vu0_broadcast_min(reps2::runtime::vu0_read_vf(state.vu0, {d}), reps2::runtime::vu0_read_vf(state.vu0, {}), reps2::runtime::vu0_read_vf(state.vu0, {}), {broadcast_lane}, {dest_mask}));\n",
                 fs.index(),
                 ft.index()
             ));
@@ -3114,6 +3145,24 @@ mod tests {
         let program = ir::lift(&decoded).expect("VADD IR");
         let cpp = emit_cpp(&program).expect("VADD C++");
         assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_add_lanes(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 14));"));
+    }
+
+    #[test]
+    fn emits_vu0_vmax_and_vmin() {
+        // VMAXx $11 = max($11,$12), full mask 0xF (frontier census word).
+        let words = [
+            0x4BEC_5AD0u32, // VMAXx $11, $11, $12, mask 0xF
+            0x4A29_40D7u32, // VMINIw $3, $8, $9, mask 0x1
+        ];
+        let decoded = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| crate::mips::decode(*word, 0x22E000 + index as u32 * 4))
+            .collect::<Vec<_>>();
+        let program = ir::lift(&decoded).expect("VMAX/VMINI IR");
+        let cpp = emit_cpp(&program).expect("VMAX/VMINI C++");
+        assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 11, reps2::runtime::vu0_broadcast_max(reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 11), reps2::runtime::vu0_read_vf(state.vu0, 12), 0, 15));"));
+        assert!(cpp.contains("reps2::runtime::vu0_write_vf(state.vu0, 3, reps2::runtime::vu0_broadcast_min(reps2::runtime::vu0_read_vf(state.vu0, 3), reps2::runtime::vu0_read_vf(state.vu0, 8), reps2::runtime::vu0_read_vf(state.vu0, 9), 3, 1));"));
     }
 
     #[test]

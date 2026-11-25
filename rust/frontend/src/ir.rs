@@ -300,6 +300,26 @@ pub enum Operation {
         is: u8,
         it: u8,
     },
+    /// VU0 VMAXx/y/z/w (COP2 Special1 funct=0x10..0x13): element-wise maximum
+    /// `fd.lane = max(fs.lane, ft[broadcast_lane])`, masked by dest field.
+    /// broadcast_lane = funct & 0x3 (0=x, 1=y, 2=z, 3=w). ADR 0215.
+    Vmax {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+        broadcast_lane: u8,
+        dest_mask: u8,
+    },
+    /// VU0 VMINIx/y/z/w (COP2 Special1 funct=0x14..0x17): element-wise minimum
+    /// `fd.lane = min(fs.lane, ft[broadcast_lane])`, masked by dest field.
+    /// broadcast_lane = funct & 0x3 (0=x, 1=y, 2=z, 3=w). ADR 0215.
+    Vmin {
+        dst: Vf,
+        fs: Vf,
+        ft: Vf,
+        broadcast_lane: u8,
+        dest_mask: u8,
+    },
     /// VU0 VLQI (COP2 Special2 index 52): VF[ft] = VU Mem0[VI[is] * 16];
     /// VI[is] += 1 (post-increment). ADR 0202.
     Vlqi {
@@ -1944,6 +1964,53 @@ pub fn lift(decoded: &[mips::Instruction]) -> Result<Program, LiftError> {
                 ft: vf(instruction.rt),
                 dest_mask: instruction.rs & 0xF,
             },
+            Opcode::Vmaxx
+            | Opcode::Vmaxy
+            | Opcode::Vmaxz
+            | Opcode::Vmaxw
+            | Opcode::Vminix
+            | Opcode::Vminiy
+            | Opcode::Vminiz
+            | Opcode::Vminiw => {
+                // VMAX/VMINI: fd = shift_amount, fs = rd, ft = rt, dest_mask = rs & 0xF
+                let dst = vf(instruction.shift_amount);
+                let fs = vf(instruction.rd);
+                let ft = vf(instruction.rt);
+                let dest_mask = instruction.rs & 0xF;
+                match instruction.opcode {
+                    Opcode::Vmaxx | Opcode::Vmaxy | Opcode::Vmaxz | Opcode::Vmaxw => {
+                        let lane = match instruction.opcode {
+                            Opcode::Vmaxx => 0,
+                            Opcode::Vmaxy => 1,
+                            Opcode::Vmaxz => 2,
+                            _ => 3,
+                        };
+                        Operation::Vmax {
+                            dst,
+                            fs,
+                            ft,
+                            broadcast_lane: lane,
+                            dest_mask,
+                        }
+                    }
+                    Opcode::Vminix | Opcode::Vminiy | Opcode::Vminiz | Opcode::Vminiw => {
+                        let lane = match instruction.opcode {
+                            Opcode::Vminix => 0,
+                            Opcode::Vminiy => 1,
+                            Opcode::Vminiz => 2,
+                            _ => 3,
+                        };
+                        Operation::Vmin {
+                            dst,
+                            fs,
+                            ft,
+                            broadcast_lane: lane,
+                            dest_mask,
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
             Opcode::Vaddx | Opcode::Vaddy | Opcode::Vaddz | Opcode::Vaddw => {
                 let lane = match instruction.opcode {
                     Opcode::Vaddx => 0,
@@ -2172,6 +2239,34 @@ mod tests {
         assert!(matches!(
             program.instructions()[1].operation,
             Operation::Vlqi { dst, vi } if dst.index() == 17 && vi == 13
+        ));
+    }
+
+    #[test]
+    fn lifts_vu0_vmaxx_and_vminiw() {
+        let vmax = crate::mips::decode(0x4BEC_5AD0, 0x22E000);
+        let program = lift(&[vmax]).expect("VMAX lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vmax {
+                dst: Vf(11),
+                fs: Vf(11),
+                ft: Vf(12),
+                broadcast_lane: 0,
+                dest_mask: 0xF
+            }
+        ));
+        let vmin = crate::mips::decode(0x4A29_40D7, 0x22E004);
+        let program = lift(&[vmin]).expect("VMINI lift");
+        assert!(matches!(
+            program.instructions()[0].operation,
+            Operation::Vmin {
+                dst: Vf(3),
+                fs: Vf(8),
+                ft: Vf(9),
+                broadcast_lane: 3,
+                dest_mask: 0x1
+            }
         ));
     }
 
