@@ -1,0 +1,44 @@
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-CLEAN\CMAKEFILES\B0687D7824C90297BF50E7237C4B6462\REPS2.EXE.RULE
+setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-CLEAN\CMAKEFILES\DC74D67619166CE7055F18FEE178EB61\MMI0_WORD_PROGRAM.CPP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated/mmi0_word_program.cpp 0x00007000 0x70221808 0x70222048 0x70220008 0x70A62808 0x71073848 0x70224908 0x70225148 0x70220108 0x716C5908 0x71CD6948 0x70228A48 0x72539248 0x72B4A248 0x72D6B248 0x70220248
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-CLEAN\CMAKEFILES\44DFDFC404E674E28A8BD76DE952E902\REPS2_MMI0_WORD_CODEGEN_FIXTURE.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

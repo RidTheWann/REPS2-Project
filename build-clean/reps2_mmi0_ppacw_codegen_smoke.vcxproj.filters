@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_ppacw_program.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\tests\mmi0_ppacw_smoke.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{612814AA-5FBF-3B40-83D5-2C6A3D3B4157}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{6B689D24-54F9-3914-80DB-E9ED0574CE03}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

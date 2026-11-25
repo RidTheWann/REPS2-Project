@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-baseline\CMakeFiles\083b8a17b4ed3e673fa4f6e318201bb1\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{E851ECD5-22EB-3992-94CD-A98A890B4529}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

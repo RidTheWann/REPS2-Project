@@ -1,0 +1,60 @@
+{
+  "cmake" : 
+  {
+    "configuration" : "RelWithDebInfo",
+    "generator" : "Visual Studio 18 2026",
+    "generator_platform" : "",
+    "generator_toolset" : "",
+    "host_processor" : "AMD64",
+    "host_system" : "Windows",
+    "target_processor" : "AMD64",
+    "target_system" : "Windows",
+    "version" : "4.4.4"
+  },
+  "compile" : 
+  {
+    "cxx_extensions" : false,
+    "cxx_standard" : 20,
+    "debug_cxx_flags" : "/Ob0 /Od /RTC1",
+    "debug_executable_linker_flags" : "/debug /INCREMENTAL",
+    "global_cxx_flags" : "/DWIN32 /D_WINDOWS /EHsc",
+    "global_executable_linker_flags" : "/machine:x64",
+    "minsizerel_cxx_flags" : "/O1 /Ob1 /DNDEBUG",
+    "minsizerel_executable_linker_flags" : "/INCREMENTAL:NO",
+    "release_cxx_flags" : "/O2 /Ob2 /DNDEBUG",
+    "release_executable_linker_flags" : "/INCREMENTAL:NO",
+    "relwithdebinfo_cxx_flags" : "/O2 /Ob1 /DNDEBUG",
+    "relwithdebinfo_executable_linker_flags" : "/debug /INCREMENTAL",
+    "target_options" : [ "/W4", "/permissive-" ]
+  },
+  "compiler" : 
+  {
+    "architecture_id" : "x64",
+    "compiler_arg1_sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "compiler_launcher_config_sha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "executable_sha256" : "b0a1818ebae6da7f18230a84e76ce839212584ac4c2ab55b97a0d5268085da57",
+    "frontend_variant" : "MSVC",
+    "id" : "MSVC",
+    "linker_executable_sha256" : "a8c42e25c91ca2453e1110540ac08f0fc12d7539454a11b9af8baeecb469837d",
+    "target" : "",
+    "version" : "19.51.36260.0"
+  },
+  "frontend" : 
+  {
+    "control_ir_schema_version" : 1,
+    "input_elf_sha256" : null,
+    "input_kind" : "synthetic_fixture",
+    "manifest_schema_version" : 3,
+    "parent_iso_sha256" : null,
+    "ram_image_sha256" : null,
+    "translation_sources_sha256" : "e8b584684c17e56be823d96b5d1a645242a71ed56080b33726e606be2b9d5705"
+  },
+  "frontend_version" : "0.7.0",
+  "runtime" : 
+  {
+    "abi_version" : 42,
+    "headers_sha256" : "d6a68c8b770cad13bf57ffa58f6d98bde88043934bfd2b332e11d14d0353243f"
+  },
+  "schema_version" : 1,
+  "tool" : "reps2-native-build"
+}

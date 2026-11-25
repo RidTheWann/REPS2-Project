@@ -545,6 +545,10 @@ void print_error(
               << ",\"matches\":" << state.memory.timer2_matches
               << ",\"irq_raises\":" << state.memory.timer2_irq_raises
               << ",\"irq_refusals\":" << state.memory.timer2_irq_refusals
+              << "},\"vblank\":{\"starts\":" << state.memory.vblank_starts
+              << ",\"ends\":" << state.memory.vblank_ends
+              << ",\"irq_refusals\":" << state.memory.vblank_irq_refusals
+              << ",\"in_blank\":" << (state.memory.vblank_in_blank ? 1U : 0U)
               << "},\"intc\":{\"stat\":" << state.memory.intc.i_stat
               << ",\"mask\":" << state.memory.intc.i_mask
               << ",\"known\":"

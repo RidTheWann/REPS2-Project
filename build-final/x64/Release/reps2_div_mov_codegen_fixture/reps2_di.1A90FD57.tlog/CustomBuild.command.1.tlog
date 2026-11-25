@@ -1,0 +1,44 @@
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-FINAL\CMAKEFILES\CFA9F3577C7ECFBCA10FB832E28EEF44\REPS2.EXE.RULE
+setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-final/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-FINAL\CMAKEFILES\34BB87721E8309308E12B71DDEDA94CB\DIV_MOV_PROGRAM.CPP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-final/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-final/generated/div_mov_program.cpp 0x00100000 0x0000000F 0x0000040F 0xBC000000 0xCC000000 0x0022001A 0x0000A010 0x0000A812 0x0060001A 0x0000B010 0x0000B812 0x0080001A 0x0000C010 0x0000C812 0x00A6001A 0x0000D010 0x0000D812 0x00E8001B 0x0000E010 0x0000E812 0x00E0001B 0x0000F010 0x0000F812 0x016C500A 0x0162680A 0x0162700B 0x016C780B 0x016C000A 0x0162000B
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-FINAL\CMAKEFILES\22D8842E028E8BBBE6752009A9841A3C\REPS2_DIV_MOV_CODEGEN_FIXTURE.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-final --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-final/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

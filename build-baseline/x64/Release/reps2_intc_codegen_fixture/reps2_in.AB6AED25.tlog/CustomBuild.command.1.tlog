@@ -1,0 +1,44 @@
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-BASELINE\CMAKEFILES\9387F2EDCDB53943F18D8AD0C6B07200\REPS2.EXE.RULE
+setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-baseline/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-BASELINE\CMAKEFILES\310B3E245B6F83F2D0466CB443751B8E\INTC_PROGRAM.CPP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-baseline/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-baseline/generated/intc_program.cpp 0x0000F000 0x3C021000 0x3442F000 0x8C430000 0xAC430000 0x34420010 0x8C430000 0xAC430000
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-BASELINE\CMAKEFILES\083B8A17B4ED3E673FA4F6E318201BB1\REPS2_INTC_CODEGEN_FIXTURE.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-baseline --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-baseline/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

@@ -1,0 +1,44 @@
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-CLEAN\CMAKEFILES\B0687D7824C90297BF50E7237C4B6462\REPS2.EXE.RULE
+setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-CLEAN\CMAKEFILES\DC74D67619166CE7055F18FEE178EB61\MMI0_PEXT5_PPAC5_PROGRAM.CPP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated/mmi0_pext5_ppac5_program.cpp 0x0000D000 0x70021F88 0x70033FC8 0x70052F88 0x700127C8 0x700637C8 0x70020788 0x700107C8 0x70004788 0x70004FC8
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-CLEAN\CMAKEFILES\44DFDFC404E674E28A8BD76DE952E902\REPS2_MMI0_PEXT5_PPAC5_CODEGEN_FIXTURE.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

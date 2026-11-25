@@ -664,6 +664,13 @@ inline constexpr std::uint32_t kEeTimer2CmpeBit{0x0000'0100U};
 inline constexpr std::uint32_t kEeTimer2EqufBit{0x0000'0400U};
 inline constexpr std::uint32_t kEeTimer2OvffBit{0x0000'0800U};
 
+// EE VBLANK synthetic timing model (ADR 0218). One modeled guest BUSCLK
+// cycle per executed instruction (ADR 0142); one NTSC field ~59.94 Hz at
+// ~294.912 MHz, with ~26/262 lines blank. These constants schedule only the
+// INTC VBLANK sources; this is not a GPU, display, or field-parity model.
+inline constexpr std::uint64_t kEeVblankCyclesPerFrame{4'920'954U};
+inline constexpr std::uint64_t kEeVblankDurationCycles{487'443U};
+
 // The clock-select divisor is the Timer 3 table: one function, so a correction
 // to the documented divisors cannot land in one timer and miss the other.
 [[nodiscard]] inline std::uint32_t ee_timer2_cycles_per_tick(std::uint32_t mode) noexcept {
@@ -818,6 +825,7 @@ inline void materialize_ee_timer2(EeMemory&) noexcept;
 // Timer 1 is bounded storage only (no counting, no interrupts, no clock source).
 // ADR 0183.
 inline void materialize_ee_timer1(EeMemory&) noexcept;
+inline void materialize_ee_vblank(EeMemory&) noexcept;
 
 inline constexpr std::size_t kEeVif1FifoCapacityQwords = 16U;
 
@@ -879,6 +887,15 @@ struct EeMemory {
     std::uint64_t timer2_matches{};
     std::uint64_t timer2_irq_raises{};
     std::uint64_t timer2_irq_refusals{};
+    // EE VBLANK synthetic timing state (ADR 0218). Transitions are scheduled
+    // from guest_bus_cycles through EeIntcState::raise_source, the same path as
+    // Timer 2 (ADR 0172); refusals are counted, never silently dropped.
+    std::uint64_t vblank_next_start_cycle{};
+    std::uint64_t vblank_next_end_cycle{};
+    std::uint64_t vblank_starts{};
+    std::uint64_t vblank_ends{};
+    std::uint64_t vblank_irq_refusals{};
+    bool vblank_in_blank{};
     EeDmacState dmac{};
     EeIntcState intc{};
     // Bounded software model for the VIF1 hardware FIFO: each EE SQ pushes a
@@ -2630,8 +2647,43 @@ inline void materialize_ee_timer3(EeMemory& self) noexcept {
 // derives from it. The host calls this after each execution step with the guest
 // cycles it executed; REPS2 uses one instruction per modelled BUSCLK cycle, an
 // explicit approximation recorded in ADR 0142 (not a claim of cycle accuracy).
+// Materialise periodic VBLANK transitions from guest_bus_cycles (ADR 0218).
+// Source 2 (VBLANK_START) fires at frame*frame - blank_duration, source 3
+// (VBLANK_END) at each frame boundary, through EeIntcState::raise_source, the
+// same path as Timer 2 (ADR 0172). I_STAT remains pending with I_MASK clear;
+// I_STAT writes remain write-one-to-clear. Large jumps process every missed
+// transition in order; repeated pending bits coalesce as real pending bits do.
+inline void materialize_ee_vblank(EeMemory& self) noexcept {
+    if (self.vblank_next_start_cycle == 0U) {
+        self.vblank_next_start_cycle =
+            kEeVblankCyclesPerFrame - kEeVblankDurationCycles;
+        self.vblank_next_end_cycle = kEeVblankCyclesPerFrame;
+    }
+    while (self.vblank_next_start_cycle <= self.guest_bus_cycles
+           || self.vblank_next_end_cycle <= self.guest_bus_cycles) {
+        if (self.vblank_next_start_cycle <= self.vblank_next_end_cycle) {
+            if (self.intc.raise_source(kEeIntcSourceVblankStart)) {
+                ++self.vblank_starts;
+            } else {
+                ++self.vblank_irq_refusals;
+            }
+            self.vblank_in_blank = true;
+            self.vblank_next_start_cycle += kEeVblankCyclesPerFrame;
+        } else {
+            if (self.intc.raise_source(kEeIntcSourceVblankEnd)) {
+                ++self.vblank_ends;
+            } else {
+                ++self.vblank_irq_refusals;
+            }
+            self.vblank_in_blank = false;
+            self.vblank_next_end_cycle += kEeVblankCyclesPerFrame;
+        }
+    }
+}
+
 inline void advance_ee_timers(EeState& state, std::uint64_t bus_cycles) noexcept {
     state.memory.guest_bus_cycles += bus_cycles;
+    materialize_ee_vblank(state.memory);
     materialize_ee_timer3(state.memory);
     materialize_ee_timer2(state.memory);
 }

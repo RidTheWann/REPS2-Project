@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\native-build-driver\src\control_flow_split.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\native-build-driver\src\control_flow_split.part0001.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\native-build-driver\src\control_flow_split.part0002.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\native-build-driver\src\control_flow_split.part0003.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\native-build-driver\src\control_flow_split.part0004.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\native-build-driver\src\control_flow_split.native\rg_reps2_module.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\native-build-driver\src\control_flow_split.native\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{BDB70C56-F2E7-3A3C-A742-AEEACF81BA16}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

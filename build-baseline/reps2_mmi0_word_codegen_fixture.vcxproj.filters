@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-baseline\CMakeFiles\9387f2edcdb53943f18d8ad0c6b07200\reps2.exe.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-baseline\CMakeFiles\310b3e245b6f83f2d0466cb443751b8e\mmi0_word_program.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-baseline\CMakeFiles\083b8a17b4ed3e673fa4f6e318201bb1\reps2_mmi0_word_codegen_fixture.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-baseline\CMakeFiles\reps2_mmi0_word_codegen_fixture" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{E851ECD5-22EB-3992-94CD-A98A890B4529}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

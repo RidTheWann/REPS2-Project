@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\CMakeFiles\cfa9f3577c7ecfbca10fb832e28eef44\reps2.exe.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\CMakeFiles\34bb87721e8309308e12b71ddeda94cb\mmi2_pxor_program.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\CMakeFiles\22d8842e028e8bbbe6752009a9841a3c\reps2_mmi2_pxor_codegen_fixture.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-final\CMakeFiles\reps2_mmi2_pxor_codegen_fixture" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{E2828418-6248-3B5A-A166-7B431C2B8377}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

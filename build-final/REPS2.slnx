@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Solution>
+	<Configurations>
+		<BuildType Name="Debug"/>
+		<BuildType Name="Release"/>
+		<BuildType Name="MinSizeRel"/>
+		<BuildType Name="RelWithDebInfo"/>
+		<Platform Name="x64"/>
+	</Configurations>
+	<Project Path="ALL_BUILD.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0cce6645-6ec4-3722-bb13-efe965dd1998" DefaultStartup="true">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2.vcxproj"/>
+		<BuildDependency Project="reps2_cfg_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_cfg_split_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_compare_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_cop0_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_cop1_arith_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_cop1_arith_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_cop1_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_cop1_compare_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_cop2_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_div_mov_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_dmac_dstat_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_gs_csr_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_hilo_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_hle_syscall_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="host/reps2_host.vcxproj"/>
+		<BuildDependency Project="reps2_host_media_smoke.vcxproj"/>
+		<BuildDependency Project="host/reps2_host_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_intc_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_intc_timer2_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_intc_timer2_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mdu1_multiply_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pcgtw_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pext5_ppac5_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pextlb_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pextlw_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_ppacw_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_word_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi1_paddub_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi1_pceqw_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pand_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pcpyld_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pexew_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_prot3w_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pxor_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_pcpyh_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_pcpyud_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_pnor_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_por_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_sa_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_signed_doubleword_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_syscall_census_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_vif1_fifo_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_vu_mem_smoke.vcxproj"/>
+		<BuildDependency Project="reps2_word_overflow_codegen_smoke.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_census_fixture.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_dynamic_fixture.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_loader_smoke.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_missing_symbol_fixture.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_runner.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_smoke.vcxproj"/>
+	</Project>
+	<Project Path="Continuous.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="2c0ffd4f-94fe-3ef0-b423-caac591b5ade">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="Experimental.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3b5aaad8-2f62-3253-a474-868bce9baa79">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="INSTALL.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4302c7bd-d5a7-39c5-bb8b-3b9615d2b993">
+		<BuildDependency Project="ALL_BUILD.vcxproj"/>
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="Nightly.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="75854c2e-5c2b-336d-9560-4458542d08cf">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="NightlyMemoryCheck.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b9c92abe-809d-3a7c-aef7-b093240ab82e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="RUN_TESTS.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="fc651d7b-1d08-3bcf-971d-19c0fe7e173e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="ZERO_CHECK.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f2165b56-6917-3d2d-9bc1-feedddc902c9"/>
+	<Project Path="reps2.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="9a3a8385-b86f-3315-a97a-13bcaccb2fa3">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cfg_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="34648059-b51f-3607-916a-881620f2b980">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cfg_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="98075ee2-2add-34f9-8499-c3ba70a901a2">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cfg_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cfg_split_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5d9d0ad7-34a8-3f89-b3cd-81c09c56fa95">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cfg_split_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="63cd3d11-5ed6-323c-9a28-0cddde53ef69">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cfg_split_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="657cd60e-8f90-3963-abab-94adf0cbdf34">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="36ebadd9-2df2-3cc6-a72d-ee99f4ab0488">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_compare_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c53a6691-4225-38b6-baae-66a8e616a0f7">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_compare_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ab6e4501-dba4-3c17-9915-b2242bdfa664">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_compare_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop0_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="2451e34c-d795-32b4-80b5-c20ea7153b0c">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop0_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8defe880-b9b1-309d-b437-b57502b69535">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cop0_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop1_arith_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="08fc890f-c34c-391b-8fe8-967ba9206ba2">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop1_arith_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a38d049e-eb71-3cdd-92d2-c49794de8b19">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cop1_arith_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop1_arith_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="911501b0-70a8-33cb-bb51-983bdb65b118">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop1_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5b2f4d33-0f21-3aa4-a28d-61286fcb9bb5">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop1_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0f200d49-210a-35d0-a1be-d9a29e217075">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cop1_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop1_compare_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="38b48d6f-1fe8-30e4-bc30-032bc86bfc91">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop2_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f1cd747c-49e1-377d-95d5-23270a5cf6a6">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_cop2_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8f722ead-081d-3623-8c6d-978e574bcec4">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cop2_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_div_mov_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1a90fd57-31da-3800-8ca0-2daa64baaaad">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_div_mov_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4634e093-b9cc-3009-8fa8-682a4e6e2eea">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_div_mov_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_dmac_dstat_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ca91b349-501a-3070-b9fd-8ec467ce3f4b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_dmac_dstat_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5a6cd55d-c367-31a9-96cb-a20d16fe6d28">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_dmac_dstat_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_gs_csr_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="66ba655e-50e8-3562-be7c-f90ce69524e7">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_hilo_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="9b96f514-33e9-3453-9093-fec12349a420">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_hilo_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="809d7a27-cb9a-326a-b8c1-7ba3caa9d365">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_hilo_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_hle_syscall_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="9c09a3c4-4b94-324b-ad80-9acff3e03d3e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cfg_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="host/reps2_host.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0e6ea971-460b-3d84-942d-c69f557bf7a6">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_host_media_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b84dc924-19d9-3f62-90eb-e52c3fe56eb8">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="host/reps2_host_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b66cb84f-26fd-30ef-aaaf-4bfc035bfe5a">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="host/reps2_host.vcxproj"/>
+	</Project>
+	<Project Path="reps2_intc_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1593cde7-bafe-3222-96d9-d7ab3e3bac3d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_intc_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="18a11da7-607f-38cc-8f5b-47e1a756a375">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_intc_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_intc_timer2_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a1f6ee74-3b9f-3de3-a541-d7670f8e4306">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cfg_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_intc_timer2_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="08096b87-d659-3a40-ac94-9275286668ea">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mdu1_multiply_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ceb6f84e-8ec8-3ca4-b1b2-a94effb93a60">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mdu1_multiply_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="010e01a1-a3e5-3129-b403-83527ab93134">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mdu1_multiply_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pcgtw_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="865232bb-36e1-364b-b07e-da3ffdd145c3">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pcgtw_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1bb5be1d-7b64-3f9d-9078-811c9f24b90d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pcgtw_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pext5_ppac5_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6cca2870-1895-34d3-8ae0-982671db3ba9">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pext5_ppac5_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="86678998-f1b8-3a9e-8bac-7bbcbf62ea09">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pext5_ppac5_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pextlb_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="dc84d1c7-4a6d-3d20-8345-0fbb3cbe36d1">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pextlb_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="561be09b-10a7-3a53-8bb7-0bcc82aede18">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pextlb_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pextlw_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="53ccb4c3-6c5a-3374-879b-a87fe1ba1c34">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_pextlw_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="10f6704f-02fc-3f8e-8e67-d73db91c1761">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_pextlw_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_ppacw_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="97e347e4-b1e6-3762-86f1-f5bfce42eb8b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_ppacw_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ff52db09-a179-3e0d-bb64-2288ad9f2ad3">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_ppacw_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_word_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="059fe5b7-bbe9-3616-8234-20d869be349b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi0_word_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="68ba3f4f-0cd4-3a0a-8f3a-6f3da55d1738">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi0_word_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi1_paddub_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="961f4510-8eb9-3a68-ad7e-4e41545dadfb">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi1_paddub_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5ee9b45a-4942-3493-b1b8-3db55510f38e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi1_paddub_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi1_pceqw_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8968ac53-ed2e-3338-99d2-564514e00406">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi1_pceqw_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6bd31df7-a615-391a-b81e-2842f8bd8c8c">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi1_pceqw_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pand_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8a6046b4-8e4b-3309-9f73-feb3807d7a06">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pand_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1665085a-d939-3a9b-95df-3d20cd2de2c0">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pand_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pcpyld_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7c8aadce-5e42-34dd-bb3e-c8e172a0c742">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pcpyld_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="e61d3f44-0447-3a31-a3f7-43c50245cdd8">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pcpyld_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pexew_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="bb22e78d-d357-389f-a193-fba19ea5675b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pexew_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a7910086-1eea-384d-b244-4dff647b1673">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pexew_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_prot3w_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5d44a140-31e3-3326-9028-0a5f2a0fb323">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_prot3w_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="81b1c082-552b-3dec-9b5b-892b47eec0b9">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_prot3w_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pxor_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="91096935-8f6e-3905-95f6-2d38dcb2ec78">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi2_pxor_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="23c9651f-3f01-37bb-87af-622ff9862117">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi2_pxor_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_pcpyh_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f35dd4e6-6c2d-3781-9194-fb95334cb9b4">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_pcpyh_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="d4a6f922-1994-3aab-85e4-51af003adedb">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_pcpyh_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_pcpyud_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="7114161d-4204-33f5-9f6a-47e0cc80b4d6">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_pcpyud_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1d775dca-903d-3847-91e8-35858fd3357e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_pcpyud_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_pnor_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f36378f7-5289-316a-a500-f6598bde2cca">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_pnor_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="9fdac882-9bfe-360e-bbdb-f843685c6dbf">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_pnor_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_por_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="db29e7e7-7446-3ae9-92c7-4e4839eb7258">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_mmi3_por_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6f01b435-2792-3800-b9d7-741c4af8fe98">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_mmi3_por_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_sa_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c8aec573-9c14-3ca8-ae41-4f48e295c19b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_sa_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5296ead1-8921-3df4-b915-5283ff77dd8c">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_sa_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_signed_doubleword_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="aa73abdf-cf4d-3d3e-8605-e8f50b69b272">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_signed_doubleword_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="bab736ff-b2c7-336e-acff-169a4da818dc">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_signed_doubleword_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="reps2_syscall_census_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1bdd5a03-b23a-33fb-b38f-4dfe5827cf6e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_vif1_fifo_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="d9254558-fdea-356d-9516-74579cf2c12e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_vu_mem_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="cb96e7f4-b68b-3364-9fed-f1a7ae3ab1d5">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_word_overflow_codegen_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ed17d089-2e82-324f-b04e-d832bfa6f258">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="reps2_word_overflow_codegen_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="746b0639-668a-3bdc-849f-b49a7f6de792">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_word_overflow_codegen_fixture.vcxproj"/>
+	</Project>
+	<Project Path="rg_reps2_engine.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5c957ea5-d207-39db-a968-d15b63952225">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="rg_reps2_engine_census_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ec71f685-9a87-3fe6-bde3-158e61ac96b0">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="rg_reps2_engine_dynamic_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="e2526bb3-3117-3eb6-94d4-78950f04aa0d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="rg_reps2_engine_loader_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1f7ca7eb-a98d-385a-a232-8f6f1a5f81e8">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_dynamic_fixture.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine_missing_symbol_fixture.vcxproj"/>
+	</Project>
+	<Project Path="rg_reps2_engine_missing_symbol_fixture.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c088dbb5-d239-3d47-a3d7-513f3ed7d7a0">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="rg_reps2_engine_runner.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a2816adf-69fe-3457-a4f2-a4cd60195bfc">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine.vcxproj"/>
+	</Project>
+	<Project Path="rg_reps2_engine_smoke.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ada5fab4-2d10-3082-91af-67cbf1e730c4">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="reps2_cfg_codegen_fixture.vcxproj"/>
+		<BuildDependency Project="rg_reps2_engine.vcxproj"/>
+	</Project>
+</Solution>

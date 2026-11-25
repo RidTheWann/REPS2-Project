@@ -1381,6 +1381,23 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_gs_csr_smoke COMMAND reps2_gs_csr_smoke)
 
+    # EE VBLANK synthetic timing model (ADR 0218): VBLANK_START (INTC source 2)
+    # / VBLANK_END (source 3) scheduled from the guest cycle counter through the
+    # same raise_source path as Timer 2 (ADR 0172).
+    add_executable(reps2_vblank_timing_smoke
+        tests/vblank_timing_smoke.cpp
+    )
+    target_link_libraries(reps2_vblank_timing_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_vblank_timing_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_vblank_timing_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_vblank_timing_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_vblank_timing_smoke COMMAND reps2_vblank_timing_smoke)
+
     add_executable(reps2_vif1_fifo_smoke
         tests/vif1_fifo_smoke.cpp
     )

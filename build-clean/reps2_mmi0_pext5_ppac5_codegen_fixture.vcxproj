@@ -1,0 +1,368 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{D45B40BD-FAEE-3FD4-817A-DA0C6165E95A}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>reps2_mmi0_pext5_ppac5_codegen_fixture</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\b0687d7824c90297bf50e7237c4b6462\reps2.exe.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building the REPS2 Rust frontend</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\address.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\analysis.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\build_manifest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\coverage.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer_json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\diagnostics.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\digest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf_compat.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\iso9660.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\lib.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\library.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\main.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\mips.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\native_build.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.toml;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.lock;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building the REPS2 Rust frontend</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\address.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\analysis.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\build_manifest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\coverage.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer_json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\diagnostics.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\digest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf_compat.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\iso9660.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\lib.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\library.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\main.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\mips.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\native_build.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.toml;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.lock;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building the REPS2 Rust frontend</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\address.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\analysis.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\build_manifest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\coverage.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer_json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\diagnostics.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\digest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf_compat.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\iso9660.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\lib.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\library.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\main.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\mips.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\native_build.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.toml;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.lock;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building the REPS2 Rust frontend</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+cd D:\REPS2-Project\.worktrees\ee-vblank-timing
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E env CARGO_TARGET_DIR=D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/cargo-target C:/Users/RidTheWann/.cargo/bin/cargo.exe build --locked --release --manifest-path D:/REPS2-Project/.worktrees/ee-vblank-timing/rust/Cargo.toml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\address.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\analysis.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\build_manifest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_codegen.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\control_ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\coverage.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\developer_json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\diagnostics.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\digest.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\elf_compat.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\ir.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\iso9660.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\json.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\lib.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\library.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\main.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\mips.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\src\native_build.rs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.toml;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\Cargo.lock;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\dc74d67619166ce7055f18fee178eb61\mmi0_pext5_ppac5_program.cpp.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AOT-compiling R5900 MMI0 PEXT5/PPAC5 conversion</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated/mmi0_pext5_ppac5_program.cpp 0x0000D000 0x70021F88 0x70033FC8 0x70052F88 0x700127C8 0x700637C8 0x70020788 0x700107C8 0x70004788 0x70004FC8
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AOT-compiling R5900 MMI0 PEXT5/PPAC5 conversion</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated/mmi0_pext5_ppac5_program.cpp 0x0000D000 0x70021F88 0x70033FC8 0x70052F88 0x700127C8 0x700637C8 0x70020788 0x700107C8 0x70004788 0x70004FC8
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">AOT-compiling R5900 MMI0 PEXT5/PPAC5 conversion</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated/mmi0_pext5_ppac5_program.cpp 0x0000D000 0x70021F88 0x70033FC8 0x70052F88 0x700127C8 0x700637C8 0x70020788 0x700107C8 0x70004788 0x70004FC8
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">AOT-compiling R5900 MMI0 PEXT5/PPAC5 conversion</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated
+if %errorlevel% neq 0 goto :cmEnd
+cargo-target\release\reps2.exe compile-words D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/generated/mmi0_pext5_ppac5_program.cpp 0x0000D000 0x70021F88 0x70033FC8 0x70052F88 0x700127C8 0x700637C8 0x70020788 0x700107C8 0x70004788 0x70004FC8
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\cargo-target\release\reps2.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\44dfdfc404e674e28a8bd76de952e902\reps2_mmi0_pext5_ppac5_codegen_fixture.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'"></Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\reps2_mmi0_pext5_ppac5_codegen_fixture</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</VerifyInputsAndOutputsExist>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'"></Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\reps2_mmi0_pext5_ppac5_codegen_fixture</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</VerifyInputsAndOutputsExist>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'"></Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\reps2_mmi0_pext5_ppac5_codegen_fixture</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</VerifyInputsAndOutputsExist>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'"></Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\generated\mmi0_pext5_ppac5_program.cpp;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\reps2_mmi0_pext5_ppac5_codegen_fixture</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</VerifyInputsAndOutputsExist>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule D:/REPS2-Project/.worktrees/ee-vblank-timing/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.4\Modules\InstallRequiredSystemLibraries.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake;C:\Program Files\CMake\share\cmake-4.4\Templates\CTestScript.cmake.in;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeCXXCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeRCCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeSystem.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\cmake.verify_globs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule D:/REPS2-Project/.worktrees/ee-vblank-timing/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.4\Modules\InstallRequiredSystemLibraries.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake;C:\Program Files\CMake\share\cmake-4.4\Templates\CTestScript.cmake.in;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeCXXCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeRCCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeSystem.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\cmake.verify_globs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule D:/REPS2-Project/.worktrees/ee-vblank-timing/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.4\Modules\InstallRequiredSystemLibraries.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake;C:\Program Files\CMake\share\cmake-4.4\Templates\CTestScript.cmake.in;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeCXXCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeRCCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeSystem.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\cmake.verify_globs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule D:/REPS2-Project/.worktrees/ee-vblank-timing/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCXXInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeGenericSystem.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeRCInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTest.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestTargets.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\CTestUseLaunchers.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Compiler\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\DartConfiguration.tcl.in;C:\Program Files\CMake\share\cmake-4.4\Modules\InstallRequiredSystemLibraries.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Linker\MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\Windows.cmake;C:\Program Files\CMake\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake;C:\Program Files\CMake\share\cmake-4.4\Templates\CTestScript.cmake.in;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeCXXCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeRCCompiler.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\4.4.4\CMakeSystem.cmake;D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\cmake.verify_globs;D:\REPS2-Project\.worktrees\ee-vblank-timing\rust\frontend\Cargo.toml;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\reps2_mmi0_pext5_ppac5_codegen_fixture">
+    </None>
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\ZERO_CHECK.vcxproj">
+      <Project>{E5135DD9-836F-35EA-9FC0-C9B28DC63928}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

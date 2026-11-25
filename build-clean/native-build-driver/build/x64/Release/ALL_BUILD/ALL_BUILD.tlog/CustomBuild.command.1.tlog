@@ -1,0 +1,10 @@
+^D:\REPS2-PROJECT\.WORKTREES\EE-VBLANK-TIMING\BUILD-CLEAN\NATIVE-BUILD-DRIVER\SRC\CONTROL_FLOW_SPLIT.NATIVE\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/native-build-driver/src/control_flow_split.native -BD:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/native-build-driver/build --check-stamp-file D:/REPS2-Project/.worktrees/ee-vblank-timing/build-clean/native-build-driver/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

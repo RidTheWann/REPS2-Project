@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\b0687d7824c90297bf50e7237c4b6462\reps2.exe.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\dc74d67619166ce7055f18fee178eb61\compare_nor_program.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\44dfdfc404e674e28a8bd76de952e902\reps2_compare_codegen_fixture.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\REPS2-Project\.worktrees\ee-vblank-timing\build-clean\CMakeFiles\reps2_compare_codegen_fixture" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{612814AA-5FBF-3B40-83D5-2C6A3D3B4157}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
