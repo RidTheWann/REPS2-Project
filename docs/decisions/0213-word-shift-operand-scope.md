@@ -74,7 +74,9 @@ not a producer bug.
   Downhill Domination USA ISO `0fe2b777...a7eb86`, boot ELF
   `adfda7b7...f0cf0c`): the `0x0021B9B8` stop is gone; the run executes
   5,179,512 instructions in 2 batches and stops at `pc=0x00217D8C` as
-  `unsupported_instruction` on word `0x41010003` (COP0 `TLBP`), a genuine
-  TLB-management instruction. Census unchanged: 63,937 blocks, 347,734 guest
-  instructions, 77 unsupported stops. Evidence recorded in `docs/RESEARCH.md`
-  and `docs/PROJECT_STATE.md`. No boot-tested or playable claim.
+  `unsupported_instruction` on word `0x41010003`. **Correction (ADR 0214):**
+  this word is COP0 **BC0T** (primary `0x10`, `rs=0x08`, `rt=1`), not `TLBP`
+  as first written here; BC0T branches on the COP0 condition bit, which is
+  not modeled. Census unchanged: 63,937 blocks, 347,734 guest instructions,
+  77 unsupported stops. Evidence recorded in `docs/RESEARCH.md` and
+  `docs/PROJECT_STATE.md`. No boot-tested or playable claim.
