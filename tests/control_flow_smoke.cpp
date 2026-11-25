@@ -1201,6 +1201,31 @@ int main() {
         return fail(87);
     }
 
+    // BC0 branches on CPCOND0 (COP0 condition from DMAC D_STAT/D_PCR). The DMAC
+    // state is never seeded in this synthetic fixture, so CPCOND0 is unknown
+    // and the generated predicate stops fail-closed with
+    // unsupported_memory_access instead of approximating the condition.
+    // Sony EE Core Instruction Set Manual v6.0 Ch.4 pp.290-293; ADR 0216.
+    EeState bc0t_fixture{};
+    bc0t_fixture.pc = 0x7400U;
+    bc0t_fixture.gpr[31].low = 0x9000U;
+    const auto bc0t_status = reps2::generated::execute_cfg(bc0t_fixture, 64U);
+    if (bc0t_status != Status::unsupported_memory_access || bc0t_fixture.pc != 0x7400U) {
+        std::fprintf(stderr, "BC0T did not stop fail-closed on unknown DMAC state: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc0t_status), bc0t_fixture.pc);
+        return fail(90);
+    }
+
+    EeState bc0fl_fixture{};
+    bc0fl_fixture.pc = 0x7500U;
+    bc0fl_fixture.gpr[31].low = 0x9000U;
+    const auto bc0fl_status = reps2::generated::execute_cfg(bc0fl_fixture, 64U);
+    if (bc0fl_status != Status::unsupported_memory_access || bc0fl_fixture.pc != 0x7500U) {
+        std::fprintf(stderr, "BC0FL did not stop fail-closed on unknown DMAC state: status=%u pc=0x%08X\n",
+            static_cast<unsigned>(bc0fl_status), bc0fl_fixture.pc);
+        return fail(91);
+    }
+
     // All twelve EE conditional traps compare GPR[63:0]. Immediate forms
     // sign-extend the 16-bit constant before applying signed/unsigned semantics.
     struct ConditionalTrapCase {

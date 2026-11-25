@@ -314,6 +314,14 @@ pub enum Opcode {
     Bc1t,
     Bc1fl,
     Bc1tl,
+    /// BC0 branch family (COP0, rs = 0x08): branches on the CPCOND0 signal,
+    /// which the EE DMAC drives from D_PCR.CPC and D_STAT.CIS. rt selects the
+    /// variant (0 BC0F, 1 BC0T, 2 BC0FL, 3 BC0TL) and bits 15..0 hold the
+    /// signed word offset. See ADR 0216.
+    Bc0f,
+    Bc0t,
+    Bc0fl,
+    Bc0tl,
     /// SYNC is a memory barrier; static recompilation treats it as a
     /// scheduling fence with no guest-visible data effect.
     Sync,
@@ -645,6 +653,10 @@ impl Opcode {
             Self::Bc1t => "bc1t",
             Self::Bc1fl => "bc1fl",
             Self::Bc1tl => "bc1tl",
+            Self::Bc0f => "bc0f",
+            Self::Bc0t => "bc0t",
+            Self::Bc0fl => "bc0fl",
+            Self::Bc0tl => "bc0tl",
             Self::Sync => "sync",
             Self::Movn => "movn",
             Self::Movz => "movz",
@@ -854,6 +866,10 @@ impl Instruction {
                 | Opcode::Bc1t
                 | Opcode::Bc1fl
                 | Opcode::Bc1tl
+                | Opcode::Bc0f
+                | Opcode::Bc0t
+                | Opcode::Bc0fl
+                | Opcode::Bc0tl
                 | Opcode::Jr
                 | Opcode::Jalr
         )
@@ -884,6 +900,10 @@ impl Instruction {
                 | Opcode::Bc1t
                 | Opcode::Bc1fl
                 | Opcode::Bc1tl
+                | Opcode::Bc0f
+                | Opcode::Bc0t
+                | Opcode::Bc0fl
+                | Opcode::Bc0tl
         )
     }
 
@@ -904,6 +924,8 @@ impl Instruction {
                 | Opcode::Bgezall
                 | Opcode::Bc1fl
                 | Opcode::Bc1tl
+                | Opcode::Bc0fl
+                | Opcode::Bc0tl
         )
     }
 
@@ -1258,6 +1280,12 @@ impl Instruction {
                 effects.control_flow = ControlFlowEffect::ConditionalDirect;
             }
 
+            // The BC0 family reads the CPCOND0 signal (DMAC DMA-completion),
+            // not a GPR or the FCR31 bit. See ADR 0216.
+            Opcode::Bc0f | Opcode::Bc0t | Opcode::Bc0fl | Opcode::Bc0tl => {
+                effects.control_flow = ControlFlowEffect::ConditionalDirect;
+            }
+
             Opcode::Lb
             | Opcode::Lh
             | Opcode::Lw
@@ -1525,10 +1553,32 @@ fn jump_target(pc: u32, word: u32) -> u32 {
 /// instruction it would otherwise name.
 fn decode_cop0(word: u32) -> Opcode {
     let rs = ((word >> 21) & 0x1F) as u8;
-    let reserved_low = word & 0x7FF; // bits 10..0
     match rs {
-        0x00 if reserved_low == 0 => Opcode::Mfc0,
-        0x04 if reserved_low == 0 => Opcode::Mtc0,
+        0x00 => {
+            // MFC0: bits 10..0 must be zero
+            if (word & 0x7FF) != 0 {
+                return Opcode::Unknown;
+            }
+            Opcode::Mfc0
+        }
+        0x04 => {
+            // MTC0: bits 10..0 must be zero
+            if (word & 0x7FF) != 0 {
+                return Opcode::Unknown;
+            }
+            Opcode::Mtc0
+        }
+        0x08 => {
+            // BC0 branch family: rt selects variant (0..3), offset in bits 15..0
+            let rt = ((word >> 16) & 0x1F) as u8;
+            match rt {
+                0 => Opcode::Bc0f,
+                1 => Opcode::Bc0t,
+                2 => Opcode::Bc0fl,
+                3 => Opcode::Bc0tl,
+                _ => Opcode::Unknown,
+            }
+        }
         0x10 => match word {
             0x4200_0018 => Opcode::Eret,
             0x4200_0038 => Opcode::Ei,
@@ -2009,7 +2059,14 @@ pub fn decode(word: u32, pc: u32) -> Instruction {
 
     if matches!(
         instruction.opcode,
-        Opcode::Bc1f | Opcode::Bc1t | Opcode::Bc1fl | Opcode::Bc1tl
+        Opcode::Bc1f
+            | Opcode::Bc1t
+            | Opcode::Bc1fl
+            | Opcode::Bc1tl
+            | Opcode::Bc0f
+            | Opcode::Bc0t
+            | Opcode::Bc0fl
+            | Opcode::Bc0tl
     ) {
         let offset = ((immediate as i16 as i32).wrapping_mul(4)) as u32;
         instruction.target = pc.wrapping_add(4).wrapping_add(offset);
@@ -4304,6 +4361,54 @@ mod tests {
         assert!(!eret.has_delay_slot);
         let eret_eff = eret.effects();
         assert_eq!(eret_eff.control_flow, ControlFlowEffect::Trap);
+    }
+
+    #[test]
+    fn decodes_cop0_bc0_branches_on_cpcond0() {
+        // Sony EE Core Instruction Set Manual v6.0 Ch.4 pp.290-293:
+        // BC0F/BC0T/BC0FL/BC0TL = primary 0x10, rs 0x08, rt 0..3,
+        // signed 16-bit word offset. The real-title frontier word
+        // 0x41010003 is BC0T with offset 3. See ADR 0216.
+        let cases = [
+            (0u32, Opcode::Bc0f, "bc0f", false),
+            (1, Opcode::Bc0t, "bc0t", false),
+            (2, Opcode::Bc0fl, "bc0fl", true),
+            (3, Opcode::Bc0tl, "bc0tl", true),
+        ];
+        for (rt, opcode, mnemonic, likely) in cases {
+            let word = (0x10 << 26) | (0x08 << 21) | (rt << 16) | 3;
+            let decoded = decode(word, 0x21_7D8C);
+            assert_eq!(decoded.opcode, opcode, "rt {rt}");
+            assert_eq!(decoded.opcode.mnemonic(), mnemonic);
+            assert_eq!(decoded.target, 0x21_7D9C);
+            assert!(decoded.is_control_transfer());
+            assert!(decoded.is_conditional_branch());
+            assert!(decoded.has_delay_slot);
+            assert_eq!(decoded.is_branch_likely(), likely, "rt {rt}");
+            let effects = decoded.effects();
+            assert_eq!(effects.gpr_read_mask, 0);
+            assert_eq!(effects.gpr_write_mask, 0);
+            assert_eq!(effects.control_flow, ControlFlowEffect::ConditionalDirect);
+        }
+
+        // The exact frontier word from the Downhill Domination probe.
+        let frontier = decode(0x4101_0003, 0x0021_7D8C);
+        assert_eq!(frontier.opcode, Opcode::Bc0t);
+        assert_eq!(frontier.target, 0x0021_7D9C);
+
+        // Negative offset sign-extends across the full 16-bit field.
+        let back = decode((0x10 << 26) | (0x08 << 21) | (1 << 16) | 0xFFFF, 0x1000);
+        assert_eq!(back.opcode, Opcode::Bc0t);
+        assert_eq!(back.target, 0x1000);
+
+        // rt 4..31 are reserved and must not be decoded as BC0 forms.
+        for rt in 4..32 {
+            assert_eq!(
+                decode((0x10 << 26) | (0x08 << 21) | (rt << 16), 0).opcode,
+                Opcode::Unknown,
+                "rt {rt}"
+            );
+        }
     }
 
     #[test]

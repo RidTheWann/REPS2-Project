@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 namespace reps2::runtime {
 
@@ -79,6 +80,26 @@ inline constexpr std::uint32_t kEeDmacDStatBusErrorStatusBit{0x0000'8000U};
     const std::uint32_t mask = (d_stat >> 16U) & 0x0000'FFFFU;
     return (status & mask) != 0U
         || (d_stat & kEeDmacDStatBusErrorStatusBit) != 0U;
+}
+
+// CPCOND0: the COP0 condition signal read by BC0F/BC0T/BC0FL/BC0TL.
+//
+// Sony EE Core Instruction Set Manual v6.0 (SCEI, 2002) Ch.4, BC0F/BC0T/
+// BC0FL/BC0TL (pp.290-293): CPCOND0 is "a DMA transfer termination signal"
+// and is asynchronous. PS2Tek EE DMAC I/O (D_PCR, 0x1000E020): CPCOND0 is
+// asserted when every channel selected by D_PCR.CPC (bits 0..9) has its
+// D_STAT.CIS bit set. PCSX2 computes the same predicate as
+// `((D_STAT.CIS | ~D_PCR.CPC) & 0x3FF) == 0x3FF`; used only as a behavioral
+// cross-check, not copied implementation code. A channel with CPC=0 is not
+// selected and cannot block the signal. See ADR 0216.
+[[nodiscard]] constexpr bool ee_dmac_cop0_condition(
+    std::uint32_t d_stat,
+    std::uint32_t pcr
+) noexcept {
+    constexpr std::uint32_t kChannelMask{0x0000'03FFU};
+    const std::uint32_t cis = d_stat & kChannelMask;
+    const std::uint32_t cpc = pcr & kChannelMask;
+    return ((cis | ~cpc) & kChannelMask) == kChannelMask;
 }
 
 // CHCR bit masks (per PS2Tek / PS2SDK).
@@ -287,6 +308,15 @@ struct EeDmacState {
         if (!ctrl_known || !d_stat_known) return false;
         return ee_dmac_interrupt_pending(
             d_stat, (ctrl & kEeDmacCtrlDmaeMask) != 0U, false);
+    }
+
+    // CPCOND0 for the BC0 branch family. Fail-closed: returns nullopt when
+    // either D_STAT or D_PCR is unseeded, so the generated branch cannot
+    // silently treat an unknown DMA state as "all transfers complete" or
+    // "none complete". See ADR 0216.
+    [[nodiscard]] std::optional<bool> cop0_condition() const noexcept {
+        if (!d_stat_known || !pcr_known) return std::nullopt;
+        return ee_dmac_cop0_condition(d_stat, pcr);
     }
 
     // Publish the SIF0 (channel 5) completion event for an inbound IOP->EE
