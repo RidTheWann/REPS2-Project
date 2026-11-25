@@ -1,6 +1,6 @@
 # ADR 0218: EE VBLANK synthetic timing model (INTC sources 2/3)
 
-- **Status:** Accepted (validated locally; real-title probe pending at time of acceptance).
+- **Status:** Accepted (validated locally and by real-title probe `frontier-vblank-01`).
 - **Date:** 2026-11-25
 - **Scope:** `runtime/include/reps2/runtime/ee_state.hpp`
   (`kEeVblankCyclesPerFrame`/`kEeVblankDurationCycles` constants, `EeMemory`
@@ -99,10 +99,14 @@ consistent with Timer 2 (ADR 0172).
   required by this slice).
 - CMake Release build + `ctest --test-dir build -C Release --output-on-failure`
   passes (including new `reps2_vblank_timing_smoke`, 7 cases).
-- Real-title probe `frontier-vblank-01` on merged `main` c79b460, runtime ABI 42,
-  Windows x64/MSVC, ISO `0fe2b777…a7eb86`, boot ELF
-  `adfda7b7…f0cf0c`. Recorded in `docs/RESEARCH.md`; no boot-tested or playable
-  claim is made.
+- Real-title probe `frontier-vblank-01` (runtime ABI 42, Windows x64/MSVC, ISO
+  `0fe2b777...a7eb86`, boot ELF `adfda7b7...f0cf0c`): outcome `guest_stopped` at
+  `pc=0x0021F05C` after 10,000,298 instructions over 3 batches — the previous
+  `budget_limit_reached` at `pc=0x0025ABB0` after 79,999,926 instructions is gone,
+  so the VBLANK wait loop exits. `vblank={starts:2, ends:2, irq_refusals:0,
+  in_blank:0}`; `intc.stat=8` (VBLANK_END pending); `timer2.irq_raises=0` (never
+  armed); `syscalls_seen=1,637 handled=1,620`. Recorded in `docs/RESEARCH.md`.
+  No boot-tested or playable claim is made; the next frontier is `pc=0x0021F05C`.
 
 ## References
 
