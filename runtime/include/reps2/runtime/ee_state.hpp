@@ -1985,6 +1985,11 @@ struct EeSifCmdState {
     std::uint32_t last_mc_serv_version{};
     std::uint32_t last_mc_man_version{};
     bool last_mc_init_replied{};
+    // ADR 0221: first four words of the last refused mcserv request plus the
+    // refusal count, so a probe shows the request shape without fabricating a
+    // reply. Same bounded convention as the SearchFile head (ADR 0156).
+    std::uint32_t last_mc_request_head[4]{};
+    std::uint32_t mc_refused_calls{};
     // The title's 989snd sound driver (main server sid 0x00123456, loader server
     // 0x00123457; ADR 0152). Only the main server's SL_INIT (function 0) is
     // modelled (ADR 0155): the 8-byte request carries the EE address of the

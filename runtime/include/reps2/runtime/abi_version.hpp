@@ -136,5 +136,10 @@
 // and event deadline (`timer_synced_instructions`, `timer_next_event`) in
 // EeMemory so `execute_cfg` materializes VBLANK/timers at block boundaries
 // inside a batch. sizeof(EeState) changes; ABI-43 modules are refused.
+//
+// ABI 45 covers ADR 0221: mcserv diagnostic recording (`last_mc_request_head`,
+// `mc_refused_calls`) in EeSifCmdState so a refused memory-card function shows
+// its request shape in the run report. sizeof(EeState) changes; ABI-44 modules
+// are refused.
 
-#define REPS2_RUNTIME_ABI_VERSION 44
+#define REPS2_RUNTIME_ABI_VERSION 45

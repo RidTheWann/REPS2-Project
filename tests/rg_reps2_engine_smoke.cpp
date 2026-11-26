@@ -175,6 +175,15 @@ int test_module_admission(const Engine& engine, PreparedNativeModule& prepared) 
     if (engine.prepare(invalid, prepared) != EngineError::runtime_abi_mismatch) {
         return fail(12, "ABI-43 runtime module was not rejected as a runtime ABI mismatch");
     }
+    static_assert(
+        REPS2_RUNTIME_ABI_VERSION > 44U,
+        "ABI 45 is the generation that covers ADR 0221 (mcserv request diagnostics)"
+    );
+    invalid = descriptor;
+    invalid.runtime_abi_version = 44U;  // ABI 44 module must be rejected at ABI 45
+    if (engine.prepare(invalid, prepared) != EngineError::runtime_abi_mismatch) {
+        return fail(13, "ABI-44 runtime module was not rejected as a runtime ABI mismatch");
+    }
     invalid = descriptor;
     invalid.toolchain_abi_fingerprint += 1U;
     if (engine.prepare(invalid, prepared) != EngineError::toolchain_abi_mismatch) {
