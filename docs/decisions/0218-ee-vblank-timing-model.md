@@ -62,9 +62,11 @@ consistent with Timer 2 (ADR 0172).
    - No GPU state, display output, vsync, GS DMA, field parity, or GS CSR
      VSINT/FIELD is modeled or fabricated.
 
-2. **Codegen dispatcher** (`engine/include/rg_reps2_engine/session.hpp`): already
-   calls `advance_ee_timers` after each execution boundary; no call-site change
-   needed.
+2. **Codegen dispatcher** (`engine/include/rg_reps2_engine/session.hpp`):
+   originally called `advance_ee_timers` after each execution boundary only.
+   **Superseded by ADR 0220**: the generated `execute_cfg` now calls
+   `sync_ee_timers` at every block boundary (deadline-guarded), so VBLANK
+   transitions are materialized inside a batch, not only at batch end.
 
 3. **Engine report** (`engine/src/main.cpp`): adds `vblank` object
    `{starts, ends, irq_refusals, in_blank}`.

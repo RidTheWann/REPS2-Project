@@ -209,14 +209,10 @@ public:
         const std::uint32_t pc_before = state_.pc;
         phase_ = SessionPhase::running;
         const ExecutionResult execution = engine_.execute(module_, state_, budget);
-        // Advance the modelled guest-time source for the executed instructions so the
-        // EE Timer 2 and Timer 3 counters materialise deterministically (ADR
-        // 0142, ADR 0172): one instruction is treated as one modelled BUSCLK
-        // cycle.
-        if (state_.instructions_executed >= before) {
-            ::reps2::runtime::advance_ee_timers(
-                state_, state_.instructions_executed - before);
-        }
+        // Synchronize the modelled guest-time source for any instructions executed
+        // in this batch that were not already folded in intra-batch by the
+        // generated dispatcher (ADR 0142, ADR 0172, ADR 0220). Idempotent.
+        ::reps2::runtime::sync_ee_timers(state_);
 
         SessionRunResult result{};
         result.engine_error = execution.error;

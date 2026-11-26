@@ -1636,6 +1636,28 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_intc_timer2_codegen_smoke COMMAND reps2_intc_timer2_codegen_smoke)
 
+    # Intra-batch VBLANK synchronization through AOT-compiled blocks (ADR 0220):
+    # the 0x7600 fixture W1C-clears I_STAT bit 2 and polls it, so the guest must
+    # observe several VBLANK_START edges inside a single execute_cfg batch. This
+    # fails (budget exhaustion, zero frames observed) without the emitted
+    # per-block `sync_ee_timers` gate. A second entry pins the unseeded-INTC
+    # fail-closed case.
+    add_executable(reps2_vblank_poll_codegen_smoke
+        "${REPS2_CFG_GENERATED_CPP}"
+        tests/vblank_poll_codegen_smoke.cpp
+    )
+    add_dependencies(reps2_vblank_poll_codegen_smoke reps2_cfg_codegen_fixture)
+    target_link_libraries(reps2_vblank_poll_codegen_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_vblank_poll_codegen_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_vblank_poll_codegen_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_vblank_poll_codegen_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_vblank_poll_codegen_smoke COMMAND reps2_vblank_poll_codegen_smoke)
+
     # Bounded syscall census and trace ring (ADR 0170): service attribution,
     # seen/handled/refused invariants, shared-site attribution, the negated
     # "i" form, the overflow bucket, ring capacity/order and the disable path.

@@ -212,6 +212,9 @@ const EXECUTE_CFG_TAIL: &str = "\
             return Status::external_control_flow;
         }
         const Status status = found->function(state, remaining);
+        if (state.instructions_executed >= state.memory.timer_next_event) {
+            reps2::runtime::sync_ee_timers(state);
+        }
         if (status != Status::ok) {
             // A guest syscall handler returns through the kseg3 sentinel: the
             // jr $ra block exits as external control flow with pc set to the
@@ -1238,5 +1241,23 @@ mod tests {
         );
         // Branch dispatch still present after the trap site (fallthrough target).
         assert!(cpp.contains("0x00001008U"));
+    }
+
+    #[test]
+    fn emits_deadline_guarded_intra_batch_timer_sync() {
+        let words = [0x03E0_0008u32, 0x0000_0000u32]; // jr ra; nop
+        let segments = [segment(0x1000, &words)];
+        let graph = analysis::discover_cfg(
+            &segments,
+            vec![entry(0x1000)],
+            &[0x1000],
+            AnalysisLimits::default(),
+        )
+        .expect("synthetic CFG");
+        let program = crate::control_ir::ControlProgram::lift(&graph).expect("control IR");
+        let cpp = emit_cpp(&program).expect("C++ output");
+
+        assert!(cpp.contains("state.instructions_executed >= state.memory.timer_next_event"));
+        assert!(cpp.contains("reps2::runtime::sync_ee_timers(state);"));
     }
 }

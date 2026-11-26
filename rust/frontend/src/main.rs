@@ -2123,6 +2123,28 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         0x0000_0000, // return delay slot
     ];
 
+    // Intra-batch VBLANK polling fixture (ADR 0220): clears I_STAT bit 2
+    // (VBLANK_START) by write-one-to-clear, then polls (I_STAT & 4) == 0
+    // `$a0` times before returning through `jr ra`. Without intra-batch timer
+    // sync, a single batch never observes multiple VBLANK_START edges.
+    let vblank_poll = [
+        0x3C08_1000, // lui   t0, 0x1000
+        0x3508_F000, // ori   t0, t0, 0xF000  t0 = I_STAT (0x1000F000)
+        0x3409_0004, // ori   t1, zero, 4     t1 = 1 << kEeIntcSourceVblankStart
+        0x0080_8025, // or    s0, a0, zero    s0 = target frame count
+        0x0000_8825, // or    s1, zero, zero  s1 = observed frames
+        0xAD09_0000, // sw    t1, 0(t0)       outer (0x7614): W1C clear bit 2
+        0x8D0A_0000, // lw    t2, 0(t0)       inner (0x7618): read I_STAT
+        0x314A_0004, // andi  t2, t2, 4       test VBLANK_START
+        0x1140_FFFD, // beq   t2, zero, 0x7618
+        0x0000_0000, // nop
+        0x2631_0001, // addiu s1, s1, 1       one VBLANK_START observed
+        0x1630_FFF9, // bne   s1, s0, 0x7614
+        0x0000_0000, // nop
+        0x03E0_0008, // jr    ra
+        0x0000_0000, // nop
+    ];
+
     // Color conversion in a normal block, an annulled/taken likely delay,
     // and a return delay slot. Shared by single- and split-unit native tests.
     let mmi_color = [
@@ -2175,6 +2197,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         segment(0xE800, &hle_end_callback),
         segment(0x6600, &hle_intc_intc_handler),
         segment(0x6700, &hle_intc_handler_body),
+        segment(0x7600, &vblank_poll),
     ];
     // Each conditional trap is an independent one-instruction segment, so a
     // false predicate retires to an untranslated boundary instead of flowing
@@ -2223,6 +2246,7 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         entry(0xE600, "hle-syscall-handler-fixture"),
         entry(0xE700, "hle-call-registered-handler-fixture"),
         entry(0xE800, "hle-end-callback-fixture"),
+        entry(0x7600, "vblank-poll-fixture"),
     ];
     entries.extend(
         (0..conditional_traps.len())
@@ -2241,7 +2265,8 @@ fn compile_cfg_fixture(output: &Path, options: FixtureOptions) -> Result<(), Str
         // EE Timer 2 / INTC delivery fixture (ADR 0172): the handler body is
         // reached only through the HLE interrupt path, so it is an explicit
         // root and never a CFG successor.
-        0x6600, 0x6700,
+        0x6600, 0x6700, // Intra-batch VBLANK polling fixture (ADR 0220).
+        0x7600,
     ];
     roots.extend((0..conditional_traps.len()).map(|index| 0xC000 + (index as u32 * 0x100)));
     roots.push(0xCC00);
