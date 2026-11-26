@@ -3822,7 +3822,21 @@ inline constexpr std::uint32_t kEeCdvdScmdGetError = 0x04U;
     ++sif.mc_call_count;
     sif.last_mc_number = call.rpc_number;
     if (call.rpc_number != kEeMcCmdInit) {
-        return false; // unmodelled mcserv function: no reply, caller stays blocked
+        // Unmodelled mcserv function: no reply, no RPC_END, caller stays
+        // blocked. Record the first four request words so the payload shape
+        // becomes evidence instead of a guess (ADR 0221).
+        ++sif.mc_refused_calls;
+        for (std::size_t word = 0; word < 4U; ++word) {
+            const std::uint32_t size_needed = static_cast<std::uint32_t>((word + 1U) * 4U);
+            std::uint32_t value{};
+            if (call.send_size >= size_needed
+                && load_u32(state.memory, call.send_addr + size_needed - 4U, value) == Status::ok) {
+                sif.last_mc_request_head[word] = value;
+            } else {
+                sif.last_mc_request_head[word] = 0U;
+            }
+        }
+        return false;
     }
     if (call.recv_addr == 0U || call.recv_addr > 0xFFFF'FFF7U || call.recv_size < 12U) {
         return false; // no room for reply words 0..2 (or word 2 would wrap past 4 GiB)

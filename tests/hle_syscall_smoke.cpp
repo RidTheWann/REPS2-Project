@@ -5820,6 +5820,41 @@ int test_mcserv_refuses_other_functions() {
     if (load_word(ram, kRpcReply) != 0xA5A5'A5A5U) return 8423;
     if (load_word(ram, kRpcEePktbuf + 0x08U) == reps2::runtime::kEeSifCmdRpcEnd) return 8424;
     if (state.hle.semaphores[3].count != 0) return 8425;
+    // ADR 0221: a refused call records its first request word (here zero).
+    if (sif.mc_refused_calls != 1U) return 8426;
+    if (sif.last_mc_request_head[0] != 0U) return 8427;
+    return 0;
+}
+
+// ADR 0221: a refused mcserv request records up to four payload words without
+// replying, signalling a semaphore, or touching the receive buffer.
+int test_mcserv_refusal_records_request_head() {
+    SifWindow ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    reps2::runtime::initialize_hle_boot_environment(state);
+    state.hle.sif_cmd.ee_pktbuf = kRpcEePktbuf;
+    make_rpc_call_semaphore(state);
+
+    store_rpc_call_request(ram, reps2::runtime::kEeSifServerMcServ, 0x77U, 0x30U, 4U);
+    constexpr std::uint32_t kWords[4] = {0xDEAD'BEEFU, 0x0000'0001U, 0x8000'1234U, 0x0000'00FFU};
+    for (std::size_t index = 0; index < 4U; ++index) {
+        store_word(ram, kRpcPayload + static_cast<std::uint32_t>(index * 4U), kWords[index]);
+    }
+    store_word(ram, kRpcReply, 0x5A5A'5A5AU);
+    const reps2::runtime::SifDmaTransfer payload{kRpcPayload, 0U, 0x30U, 0U};
+    if (reps2::runtime::process_sif_command(state, kRpcCallPacket, &payload) != Status::ok) {
+        return 8450;
+    }
+    const auto& sif = state.hle.sif_cmd;
+    if (sif.last_mc_number != 0x77U) return 8451;
+    if (sif.mc_refused_calls != 1U || sif.mc_init_calls != 0U) return 8452;
+    for (std::size_t index = 0; index < 4U; ++index) {
+        if (sif.last_mc_request_head[index] != kWords[index]) return 8453;
+    }
+    if (load_word(ram, kRpcReply) != 0x5A5A'5A5AU) return 8454;
+    if (sif.last_rpc_call_replied || sif.rpc_call_replies != 0U) return 8455;
+    if (state.hle.semaphores[3].count != 0) return 8456;
     return 0;
 }
 
@@ -6729,6 +6764,8 @@ int main() {
          &test_mcserv_init_is_served_with_module_versions},
         {"mcserv refuses other functions",
          &test_mcserv_refuses_other_functions},
+        {"mcserv refusal records the request head",
+         &test_mcserv_refusal_records_request_head},
         {"mcserv init refuses without a request word",
          &test_mcserv_init_refuses_without_a_request_word},
         {"mcserv init refuses a wrapping reply buffer",
