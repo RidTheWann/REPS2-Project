@@ -178,6 +178,81 @@ int test_gs_pmode_store_u64_decomposes() {
     return 0;
 }
 
+// GS CRT display registers (ADR 0219): DISPFB2 0x12000090, DISPLAY2
+// 0x120000A0, BGCOLOR 0x120000E0 — reached by observed guest SD/LD stores
+// at pc=0x0021F05C/0x0021F064/0x0021F06C. SMODE1 (0x12000010) is not reached
+// in this block and is deliberately not modelled yet (no evidence). Each is a
+// bounded 64-bit storage register; SD/LD round-trips and 32-bit access reaches
+// the low word while preserving the high word. No display, vsync or GPU state.
+int test_gs_dispfb2_store_load_u64() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, reps2::runtime::kEeGsDispfb2Address,
+                                  0x0000'0000'0000'948CULL) != Status::ok)
+        return 33;
+    std::uint64_t value = 0U;
+    if (reps2::runtime::load_u64(state.memory, reps2::runtime::kEeGsDispfb2Address, value)
+            != Status::ok)
+        return 34;
+    return value == 0x0000'0000'0000'948CULL ? 0 : 35;
+}
+
+int test_gs_display2_store_load_u64() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, reps2::runtime::kEeGsDisplay2Address,
+                                  0xDEAD'BEEF'CAFE'F00DULL) != Status::ok)
+        return 36;
+    std::uint64_t value = 0U;
+    if (reps2::runtime::load_u64(state.memory, reps2::runtime::kEeGsDisplay2Address, value)
+            != Status::ok)
+        return 37;
+    return value == 0xDEAD'BEEF'CAFE'F00DULL ? 0 : 38;
+}
+
+int test_gs_bgcolor_store_load_u64() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, reps2::runtime::kEeGsBgcolorAddress,
+                                  0x0000'0000'00FF'FFFFULL) != Status::ok)
+        return 39;
+    std::uint64_t value = 0U;
+    if (reps2::runtime::load_u64(state.memory, reps2::runtime::kEeGsBgcolorAddress, value)
+            != Status::ok)
+        return 40;
+    return value == 0x0000'0000'00FF'FFFFULL ? 0 : 41;
+}
+
+// KSEG0/KSEG1 direct-mapped aliases of a 64-bit GS display register reach the
+// same register through SD/LD, exactly like the normalized 32-bit MMIO path.
+// ADR 0219 / Codex review fix on PR #58.
+int test_gs_dispfb2_kseg_alias_reaches_register() {
+    EeState state{};
+    constexpr std::uint64_t kValue = 0x1122'3344'5566'7788ULL;
+    if (reps2::runtime::store_u64(state.memory, 0x9200'0090U, kValue) != Status::ok)
+        return 50;
+    std::uint64_t value = 0U;
+    if (reps2::runtime::load_u64(state.memory, 0xB200'0090U, value) != Status::ok)
+        return 51;
+    if (value != kValue) return 52;
+    if (state.memory.gs_dispfb2 != kValue) return 53;
+    return 0;
+}
+
+// 32-bit word access to a 64-bit GS display register reaches the low half
+// and preserves the high half. ADR 0219.
+int test_gs_dispfb2_word_access_preserves_high() {
+    EeState state{};
+    if (reps2::runtime::store_u64(state.memory, reps2::runtime::kEeGsDispfb2Address,
+                                  0xAAAA'AAAA'0000'948CULL) != Status::ok)
+        return 42;
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeGsDispfb2Address,
+                                  0x0000'1234U) != Status::ok)
+        return 43;
+    std::uint64_t value = 0U;
+    if (reps2::runtime::load_u64(state.memory, reps2::runtime::kEeGsDispfb2Address, value)
+            != Status::ok)
+        return 44;
+    return value == 0xAAAA'AAAA'0000'1234ULL ? 0 : 45;
+}
+
 // VIF1_FBRST (0x10003C10) accepts writes and reads return the stored word.
 // ADR 0179: bounded storage, no VIF FIFO reset.
 // VIF1_STAT (0x10003C00) bounded storage, ADR 0186.
@@ -392,6 +467,11 @@ int main() {
     run("gs_pmode_storage", test_gs_pmode_storage);
     run("gs_smode2_storage", test_gs_smode2_storage);
     run("gs_pmode_store_u64_decomposes", test_gs_pmode_store_u64_decomposes);
+    run("gs_dispfb2_store_load_u64", test_gs_dispfb2_store_load_u64);
+    run("gs_display2_store_load_u64", test_gs_display2_store_load_u64);
+    run("gs_bgcolor_store_load_u64", test_gs_bgcolor_store_load_u64);
+    run("gs_dispfb2_word_access_preserves_high", test_gs_dispfb2_word_access_preserves_high);
+    run("gs_dispfb2_kseg_alias_reaches_register", test_gs_dispfb2_kseg_alias_reaches_register);
     run("vif1_stat_storage", test_vif1_stat_storage);
     run("vif1_fbrst_storage", test_vif1_fbrst_storage);
     run("vif1_err_storage", test_vif1_err_storage);

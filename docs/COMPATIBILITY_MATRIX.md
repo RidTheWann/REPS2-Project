@@ -13,3 +13,10 @@ No title is currently marked Playable. Add rows only with exact disc digest/revi
 
 
 **Verification freshness (2026-11-26, ADR 0218):** Runtime ABI 42 adds a deterministic synthetic NTSC VBLANK timing source driven by `guest_bus_cycles` (one modeled cycle per executed instruction), raising INTC source 2/3 through the shared `raise_source` path. CI and local synthetic gates passed: Rust fmt/clippy/test (416 lib tests), CTest 53/53 Windows x64/MSVC. The real-title probe `frontier-vblank-01` is verified: `guest_stopped` at `pc=0x0021F05C` after 10,000,298 instructions over 3 batches, with `vblank={starts:2, ends:2, irq_refusals:0, in_blank:0}` and `intc.stat=8`; the prior `budget_limit_reached` at `pc=0x0025ABB0` after 79,999,926 instructions is gone. Compatibility state is unchanged; no boot-tested or playable claim.
+
+### GS CRT Display Registers (ADR 0219, runtime ABI 43)
+**Implemented:** DISPFB2 (0x12000090), DISPLAY2 (0x120000A0), BGCOLOR (0x120000E0) as bounded 64-bit storage with whole-register SD/LD and low-word-preserving 32-bit handlers. SMODE1 (0x12000010) unmodelled (no observed access).
+**Evidence:** `frontier-vblank-01` probe on Downhill Domination USA stops at `pc=0x0021F05C` on SD to DISPFB2; next instructions target DISPLAY2/BGCOLOR. PMODE/SMODE2 already served (ADR 0178).
+**Tests:** 4 cases in `gs_csr_smoke` (SD/LD round-trips + low-word preserve-high).
+**Gates:** cargo fmt/clippy/test pass, CTest 53/53.
+**Probe re-run:** pending on this branch. No boot-tested/playable claim.

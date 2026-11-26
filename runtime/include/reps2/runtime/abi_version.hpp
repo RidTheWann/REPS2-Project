@@ -126,4 +126,10 @@
 // sizeof(EeState) changes; ABI-39 modules are refused.
 // ABI 41 covers ADR 0202: VU0 data memory (Vu0State::data_mem, 256x Gpr128).
 // sizeof(EeState) changes; ABI-40 modules are refused.
-#define REPS2_RUNTIME_ABI_VERSION 42
+// ABI 43 covers ADR 0219: GS CRT display registers DISPFB2 (0x12000090),
+// DISPLAY2 (0x120000A0) and BGCOLOR (0x120000E0) are bounded 64-bit storage
+// in EeMemory (`gs_dispfb2`/`gs_display2`/`gs_bgcolor`) with MMIO dispatch,
+// whole-register SD/LD reads/writes and low-word-preserving 32-bit writes.
+// sizeof(EeState) changes; ABI-42 modules are refused. SMODE1 stays unmodelled.
+
+#define REPS2_RUNTIME_ABI_VERSION 43
