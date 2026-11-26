@@ -585,6 +585,15 @@ inline constexpr std::uint32_t kEeGsImrAddress{0x1200'1010U};
 // output, no vsync, no GPU state. ADR 0178.
 inline constexpr std::uint32_t kEeGsPmodeAddress{0x1200'0000U};
 inline constexpr std::uint32_t kEeGsSmode2Address{0x1200'0020U};
+// GS CRT/display registers (PS2SDK gs_privileged.h / PS2Tek GS register list).
+// DISPFB2 0x12000090, DISPLAY2 0x120000A0, BGCOLOR 0x120000E0 — written by
+// the observed guest SD sequence at pc=0x0021F05C/.../0x0021F06C. Bounded
+// 64-bit storage only: reads return the last written value, writes store.
+// No display, vsync, GPU state, or GS DMA is modelled. ADR 0219.
+// SMODE1 (0x12000010) is deliberately NOT modelled: not reached in the probe.
+inline constexpr std::uint32_t kEeGsDispfb2Address{0x1200'0090U};
+inline constexpr std::uint32_t kEeGsDisplay2Address{0x1200'00A0U};
+inline constexpr std::uint32_t kEeGsBgcolorAddress{0x1200'00E0U};
 // VIF1 command registers (PS2SDK common/include/ee_regs.h): VIF1_FBRST at
 // 0x10003C10 (write-only frame-buffer/FIFO reset) and VIF1_ERR at 0x10003C20
 // (write-only error clear). Modelled as bounded write-acknowledge registers:
@@ -790,6 +799,13 @@ inline Status mmio_read_gs_pmode(const EeMemory&, std::uint32_t, std::uint32_t&)
 inline Status mmio_write_gs_pmode(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_gs_smode2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_gs_smode2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+// GS CRT display registers (ADR 0219), 64-bit storage split over two 32-bit MMIO words.
+inline Status mmio_read_gs_dispfb2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_dispfb2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_display2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_display2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_bgcolor(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_bgcolor(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 // VIF1 command registers (ADR 0179).
 inline Status mmio_read_vif1_stat(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_vif1_stat(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
@@ -916,6 +932,12 @@ struct EeMemory {
     // here; reads return the stored value. No display, no vsync. ADR 0178.
     std::uint32_t gs_pmode{};
     std::uint32_t gs_smode2{};
+    // GS CRT display registers (ADR 0219): bounded 64-bit storage with reset 0.
+    // Written by the observed guest display setup sequence; no GPU or display
+    // side effect is modelled. SMODE1 stays unmodelled (no observed access).
+    std::uint64_t gs_dispfb2{};
+    std::uint64_t gs_display2{};
+    std::uint64_t gs_bgcolor{};
     // VIF1 write-only command registers: FBRST (0x10003C10) and ERR
     // (0x10003C20) accept writes and store the word; reads return it. No VIF
     // pipeline state changes. ADR 0179.
@@ -982,6 +1004,9 @@ struct EeMemory {
         { kEeGsImrAddress,       &mmio_read_gs_imr,  &mmio_write_gs_imr },
         { kEeGsPmodeAddress,     &mmio_read_gs_pmode, &mmio_write_gs_pmode },
         { kEeGsSmode2Address,    &mmio_read_gs_smode2, &mmio_write_gs_smode2 },
+        { kEeGsDispfb2Address,   &mmio_read_gs_dispfb2, &mmio_write_gs_dispfb2 },
+        { kEeGsDisplay2Address,  &mmio_read_gs_display2, &mmio_write_gs_display2 },
+        { kEeGsBgcolorAddress,   &mmio_read_gs_bgcolor, &mmio_write_gs_bgcolor },
         { kEeVif1StatAddress,    &mmio_read_vif1_stat, &mmio_write_vif1_stat },
         { kEeVif1FbrstAddress,   &mmio_read_vif1_fbrst, &mmio_write_vif1_fbrst },
         { kEeVif1ErrAddress,     &mmio_read_vif1_err, &mmio_write_vif1_err },
@@ -3018,6 +3043,32 @@ inline Status mmio_write_gs_smode2(EeMemory& self, std::uint32_t, std::uint32_t 
     self.gs_smode2 = value;
     return Status::ok;
 }
+// GS CRT display registers (ADR 0219): 64-bit storage; a 32-bit store reaches only the
+// low word and must preserve the high word (no high-half truncation).
+inline Status mmio_read_gs_dispfb2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = static_cast<std::uint32_t>(self.gs_dispfb2);
+    return Status::ok;
+}
+inline Status mmio_write_gs_dispfb2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_dispfb2 = (self.gs_dispfb2 & 0xFFFFFFFF'00000000ULL) | static_cast<std::uint64_t>(value);
+    return Status::ok;
+}
+inline Status mmio_read_gs_display2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = static_cast<std::uint32_t>(self.gs_display2);
+    return Status::ok;
+}
+inline Status mmio_write_gs_display2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_display2 = (self.gs_display2 & 0xFFFFFFFF'00000000ULL) | static_cast<std::uint64_t>(value);
+    return Status::ok;
+}
+inline Status mmio_read_gs_bgcolor(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+    value = static_cast<std::uint32_t>(self.gs_bgcolor);
+    return Status::ok;
+}
+inline Status mmio_write_gs_bgcolor(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    self.gs_bgcolor = (self.gs_bgcolor & 0xFFFFFFFF'00000000ULL) | static_cast<std::uint64_t>(value);
+    return Status::ok;
+}
 // VIF1_FBRST (0x10003C10) and VIF1_ERR (0x10003C20): bounded storage only.
 // The guest writes reset/error-clear commands; REPS2 models no VIF unit, so
 // the write is accepted and stored but performs no FIFO/transfer reset.
@@ -3467,6 +3518,37 @@ inline void disable_interrupts(EeState& state) noexcept {
     return Status::ok;
 }
 
+// GS CRT display registers are 64-bit storage (ADR 0219). These helpers let the
+// 64-bit SD/LD path reach the whole register while the 32-bit MMIO handlers
+// below read/write the low word. The address is normalized through
+// normalize_ee_mmio_address first, so direct-mapped KSEG0/KSEG1 aliases
+// (0x9200'0090 / 0xB200'0090) reach the same register as the physical
+// address, exactly like the 32-bit MMIO dispatch. Unlisted addresses return
+// nullptr so the caller keeps its normal path.
+[[nodiscard]] inline const std::uint64_t* gs_crt_display_register(
+    const EeMemory& memory,
+    std::uint32_t address
+) noexcept {
+    switch (normalize_ee_mmio_address(address)) {
+        case kEeGsDispfb2Address: return &memory.gs_dispfb2;
+        case kEeGsDisplay2Address: return &memory.gs_display2;
+        case kEeGsBgcolorAddress: return &memory.gs_bgcolor;
+        default: return nullptr;
+    }
+}
+
+[[nodiscard]] inline std::uint64_t* gs_crt_display_register(
+    EeMemory& memory,
+    std::uint32_t address
+) noexcept {
+    switch (normalize_ee_mmio_address(address)) {
+        case kEeGsDispfb2Address: return &memory.gs_dispfb2;
+        case kEeGsDisplay2Address: return &memory.gs_display2;
+        case kEeGsBgcolorAddress: return &memory.gs_bgcolor;
+        default: return nullptr;
+    }
+}
+
 [[nodiscard]] inline Status load_u64(
     const EeMemory& memory,
     std::uint32_t address,
@@ -3478,6 +3560,11 @@ inline void disable_interrupts(EeState& state) noexcept {
     // VU Mem0 MMIO window. ADR 0211.
     if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
         return vu_mem_read_u64(memory, address, value);
+    }
+    // 64-bit GS CRT display registers read back whole. ADR 0219.
+    if (const auto* reg = gs_crt_display_register(memory, address)) {
+        value = *reg;
+        return Status::ok;
     }
     // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
     // decompose the 64-bit load into a 32-bit load from the register plus
@@ -3639,6 +3726,11 @@ inline Status vif1_fifo_push(EeMemory& memory, const Gpr128& value) noexcept {
     // VU Mem0 MMIO window. ADR 0211.
     if (address >= kEeVuMem0BaseAddress && address < kEeVuMem0BaseAddress + kEeVuMem0Size) {
         return vu_mem_write_u64(memory, address, value);
+    }
+    // 64-bit GS CRT display registers accept the whole value. ADR 0219.
+    if (auto* reg = gs_crt_display_register(memory, address)) {
+        *reg = value;
+        return Status::ok;
     }
     // For 32-bit registers that have 64-bit MMIO handlers (GS CSR and IMR),
     // decompose the 64-bit write into a 32-bit write to the register itself.
