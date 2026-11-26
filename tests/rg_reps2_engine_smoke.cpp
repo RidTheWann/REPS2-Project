@@ -166,6 +166,15 @@ int test_module_admission(const Engine& engine, PreparedNativeModule& prepared) 
     if (engine.prepare(invalid, prepared) != EngineError::runtime_abi_mismatch) {
         return fail(11, "previous-generation runtime ABI was not rejected as a runtime mismatch");
     }
+    static_assert(
+        REPS2_RUNTIME_ABI_VERSION > 43U,
+        "ABI 44 is the generation that covers ADR 0220 (intra-batch timer/VBLANK sync)"
+    );
+    invalid = descriptor;
+    invalid.runtime_abi_version = 43U;  // ABI 43 module must be rejected at ABI 44
+    if (engine.prepare(invalid, prepared) != EngineError::runtime_abi_mismatch) {
+        return fail(12, "ABI-43 runtime module was not rejected as a runtime ABI mismatch");
+    }
     invalid = descriptor;
     invalid.toolchain_abi_fingerprint += 1U;
     if (engine.prepare(invalid, prepared) != EngineError::toolchain_abi_mismatch) {

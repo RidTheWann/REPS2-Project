@@ -912,6 +912,15 @@ struct EeMemory {
     std::uint64_t vblank_ends{};
     std::uint64_t vblank_irq_refusals{};
     bool vblank_in_blank{};
+    // Intra-batch timer/VBLANK synchronization state (ADR 0220).
+    // `timer_synced_instructions` tracks the `EeState::instructions_executed`
+    // watermark already folded into `advance_ee_timers`; `timer_next_event`
+    // holds the next guest instruction count at which a VBLANK or armed timer
+    // transition is due.
+    std::uint64_t timer_synced_instructions{};
+    std::uint64_t timer_next_event{};
+    bool timer2_needs_rebase{};
+    bool timer3_needs_rebase{};
     EeDmacState dmac{};
     EeIntcState intc{};
     // Bounded software model for the VIF1 hardware FIFO: each EE SQ pushes a
@@ -2713,6 +2722,85 @@ inline void advance_ee_timers(EeState& state, std::uint64_t bus_cycles) noexcept
     materialize_ee_timer2(state.memory);
 }
 
+// Compute the earliest guest instruction count at which the next VBLANK or
+// armed Timer 2/3 transition occurs (ADR 0220).
+[[nodiscard]] inline std::uint64_t compute_next_timer_event(const EeState& state) noexcept {
+    const EeMemory& mem = state.memory;
+    const std::uint64_t vblank_start = mem.vblank_next_start_cycle == 0U
+        ? (kEeVblankCyclesPerFrame - kEeVblankDurationCycles)
+        : mem.vblank_next_start_cycle;
+    const std::uint64_t vblank_end = mem.vblank_next_end_cycle == 0U
+        ? kEeVblankCyclesPerFrame
+        : mem.vblank_next_end_cycle;
+    std::uint64_t next_cycle = vblank_start < vblank_end ? vblank_start : vblank_end;
+
+    if ((mem.timer2_mode & kEeTimer2CueBit) != 0U) {
+        const std::uint64_t per_tick = ee_timer2_cycles_per_tick(mem.timer2_mode);
+        const std::uint32_t compare = mem.timer2_compare & kEeTimer2CounterMask;
+        std::uint64_t ticks_to_event = 1U;
+        if ((mem.timer2_mode & kEeTimer2CmpeBit) != 0U && mem.timer2_base_count <= compare) {
+            ticks_to_event = static_cast<std::uint64_t>(compare - mem.timer2_base_count) + 1U;
+        } else {
+            ticks_to_event =
+                static_cast<std::uint64_t>(kEeTimer2CounterMask - mem.timer2_base_count) + 1U;
+        }
+        const std::uint64_t t2_cycle = mem.timer2_cycles_at_base + ticks_to_event * per_tick;
+        if (t2_cycle < next_cycle) {
+            next_cycle = t2_cycle;
+        }
+    }
+
+    if ((mem.timer3_mode & kEeTimer3CueBit) != 0U) {
+        const std::uint64_t per_tick = ee_timer3_cycles_per_tick(mem.timer3_mode);
+        const std::uint64_t t3_cycle = mem.timer3_cycles_at_base + per_tick;
+        if (t3_cycle < next_cycle) {
+            next_cycle = t3_cycle;
+        }
+    }
+
+    if (next_cycle <= mem.guest_bus_cycles) {
+        return mem.timer_synced_instructions;
+    }
+    const std::uint64_t remaining_cycles = next_cycle - mem.guest_bus_cycles;
+    if (remaining_cycles > UINT64_MAX - mem.timer_synced_instructions) {
+        return UINT64_MAX;
+    }
+    return mem.timer_synced_instructions + remaining_cycles;
+}
+
+// Synchronize modelled timers/VBLANK up to `state.instructions_executed`.
+// Idempotent when called from both `execute_cfg` and `EngineSession::run`
+// (ADR 0220); fails closed (no underflow) if `instructions_executed` has not
+// advanced beyond `timer_synced_instructions`.
+inline void sync_ee_timers(EeState& state) noexcept {
+    if (state.instructions_executed > state.memory.timer_synced_instructions) {
+        const std::uint64_t delta =
+            state.instructions_executed - state.memory.timer_synced_instructions;
+        state.memory.timer_synced_instructions = state.instructions_executed;
+        if (state.memory.timer2_needs_rebase || state.memory.timer3_needs_rebase) {
+            state.memory.guest_bus_cycles += delta;
+            materialize_ee_vblank(state.memory);
+            if (state.memory.timer3_needs_rebase) {
+                state.memory.timer3_cycles_at_base = state.memory.guest_bus_cycles;
+                state.memory.timer3_needs_rebase = false;
+            } else {
+                materialize_ee_timer3(state.memory);
+            }
+            if (state.memory.timer2_needs_rebase) {
+                state.memory.timer2_cycles_at_base = state.memory.guest_bus_cycles;
+                state.memory.timer2_needs_rebase = false;
+            } else {
+                materialize_ee_timer2(state.memory);
+            }
+        } else {
+            advance_ee_timers(state, delta);
+        }
+    }
+    state.memory.timer2_needs_rebase = false;
+    state.memory.timer3_needs_rebase = false;
+    state.memory.timer_next_event = compute_next_timer_event(state);
+}
+
 // Keep the pre-Timer-2 entry point as a forwarding alias: one guest-time source
 // advances both counters, so a second name must never add cycles twice.
 inline void advance_ee_timer3(EeState& state, std::uint64_t bus_cycles) noexcept {
@@ -2728,6 +2816,7 @@ inline Status mmio_write_timer3_count(EeMemory& self, std::uint32_t, std::uint32
     self.timer3_count = value & kEeTimer3CounterMask;
     self.timer3_base_count = self.timer3_count;
     self.timer3_cycles_at_base = self.guest_bus_cycles;
+    self.timer_next_event = 0U;
     return Status::ok;
 }
 inline Status mmio_read_timer3(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
@@ -2735,6 +2824,7 @@ inline Status mmio_read_timer3(const EeMemory& self, std::uint32_t, std::uint32_
     return Status::ok;
 }
 inline Status mmio_write_timer3(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    const bool was_enabled = (self.timer3_mode & kEeTimer3CueBit) != 0U;
     materialize_ee_timer3(self);
     // EQUF (bit 10) and OVFF (bit 11) are write-one-to-clear status bits; the
     // remaining writable mode fields keep their documented mask.
@@ -2745,6 +2835,10 @@ inline Status mmio_write_timer3(EeMemory& self, std::uint32_t, std::uint32_t val
         (value & kEeTimer3ModeWritableMask) | flags;
     self.timer3_base_count = self.timer3_count;
     self.timer3_cycles_at_base = self.guest_bus_cycles;
+    if (!was_enabled && (self.timer3_mode & kEeTimer3CueBit) != 0U) {
+        self.timer3_needs_rebase = true;
+    }
+    self.timer_next_event = 0U;
     return Status::ok;
 }
 inline Status mmio_read_timer3_compare(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
@@ -2756,6 +2850,7 @@ inline Status mmio_write_timer3_compare(EeMemory& self, std::uint32_t, std::uint
     self.timer3_compare = value & kEeTimer3CounterMask;
     self.timer3_base_count = self.timer3_count;
     self.timer3_cycles_at_base = self.guest_bus_cycles;
+    self.timer_next_event = 0U;
     return Status::ok;
 }
 
@@ -2814,6 +2909,7 @@ inline Status mmio_write_timer2_count(EeMemory& self, std::uint32_t, std::uint32
     self.timer2_count = value & kEeTimer2CounterMask;
     self.timer2_base_count = self.timer2_count;
     self.timer2_cycles_at_base = self.guest_bus_cycles;
+    self.timer_next_event = 0U;
     return Status::ok;
 }
 inline Status mmio_read_timer2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
@@ -2821,6 +2917,7 @@ inline Status mmio_read_timer2(const EeMemory& self, std::uint32_t, std::uint32_
     return Status::ok;
 }
 inline Status mmio_write_timer2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    const bool was_enabled = (self.timer2_mode & kEeTimer2CueBit) != 0U;
     materialize_ee_timer2(self);
     // EQUF and OVFF are write-one-to-clear exactly as on T3_MODE, so a guest that
     // clears the match flag does not lose a match that already happened.
@@ -2830,6 +2927,10 @@ inline Status mmio_write_timer2(EeMemory& self, std::uint32_t, std::uint32_t val
     self.timer2_mode = (value & kEeTimer2ModeWritableMask) | flags;
     self.timer2_base_count = self.timer2_count;
     self.timer2_cycles_at_base = self.guest_bus_cycles;
+    if (!was_enabled && (self.timer2_mode & kEeTimer2CueBit) != 0U) {
+        self.timer2_needs_rebase = true;
+    }
+    self.timer_next_event = 0U;
     return Status::ok;
 }
 inline Status mmio_read_timer2_compare(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
@@ -2841,6 +2942,7 @@ inline Status mmio_write_timer2_compare(EeMemory& self, std::uint32_t, std::uint
     self.timer2_compare = value & kEeTimer2CounterMask;
     self.timer2_base_count = self.timer2_count;
     self.timer2_cycles_at_base = self.guest_bus_cycles;
+    self.timer_next_event = 0U;
     return Status::ok;
 }
 // Timer 1 registers (0x10000800 count, 0x10000810 mode, 0x10000820 compare,

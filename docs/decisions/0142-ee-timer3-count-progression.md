@@ -72,7 +72,10 @@ Evidence for the hardware contract (PS2TEK EE Timers; PS2SDK
   on top of it (over-counting bounded by one batch). Reads between steps see the
   value as of the last step. Both limits follow from driving the source at host
   steps; finer attribution would need a per-instruction runtime hook, which this
-  slice deliberately does not add.
+  slice deliberately does not add. **Superseded in part by ADR 0220**: the
+  generated dispatcher now re-bases and materializes the cycle source at every
+  block boundary (`sync_ee_timers`), so the batch is no longer the attribution
+  unit. Per-instruction (sub-block) granularity is still not claimed.
 - Timer 0/1/2 and Timer 3 interrupt delivery remain unmodelled.
 
 ## Validation

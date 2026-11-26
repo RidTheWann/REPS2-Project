@@ -131,5 +131,10 @@
 // in EeMemory (`gs_dispfb2`/`gs_display2`/`gs_bgcolor`) with MMIO dispatch,
 // whole-register SD/LD reads/writes and low-word-preserving 32-bit writes.
 // sizeof(EeState) changes; ABI-42 modules are refused. SMODE1 stays unmodelled.
+//
+// ABI 44 covers ADR 0220: intra-batch timer/VBLANK synchronization watermark
+// and event deadline (`timer_synced_instructions`, `timer_next_event`) in
+// EeMemory so `execute_cfg` materializes VBLANK/timers at block boundaries
+// inside a batch. sizeof(EeState) changes; ABI-43 modules are refused.
 
-#define REPS2_RUNTIME_ABI_VERSION 43
+#define REPS2_RUNTIME_ABI_VERSION 44

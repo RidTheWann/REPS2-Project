@@ -1,14 +1,15 @@
 # ADR 0220: Intra-batch timer/VBLANK materialization in generated dispatch
 
-- **Status:** Proposed (draft; changes runtime ABI 43 -> 44 — awaiting go-ahead before implementation)
-- **Date:** 2026-11-26
+- **Status:** Accepted (validated locally; real-title probe `abi44-*` on Downhill Domination USA)
+- **Date:** 2026-11-27
 - **Scope:**
-  - `runtime/include/reps2/runtime/ee_state.hpp` (`EeState::timer_synced_instructions`, `sync_ee_timers(EeState&)`)
+  - `runtime/include/reps2/runtime/ee_state.hpp` (`EeMemory::timer_synced_instructions`, `timer_next_event`, `timer2_needs_rebase`, `timer3_needs_rebase`; `compute_next_timer_event`, `sync_ee_timers`; Timer 2/3 mode writes set the rebase flags)
   - `runtime/include/reps2/runtime/abi_version.hpp` (`REPS2_RUNTIME_ABI_VERSION` 43 -> 44)
-  - `rust/frontend/src/control_codegen.rs` (`execute_cfg` calls `reps2::runtime::sync_ee_timers(state)` per block step)
-  - `engine/include/rg_reps2_engine/session.hpp` (`EngineSession::run` calls `sync_ee_timers(state_)` idempotently instead of raw `advance_ee_timers`)
-  - `tests/vblank_timing_smoke.cpp` and a new synthetic polling-guest generated-code test (`tests/vblank_poll_codegen_smoke.cpp` or addition to `cfg_codegen_smoke` / `vblank_timing_smoke`)
-- **Related:** ADR 0142 (Timer 3 BUSCLK model & batch-boundary limit), ADR 0172 (Timer 2 / INTC handlers), ADR 0218 (deterministic VBLANK model, ABI 42), ADR 0219 (GS CRT display registers, ABI 43).
+  - `rust/frontend/src/control_codegen.rs` (`execute_cfg` deadline-guarded `sync_ee_timers`, new `0x7600` VBLANK poll fixture segment)
+  - `rust/frontend/src/main.rs` (`0x7600` fixture segment/entry/root)
+  - `engine/include/rg_reps2_engine/session.hpp` (`EngineSession::run` calls `sync_ee_timers` idempotently)
+  - `tests/vblank_poll_codegen_smoke.cpp` (new: intra-batch polling guest), `tests/vblank_timing_smoke.cpp` (mid-batch arm rebase case), `tests/rg_reps2_engine_smoke.cpp` (ABI-43 refusal)
+- **Related:** ADR 0142 (Timer 3 BUSCLK model & batch-boundary limit — **superseded in part**), ADR 0172 (Timer 2 / INTC delivery), ADR 0218 (deterministic VBLANK model — **batch-boundary note superseded**), ADR 0219 (GS CRT display registers), ADR 0103 (INTC register file), ADR 0164/0169 (ABI-bump discipline).
 
 ## Context
 
@@ -16,71 +17,75 @@ Probe `frontier-abi43-01` (merged `main` `e00ab68`, runtime ABI 43, Windows x64 
 
 ### Diagnosis of the `0x0025ABB0` loop (observed vs derived)
 
-1. **Observed (generated code):**
-   - `0x0025AB88` writes `4` (`1 << kEeIntcSourceVblankStart`) to `0x1000F000` (`I_STAT`, write-one-to-clear).
-   - `0x0025ABB0..0x0025ABC8` polls `lw $2, 0($3)` (`$3 = 0x1000F000`), `andi $2, $2, 4`, `beq $2, $0, 0x0025ABB0`.
-   - `0x0025ABE0` clears bit 2 again before returning.
-   - `intc.handlers == 0` and no `AddIntcHandler`/`EnableIntc` appears in `syscall_census`: the title polls `I_STAT` directly instead of registering an INTC IP2 handler (ADR 0172's handler registry/delivery exists, unused by this title here).
+1. **Observed (generated code):** `0x0025AB88` writes `4` (`1 << kEeIntcSourceVblankStart`) to `0x1000F000` (`I_STAT`, write-one-to-clear); `0x0025ABB0..0x0025ABC8` polls `lw $2, 0($3)` (`$3 = 0x1000F000`), `andi $2, $2, 4`, `beq $2, $0, 0x0025ABB0`; `0x0025ABE0` clears bit 2 again before returning. `intc.handlers == 0` and no `AddIntcHandler` appears in `syscall_census`, so the title polls `I_STAT` directly (ADR 0172's IP2 handler path exists, unused here).
 
 2. **Observed (discriminating experiments on the exact ABI-43 module + ISO):**
 
-   | Run config | Total instr | Batches | `vblank.starts` | `syscalls_seen` | Final PC | Last SIF RPC |
-   |---|---:|---:|---:|---:|---|---|
-   | `80M x 1` (with `--media`) | 79,999,996 | 1 | 16 | 1636 | `0x0025ABB0` | `0x80000593` fn 4 replied 1 |
-   | `5M x 1` (with `--media`) | 4,999,999 | 1 | 1 | 1531 | `0x0020E5F0` | `0x8000059C` fn 0 replied 1 |
-   | `5M x 2` (with `--media`) | 9,999,996 | 2 | 2 | 1636 | `0x0025ABB0` | `0x80000593` fn 4 replied 1 |
-   | `5M x 3` (with `--media`) | 14,999,995 | 3 | 3 | 1643 (+7) | `0x0025ABB0` | `0x80000593` fn 4 replied 1 |
-   | `5M x 16` (`frontier-abi43-01`) | 79,999,968 | 16 | 16 | 1736 | `0x0025ABB0` | `0x80000400` fn 1 replied 0 |
-   | `5M x 30` (with `--media`) | 149,999,938 | 30 | 30 | 1834 | `0x0025ABB0` | `0x80000400` fn 1 replied 0 |
-   | `20M x 20` (with `--media`, trace) | 399,999,953 | 20 | 81 | 1771 | `0x0025ABB0` | (trace: 6 PCs `0x25ABB0..0x25ABC4`) |
-   | `1M x 100` (with `--media`) | 99,999,854 | 100 | 20 | 1771 | `0x0025ABB0` | — |
-   | `100k x 1000` (with `--media`) | 99,995,080 | 1000 | 20 | 1771 | `0x0025ABB0` | — |
-   | `80M x 1` (without `--media`) | 79,999,996 | 1 | 16 | 974665 | `0x00246E2C` | — |
+   | Run config | Total instr | Batches | `vblank.starts` | `syscalls_seen` | Final PC |
+   |---|---:|---:|---:|---:|---|
+   | `80M x 1` (media) | 79,999,996 | 1 | 16 | 1636 | `0x0025ABB0` |
+   | `5M x 16` (`frontier-abi43-01`) | 79,999,968 | 16 | 16 | 1736 | `0x0025ABB0` |
+   | `5M x 30` (media) | 149,999,938 | 30 | 30 | 1834 | `0x0025ABB0` |
+   | `20M x 20` (media, 400M instr) | 399,999,953 | 20 | 81 | 1771 | `0x0025ABB0` |
+   | `1M x 100` (100M instr) | 99,999,854 | 100 | 20 | 1771 | `0x0025ABB0` |
+   | `100k x 1000` (100M instr) | 99,995,080 | 1000 | 20 | 1771 | `0x0025ABB0` |
+   | `80M x 1` (no media) | 79,999,996 | 1 | 16 | 974,665 | `0x00246E2C` |
 
-3. **Derived conclusions (H1 / H2 / H3):**
-   - **H1 confirmed (root cause of intra-batch stall):** `EngineSession::run` (`engine/include/rg_reps2_engine/session.hpp:217`) calls `advance_ee_timers` (and thus `materialize_ee_vblank`) **only after `execute_cfg` returns at the end of a batch**. Neither `execute_cfg` (`rust/frontend/src/control_codegen.rs`) nor `mmio_read_intc_stat` (`const EeMemory&` in `runtime/include/reps2/runtime/ee_state.hpp:2995`) advances `guest_bus_cycles` or materializes VBLANK. Therefore, regardless of batch budget (`5M`, `20M`, or `80M`), a guest that W1C-clears `I_STAT` bit 2 and polls `0x0025ABB0` can never observe a new `VBLANK_START` during that batch; it exits the wait at most once per batch boundary where a new `VBLANK_START` crossed (producing +7 syscalls of frame work before re-entering the wait). Notice `150M / 30 batches` reaches `1834` syscalls while `400M / 20 batches` stalls at `1771`.
-   - **H2 (legitimate frame wait, progressing across VBLANKs):** The guest is not deadlocked in logic; across batch boundaries where `VBLANK_START` flips from 0->1, it exits `0x0025ABB0`, executes ~7 syscalls (`DisableDmac`, `FlushCache`), even dispatches `mcserv` (`0x80000400` fn 1), and then calls the next frame wait. Its progress is artificially throttled to one frame per external batch boundary by H1.
-   - **H3 refuted:** No hidden writer clears bit 2; `0x0025AB88` is the wait function's own W1C ack, and `0x0025ABB0` tests bit 2 (`0x4`).
+3. **Derived (H1 confirmed / H2 frame progression / H3 refuted):** Guest progress through `0x0025ABB0` scaled with batch boundaries, not instructions (`150M / 30 batches` -> 1834 syscalls; `400M / 20 batches` -> 1771). Root cause: `EngineSession::run` (`engine/include/rg_reps2_engine/session.hpp`) called `advance_ee_timers` **only after `execute_cfg` returned**, never inside `execute_cfg` or on `I_STAT` reads (`mmio_read_intc_stat` takes `const EeMemory&` and does not advance `guest_bus_cycles`). A guest that W1C-cleared bit 2 and polled could observe at most one `VBLANK_START` per batch. H3 refuted: `0x0025AB88` is the wait routine's own W1C ack.
 
-## Proposed Design (Minimal Change)
+## Sync-strategy comparison (evidence: same machine, same 80M-instruction module, median of 3 runs)
 
-1. **Add `std::uint64_t timer_synced_instructions{}` to `EeState`** (`runtime/include/reps2/runtime/ee_state.hpp`) and define an inline helper:
+| Strategy | 80M no-media (`engine.elapsed_microseconds`) | 80M media | Notes |
+|---|---:|---:|---|
+| Baseline, ABI 43 module (batch-end only) | 1,102,162 us | 365,043 us (1 frame) | the stall being fixed |
+| **S1** unconditional per-block `sync_ee_timers` | 1,168,489 us (+6.0%) | 453,773 us (16 frames) | every step calls `compute_next_timer_event` |
+| **S2** deadline-guarded (`instructions_executed >= timer_next_event`) | **1,093,138 us (-0.8%, in noise)** | **400,087 us** (16 frames) | one `std::uint64_t` compare per step; recompute only when the deadline is reached |
+| S3 lazy on MMIO access + batch end | — | — | rejected: does not bound the cycle source at block boundaries, so a polling guest (exactly the observed case) still sees one edge per batch |
 
-   ```cpp
-   inline void sync_ee_timers(EeState& state) noexcept {
-       if (state.instructions_executed > state.timer_synced_instructions) {
-           const std::uint64_t delta =
-               state.instructions_executed - state.timer_synced_instructions;
-           state.timer_synced_instructions = state.instructions_executed;
-           advance_ee_timers(state, delta);
-       }
-   }
-   ```
+**Chosen: S2.** It matches the baseline cost within measurement noise on the media-free workload (which exercises the full 974,665-syscall path) while restoring per-frame progress on the media workload, and its per-step cost is a single compare instead of a virtual-call-free but still non-trivial recomputation. S3 is rejected because the observed guest polls `I_STAT` in a tight loop, which is precisely the case lazy materialization cannot cover.
 
-   - **Why a separate watermark instead of reading `guest_bus_cycles` directly:** Existing unit tests (`tests/vblank_timing_smoke.cpp`, `tests/intc_timer2_smoke.cpp`, `tests/hle_syscall_smoke.cpp`) call `advance_ee_timers(state, delta)` directly without advancing `state.instructions_executed`. Keeping `timer_synced_instructions` separate guarantees those tests remain exact while making `sync_ee_timers(state)` strictly idempotent across `execute_cfg` and `EngineSession::run`.
-   - **Fail-closed:** `advance_ee_timers` / `materialize_ee_vblank` continue to respect `intc.i_stat_known`; when `I_STAT` is unseeded (`seed_idle_boot_state()` not called), `raise_source` refuses and increments `vblank_irq_refusals`, and `mmio_read_intc_stat` fails closed with `unsupported_memory_access`. When `instructions_executed <= timer_synced_instructions`, `sync_ee_timers` is a no-op (no wrap, no negative delta).
+Requirement checks:
+- **Guest-time only:** the deadline derives from `instructions_executed` vs `guest_bus_cycles`; no host clock or address is read.
+- **Ordering inside a window:** `sync_ee_timers` runs *after* the block function returns and *before* the dispatcher's DMAC/INTC/scheduler checks, so a source raised at the boundary is visible to the interrupt checks in the same iteration. A guest W1C write executed inside the block is still applied by `mmio_write_intc_stat` at the guest's observed time; the following `sync_ee_timers` cannot resurrect a cleared bit (it only ORs newly-crossed transitions).
+- **Latched until W1C:** `I_STAT` bits stay set until the guest writes 1 to them; the model never clears a pending bit itself.
+- **Idempotence:** `timer_synced_instructions` is a watermark; `sync_ee_timers` with no instruction progress is a no-op and never rewinds. `EngineSession::run` calls it after the dispatcher, so the two call sites never double-count.
+- **Mid-batch arming:** a Timer 2/3 mode write that enables CUE while the cycle source lags `instructions_executed` sets a rebase flag; the next `sync_ee_timers` re-bases `*_cycles_at_base` to the current cycle count instead of attributing pre-arm instructions to the timer (covered by `test_timer2_mid_batch_arm_rebase`).
+- **Supersedes:** ADR 0142's "the host advances the cycle source once per execution batch ... finer attribution would need a per-instruction runtime hook" and ADR 0218's "calls `advance_ee_timers` after each execution boundary; no call-site change needed" are superseded by this ADR for the batch-attribution limit. Reads between steps still see the value as of the last block boundary (not per instruction); that granularity is unchanged and is not claimed.
 
-2. **Invoke `reps2::runtime::sync_ee_timers(state)` inside `execute_cfg`** (`rust/frontend/src/control_codegen.rs`):
-   - Call `reps2::runtime::sync_ee_timers(state);` immediately after `found->function(state, remaining)` returns (whether `Status::ok` or non-`ok` — so `guest_bus_cycles`, VBLANK, Timer 2, and Timer 3 match `state.instructions_executed` on every stop, budget exhaustion, and block transition), **before** the next iteration's `ee_dmac_line_asserted` / `ee_intc_line_asserted` checks.
-   - Consequence: a tight `I_STAT` polling block (like `0x0025ABB0..0x0025ABC8`) sees `VBLANK_START` inside a **single** `execute_cfg` call as soon as `instructions_executed` crosses `4,920,954 - 487,443 = 4,433,511`, and Timer 2 / VBLANK interrupts registered via `AddIntcHandler` can also fire at the exact block boundary where the cycle threshold crosses.
+## ABI
 
-3. **Update `EngineSession::run`** (`engine/include/rg_reps2_engine/session.hpp`):
-   - Replace the post-batch `advance_ee_timers(state_, state_.instructions_executed - before)` with `::reps2::runtime::sync_ee_timers(state_);`.
-   - Hand-written test modules that bypass `execute_cfg` and mutate `state.instructions_executed` still advance at batch end; codegen modules that already called `sync_ee_timers` per block are not double-counted.
+`REPS2_RUNTIME_ABI_VERSION` 43 -> 44: `EeMemory` gains `timer_synced_instructions`, `timer_next_event` and the two `*_needs_rebase` flags, so `sizeof(EeState)` changes. ABI-43 modules are refused at admission as `runtime_abi_mismatch` (verified: the ABI-43 `frontier-abi43-01` module is rejected with `engine_error: runtime_abi_mismatch`, exit 4). Every generated module must be rebuilt. Nothing is silently admitted.
 
-4. **Bump `REPS2_RUNTIME_ABI_VERSION` from 43 to 44** (`runtime/include/reps2/runtime/abi_version.hpp`):
-   - `EeState` grows by 8 bytes (`timer_synced_instructions`). All ABI-43 native modules are rejected at admission and must be rebuilt.
+## Tests
 
-## Tests Planned
+- `tests/vblank_poll_codegen_smoke.cpp` (new): a `0x7600` fixture guest W1C-clears `I_STAT` bit 2 and polls it for 8 frames inside **one** batch, plus deterministic replay, sync idempotence, unseeded-INTC fail-closed, and batch-size invariance (45,000,000 instructions as 1 / 16 / 450 batches must observe the same frame count and VBLANK count +/-1).
+- `tests/vblank_timing_smoke.cpp`: adds `test_timer2_mid_batch_arm_rebase`.
+- `rust/frontend/src/control_codegen.rs`: `emits_deadline_guarded_intra_batch_timer_sync` asserts the emitted gate.
+- **Falsification:** removing the gate from `execute_cfg` makes `reps2_vblank_poll_codegen_smoke` fail (0% -> pass). Restoring it passes.
 
-- Synthetic unit tests in `tests/vblank_timing_smoke.cpp`:
-  - Idempotency of `sync_ee_timers(state)` when called repeatedly or after `execute_cfg`.
-  - No-op / no underflow when `instructions_executed < timer_synced_instructions`.
-- Synthetic **polling-guest generated-code test** (compiled from MIPS words via the Rust frontend or matching generated `execute_cfg` structure and registered in CTest):
-  - Guest W1C-clears `I_STAT` bit 2 (`0x1000F000 <- 4`), then polls `(I_STAT & 4) == 0` in a tight loop, then exits cleanly (or stops on sentinel) with a single batch budget > `kEeVblankCyclesPerFrame`.
-  - Assert that **without** intra-batch `sync_ee_timers` it exhausts the single-batch budget inside the loop, and **with** the change it observes `VBLANK_START` and exits the polling loop within that single batch.
+## Validation
 
-## What Is NOT Claimed
+- Rust: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --locked` — all pass (416 lib tests + suites).
+- C++: `cmake -S . -B build -DBUILD_TESTING=ON`, Release build, `ctest --test-dir build -C Release --output-on-failure` — **54/54 pass** (was 53; the new `reps2_vblank_poll_codegen_smoke` is #48).
+- Real-title probes (`abi44-*`, rebuilt frontend + native module at ABI 44, same ISO/ELF digests, Windows x64 / MSVC 19.51.36260.0):
 
-- Not claiming cycle-accurate hardware VBLANK timing (`1 instruction = 1 BUSCLK cycle` remains the ADR 0142 synthetic model).
-- Not claiming that clearing this intra-batch throttle makes Downhill Domination boot or playable; the probe will simply advance past the throttle to whatever real blocker (e.g., `mcserv` fno 1, GIF/VIF/GS transfers, or another service/instruction gap) lies downstream.
+  | Run | Outcome | PC | `vblank.starts` | `syscalls_seen` |
+  |---|---|---|---:|---:|
+  | `80M_5Mx16` | `budget_limit_reached` | `0x0025ABB0` | 16 | 1743 |
+  | `80M_80Mx1` | `budget_limit_reached` | `0x0025ABB0` | 16 | 1743 |
+  | `80M_1Mx80` | `budget_limit_reached` | `0x0025ABB0` | 16 | 1743 |
+  | `400M_20Mx20` | `budget_limit_reached` | `0x0025ABB0` | 81 | 2198 |
+  | `2B_80Mx25` | `budget_limit_reached` | `0x0025ABB0` | 406 | 4473 |
+
+  **Batch-size invariance holds** on the real title: 1 / 16 / 80 batches at 80M instructions all give `vblank.starts=16` and `syscalls_seen=1743`. Only `DisableDmac` (23) and `FlushCache` (100) grow with frames (`+650` / `+1625` from 400M to 2B), i.e. ~2.5 syscalls per frame of steady-state frame work.
+
+## Consequences
+
+- The `pc=0x0025ABB0` loop is a **legitimate per-frame wait** whose progress is no longer throttled to one frame per batch. Its floor is now `frame_cycles` of guest time, not the host batch size.
+- The remaining M4 blocker at this frontier is the refusal, not the wait: the title's last SIF RPC is server `0x80000400` (`mcserv`) function 1 with `rpc_call_replied=0`, so the frame loop is waiting on an unmodelled memory-card response. That is a separate service-gap unit.
+- Not claimed: cycle-accurate hardware VBLANK timing (1 instruction = 1 BUSCLK cycle remains the ADR 0142 synthetic model); per-instruction (sub-block) granularity; a boot or playable stage for any title.
+
+## References
+
+- Sony EE Core Instruction Set Manual v6.0 / EE Core User's Manual: INTC source numbering (`INTC_VBLANK_S` = 2), `INTC_STAT = 0x1000F000` write-one-to-clear.
+- ADR 0142, ADR 0172, ADR 0218, ADR 0219; ADR 0164/0169 (ABI-bump discipline); CLAUDE.md Golden Rules (fail closed, evidence before assertion, ABI discipline).

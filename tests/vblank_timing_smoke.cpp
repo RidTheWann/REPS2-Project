@@ -72,6 +72,27 @@ int test_unseeded_intc_fails_closed() {
     return (f.state.memory.vblank_starts==0U && f.state.memory.vblank_irq_refusals==1U) ? 0 : 1;
 }
 
+// Mid-batch timer arming under deadline-based sync (ADR 0220):
+// When `guest_bus_cycles` has not yet caught up to `instructions_executed`,
+// enabling Timer 2 via MMIO must not attribute pre-arm cycles to Timer 2.
+int test_timer2_mid_batch_arm_rebase() {
+    Fixture f;
+    f.state.instructions_executed = 500'000ULL;
+    // Arm Timer 2 with compare = 1000 ticks, CMPE enabled; cycles 0..500,000
+    // elapsed BEFORE arming.
+    if (store_u32(f.state.memory, kEeTimer2CountAddress, 0U) != Status::ok) return 1;
+    if (store_u32(f.state.memory, kEeTimer2CompareAddress, 1000U) != Status::ok) return 2;
+    if (store_u32(f.state.memory, kEeTimer2ModeAddress,
+                  kEeTimer2CueBit | kEeTimer2CmpeBit) != Status::ok) return 3;
+    sync_ee_timers(f.state);
+    if (f.state.memory.timer2_matches != 0U) return 4;
+    if (f.state.memory.timer2_cycles_at_base != 500'000ULL) return 5;
+    // Advance past compare = 1000 cycles after arming: now the match fires once.
+    f.state.instructions_executed = 501'001ULL;
+    sync_ee_timers(f.state);
+    return (f.state.memory.timer2_matches == 1U && f.state.memory.timer2_irq_raises == 1U) ? 0 : 6;
+}
+
 } // namespace
 
 int main() {
@@ -79,7 +100,8 @@ int main() {
     constexpr Test tests[]{{"before_period",test_before_period},{"start_end",test_start_and_end_boundaries},
         {"multi_frame_jump",test_multi_frame_jump},{"clear_w1c",test_clear_w1c},
         {"mask_polling",test_mask_does_not_hide_pending},{"deterministic_replay",test_deterministic_replay},
-        {"unseeded_fails_closed",test_unseeded_intc_fails_closed}};
+        {"unseeded_fails_closed",test_unseeded_intc_fails_closed},
+        {"timer2_mid_batch_arm_rebase",test_timer2_mid_batch_arm_rebase}};
     for (const auto& t:tests) { const int rc=t.run(); if(rc!=0){std::fprintf(stderr,"%s:%d\n",t.name,rc);return rc;} }
     return 0;
 }
