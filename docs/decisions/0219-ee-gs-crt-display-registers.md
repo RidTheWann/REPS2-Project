@@ -1,6 +1,6 @@
 # ADR 0219: Model GS CRT display registers DISPFB2/DISPLAY2/BGCOLOR (runtime ABI 43)
 
-- **Status:** Proposed (evidence from `frontier-vblank-01` probe on merged main `c1f10de`)
+- **Status:** Accepted (validated locally and by real-title probe `frontier-abi43-01` on merged `main` `e00ab68`, runtime ABI 43, Windows x64 / MSVC 19.51.36260.0)
 - **Date:** 2026-11-26
 - **Scope:** `runtime/include/reps2/runtime/ee_state.hpp`
   (new `kEeGsDispfb2Address`/`kEeGsDisplay2Address`/`kEeGsBgcolorAddress` constants,
@@ -126,10 +126,25 @@ without fabricating GPU behavior, consistent with ADR 0175/0178.
   `cargo test --workspace --locked` (Rust gates pass; no Rust changes required by this slice).
 - CMake Release build + `ctest --test-dir build -C Release --output-on-failure` passes
   (including the new `gs_csr_smoke` cases).
-- Real-title probe re-run on exact merged main, exact ISO/ELF digests, Windows x64/MSVC,
-  recorded engine/runtime configuration.
-- Update `docs/RESEARCH.md`, `docs/PROJECT_STATE.md`, `docs/COMPATIBILITY_MATRIX.md` with the
-  probe outcome.
+- Real-title probe `frontier-abi43-01` verified on merged `main` `e00ab68115e69aec227763c921e764b2c88f1642`
+  (runtime ABI 43, Windows x64, MSVC 19.51.36260.0, C++20, Downhill Domination USA
+  `SCUS_971.77`, ISO SHA-256 `0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86`,
+  boot ELF SHA-256 `adfda7b73a8f05fb20a3f0f318772e9d3797fd4d6c0a6c0078ae392df0f0cf0c`,
+  `--discover --tu-count 8 --probe-budget 5000000 --max-batches 16 --hle-syscalls`):
+  - The DISPFB2 stop at `pc=0x0021F05C` is passed; DISPFB2 (`0x12000090`), DISPLAY2 (`0x120000A0`),
+    and BGCOLOR (`0x120000E0`) stores all execute.
+  - Outcome: `budget_limit_reached` (`budget_exhausted`), `pc=0x0025ABB0` after `79,999,968`
+    instructions over `16` batches; `syscalls_seen=1736`, `syscalls_handled=1719`,
+    `callbacks_completed=82`, `vblank={starts:16, ends:16, irq_refusals:0, in_blank:0}`,
+    `intc.stat=0xC` (`12`), `intc.handlers=0`.
+  - Run-report excerpt: `outcome: "budget_limit_reached"`, `session.pc_hex: "0x0025ABB0"`,
+    `session.instructions_executed: 79999968`, `session.run_batches: 16`,
+    `session.gprs[3]: "0x000000001000F000"`, `session.gprs[4]: "0x0000000000000004"`.
+  - Frontier advance (clears the `0x0021F05C` stop and enters the frame-sync poll loop), not
+    a boot stage; budget exhaustion is a weaker evidence class than a semantic stop and
+    promotes no compatibility state. (See ADR 0220 for the diagnosis of the `0x0025ABB0`
+    intra-batch VBLANK polling stall.)
+- Updated `docs/RESEARCH.md`, `docs/PROJECT_STATE.md`, `docs/ROADMAP.md`, and `docs/COMPATIBILITY_MATRIX.md`.
 
 ## References
 
