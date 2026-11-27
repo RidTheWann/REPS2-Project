@@ -20,45 +20,24 @@ rpc_call_server=0x80000400 rpc_call_number=1 rpc_call_replied=0
 mc_calls=2 mc_number=1
 ```
 
-`0x80000400` is the memory-card SIF RPC server (MCSERV, PS2SDK `libmc`). Function 1 is the title's next call after XMCSERV INIT (function `0xFE`, already served). It is currently refused (`rpc_call_replied=0`), so the caller stays blocked in its retry loop.
+`0x80000400` is the memory-card SIF RPC server (MCSERV, PS2SDK `libmc`). After the served XMCSERV INIT (fno `0xFE`), the title issues fno `1` (refused, `rpc_call_replied=0`) and fno `0x15` (GET_INFO, refused). Neither is currently served.
 
-## Diagnosis of mcserv fno 1 (observed via capstone disassembly of `boot.elf`)
+## Corrected diagnosis (ADR 0223, capstone 5.0.7 MIPS64 LE on `boot.elf` adfda7b7…f0cf0c)
 
-**Caller chain:** `0x182974`, `0x18df84`, `0x1b59f0` each `jal 0x21F820` with an argument in `$a0`.
+**This section replaces the earlier "fno 1 / sentinel" attribution, which was wrong on both counts.**
 
-**Function `0x21F820(expected_reply_word0)`** (capstone, fully decoded):
-
-```
-0x21F820: sp -= 0x20; save s0,s1,ra
-0x21F82C: s0 = 0x2A0000 - 0x1D48 = 0x282DB8   // reply buffer base
-0x21F838: s1 = 0                                // retry counter
-0x21F840: jal 0x246030   delay: a0 = s1          // mcserv fno 1 wrapper
-0x21F848: v1 = lw (s0)                            // read reply word 0
-0x21F84C: if (v1 == v0) goto exit                 // sentinel match
-0x21F850: s1 += 1
-0x21F854: jal 0x21F620   delay: sw v0, (s0)     // wait between attempts
-0x21F85C: if (s1 < 2) goto 0x21F840               // at most 2 attempts
-exit:
-0x21F864: s0 += 4                                 // advance reply pointer
-0x21F868: restore; jr ra
-```
-
-- The wrapper `0x246030` sends `send_size=48`, `recv_size=4`, `recv_addr` derived from `$s9`, and reads reply word 0 on the success path.
-- **The loop exits by itself** after at most 2 attempts, or earlier when reply word 0 equals the sentinel. It is **not** an unbounded wait.
-- `mc_calls=2` in the probe matches the two attempts. `rpc_call_replied=0` means no IOP replied — the loop still exits by retry exhaustion.
-- Post-exit (`0x21F868`) is only an epilogue; the *caller* decides what to do with a failed attempt.
-
-**What is NOT known:**
-- The sentinel value (`$a0` argument of `0x21F820`) at each of the three call sites — requires resolving caller state at `0x182974`/`0x18df84`/`0x1b59f0`.
-- What the caller does after `0x21F820` returns with reply word 0 == 0 (no-card path vs retry elsewhere).
+- Wrapper `0x246030` is **fno `0x15` (GET_INFO)**, not fno 1: `0x246090: 24050015  addiu $a1, $zero, 0x15` sets the function-number argument to `sceSifCallRpc` (`jal 0x25CF88` at `0x2460A8`), with send_size 48, recv_size 4, recv_buf `0x760780`.
+- The actual **fno 1** call is at `0x2468FC` via wrapper `0x2467D8`: `0x2468F0: 24050001  addiu $a1, $zero, 1`, send_size 48, recv_size 4, end_function `0x246780` (confirmed by the ABI-45 probe fields `rpc_call_number=1`, `rpc_call_end_function=0x246780`).
+- Poll loop `0x21F820` (called from `0x182974`, `0x18df84`, `0x1b59f0`) does **not** compare against a caller-supplied sentinel: the delay slot at `0x21F844` is `move $a0, $s1` where `$s1` is the retry counter (0, then 1); `0x21F84C` compares `lw($s0)` (reply word 0 at `0x29E2B8`) against the wrapper return `$v0`; max 2 attempts (`slti $v0, $s1, 2`).
+- Reproducible ABI-45 probes (`ap-abi45-mcprobe-02`/`-03`, `frontier.py compare` exit 0): 1,279,999,986 instructions, 260 VBLANKs, `pc=0x0025ABB0`; `mc_calls=2` (INIT served + fno 1 refused), `mc_refused_calls=1`, `mc_request_head=[0,0,0,1]`. The fno 1 refusal happens early and the title continues for 260 VBLANKs to the legitimate per-frame wait — **fno 1 is not the cumulative frontier blocker**.
 
 ## Decision
 
-**Do not implement mcserv fno 1 HLE yet.** The request payload (48 bytes) and reply contract (4 bytes) are unknown, and fabricating a reply would violate fail-closed. Instead:
+**Do not implement mcserv fno 1 (or 0x15) HLE yet.** The request payload (48 bytes) and reply contract (4 bytes) are unknown, and fabricating a reply would violate fail-closed. Instead:
 
 1. **Diagnostic recording (this ADR):** record the first four words of the last refused mcserv request in the run report, using the same bounded convention as SearchFile head (ADR 0156). A probe can then identify the payload shape from evidence instead of a guess.
-2. **Reserve sentinel resolution** as the next unit: read the caller argument at each `jal 0x21F820` site and trace what happens when reply word 0 is zero.
-3. Only then, if the caller treats reply word 0 == 0 as "no card / error" and exits its own loop, consider modelling mcserv fno 1 with that exact error result. Otherwise leave it refused.
+2. **Next unit is wait-target attribution of the `0x25ABB0` loop** (ADR 0223 / Q1), not sentinel resolution: derive what the per-frame loop polls and who produces it.
+3. Only if that attribution shows the missing producer is a mcserv reply, and the request/reply layout is derived from the title's own code with an evidenced "no card" answer (precedent ADR 0147/0174), consider modelling the call with that exact reply. Otherwise leave it refused.
 
 ## ABI
 
