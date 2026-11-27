@@ -82,7 +82,7 @@ Requirement checks:
 ## Consequences
 
 - The `pc=0x0025ABB0` loop is a **legitimate per-frame wait** whose progress is no longer throttled to one frame per batch. Its floor is now `frame_cycles` of guest time, not the host batch size.
-- The remaining M4 blocker at this frontier is the refusal, not the wait: the title's last SIF RPC is server `0x80000400` (`mcserv`) function 1 with `rpc_call_replied=0`, so the frame loop is waiting on an unmodelled memory-card response. That is a separate service-gap unit.
+- The remaining M4 blocker at this frontier is **not** the refusal: ADR 0223 corrects this line — reproducible ABI-45 probes (`ap-abi45-mcprobe-02`/`-03`, `compare` exit 0) show the refused mcserv fno 1 call (`rpc_call_replied=0`) happens early and the title continues 260 VBLANKs / 1.28B instructions to `pc=0x0025ABB0`. The next unit is wait-target attribution of that loop (Q1), which attributes it to the modelled VBLANK_START (INTC source 2) producer; the real remaining blocker is whatever the main state machine polls next after the wait returns.
 - Not claimed: cycle-accurate hardware VBLANK timing (1 instruction = 1 BUSCLK cycle remains the ADR 0142 synthetic model); per-instruction (sub-block) granularity; a boot or playable stage for any title.
 
 ## References
