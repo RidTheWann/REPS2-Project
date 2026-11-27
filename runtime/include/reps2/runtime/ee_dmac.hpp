@@ -102,9 +102,51 @@ inline constexpr std::uint32_t kEeDmacDStatBusErrorStatusBit{0x0000'8000U};
     return ((cis | ~cpc) & kChannelMask) == kChannelMask;
 }
 
-// CHCR bit masks (per PS2Tek / PS2SDK).
-inline constexpr std::uint32_t kEeDmacChcrStrMask{0x0000'0100U};     // bit 8: start/trigger
-inline constexpr std::uint32_t kEeDmacChcrDirMask{0x0000'0001U};     // bit 0: direction
+// CHCR bit layout (PS2Tek `PS2/DMAC/IO.html`, D_CHCR):
+//   bit 0      DIR - direction (0=to memory, 1=from memory)
+//   bits 2..3  MOD - transfer mode (0=normal, 1=chain, 2=interleave)
+//   bits 4..5  ASP - address stack pointer (CALL/RET chains)
+//   bit 6      TTE - transfer DMAtag (source chain mode: upper 64 bits of the
+//                     tag quadword are data, not tag fields)
+//   bit 7      TIE - enable IRQ bit in DMAtag
+//   bit 8      STR - start/busy
+//   bits 16..31 TAG - bits 16..31 of the most recently read DMAtag
+inline constexpr std::uint32_t kEeDmacChcrDirMask{0x0000'0001U};     // bit 0
+inline constexpr std::uint32_t kEeDmacChcrModMask{0x0000'000CU};     // bits 2..3
+inline constexpr std::uint32_t kEeDmacChcrModNormal{0x0000'0000U};   // MOD=0
+inline constexpr std::uint32_t kEeDmacChcrModChain{0x0000'0004U};    // MOD=1
+inline constexpr std::uint32_t kEeDmacChcrModInterleave{0x0000'0008U};// MOD=2
+inline constexpr std::uint32_t kEeDmacChcrAspMask{0x0000'0030U};     // bits 4..5
+inline constexpr std::uint32_t kEeDmacChcrTteMask{0x0000'0040U};     // bit 6
+inline constexpr std::uint32_t kEeDmacChcrTieMask{0x0000'0080U};     // bit 7
+inline constexpr std::uint32_t kEeDmacChcrStrMask{0x0000'0100U};     // bit 8
+inline constexpr std::uint32_t kEeDmacChcrTagMask{0xFFFF'0000U};     // bits 16..31
+
+// DMAtag (128-bit) layout, per PS2Tek `PS2/DMAC/Chain_mode.html`:
+//   bits  0..15  QWC - quadwords to transfer
+//   bits 26..27  PCE - priority control effect
+//   bits 28..30  ID  - tag ID (chain source rule)
+//   bit  31      IRQ - interrupt request
+//   bits 32..62  ADDR - next address (lower 4 bits must be zero)
+//   bit  63      SPR  - memory selection for ADDR (0=RAM, 1=scratchpad)
+//   bits 64..127 data word, transferred only when CHCR.TTE==1
+inline constexpr std::uint32_t kEeDmacTagQwcMask{0x0000'FFFFU};   // bits 0..15
+inline constexpr std::uint32_t kEeDmacTagPceShift{26U};
+inline constexpr std::uint32_t kEeDmacTagIdMask{0x7U};            // bits 28..30
+inline constexpr std::uint32_t kEeDmacTagIdShift{28U};
+inline constexpr std::uint32_t kEeDmacTagIrqMask{0x8000'0000U};   // bit 31
+inline constexpr std::uint64_t kEeDmacTagAddrMask{0x7FFF'FFFF'FFFF'FFF0ULL}; // bits 32..62, low 4 zero
+inline constexpr std::uint64_t kEeDmacTagSprMask{0x8000'0000'0000'0000ULL};   // bit 63
+
+// DMAtag ID values (source chain), per PS2Tek Chain_mode.html.
+inline constexpr std::uint32_t kEeDmacTagIdRefe{0U};  // MADR=ADDR; TADR+=16; end
+inline constexpr std::uint32_t kEeDmacTagIdCnt{1U};   // MADR=TADR+16; TADR=MADR
+inline constexpr std::uint32_t kEeDmacTagIdNext{2U};  // MADR=TADR+16; TADR=ADDR
+inline constexpr std::uint32_t kEeDmacTagIdRef{3U};   // MADR=ADDR; TADR+=16
+inline constexpr std::uint32_t kEeDmacTagIdRefs{4U};  // MADR=ADDR; TADR+=16 (dest variant)
+inline constexpr std::uint32_t kEeDmacTagIdCall{5U};  // MADR=TADR+16; push ASR; TADR=ADDR
+inline constexpr std::uint32_t kEeDmacTagIdRet{6U};   // MADR=TADR+16; pop ASR / end
+inline constexpr std::uint32_t kEeDmacTagIdEnd{7U};   // MADR=TADR+16; end
 
 struct EeDmacState {
     // D_CTRL: DMAC control register. Only the master-enable bit is named; the
@@ -158,7 +200,10 @@ struct EeDmacState {
     std::uint32_t tadr1{};
     bool tadr1_known{};
 
-    // GIF (channel 2) registers: bounded storage only, reset known zero. ADR 0185.
+    // GIF (channel 2) registers: bounded storage + chain-mode transfer. ADR 0185,
+    // ADR 0224. ASR0/ASR1 are the VIF0-channel copies (declared above); ch2
+    // chain CALL/RET uses the same Dn_ASR window in hardware, modelled here
+    // through the shared asr0/asr1 fields.
     std::uint32_t chcr2{};
     bool chcr2_known{};
     std::uint32_t madr2{};
@@ -237,9 +282,35 @@ struct EeDmacState {
     }
 
     // Seed SIF0 TADR.
+    void seed_asr0(std::uint32_t value) noexcept {
+        asr0 = value;
+        asr0_known = true;
+    }
+    void seed_asr1(std::uint32_t value) noexcept {
+        asr1 = value;
+        asr1_known = true;
+    }
     void seed_tadr5(std::uint32_t value) noexcept {
         tadr5 = value;
         tadr5_known = true;
+    }
+
+    // GIF channel-2 seeds (needed by DMAC ch2 chain-mode HLE, ADR Q3).
+    void seed_chcr2(std::uint32_t value) noexcept {
+        chcr2 = value;
+        chcr2_known = true;
+    }
+    void seed_madr2(std::uint32_t value) noexcept {
+        madr2 = value;
+        madr2_known = true;
+    }
+    void seed_qwc2(std::uint32_t value) noexcept {
+        qwc2 = value;
+        qwc2_known = true;
+    }
+    void seed_tadr2(std::uint32_t value) noexcept {
+        tadr2 = value;
+        tadr2_known = true;
     }
 
     // Read D_CTRL. Fails if not seeded.

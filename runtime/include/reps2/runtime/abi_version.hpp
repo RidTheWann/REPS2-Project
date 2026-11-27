@@ -137,9 +137,9 @@
 // EeMemory so `execute_cfg` materializes VBLANK/timers at block boundaries
 // inside a batch. sizeof(EeState) changes; ABI-43 modules are refused.
 //
-// ABI 45 covers ADR 0221: mcserv diagnostic recording (`last_mc_request_head`,
-// `mc_refused_calls`) in EeSifCmdState so a refused memory-card function shows
-// its request shape in the run report. sizeof(EeState) changes; ABI-44 modules
-// are refused.
+// ABI 46 covers Q3 DMAC ch2 chain-mode transfer + GS register/local-memory
+// model: EeMemory gains `gif_fifo` (GIF input FIFO), `gs_*` privileged
+// registers and `gs_local_memory` (4 MiB GS local memory). sizeof(EeState)
+// changes; ABI-45 modules are refused.
 
-#define REPS2_RUNTIME_ABI_VERSION 45
+#define REPS2_RUNTIME_ABI_VERSION 46

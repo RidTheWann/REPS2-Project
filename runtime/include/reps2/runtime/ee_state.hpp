@@ -7,6 +7,7 @@
 #include <bit>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 #include "reps2/runtime/abi_version.hpp"
 #include "reps2/runtime/ee_dmac.hpp"
@@ -958,6 +959,32 @@ struct EeMemory {
     std::uint32_t gif_ctrl{};
     std::uint32_t gif_mode{};
     std::uint32_t gif_stat{};
+    // GIF input path. A transferred qword is delivered straight to the GIF
+    // packet consumer as it is committed; there is no fixed-size data-path
+    // FIFO that a real chain could fill. `gif_qwords_delivered` counts every
+    // delivered qword and `gif_head_capture` keeps the first few for
+    // diagnostics only (never the data path). ADR 0224.
+    static constexpr std::size_t kEeGifHeadCaptureQwords = 8U;
+    // Bounded staging window for atomic commit: a chain whose total staged
+    // payload exceeds this fails closed before any qword is delivered, so no
+    // partial mutation is possible. Deliberate ceiling; raise when the GS
+    // consumer can accept an incremental (streaming) commit. ADR 0224.
+    static constexpr std::size_t kEeGifStagingLimitQwords = 65536U;
+    std::array<Gpr128, kEeGifHeadCaptureQwords> gif_head_capture{};
+    std::size_t gif_head_count{};
+    std::uint64_t gif_qwords_delivered{};
+    // GS privileged registers. ADR Q3.
+    std::uint32_t gs_prim{};
+    std::uint32_t gs_rgbaq{};
+    std::uint32_t gs_xyz2{};
+    std::uint32_t gs_xyz3{};
+    std::uint32_t gs_tex0{};
+    std::uint32_t gs_zbuf{};
+    std::uint32_t gs_xyoffset{};
+    std::uint32_t gs_scissor{};
+    // GS local memory: 4 MiB framebuffer storage. ADR Q3.
+    static constexpr std::size_t kEeGsLocalMemorySize = 4U * 1024U * 1024U;
+    std::vector<std::uint8_t> gs_local_memory{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -2622,7 +2649,151 @@ inline Status mmio_write_tadr1(EeMemory& self, std::uint32_t, std::uint32_t valu
 inline Status mmio_read_chcr2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
     return self.dmac.read_chcr2(value) ? Status::ok : Status::unsupported_memory_access;
 }
+
+// Forward declaration: load_u64 is defined below (after GS register helpers).
+[[nodiscard]] inline Status load_u64(const EeMemory& memory, std::uint32_t address,
+                                     std::uint64_t& value) noexcept;
+
+// DMAC channel-2 (GIF) source-chain transfer, per PS2Tek `PS2/DMAC/Chain_mode.html`.
+//
+// Each DMAtag is 128 bits: QWC[15:0], PCE[27:26], ID[30:28], IRQ[31],
+// ADDR[62:32] (+SPR[63]); the upper 64 bits are payload data only when
+// CHCR.TTE==1. The source chain walks tags starting at TADR2 and applies the
+// ID rule to update MADR/TADR/QWC/CHCR.TAG; the payload for each tag is read
+// from MADR (never from a fixed address), QWC quadwords per tag.
+//
+// The transfer is staged into a local vector first and committed atomically
+// only on full success; on any error the FIFO head/count and MADR/TADR/QWC are
+// left unchanged (fail closed, no partial mutation).
+[[nodiscard]] inline Status dma_chain_transfer_gif(
+    EeMemory& self, std::uint32_t chcr
+) noexcept {
+    auto& dmac = self.dmac;
+    if ((chcr & kEeDmacChcrModMask) != kEeDmacChcrModChain) {
+        return Status::unsupported_memory_access; // only source-chain mode modelled
+    }
+    const bool tte = (chcr & kEeDmacChcrTteMask) != 0U;
+
+    std::uint32_t madr = dmac.madr2;
+    std::uint32_t tadr = dmac.tadr2;
+    std::uint32_t qwc = dmac.qwc2;
+    std::uint32_t tag_field = (chcr & kEeDmacChcrTagMask) >> 16U;
+    std::uint32_t asp = (chcr & kEeDmacChcrAspMask) >> 4U;
+    std::uint32_t asr0 = dmac.asr0_known ? dmac.asr0 : 0U;
+    std::uint32_t asr1 = dmac.asr1_known ? dmac.asr1 : 0U;
+
+    std::vector<Gpr128> staged;
+    constexpr std::uint32_t kMaxTags = 4096U;
+    for (std::uint32_t tag_index = 0U; tag_index < kMaxTags; ++tag_index) {
+        std::uint64_t tag_low{}, tag_high{};
+        if (load_u64(self, tadr, tag_low) != Status::ok
+            || load_u64(self, tadr + 8U, tag_high) != Status::ok) {
+            return Status::unsupported_memory_access; // unreadable tag: staged discarded
+        }
+        const std::uint32_t qwc_tag = static_cast<std::uint32_t>(tag_low & kEeDmacTagQwcMask);
+        const std::uint32_t id = static_cast<std::uint32_t>((tag_low >> kEeDmacTagIdShift) & kEeDmacTagIdMask);
+        const std::uint64_t addr_raw = (tag_low >> 32U) & 0x7FFFFFFFULL;
+        const std::uint32_t addr = static_cast<std::uint32_t>(addr_raw & 0xFFFFFFF0U);
+        // bit 63 SPR: scratchpad selection for ADDR (not modelled as a source)
+        (void)(tag_low & kEeDmacTagSprMask);
+
+        // Apply the source-chain ID rule to MADR/TADR (ps2tek Chain_mode.html).
+        bool tag_end = false;
+        switch (id) {
+            case kEeDmacTagIdRefe: madr = addr; tadr += 16U; tag_end = true; break;
+            case kEeDmacTagIdCnt:  madr = tadr + 16U; tadr = madr; break;
+            case kEeDmacTagIdNext: madr = tadr + 16U; tadr = addr; break;
+            case kEeDmacTagIdRef:
+            case kEeDmacTagIdRefs: madr = addr; tadr += 16U; break;
+            case kEeDmacTagIdCall:
+                madr = tadr + 16U;
+                if (asp == 0U) asr0 = madr + qwc_tag * 16U;
+                else if (asp == 1U) asr1 = madr + qwc_tag * 16U;
+                tadr = addr;
+                if (asp < 3U) ++asp;
+                break;
+            case kEeDmacTagIdRet:
+                madr = tadr + 16U;
+                if (asp == 2U) { tadr = asr1; --asp; }
+                else if (asp == 1U) { tadr = asr0; --asp; }
+                else tag_end = true;
+                break;
+            case kEeDmacTagIdEnd: madr = tadr + 16U; tag_end = true; break;
+            default: return Status::unsupported_memory_access; // unknown ID: fail closed
+        }
+
+        // PS2Tek Chain_mode.html: "When Dn_CHCR.TTE is on, bits 64-127 are
+        // transferred BEFORE QWC." The tag data word is 64 bits.
+        if (tte) {
+            staged.push_back(Gpr128{tag_high, 0U});
+        }
+        // Copy QWC quadwords of payload from MADR into the staged buffer.
+        for (std::uint32_t q = 0U; q < qwc_tag; ++q) {
+            std::uint64_t lo{}, hi{};
+            if (load_u64(self, madr, lo) != Status::ok
+                || load_u64(self, madr + 8U, hi) != Status::ok) {
+                return Status::unsupported_memory_access; // unreadable payload
+            }
+            staged.push_back(Gpr128{lo, hi});
+            madr += 16U;
+        }
+        qwc = qwc_tag;
+        tag_field = static_cast<std::uint32_t>((tag_low >> 16U) & 0xFFFFU);
+        if (tag_end) break;
+    }
+
+    // Commit atomically: deliver staged qwords to the GIF packet consumer. The
+    // whole chain was staged first, so either every qword is delivered or none
+    // is; the staging ceiling bounds memory without bounding a real chain.
+    if (staged.size() > EeMemory::kEeGifStagingLimitQwords) {
+        return Status::unsupported_memory_access; // ceiling exceeded: nothing committed
+    }
+    for (const auto& q : staged) {
+        if (self.gif_head_count < EeMemory::kEeGifHeadCaptureQwords) {
+            self.gif_head_capture[self.gif_head_count++] = q;
+        }
+        ++self.gif_qwords_delivered;
+    }
+    // Update channel registers to their post-transfer values.
+    dmac.madr2 = madr;
+    dmac.madr2_known = true;
+    dmac.tadr2 = tadr;
+    dmac.tadr2_known = true;
+    dmac.qwc2 = qwc;
+    dmac.qwc2_known = true;
+    dmac.chcr2 = (dmac.chcr2 & ~kEeDmacChcrTagMask) | ((tag_field & 0xFFFFU) << 16U);
+    if (dmac.asr0_known) dmac.asr0 = asr0;
+    if (dmac.asr1_known) dmac.asr1 = asr1;
+    dmac.chcr2 = (dmac.chcr2 & ~kEeDmacChcrAspMask) | ((asp & 0x3U) << 4U);
+    return Status::ok;
+}
+
 inline Status mmio_write_chcr2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    const bool was_str = (self.dmac.chcr2 & kEeDmacChcrStrMask) != 0U;
+    const bool now_str = (value & kEeDmacChcrStrMask) != 0U;
+    if (!was_str && now_str && self.dmac.d_stat_known) {
+        const std::uint32_t mod = (value & kEeDmacChcrModMask) >> 2U;
+        if (mod == 1U) { // chain mode
+            if (dma_chain_transfer_gif(self, value) != Status::ok) {
+                // Fail closed: staged data discarded; FIFO/MADR/TADR/QWC unchanged.
+                self.dmac.write_chcr2(value);
+                return Status::unsupported_memory_access;
+            }
+            // The transfer updated TAG and ASP in dmac.chcr2; write the guest
+            // value first so the STR self-clear path runs, then re-apply the
+            // transfer's TAG/ASP updates (they are state the hardware keeps).
+            const std::uint32_t tag_asp = self.dmac.chcr2 & (kEeDmacChcrTagMask | kEeDmacChcrAspMask);
+            self.dmac.write_chcr2(value);
+            self.dmac.chcr2 = (self.dmac.chcr2 & ~(kEeDmacChcrTagMask | kEeDmacChcrAspMask)) | tag_asp;
+            return Status::ok;
+        }
+        if (mod != 0U) {
+            // interleave (2) not modelled: fail closed
+            self.dmac.write_chcr2(value);
+            return Status::unsupported_memory_access;
+        }
+        // normal mode (0): bounded storage only (ADR 0185); complete immediately.
+    }
     return self.dmac.write_chcr2(value) ? Status::ok : Status::unsupported_memory_access;
 }
 inline Status mmio_read_madr2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
