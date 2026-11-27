@@ -137,6 +137,8 @@ public:
             main_ram_.data(), main_ram_.size());
         state_.memory.scratchpad = std::span<std::uint8_t>(
             scratchpad_.data(), scratchpad_.size());
+        state_.memory.gs_local_memory.resize(
+            ::reps2::runtime::EeMemory::kEeGsLocalMemorySize, std::uint8_t{0});
         // VU0 data memory (VU Mem0) is exposed to the EE as MMIO at
         // 0x11004000..0x11004FF0 and is backed by Vu0State::data_mem; bind the
         // MMIO span to that storage. ADR 0211.

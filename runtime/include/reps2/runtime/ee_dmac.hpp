@@ -105,6 +105,14 @@ inline constexpr std::uint32_t kEeDmacDStatBusErrorStatusBit{0x0000'8000U};
 // CHCR bit masks (per PS2Tek / PS2SDK).
 inline constexpr std::uint32_t kEeDmacChcrStrMask{0x0000'0100U};     // bit 8: start/trigger
 inline constexpr std::uint32_t kEeDmacChcrDirMask{0x0000'0001U};     // bit 0: direction
+// CHCR.MOD (bits 9..10): 00 = normal, 01 = chain, 10 = interleave.
+// The Downhill Domination title uses bit 6 (0x40) as a chain-mode enable in its
+// CHCR2 writes (observed value 0x145 = STR | chain(0x40) | ... | DIR(1)), so
+// treat either bit 6 or bit 10 as chain-mode enable.
+inline constexpr std::uint32_t kEeDmacChcrModeMask{0x0000'0640U}; // bits 6,9,10
+inline constexpr std::uint32_t kEeDmacChcrModeNormal{0x0000'0000U};
+inline constexpr std::uint32_t kEeDmacChcrModeChain{0x0000'0040U}; // bit 6 == title's chain enable
+inline constexpr std::uint32_t kEeDmacChcrModeInterleave{0x0000'0200U};
 
 struct EeDmacState {
     // D_CTRL: DMAC control register. Only the master-enable bit is named; the
@@ -240,6 +248,24 @@ struct EeDmacState {
     void seed_tadr5(std::uint32_t value) noexcept {
         tadr5 = value;
         tadr5_known = true;
+    }
+
+    // GIF channel-2 seeds (needed by DMAC ch2 chain-mode HLE, ADR Q3).
+    void seed_chcr2(std::uint32_t value) noexcept {
+        chcr2 = value;
+        chcr2_known = true;
+    }
+    void seed_madr2(std::uint32_t value) noexcept {
+        madr2 = value;
+        madr2_known = true;
+    }
+    void seed_qwc2(std::uint32_t value) noexcept {
+        qwc2 = value;
+        qwc2_known = true;
+    }
+    void seed_tadr2(std::uint32_t value) noexcept {
+        tadr2 = value;
+        tadr2_known = true;
     }
 
     // Read D_CTRL. Fails if not seeded.

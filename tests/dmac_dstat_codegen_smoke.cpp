@@ -333,8 +333,13 @@ int test_chcr0_str_sets_dstat_vif0_ch0() {
 // Same STR completion contract for channel 2 (GIF), guest writes D2_CHCR=0x145
 // at 0x0021B748 before polling STR in the same loop.
 int test_chcr2_str_sets_dstat_gif() {
+    using Ram = std::array<std::uint8_t, 0x20000>;
+    Ram ram{};
     EeState state{};
+    state.memory.main_ram = ram;
     state.memory.dmac.seed_d_stat(0U);
+    state.memory.dmac.seed_tadr2(0U); // valid RAM address; payload irrelevant for STR-only path
+    state.memory.dmac.seed_madr2(0U);
     std::uint32_t value = 0U;
     if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeDmacChcr2Address, 0x145U)
         != Status::ok) return 1;
@@ -342,6 +347,99 @@ int test_chcr2_str_sets_dstat_gif() {
         != Status::ok || (value & 0x100U) != 0U) return 2;
     if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacDStatAddress, value)
         != Status::ok || (value & (1U << 2U)) == 0U) return 3;
+    return 0;
+}
+
+// DMAC channel-2 chain-mode transfer pushes tag payloads into the GIF input
+// FIFO. A chain is: tag quadword at TADR2 {NLOOP, EOP=0, FLG=PACKED, NREG,
+// REGS, ADDR=next_tag} followed by NLOOP quadwords at MADR2; NLOOP==0/EOP
+// terminates the chain. Fail-closed: unreadable tag or full FIFO returns an
+// error with no partial state change.
+// Guest code observed at 0x00210538 writes TADR2 then CHCR2=0x145
+// (chain-mode + STR).
+int test_chcr2_chain_transfer_pushes_gif_fifo() {
+    using Ram = std::array<std::uint8_t, 0x20000>;
+    Ram ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.memory.dmac.seed_d_stat(0U);
+    constexpr std::uint32_t kTagAddr = 0x0001'0000U;
+    constexpr std::uint32_t kDataAddr = 0x0001'0010U;
+    constexpr std::uint32_t kNextTagAddr = 0x0001'0040U;
+    // Tag word0 = NLOOP(2)=2 | EOP(0) | FLG(00=PACKED) | NREG(0) | REGS(0)
+    constexpr std::uint32_t kTagWord0 = 2U;
+    // Tag word1 = next tag address (chain continues at kNextTagAddr).
+    constexpr std::uint64_t kTagQuad = (static_cast<std::uint64_t>(kNextTagAddr) << 32U)
+        | static_cast<std::uint64_t>(kTagWord0);
+    // Two payload quadwords at MADR2 (each 16 bytes = 128 bits).
+    constexpr std::uint64_t kPayload0_lo = 0x1111'1111'2222'2222ULL;
+    constexpr std::uint64_t kPayload0_hi = 0x5555'5555'6666'6666ULL;
+    constexpr std::uint64_t kPayload1_lo = 0x3333'3333'4444'4444ULL;
+    constexpr std::uint64_t kPayload1_hi = 0x7777'7777'8888'8888ULL;
+
+    state.memory.dmac.seed_madr2(kDataAddr);
+    state.memory.dmac.seed_tadr2(kTagAddr);
+    state.memory.dmac.seed_chcr2(0x0000'0000U); // STR=0, mode=0 (will be overwritten)
+
+    // Write tag quadword to EE RAM.
+    const std::uint8_t* tag_bytes =
+        reinterpret_cast<const std::uint8_t*>(&kTagQuad);
+    std::copy(tag_bytes, tag_bytes + 16U,
+              state.memory.main_ram.begin() + kTagAddr);
+    // Write termination tag at kNextTagAddr: NLOOP==0.
+    constexpr std::uint64_t kEndTagQuad = 0ULL;
+    const std::uint8_t* end_bytes = reinterpret_cast<const std::uint8_t*>(&kEndTagQuad);
+    std::copy(end_bytes, end_bytes + 16U,
+              state.memory.main_ram.begin() + kNextTagAddr);
+    // Write payload quadwords at MADR2 (16 bytes each).
+    const std::uint8_t* p0_lo = reinterpret_cast<const std::uint8_t*>(&kPayload0_lo);
+    const std::uint8_t* p0_hi = reinterpret_cast<const std::uint8_t*>(&kPayload0_hi);
+    const std::uint8_t* p1_lo = reinterpret_cast<const std::uint8_t*>(&kPayload1_lo);
+    const std::uint8_t* p1_hi = reinterpret_cast<const std::uint8_t*>(&kPayload1_hi);
+    std::copy(p0_lo, p0_lo + 8U, state.memory.main_ram.begin() + kDataAddr);
+    std::copy(p0_hi, p0_hi + 8U, state.memory.main_ram.begin() + kDataAddr + 8U);
+    std::copy(p1_lo, p1_lo + 8U, state.memory.main_ram.begin() + kDataAddr + 16U);
+    std::copy(p1_hi, p1_hi + 8U, state.memory.main_ram.begin() + kDataAddr + 24U);
+
+    // Write CHCR2 with chain-mode + STR: 0x145 = MOD(chain=0x400) | STR(0x100) | DIR(1).
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeDmacChcr2Address, 0x145U)
+        != Status::ok) return 10;
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacChcr2Address, value)
+        != Status::ok || (value & 0x100U) != 0U) return 11; // STR self-cleared
+    if (state.memory.gif_fifo_count != 2U) return 12;
+    if (state.memory.gif_fifo[0].low != kPayload0_lo) return 13;
+    if (state.memory.gif_fifo[0].high != kPayload0_hi) return 14;
+    if (state.memory.gif_fifo[1].low != kPayload1_lo) return 15;
+    if (state.memory.gif_fifo[1].high != kPayload1_hi) return 16;
+    // CHCR STR bit should self-clear after completion.
+    if ((value & 0x100U) != 0U) return 16;
+    // D_STAT GIF status bit set.
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacDStatAddress, value)
+        != Status::ok || (value & (1U << 2U)) == 0U) return 17;
+    return 0;
+}
+
+// DMAC ch2 chain-mode fails closed when the tag quadword cannot be read.
+int test_chcr2_chain_fails_closed_on_unreadable_tag() {
+    using Ram = std::array<std::uint8_t, 0x20000>;
+    Ram ram{};
+    EeState state{};
+    state.memory.main_ram = ram;
+    state.memory.dmac.seed_d_stat(0U);
+    state.memory.dmac.seed_madr2(0x0076'0010U);
+    state.memory.dmac.seed_tadr2(0xDEAD'0000U); // unmapped
+    state.memory.dmac.seed_chcr2(0x0000'0000U);
+    // An unreadable tag fails the transfer closed: the channel write reports
+    // unsupported_memory_access and pushes nothing into the FIFO.
+    if (reps2::runtime::store_u32(state.memory, reps2::runtime::kEeDmacChcr2Address, 0x145U)
+        != Status::unsupported_memory_access) return 20;
+    if (state.memory.gif_fifo_count != 0U) return 21;
+    // STR still self-clears: the channel reached its terminal state even though
+    // no data transferred (the error is reported to the guest, not swallowed).
+    std::uint32_t value = 0U;
+    if (reps2::runtime::load_u32(state.memory, reps2::runtime::kEeDmacChcr2Address, value)
+        != Status::ok || (value & 0x100U) != 0U) return 22;
     return 0;
 }
 
@@ -391,6 +489,14 @@ int main() {
     if (const auto result = test_dmac_device_interrupt_pending(); result != 0) {
         std::fprintf(stderr, "DMAC device interrupt-pending test failed at check %d\n", result);
         return 100 + result;
+    }
+    if (const auto result = test_chcr2_chain_transfer_pushes_gif_fifo(); result != 0) {
+        std::fprintf(stderr, "CHCR2 chain transfer to GIF FIFO test failed at check %d\n", result);
+        return 130 + result;
+    }
+    if (const auto result = test_chcr2_chain_fails_closed_on_unreadable_tag(); result != 0) {
+        std::fprintf(stderr, "CHCR2 chain fail-closed test failed at check %d\n", result);
+        return 140 + result;
     }
     return 0;
 }

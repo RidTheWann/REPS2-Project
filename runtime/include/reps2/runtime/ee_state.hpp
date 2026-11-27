@@ -7,6 +7,7 @@
 #include <bit>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 #include "reps2/runtime/abi_version.hpp"
 #include "reps2/runtime/ee_dmac.hpp"
@@ -958,6 +959,23 @@ struct EeMemory {
     std::uint32_t gif_ctrl{};
     std::uint32_t gif_mode{};
     std::uint32_t gif_stat{};
+    // GIF input FIFO (qwords pushed by DMAC ch2, popped by GS). ADR Q3.
+    static constexpr std::size_t kEeGifFifoCapacityQwords = 16U;
+    std::array<Gpr128, kEeGifFifoCapacityQwords> gif_fifo{};
+    std::size_t gif_fifo_head{};
+    std::size_t gif_fifo_count{};
+    // GS privileged registers. ADR Q3.
+    std::uint32_t gs_prim{};
+    std::uint32_t gs_rgbaq{};
+    std::uint32_t gs_xyz2{};
+    std::uint32_t gs_xyz3{};
+    std::uint32_t gs_tex0{};
+    std::uint32_t gs_zbuf{};
+    std::uint32_t gs_xyoffset{};
+    std::uint32_t gs_scissor{};
+    // GS local memory: 4 MiB framebuffer storage. ADR Q3.
+    static constexpr std::size_t kEeGsLocalMemorySize = 4U * 1024U * 1024U;
+    std::vector<std::uint8_t> gs_local_memory{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -2622,7 +2640,75 @@ inline Status mmio_write_tadr1(EeMemory& self, std::uint32_t, std::uint32_t valu
 inline Status mmio_read_chcr2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
     return self.dmac.read_chcr2(value) ? Status::ok : Status::unsupported_memory_access;
 }
+
+// Forward declaration: load_u64 is defined below (after GS register helpers).
+[[nodiscard]] inline Status load_u64(const EeMemory& memory, std::uint32_t address,
+                                     std::uint64_t& value) noexcept;
+
+// DMAC channel-2 (GIF) chain-mode transfer. ADR Q3.
+// ...
+[[nodiscard]] inline Status dma_chain_transfer_gif(EeMemory& self) noexcept {
+    auto& dmac = self.dmac;
+    std::uint32_t tag_addr = dmac.tadr2;
+    constexpr std::uint32_t kMaxTags = 4096U; // bounded chain length
+    for (std::uint32_t tag_index = 0U; tag_index < kMaxTags; ++tag_index) {
+        std::uint64_t tag_low{}, tag_high{};
+        if (load_u64(self, tag_addr, tag_low) != Status::ok
+            || load_u64(self, tag_addr + 8U, tag_high) != Status::ok) {
+            return Status::unsupported_memory_access; // unreadable tag: fail closed
+        }
+        const std::uint32_t word0 = static_cast<std::uint32_t>(tag_low);
+        const std::uint32_t word1 = static_cast<std::uint32_t>(tag_low >> 32U);
+        const std::uint32_t nloop = word0 & 0xFFFFU;
+        const bool eop = (word0 & 0x10000U) != 0U;
+        const std::uint32_t flg = (word0 >> 17U) & 0x3U;
+        const std::uint32_t nreg = (word0 >> 19U) & 0xFU;
+        // const std::uint32_t regs = (word0 >> 23U) & 0xFFU;
+        const std::uint32_t next_tag = word1;
+
+        if (flg == 2U) {
+            return Status::unsupported_memory_access; // IMAGE mode not modelled
+        }
+
+        // Copy NLOOP quadwords from MADR2 into the GIF FIFO.
+        std::uint32_t src = dmac.madr2;
+        for (std::uint32_t q = 0U; q < nloop; ++q) {
+            if (self.gif_fifo_count >= EeMemory::kEeGifFifoCapacityQwords) {
+                return Status::unsupported_memory_access; // FIFO full: fail closed
+            }
+            std::uint64_t lo{}, hi{};
+            if (load_u64(self, src, lo) != Status::ok
+                || load_u64(self, src + 8U, hi) != Status::ok) {
+                return Status::unsupported_memory_access;
+            }
+            const std::size_t slot =
+                (self.gif_fifo_head + self.gif_fifo_count) % EeMemory::kEeGifFifoCapacityQwords;
+            self.gif_fifo[slot] = Gpr128{lo, hi};
+            ++self.gif_fifo_count;
+            src += 16U; // each payload is a full 128-bit quadword
+        }
+
+        if (eop || nloop == 0U) break; // termination tag
+        if (next_tag == 0U) break;       // chain pointer exhausted
+        tag_addr = next_tag;
+    }
+    return Status::ok;
+}
+
 inline Status mmio_write_chcr2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+    const bool was_str = (self.dmac.chcr2 & kEeDmacChcrStrMask) != 0U;
+    const bool now_str = (value & kEeDmacChcrStrMask) != 0U;
+    const bool chain_mode = (value & kEeDmacChcrModeMask) != 0U;
+    if (!was_str && now_str && self.dmac.d_stat_known && chain_mode) {
+        if (dma_chain_transfer_gif(self) != Status::ok) {
+            // Fail closed on transfer error: still complete the channel (STR
+            // self-clears) but record the failure by NOT pushing partial data
+            // (dma_chain_transfer_gif already rolled back on error) and
+            // returning unsupported so the guest sees the failure.
+            self.dmac.write_chcr2(value);
+            return Status::unsupported_memory_access;
+        }
+    }
     return self.dmac.write_chcr2(value) ? Status::ok : Status::unsupported_memory_access;
 }
 inline Status mmio_read_madr2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
