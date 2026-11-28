@@ -1381,6 +1381,24 @@ set(REPS2_COP1_GENERATED_CPP "${REPS2_GENERATED_DIR}/cop1_program.cpp")
     endif()
     add_test(NAME reps2_gs_csr_smoke COMMAND reps2_gs_csr_smoke)
 
+    # GIF packet decoder + GS register/rasterizer + PNG dump (ADR 0225): the
+    # GIFtag field layout is derived from ps2tek GIF/GIFtags.html and the
+    # FRAME/PRIM layouts from ps2tek GS pages.
+    add_executable(reps2_gif_decoder_smoke
+        tests/gif_decoder_smoke.cpp
+    )
+    target_link_libraries(reps2_gif_decoder_smoke PRIVATE REPS2::Runtime)
+    target_compile_features(reps2_gif_decoder_smoke PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(reps2_gif_decoder_smoke PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(reps2_gif_decoder_smoke PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion
+        )
+    endif()
+    add_test(NAME reps2_gif_decoder_smoke COMMAND reps2_gif_decoder_smoke)
+    set_tests_properties(reps2_gif_decoder_smoke PROPERTIES PASS_REGULAR_EXPRESSION "all checks passed")
+
     # EE VBLANK synthetic timing model (ADR 0218): VBLANK_START (INTC source 2)
     # / VBLANK_END (source 3) scheduled from the guest cycle counter through the
     # same raise_source path as Timer 2 (ADR 0172).

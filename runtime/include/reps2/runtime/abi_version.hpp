@@ -137,9 +137,8 @@
 // EeMemory so `execute_cfg` materializes VBLANK/timers at block boundaries
 // inside a batch. sizeof(EeState) changes; ABI-43 modules are refused.
 //
-// ABI 46 covers Q3 DMAC ch2 chain-mode transfer + GS register/local-memory
-// model: EeMemory gains `gif_fifo` (GIF input FIFO), `gs_*` privileged
-// registers and `gs_local_memory` (4 MiB GS local memory). sizeof(EeState)
-// changes; ABI-45 modules are refused.
-
-#define REPS2_RUNTIME_ABI_VERSION 46
+// ABI 47 covers Q3 part 2: GIF packet decoder + GS register/MMIO model:
+// `gif_decoder`, `gif_decode_unsupported`, `gs` state, GS MMIO handlers for
+// PRIM/RGBAQ/XYZ2/FRAME/ZBUF/XYOFFSET/SCISSOR. sizeof(EeState) changes;
+// ABI-46 modules are refused at admission.
+#define REPS2_RUNTIME_ABI_VERSION 47
