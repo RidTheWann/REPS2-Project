@@ -49,6 +49,7 @@ struct Options {
     std::filesystem::path module_path;
     std::filesystem::path ram_path;
     std::filesystem::path media_path;
+    std::filesystem::path png_dump_dir;  // ADR 0226: GS framebuffer PNG dump directory
     std::uint64_t instruction_budget{kDefaultInstructionBudget};
     std::uint32_t max_batches{kDefaultMaxBatches};
     bool enable_hle{};
@@ -175,7 +176,7 @@ struct MediaImage {
             options.enable_trace = true;
         } else if (argument == "--ram" || argument == "--media"
                    || argument == "--budget" || argument == "--max-batches"
-                   || argument == "--syscall-trace") {
+                   || argument == "--syscall-trace" || argument == "--png-dump") {
             if (index + 1 >= argc) return false;
             const std::string_view value{argv[++index]};
             if (value.empty()) return false;
@@ -183,6 +184,8 @@ struct MediaImage {
                 options.ram_path = path_from_utf8(value);
             } else if (argument == "--media") {
                 options.media_path = path_from_utf8(value);
+            } else if (argument == "--png-dump") {
+                options.png_dump_dir = path_from_utf8(value);
             } else if (argument == "--budget") {
                 if (!parse_u64(value, options.instruction_budget)
                     || options.instruction_budget == 0U) return false;
@@ -219,6 +222,7 @@ void print_help() {
         << "  --hle-syscalls          Enable only the implemented EE syscall HLE services\n"
         << "  --syscall-trace <n>     Retain the last n syscall boundaries (1..64)\n"
         << "  --instruction-trace     Include the bounded EE instruction-PC trace\n"
+        << "  --png-dump <dir>         Directory for GS framebuffer PNG dumps (ADR 0226)\n"
         << "  --version               Print engine version\n"
         << "  --help                  Print this help\n\n"
         << "The runner loads trusted native code in-process; modules are not sandboxed.\n"
@@ -441,6 +445,7 @@ void print_error(
 
     const auto start_time = std::chrono::steady_clock::now();
     bool execution_error = false;
+    std::uint64_t last_dumped_vblank = 0U;
     for (std::uint32_t batch = 0U; batch < options.max_batches; ++batch) {
         const SessionRunResult result = session.run();
         runs.push_back(result);
@@ -448,6 +453,16 @@ void print_error(
             execution_error = true;
             break;
         }
+        // ADR 0226: per-VBLANK GS framebuffer PNG dump. After each batch, if
+        // the guest advanced VBLANK_START, dump a PNG of the current GS
+        // framebuffer into --png-dump dir. Fail-closed: bad PSM,
+        // out-of-range sprite, or missing frame leaves memory untouched; write
+        // failures stop cleanly, they never fabricate guest data.
+        if (!options.png_dump_dir.empty() &&
+            state.memory.vblank_starts > last_dumped_vblank &&
+            st.gs_local_memory.size() >=
+                reps2::runtime::EeMemory::kEeGsLocalMemorySize &&
+            st.gs_frame != 0U) {
         if (result.disposition != RunDisposition::budget_exhausted) {
             break;
         }

@@ -52,13 +52,34 @@ int test_gif_packed_ad_dispatch() {
         != Status::ok) return 1;
     if (state.memory.gs.tags_seen != 1U) return 2;
     // Two payload qwords: RGBAQ then XYZ2.
-    if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{0x8080'FF40ULL, 0ULL})
+    if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{0x8080'FF40'1111'2222ULL, 0ULL})
         != Status::ok) return 3;
-    if (state.memory.gs.rgbaq != 0x8080'FF40U) return 4;
-    if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{0x1234'5678ULL, 0ULL})
+    if (state.memory.gs.rgbaq != 0x1111'2222U) return 4;
+    if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{0x5555'6666'1234'5678ULL, 0ULL})
         != Status::ok) return 5;
     if (state.memory.gs.xyz2 != 0x1234'5678U) return 6;
     if (state.memory.gs.ad_writes != 2U) return 7;
+    return 0;
+}
+
+// REGLIST (FLG=1): each qword carries TWO registers (low 64 -> first,
+// high 64 -> second). ps2tek GIF/Data_formats.html: "Every quadword contains
+// data for two registers."
+int test_gif_reglist_two_registers_per_qword() {
+    EeState state{};
+    // Tag: NLOOP=1, FLG=REGLIST(1), NREGS=2, descriptors [RGBAQ, XYZ2].
+    const auto tag_low = gif_tag_low(1U, true, false, 0U, 1U /*REGLIST*/, 2U);
+    const auto tag_high = gif_tag_high(reps2::runtime::kGifRegRgbaq,
+                                       reps2::runtime::kGifRegXyz2, 0U, 0U);
+    if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{tag_low, tag_high})
+        != Status::ok) return 1;
+    // One payload qword: low 64 -> RGBAQ, high 64 -> XYZ2.
+    const Gpr128 payload{0x1111'2222'3333'4444ULL, 0x5555'6666'7777'8888ULL};
+    if (reps2::runtime::gif_consume_qword(state.memory, payload) != Status::ok)
+        return 2;
+    if (state.memory.gs.rgbaq != 0x3333'4444U) return 3; // low 32 of low 64
+    if (state.memory.gs.xyz2 != 0x7777'8888U) return 4; // low 32 of high 64
+    if (state.memory.gs.ad_writes != 2U) return 5;
     return 0;
 }
 
@@ -189,6 +210,10 @@ int main() {
     if (const auto r = test_gif_packed_ad_dispatch(); r != 0) {
         std::fprintf(stderr, "GIF PACKED A+D dispatch failed at %d\n", r);
         return 10 + r;
+    }
+    if (const auto r = test_gif_reglist_two_registers_per_qword(); r != 0) {
+        std::fprintf(stderr, "GIF REGLIST two-registers-per-qword failed at %d\n", r);
+        return 15 + r;
     }
     if (const auto r = test_gif_tag_prim_field(); r != 0) {
         std::fprintf(stderr, "GIF tag PRIM field failed at %d\n", r);
