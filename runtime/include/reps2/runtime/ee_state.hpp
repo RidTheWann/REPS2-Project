@@ -2852,7 +2852,6 @@ inline Status mmio_write_tadr1(EeMemory& self, std::uint32_t, std::uint32_t valu
         } else {
             // PACKED: one register per qword (low 64 bits).
             write_reg(dec.regs[dec.word_in_loop % 16U], q.low);
-            ++dec.word_in_loop;
         }
     }
     ++dec.word_in_loop;

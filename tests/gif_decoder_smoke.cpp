@@ -45,18 +45,20 @@ using reps2::runtime::Status;
 // A PACKED packet with NREGS=2 (RGBAQ, XYZ2) and NLOOP=1 writes RGBAQ then XYZ2.
 int test_gif_packed_ad_dispatch() {
     EeState state{};
+    // NLOOP=1: one pass through NREGS=2 registers = 2 qwords total
     const auto tag_low = gif_tag_low(1U, false, false, 0U, 0U /*PACKED*/, 2U);
     const auto tag_high = gif_tag_high(reps2::runtime::kGifRegRgbaq,
                                        reps2::runtime::kGifRegXyz2, 0U, 0U);
     if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{tag_low, tag_high})
         != Status::ok) return 1;
     if (state.memory.gs.tags_seen != 1U) return 2;
-    // Two payload qwords: RGBAQ then XYZ2.
-    if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{0x8080'FF40'1111'2222ULL, 0ULL})
-        != Status::ok) return 3;
+    // Two payload qwords: RGBAQ then XYZ2, each a full 64-bit qword.
+    // Q1: low=0x1111'2222 (RGBAQ), Q2: low=0x1234'5678 (XYZ2)
+    if (reps2::runtime::gif_consume_qword(state.memory,
+            Gpr128{0x8080'FF40'1111'2222ULL, 0ULL}) != Status::ok) return 3;
     if (state.memory.gs.rgbaq != 0x1111'2222U) return 4;
-    if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{0x5555'6666'1234'5678ULL, 0ULL})
-        != Status::ok) return 5;
+    if (reps2::runtime::gif_consume_qword(state.memory,
+            Gpr128{0x5555'6666'1234'5678ULL, 0ULL}) != Status::ok) return 5;
     if (state.memory.gs.xyz2 != 0x1234'5678U) return 6;
     if (state.memory.gs.ad_writes != 2U) return 7;
     return 0;
@@ -68,7 +70,7 @@ int test_gif_packed_ad_dispatch() {
 int test_gif_reglist_two_registers_per_qword() {
     EeState state{};
     // Tag: NLOOP=1, FLG=REGLIST(1), NREGS=2, descriptors [RGBAQ, XYZ2].
-    const auto tag_low = gif_tag_low(1U, true, false, 0U, 1U /*REGLIST*/, 2U);
+    const auto tag_low = gif_tag_low(1U, false, false, 0U, 1U /*REGLIST*/, 2U);
     const auto tag_high = gif_tag_high(reps2::runtime::kGifRegRgbaq,
                                        reps2::runtime::kGifRegXyz2, 0U, 0U);
     if (reps2::runtime::gif_consume_qword(state.memory, Gpr128{tag_low, tag_high})

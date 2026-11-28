@@ -458,11 +458,45 @@ void print_error(
         // framebuffer into --png-dump dir. Fail-closed: bad PSM,
         // out-of-range sprite, or missing frame leaves memory untouched; write
         // failures stop cleanly, they never fabricate guest data.
+        const auto& st = session.state().memory;
         if (!options.png_dump_dir.empty() &&
-            state.memory.vblank_starts > last_dumped_vblank &&
+            st.vblank_starts > last_dumped_vblank &&
             st.gs_local_memory.size() >=
                 reps2::runtime::EeMemory::kEeGsLocalMemorySize &&
             st.gs_frame != 0U) {
+            const auto desc =
+                reps2::runtime::gs_decode_frame(st.gs_frame);
+            const std::uint32_t fb_width =
+                static_cast<std::uint32_t>(desc.fbw) * 64U;
+            const std::uint32_t fb_height = 240U; // NTSC default placeholder
+            if (desc.psm == reps2::runtime::kGsPsmCt32 &&
+                st.gs_framebuffer_digest_last != 0U) {
+                std::filesystem::path png_path =
+                    options.png_dump_dir /
+                    ("frame_" + std::to_string(st.vblank_starts) + ".png");
+                std::string png_filename =
+                    path_to_utf8(png_path);
+                std::FILE* f = std::fopen(
+                    png_filename.c_str(), "wb");
+                if (f != nullptr) {
+                    const bool ok =
+                        reps2::runtime::png_write_rgba8(
+                            f, fb_width, fb_height,
+                            st.gs_local_memory);
+                    std::fclose(f);
+                    if (!ok) {
+                        std::remove(png_filename.c_str());
+                        execution_error = true;
+                        break;
+                    }
+                    last_dumped_vblank = st.vblank_starts;
+                }
+            } else {
+                // gs_local_memory empty or gs_frame not configured: nothing to
+                // dump yet; advance watermark so we do not retry each batch.
+                last_dumped_vblank = st.vblank_starts;
+            }
+        }
         if (result.disposition != RunDisposition::budget_exhausted) {
             break;
         }
