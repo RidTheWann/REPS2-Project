@@ -176,11 +176,11 @@ int test_module_admission(const Engine& engine, PreparedNativeModule& prepared) 
         return fail(12, "ABI-43 runtime module was not rejected as a runtime ABI mismatch");
     }
     static_assert(
-        REPS2_RUNTIME_ABI_VERSION > 45U,
-        "ABI 46 is the generation that covers Q3 DMAC ch2 chain-mode + GS model"
+        REPS2_RUNTIME_ABI_VERSION > 46U,
+        "ABI 47 is the generation that covers Q3 part 2 GIF packet decoder + GS renderer model"
     );
     invalid = descriptor;
-    invalid.runtime_abi_version = 45U;  // ABI 45 module must be rejected at ABI 46
+    invalid.runtime_abi_version = 46U;  // ABI 46 module must be rejected at ABI 47
     if (engine.prepare(invalid, prepared) != EngineError::runtime_abi_mismatch) {
         return fail(13, "ABI-44 runtime module was not rejected as a runtime ABI mismatch");
     }

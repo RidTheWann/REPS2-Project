@@ -13,6 +13,7 @@
 #include "reps2/runtime/ee_dmac.hpp"
 #include "reps2/runtime/ee_fpu.hpp"
 #include "reps2/runtime/ee_intc.hpp"
+#include "reps2/runtime/gs_renderer.hpp"
 #include "reps2/runtime/host_media.hpp"
 
 namespace reps2::runtime {
@@ -768,6 +769,29 @@ inline Status mmio_write_tadr1(EeMemory&, std::uint32_t, std::uint32_t) noexcept
 // GIF DMAC channel-2 registers. ADR 0185.
 inline Status mmio_read_chcr2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_chcr2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+
+// GS primitives/framebuffer MMIO declarations (ADR 0225), reachable from GIF
+// A+D dispatch and direct guest SD stores.
+inline Status mmio_read_gs_rgbaq(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_rgbaq(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_xyz2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_xyz2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_xyoffset1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_xyoffset1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_xyoffset1_hi(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_xyoffset1_hi(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_scissor1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_scissor1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_scissor1_hi(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_scissor1_hi(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_frame1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_frame1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_frame1_hi(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_frame1_hi(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_zbuf1(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_zbuf1(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
+inline Status mmio_read_gs_zbuf1_hi(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
+inline Status mmio_write_gs_zbuf1_hi(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_madr2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
 inline Status mmio_write_madr2(EeMemory&, std::uint32_t, std::uint32_t) noexcept;
 inline Status mmio_read_qwc2(const EeMemory&, std::uint32_t, std::uint32_t&) noexcept;
@@ -973,6 +997,11 @@ struct EeMemory {
     std::array<Gpr128, kEeGifHeadCaptureQwords> gif_head_capture{};
     std::size_t gif_head_count{};
     std::uint64_t gif_qwords_delivered{};
+    // GIF packet decoder + GS state (ADR 0225). The decoder consumes each
+    // delivered qword; PACKED/REGLIST A+D writes land in gs_* registers.
+    GifDecoderState gif_decoder{};
+    GsState gs{};
+    bool gif_decode_unsupported{};   // sticky: a tag used an unsupported format
     // GS privileged registers. ADR Q3.
     std::uint32_t gs_prim{};
     std::uint32_t gs_rgbaq{};
@@ -985,6 +1014,10 @@ struct EeMemory {
     // GS local memory: 4 MiB framebuffer storage. ADR Q3.
     static constexpr std::size_t kEeGsLocalMemorySize = 4U * 1024U * 1024U;
     std::vector<std::uint8_t> gs_local_memory{};
+    std::uint64_t gs_frame{};
+    std::uint64_t gs_zbuf64{};
+    std::uint64_t gs_xyoffset64{};
+    std::uint64_t gs_scissor64{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -1037,6 +1070,18 @@ struct EeMemory {
         // raises SIGNAL/FINISH/HSINT/VSINT/EDWINT/FLUSH). Writes store the
         // command word. IMR is a plain 16-bit mask. Reset 0. ADR 0175.
         { kEeGsCsrAddress,       &mmio_read_gs_csr,  &mmio_write_gs_csr },
+        // GS primitives/framebuffer registers reached by the title's GIF A+D
+        // dispatch and direct SD stores. ADR 0225.
+        { 0x1200'0010U,          &mmio_read_gs_rgbaq, &mmio_write_gs_rgbaq },
+        { 0x1200'0050U,          &mmio_read_gs_xyz2,  &mmio_write_gs_xyz2 },
+        { 0x1200'0180U,          &mmio_read_gs_xyoffset1, &mmio_write_gs_xyoffset1 },
+        { 0x1200'0188U,          &mmio_read_gs_xyoffset1_hi, &mmio_write_gs_xyoffset1_hi },
+        { 0x1200'0400U,          &mmio_read_gs_scissor1, &mmio_write_gs_scissor1 },
+        { 0x1200'0408U,          &mmio_read_gs_scissor1_hi, &mmio_write_gs_scissor1_hi },
+        { 0x1200'04C0U,          &mmio_read_gs_frame1, &mmio_write_gs_frame1 },
+        { 0x1200'04C8U,          &mmio_read_gs_frame1_hi, &mmio_write_gs_frame1_hi },
+        { 0x1200'04E0U,          &mmio_read_gs_zbuf1, &mmio_write_gs_zbuf1 },
+        { 0x1200'04E8U,          &mmio_read_gs_zbuf1_hi, &mmio_write_gs_zbuf1_hi },
         { kEeGsImrAddress,       &mmio_read_gs_imr,  &mmio_write_gs_imr },
         { kEeGsPmodeAddress,     &mmio_read_gs_pmode, &mmio_write_gs_pmode },
         { kEeGsSmode2Address,    &mmio_read_gs_smode2, &mmio_write_gs_smode2 },
@@ -2646,13 +2691,162 @@ inline Status mmio_write_tadr1(EeMemory& self, std::uint32_t, std::uint32_t valu
 }
 // GIF DMAC channel-2 registers: bounded storage only; no DMA transfer,
 // interrupt, or completion is modelled. ADR 0185.
-inline Status mmio_read_chcr2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+// GS privileged registers (0x12000000 page), written by GIF A+D dispatch and
+    // by direct guest SD stores. PRIM/FRAME_1 etc. follow ps2tek Register_list.
+    // ADR 0225.
+    inline Status mmio_read_gs_prim(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = self.gs.prim; return Status::ok;
+    }
+    inline Status mmio_write_gs_prim(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs.prim = value; self.gs_prim = value; return Status::ok;
+    }
+    inline Status mmio_read_gs_rgbaq(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = self.gs.rgbaq; return Status::ok;
+    }
+    inline Status mmio_write_gs_rgbaq(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs.rgbaq = value; self.gs_rgbaq = value; return Status::ok;
+    }
+    inline Status mmio_read_gs_xyz2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = self.gs.xyz2; return Status::ok;
+    }
+    inline Status mmio_write_gs_xyz2(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs.xyz2 = value; self.gs_xyz2 = value; return Status::ok;
+    }
+    // 64-bit FRAME_1 accepts the whole value (FBP/FBW/PSM/FBMSK). ADR 0225.
+    inline Status mmio_read_gs_frame1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_frame); return Status::ok;
+    }
+    inline Status mmio_write_gs_frame1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_frame = (self.gs_frame & 0xFFFF'FFFF'0000'0000ULL)
+            | static_cast<std::uint64_t>(value);
+        return Status::ok;
+    }
+    inline Status mmio_read_gs_frame1_hi(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_frame >> 32U); return Status::ok;
+    }
+    inline Status mmio_write_gs_frame1_hi(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_frame = (self.gs_frame & 0x0000'0000'FFFF'FFFFULL)
+            | (static_cast<std::uint64_t>(value) << 32U);
+        return Status::ok;
+    }
+    // ZBUF_1 as 64-bit storage pair.
+    inline Status mmio_read_gs_zbuf1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_zbuf64); return Status::ok;
+    }
+    inline Status mmio_write_gs_zbuf1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_zbuf64 = (self.gs_zbuf64 & 0xFFFF'FFFF'0000'0000ULL)
+            | static_cast<std::uint64_t>(value);
+        self.gs_zbuf = value;
+        return Status::ok;
+    }
+    inline Status mmio_read_gs_zbuf1_hi(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_zbuf64 >> 32U); return Status::ok;
+    }
+    inline Status mmio_write_gs_zbuf1_hi(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_zbuf64 = (self.gs_zbuf64 & 0x0000'0000'FFFF'FFFFULL)
+            | (static_cast<std::uint64_t>(value) << 32U);
+        return Status::ok;
+    }
+    // XYOFFSET_1 (64-bit storage).
+    inline Status mmio_write_gs_xyoffset1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_xyoffset64 = (self.gs_xyoffset64 & 0xFFFF'FFFF'0000'0000ULL)
+            | static_cast<std::uint64_t>(value);
+        self.gs_xyoffset = value;
+        return Status::ok;
+    }
+    inline Status mmio_write_gs_xyoffset1_hi(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_xyoffset64 = (self.gs_xyoffset64 & 0x0000'0000'FFFF'FFFFULL)
+            | (static_cast<std::uint64_t>(value) << 32U);
+        return Status::ok;
+    }
+    inline Status mmio_read_gs_xyoffset1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_xyoffset64); return Status::ok;
+    }
+    inline Status mmio_read_gs_xyoffset1_hi(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_xyoffset64 >> 32U); return Status::ok;
+    }
+    // SCISSOR_1 (64-bit storage).
+    inline Status mmio_write_gs_scissor1(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_scissor64 = (self.gs_scissor64 & 0xFFFF'FFFF'0000'0000ULL)
+            | static_cast<std::uint64_t>(value);
+        self.gs_scissor = value;
+        return Status::ok;
+    }
+    inline Status mmio_write_gs_scissor1_hi(EeMemory& self, std::uint32_t, std::uint32_t value) noexcept {
+        self.gs_scissor64 = (self.gs_scissor64 & 0x0000'0000'FFFF'FFFFULL)
+            | (static_cast<std::uint64_t>(value) << 32U);
+        return Status::ok;
+    }
+    inline Status mmio_read_gs_scissor1(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_scissor64); return Status::ok;
+    }
+    inline Status mmio_read_gs_scissor1_hi(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
+        value = static_cast<std::uint32_t>(self.gs_scissor64 >> 32U); return Status::ok;
+    }
+
+    inline Status mmio_read_chcr2(const EeMemory& self, std::uint32_t, std::uint32_t& value) noexcept {
     return self.dmac.read_chcr2(value) ? Status::ok : Status::unsupported_memory_access;
 }
 
 // Forward declaration: load_u64 is defined below (after GS register helpers).
 [[nodiscard]] inline Status load_u64(const EeMemory& memory, std::uint32_t address,
                                      std::uint64_t& value) noexcept;
+
+// ---------------------------------------------------------------------------
+// GIF packet consumption (ADR 0225). Each qword delivered by a DMAC ch2
+// transfer is fed straight into the decoder: a 128-bit GIFtag starts a
+// packet; the following qwords carry PACKED/REGLIST data which is dispatched
+// as A+D register writes into the GS state. IMAGE format is not modelled and
+// marks the stream unsupported (fail closed on the pixel side, still counted).
+// ---------------------------------------------------------------------------
+[[nodiscard]] inline Status gif_consume_qword(EeMemory& self, const Gpr128& q) noexcept {
+    auto& dec = self.gif_decoder;
+    if (!dec.in_payload) {
+        // This qword is a GIFtag.
+        std::uint32_t prim_value{};
+        bool prim_enable{};
+        gif_decode_tag(q.low, q.high, dec, prim_value, prim_enable);
+        ++self.gs.tags_seen;
+        if (prim_enable) {
+            self.gs.prim = prim_value;
+            self.gs_prim = prim_value;
+        }
+        if (dec.flg == kGifFlgImage) {
+            self.gif_decode_unsupported = true;
+        }
+        if (dec.ended) {
+            dec.in_payload = false;
+        }
+        return Status::ok;
+    }
+    // Payload qword: PACKED/REGLIST A+D writes.
+    if (dec.flg == kGifFlgImage) {
+        self.gif_decode_unsupported = true;
+    } else {
+        const std::uint32_t reg = dec.regs[dec.word_in_loop % 16U];
+        const std::uint32_t word = static_cast<std::uint32_t>(q.low);
+        ++self.gs.ad_writes;
+        switch (reg) {
+            case kGifRegPrim:  self.gs.prim = word; self.gs_prim = word; break;
+            case kGifRegRgbaq: self.gs.rgbaq = word; self.gs_rgbaq = word; break;
+            case kGifRegXyz2:  self.gs.xyz2 = word; self.gs_xyz2 = word; break;
+            case kGifRegXyz3:  self.gs.xyz3 = word; self.gs_xyz3 = word; break;
+            case kGifRegUv:    self.gs.uv = word; break;
+            case kGifRegTex0_1: self.gs.tex0 = word; self.gs_tex0 = word; break;
+            case kGifRegNop: break;
+            default: ++self.gs.unsupported_writes; break;
+        }
+    }
+    ++dec.word_in_loop;
+    if (dec.word_in_loop >= dec.nreg) {
+        dec.word_in_loop = 0U;
+        if (dec.loop_remaining > 0U) --dec.loop_remaining;
+        if (dec.loop_remaining == 0U) {
+            dec.in_payload = false; // packet done
+        }
+    }
+    return Status::ok;
+}
 
 // DMAC channel-2 (GIF) source-chain transfer, per PS2Tek `PS2/DMAC/Chain_mode.html`.
 //
@@ -2753,6 +2947,7 @@ inline Status mmio_read_chcr2(const EeMemory& self, std::uint32_t, std::uint32_t
             self.gif_head_capture[self.gif_head_count++] = q;
         }
         ++self.gif_qwords_delivered;
+        (void)gif_consume_qword(self, q);
     }
     // Update channel registers to their post-transfer values.
     dmac.madr2 = madr;
