@@ -1018,6 +1018,10 @@ struct EeMemory {
     std::uint64_t gs_zbuf64{};
     std::uint64_t gs_xyoffset64{};
     std::uint64_t gs_scissor64{};
+    // GS framebuffer dump diagnostics (host-side PNG output, ADR 0226). The
+    // path is host configuration, not guest-visible state.
+    std::uint64_t gs_frames_dumped{};
+    std::uint64_t gs_framebuffer_digest_last{};
 
     // MMIO device dispatch table. Each entry covers a single register address.
     // Read/write handlers return Status::ok on success; any other Status means
@@ -2820,21 +2824,34 @@ inline Status mmio_write_tadr1(EeMemory& self, std::uint32_t, std::uint32_t valu
         return Status::ok;
     }
     // Payload qword: PACKED/REGLIST A+D writes.
+    // ps2tek GIF/Data_formats.html: PACKED = one register per qword (low 64
+    // bits); REGLIST = TWO registers per qword (low 64 -> first, high 64 ->
+    // second). Refactor the register write into a helper lambda.
     if (dec.flg == kGifFlgImage) {
         self.gif_decode_unsupported = true;
     } else {
-        const std::uint32_t reg = dec.regs[dec.word_in_loop % 16U];
-        const std::uint32_t word = static_cast<std::uint32_t>(q.low);
-        ++self.gs.ad_writes;
-        switch (reg) {
-            case kGifRegPrim:  self.gs.prim = word; self.gs_prim = word; break;
-            case kGifRegRgbaq: self.gs.rgbaq = word; self.gs_rgbaq = word; break;
-            case kGifRegXyz2:  self.gs.xyz2 = word; self.gs_xyz2 = word; break;
-            case kGifRegXyz3:  self.gs.xyz3 = word; self.gs_xyz3 = word; break;
-            case kGifRegUv:    self.gs.uv = word; break;
-            case kGifRegTex0_1: self.gs.tex0 = word; self.gs_tex0 = word; break;
-            case kGifRegNop: break;
-            default: ++self.gs.unsupported_writes; break;
+        auto write_reg = [&self](std::uint32_t reg, std::uint64_t data) {
+            const std::uint32_t word = static_cast<std::uint32_t>(data);
+            ++self.gs.ad_writes;
+            switch (reg) {
+                case kGifRegPrim:  self.gs.prim = word; self.gs_prim = word; break;
+                case kGifRegRgbaq: self.gs.rgbaq = word; self.gs_rgbaq = word; break;
+                case kGifRegXyz2:  self.gs.xyz2 = word; self.gs_xyz2 = word; break;
+                case kGifRegXyz3:  self.gs.xyz3 = word; self.gs_xyz3 = word; break;
+                case kGifRegUv:    self.gs.uv = static_cast<std::uint32_t>(data); break;
+                case kGifRegTex0_1: self.gs.tex0 = word; self.gs_tex0 = word; break;
+                case kGifRegNop: break;
+                default: ++self.gs.unsupported_writes; break;
+            }
+        };
+        if (dec.flg == kGifFlgReglist && dec.nreg > 1U) {
+            // REGLIST: two registers per qword.
+            write_reg(dec.regs[dec.word_in_loop % 16U], q.low);
+            write_reg(dec.regs[(dec.word_in_loop + 1U) % 16U], q.high);
+            dec.word_in_loop += 2U;
+        } else {
+            // PACKED: one register per qword (low 64 bits).
+            write_reg(dec.regs[dec.word_in_loop % 16U], q.low);
         }
     }
     ++dec.word_in_loop;
@@ -3069,6 +3086,20 @@ inline void materialize_ee_vblank(EeMemory& self) noexcept {
         if (self.vblank_next_start_cycle <= self.vblank_next_end_cycle) {
             if (self.intc.raise_source(kEeIntcSourceVblankStart)) {
                 ++self.vblank_starts;
+                // Per-frame GS framebuffer digest (ADR 0226). Recorded at every
+                // VBLANK start; the engine runner performs the actual PNG file
+                // I/O after the batch using gs_local_memory + gs_frame, so this
+                // path stays pure and guest-semantics-free.
+                if (self.gs_local_memory.size() >=
+                        reps2::runtime::EeMemory::kEeGsLocalMemorySize &&
+                    self.gs_frame != 0U) {
+                    const auto desc = reps2::runtime::gs_decode_frame(self.gs_frame);
+                    self.gs_framebuffer_digest_last =
+                        reps2::runtime::gs_framebuffer_digest(
+                            self.gs_local_memory, desc,
+                            static_cast<std::uint32_t>(desc.fbw) * 64U,
+                            static_cast<std::uint32_t>(240U));
+                }
             } else {
                 ++self.vblank_irq_refusals;
             }
